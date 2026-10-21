@@ -5,7 +5,9 @@
 //! zooming only redraw what's on the GPU. Hover-only changes keep the uploaded meshes and just
 //! change their highlight. Picking reads the GPU's id buffer back into `App::frame` whenever the
 //! image settles (not during orbit/pan/zoom drags, which don't pick), so `Frame::pick` and
-//! window selection work unchanged, with the pick table that belongs to those ids.
+//! window selection work unchanged, with the pick table that belongs to those ids. While the
+//! view moves, distant parts of large models are drawn at a coarser level of detail; the settled
+//! image, and the ids read from it, are always at full detail.
 //!
 //! The CPU rasterizer takes over when the setting is off (`FOX_RENDERER=cpu` turns it off at
 //! start), when eframe has no OpenGL context (headless, tests) and when the GPU renderer fails to
@@ -47,7 +49,8 @@ struct Shared {
   /// A scene to upload: generation, scene, whether it only differs in hover.
   scene: Option<(u64, Scene, bool)>,
   uploaded: u64,
-  drawn: Option<(u64, Camera, [u32; 2])>,
+  /// The last image drawn, and whether at full detail (else with levels of detail, while navigating).
+  drawn: Option<(u64, Camera, [u32; 2], bool)>,
   read: Option<(u64, Camera, [u32; 2])>,
   /// The id buffer of a drawn image, for the UI to collect.
   ids: Option<(u64, Frame)>,
@@ -193,9 +196,14 @@ fn draw(gl: &glow::Context, sh: &mut Shared, view: Option<(Camera, [u32; 2], boo
   }
   let Some((cam, size, read)) = view else { return Ok(()) };
   let state = Some((sh.uploaded, cam, size));
-  if sh.drawn != state {
+  let drawn = sh.drawn.map(|(g, c, s, full)| (Some((g, c, s)), full));
+  if read && drawn != Some((state, true)) {
+    // the view settled: full detail, as the ids read back are drawn
     r.draw(gl, &cam, size[0], size[1])?;
-    sh.drawn = state;
+    sh.drawn = Some((sh.uploaded, cam, size, true));
+  } else if !read && drawn.map(|d| d.0) != Some(state) {
+    r.draw_navigating(gl, &cam, size[0], size[1])?;
+    sh.drawn = Some((sh.uploaded, cam, size, false));
   }
   if read && sh.read != state {
     if let Some(f) = r.read_ids(gl) {

@@ -1144,6 +1144,26 @@ fn render_to_a_file() {
   let _ = std::fs::remove_file(&path);
   assert!(s.execute("view.render", &json!({"path": path, "view": "sideways"})).is_err());
   assert!(s.execute("view.render", &json!({"path": path, "bodies": [99]})).is_err());
+  assert!(s.execute("view.render", &json!({"path": path, "style": "sketchy"})).is_err());
+}
+
+#[test]
+fn render_line_drawings() {
+  let mut s = Session::default();
+  run(&mut s, "cylinder", json!({"radius": 10, "height": 20}));
+  let path = std::env::temp_dir().join(format!("fox-render-style-{}.png", std::process::id()));
+  let mut sizes = Vec::new();
+  for style in ["shaded", "hidden_line", "visible_line", "wireframe"] {
+    let r = run(
+      &mut s,
+      "view.render",
+      json!({"path": path, "width": 160, "height": 120, "style": style, "background": "#ffffff"}),
+    );
+    sizes.push(r["bytes"].as_u64().unwrap());
+  }
+  let _ = std::fs::remove_file(&path);
+  // a line drawing is mostly white: it compresses far better than the shaded picture
+  assert!(sizes[1] < sizes[0] && sizes[2] < sizes[0], "{sizes:?}");
 }
 
 #[test]

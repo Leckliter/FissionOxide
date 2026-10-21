@@ -773,6 +773,19 @@ smooth. It draws the same scene as the CPU rasterizer (`fox-render`) with the sa
 analysis shading, edges, sketch overlays, toolpaths, stock and transparency. Picking stays
 exact: each pixel's pick id is drawn into a second buffer and read back when the view settles.
 
+Huge assemblies stay interactive: meshes, edges and markers are cut into spatial chunks when
+they're uploaded, and chunks outside the view are left out of every draw (which never changes the
+picture). While the view moves, distant chunks are drawn from coarser levels of detail whose cells
+look at most 1.5 pixels wide; the settled image, and the pick ids read from it, are always drawn at
+full detail.
+
+Display Settings → Visual Style has Fusion's six styles plus two line drawings: **Hidden Line**
+(plain white surfaces, visible edges and silhouettes solid, hidden ones dashed) and **Visible
+Lines Only**. Every style that doesn't shade the surfaces (the wireframes and line drawings) also
+draws the silhouettes of curved faces, so a cylinder keeps its outline; the GPU finds them every
+frame from fold edges uploaded once, the CPU rasterizer from the same fold edges.
+`view.render` takes the same styles (`"style": "hidden_line"`, `"visible_line"`, ...).
+
 Display Settings (navigation bar) → GPU Renderer switches to the CPU rasterizer, which also
 takes over by itself when OpenGL can't start; `FOX_RENDERER=cpu` starts with it. The CLI and the
 MCP server always render on the CPU. Benchmarks: `cargo run --release -p fox-ui --example

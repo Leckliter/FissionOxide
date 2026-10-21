@@ -10,7 +10,13 @@ use fox_render::{Analysis, Camera, Frame, NO_ID, Scene, VisualStyle};
 use glam::Vec3;
 use glow::HasContext;
 
-use crate::pack::{self, LINE_STRIDE, MARKER_STRIDE, MESH_STRIDE};
+use crate::pack::{self, Bounds, Cone, FOLD_STRIDE, LINE_STRIDE, MARKER_STRIDE, MESH_STRIDE, MeshChunk};
+
+/// A level of detail is drawn while navigating when its cells look at most this many pixels wide.
+pub const LOD_PIXELS: f32 = 1.5;
+/// How far (pixels) a line or marker can reach outside its points: chunks this close to the view
+/// still draw.
+const REACH_PX: f32 = 16.0;
 
 const MESH_VS: &str = r#"
 uniform mat4 u_vp;
@@ -67,7 +73,9 @@ void main() {
   vec3 h = safe_norm(u_key + view);
   float spec = pow(max(dot(n, h), 0.0), 40.0) * 0.2;
   vec3 c;
-  if (u_mode == 0) {
+  if (u_mode == 4) {
+    c = base;
+  } else if (u_mode == 0) {
     c = base * (0.38 + diff) + vec3(spec);
   } else if (u_mode == 1) {
     vec3 r = n * (2.0 * dot(n, view)) - view;
@@ -90,27 +98,21 @@ void main() {
 
 /// Segments as screen-space quads: the CPU brush is a square of `width` pixels swept along the
 /// segment, so the quad is that wide and reaches half a width past each end.
-const LINE_VS: &str = r#"
+const LINE_QUAD: &str = r#"
 uniform mat4 u_vp;
 uniform vec2 u_size;
 uniform int u_hidden;
 layout(location = 0) in vec2 a_corner;
-layout(location = 1) in vec3 a_a;
-layout(location = 2) in vec3 a_b;
-layout(location = 3) in vec4 a_color;
-layout(location = 4) in uint a_id;
-layout(location = 5) in vec3 a_info;
 out vec4 v_color;
 flat out uint v_id;
 noperspective out float v_along;
 flat out float v_dashed;
-void main() {
-  v_color = a_color;
-  v_id = a_id;
-  v_dashed = a_info.z;
+// `phase`: how far along its polyline the segment starts, in world units; the dash pattern goes
+// on from there at this segment's own scale, as the CPU's runs on along the whole polyline
+void line_quad(vec3 a, vec3 b, float width, float bias, float phase) {
   v_along = 0.0;
-  vec4 ca = u_vp * vec4(a_a, 1.0);
-  vec4 cb = u_vp * vec4(a_b, 1.0);
+  vec4 ca = u_vp * vec4(a, 1.0);
+  vec4 cb = u_vp * vec4(b, 1.0);
   float da = ca.z + ca.w;
   float db = cb.z + cb.w;
   if (da <= 0.0 && db <= 0.0) {
@@ -135,12 +137,64 @@ void main() {
   vec2 dir = len > 1e-6 ? d / len : vec2(1.0, 0.0);
   vec2 nrm = vec2(-dir.y, dir.x);
   // hidden edges are a pixel wide
-  float hw = (u_hidden == 1 ? 1.0 : a_info.x) * 0.5;
+  float hw = (u_hidden == 1 ? 1.0 : width) * 0.5;
   bool end = a_corner.x > 0.5;
   vec2 s = (end ? sb : sa) + nrm * (a_corner.y * hw) + dir * (end ? hw : -hw);
-  v_along = dot(s - sa, dir);
-  float z = clamp((end ? nb.z : na.z) + a_info.y, -1.0, 1.0);
+  float world = distance(a, b);
+  v_along = dot(s - sa, dir) + (world > 0.0 ? phase * len / world : 0.0);
+  float z = clamp((end ? nb.z : na.z) + bias, -1.0, 1.0);
   gl_Position = vec4(s / u_size * 2.0 - 1.0, z, 1.0);
+}
+"#;
+
+const LINE_VS: &str = r#"
+LINE_QUAD
+layout(location = 1) in vec3 a_a;
+layout(location = 2) in vec3 a_b;
+layout(location = 3) in vec4 a_color;
+layout(location = 4) in uint a_id;
+layout(location = 5) in vec4 a_info;
+void main() {
+  v_color = a_color;
+  v_id = a_id;
+  v_dashed = a_info.z;
+  line_quad(a_a, a_b, a_info.x, a_info.y, a_info.w);
+}
+"#;
+
+/// Fold edges, drawn as one-pixel lines where exactly one of their two triangles faces the eye
+/// (`FoldEdge::silhouette`), with the pick id of that one; collapsed elsewhere.
+const SILHOUETTE_VS: &str = r#"
+LINE_QUAD
+uniform int u_persp;
+uniform vec3 u_eye;
+uniform vec3 u_toward;
+uniform vec4 u_color;
+// world units per pixel: at distance 1 in perspective, everywhere in orthographic
+uniform float u_world_px;
+uniform float u_nudge;
+layout(location = 1) in vec3 a_a;
+layout(location = 2) in vec3 a_b;
+layout(location = 3) in vec3 a_n0;
+layout(location = 4) in vec3 a_n1;
+layout(location = 5) in uvec2 a_ids;
+void main() {
+  vec3 to_eye = u_persp == 1 ? u_eye - a_a : u_toward;
+  bool f0 = dot(a_n0, to_eye) > 0.0;
+  bool f1 = dot(a_n1, to_eye) > 0.0;
+  v_color = u_color;
+  v_id = f0 ? a_ids.x : a_ids.y;
+  v_dashed = 0.0;
+  v_along = 0.0;
+  if (f0 == f1) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+  // just outside the surface it outlines (see SILHOUETTE_NUDGE_PX)
+  vec3 n = normalize(a_n0 + a_n1);
+  float ka = u_world_px * u_nudge * (u_persp == 1 ? distance(u_eye, a_a) : 1.0);
+  float kb = u_world_px * u_nudge * (u_persp == 1 ? distance(u_eye, a_b) : 1.0);
+  line_quad(a_a + n * ka, a_b + n * kb, 1.0, -2e-5, 0.0);
 }
 "#;
 
@@ -269,7 +323,7 @@ struct GpuMesh {
   vao: glow::VertexArray,
   vbo: glow::Buffer,
   ebo: glow::Buffer,
-  count: i32,
+  chunks: Vec<MeshChunk>,
   /// How many source vertices / indices it was built from (to check a reuse is sound).
   shape: (usize, usize, usize),
   color: [u8; 4],
@@ -282,7 +336,123 @@ struct GpuMesh {
 struct GpuInstances {
   vao: glow::VertexArray,
   vbo: glow::Buffer,
-  groups: [Range<usize>; 4],
+  chunks: [Vec<Bounds>; 4],
+  cones: Vec<Cone>,
+}
+
+/// What the last draw sent to the GPU, for tests and benchmarks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DrawStats {
+  /// Mesh chunks drawn, at any level of detail.
+  pub chunks: usize,
+  /// Mesh chunks left out because they're outside the view.
+  pub culled: usize,
+  /// Mesh chunks drawn at a level of detail below the full one.
+  pub coarse: usize,
+  /// Triangles drawn (each mesh counted once, however many passes draw it).
+  pub triangles: usize,
+  /// Line segments drawn (edges, sketches, the grid), silhouette candidates aside.
+  pub segments: usize,
+}
+
+/// A camera's view of the scene, for culling chunks and choosing their level of detail.
+struct View {
+  vp: glam::Mat4,
+  /// The view's half-size in pixels, for margins in normalized device coordinates.
+  half_px: [f32; 2],
+  eye: Vec3,
+  persp: bool,
+  /// Pixels per world unit: at distance 1 in perspective, everywhere in orthographic.
+  px_per_unit: f32,
+  culling: bool,
+  lod: bool,
+}
+
+impl View {
+  /// Whether anything in the box can show, `reach` pixels around it included. Conservative: a
+  /// box is dropped only when all its corners are beyond one plane of the (widened) frustum.
+  fn sees(&self, b: &Bounds, reach: f32) -> bool {
+    if !self.culling {
+      return true;
+    }
+    let (mx, my) = (1.0 + reach / self.half_px[0], 1.0 + reach / self.half_px[1]);
+    let mut out = [true; 6];
+    for k in 0..8 {
+      let p = Vec3::new(
+        if k & 1 == 0 { b.lo[0] } else { b.hi[0] },
+        if k & 2 == 0 { b.lo[1] } else { b.hi[1] },
+        if k & 4 == 0 { b.lo[2] } else { b.hi[2] },
+      );
+      let c = self.vp * p.extend(1.0);
+      let beyond = [c.x > c.w * mx, -c.x > c.w * mx, c.y > c.w * my, -c.y > c.w * my, c.z < -c.w, c.z > c.w];
+      for (o, b) in out.iter_mut().zip(beyond) {
+        *o &= b;
+      }
+    }
+    !out.contains(&true)
+  }
+
+  /// The coarsest level whose cells look no wider than [`LOD_PIXELS`] (0 = full detail).
+  fn level(&self, c: &MeshChunk) -> usize {
+    if !self.lod {
+      return 0;
+    }
+    let scale = if self.persp {
+      let b = &c.full;
+      let nearest = Vec3::new(
+        self.eye.x.clamp(b.lo[0], b.hi[0]),
+        self.eye.y.clamp(b.lo[1], b.hi[1]),
+        self.eye.z.clamp(b.lo[2], b.hi[2]),
+      );
+      let d = nearest.distance(self.eye);
+      if d <= 0.0 {
+        return 0;
+      }
+      self.px_per_unit / d
+    } else {
+      self.px_per_unit
+    };
+    (0..c.lods.len()).rev().find(|&l| c.lods[l].1 > 0.0 && c.lods[l].1 * scale <= LOD_PIXELS).map_or(0, |l| l + 1)
+  }
+
+  /// Whether a chunk of fold edges can hold part of the silhouette: some normal in its cone is at
+  /// right angles to the direction of the eye from some point of its box. Conservative.
+  fn may_outline(&self, b: &Bounds, cone: &Cone, cam: &Camera) -> bool {
+    if !self.culling || cone.half >= std::f32::consts::FRAC_PI_2 {
+      return true;
+    }
+    let lo = Vec3::from(b.lo);
+    let hi = Vec3::from(b.hi);
+    let (to_eye, spread) = if self.persp {
+      let center = (lo + hi) / 2.0;
+      let (r, d) = ((hi - lo).length() / 2.0, self.eye.distance(center));
+      if d <= r * 1.01 {
+        return true;
+      }
+      ((self.eye - center) / d, (r / d).asin())
+    } else {
+      (cam.basis().2.as_vec3(), 0.0)
+    };
+    let angle = Vec3::from(cone.axis).dot(to_eye).clamp(-1.0, 1.0).acos();
+    (angle - std::f32::consts::FRAC_PI_2).abs() <= cone.half + spread + 1e-3
+  }
+
+  /// The parts of a group of instances to draw, as merged runs.
+  fn runs(&self, chunks: &[Bounds]) -> Vec<Range<usize>> {
+    merged(chunks.iter().filter(|b| self.sees(b, REACH_PX)).map(|b| b.range.clone()))
+  }
+}
+
+/// Joins ranges that follow on from each other.
+fn merged(ranges: impl Iterator<Item = Range<usize>>) -> Vec<Range<usize>> {
+  let mut out: Vec<Range<usize>> = Vec::new();
+  for r in ranges.filter(|r| !r.is_empty()) {
+    match out.last_mut() {
+      Some(last) if last.end == r.start => last.end = r.end,
+      _ => out.push(r),
+    }
+  }
+  out
 }
 
 /// The offscreen frame: colour, pick ids and depth.
@@ -304,6 +474,7 @@ struct Target {
 pub struct Renderer {
   mesh: Prog,
   line: Prog,
+  silhouette: Prog,
   marker: Prog,
   background: Prog,
   composite: Prog,
@@ -313,10 +484,17 @@ pub struct Renderer {
   meshes: Vec<GpuMesh>,
   lines: Option<GpuInstances>,
   markers: Option<GpuInstances>,
+  /// The body surfaces' fold edges, when the style draws silhouettes.
+  folds: Option<GpuInstances>,
   background_colors: [[u8; 4]; 2],
   analysis: Option<Analysis>,
   style: VisualStyle,
   target: Option<Target>,
+  /// Leave out what's outside the view (on by default; it never changes the picture).
+  pub culling: bool,
+  /// The last draw: camera, size, and whether it used levels of detail.
+  last: Option<(Camera, u32, u32, bool)>,
+  stats: DrawStats,
 }
 
 fn unit(c: [u8; 4]) -> [f32; 4] {
@@ -362,6 +540,24 @@ impl Renderer {
       ],
     )?;
     let line = program(gl, header, LINE_VS, LINE_FS, &["u_vp", "u_size", "u_hidden", "u_hidden_alpha"])?;
+    let silhouette = program(
+      gl,
+      header,
+      SILHOUETTE_VS,
+      LINE_FS,
+      &[
+        "u_vp",
+        "u_size",
+        "u_hidden",
+        "u_hidden_alpha",
+        "u_persp",
+        "u_eye",
+        "u_toward",
+        "u_color",
+        "u_world_px",
+        "u_nudge",
+      ],
+    )?;
     let marker = program(gl, header, MARKER_VS, MARKER_FS, &mvp)?;
     let background = program(gl, header, FULLSCREEN_VS, BACKGROUND_FS, &["u_size", "u_top", "u_bottom"])?;
     let composite = program(gl, header, FULLSCREEN_VS, COMPOSITE_FS, &["u_tex", "u_tint"])?;
@@ -375,6 +571,7 @@ impl Renderer {
       let r = Renderer {
         mesh,
         line,
+        silhouette,
         marker,
         background,
         composite,
@@ -383,10 +580,14 @@ impl Renderer {
         meshes: Vec::new(),
         lines: None,
         markers: None,
+        folds: None,
         background_colors: [[0, 0, 0, 255]; 2],
         analysis: None,
         style: VisualStyle::default(),
         target: None,
+        culling: true,
+        last: None,
+        stats: DrawStats::default(),
       };
       Ok(r)
     }
@@ -400,6 +601,15 @@ impl Renderer {
     let same = reuse_meshes
       && self.meshes.len() == scene.meshes.len()
       && self.meshes.iter().zip(&scene.meshes).all(|(g, m)| g.shape == shape(m));
+    if !(same && scene.style.silhouettes()) {
+      // fold edges depend on the meshes alone: kept while they are, built when a style wants them
+      if let Some(f) = self.folds.take() {
+        free_instances(gl, f);
+      }
+    }
+    if scene.style.silhouettes() && self.folds.is_none() {
+      self.folds = Some(upload_instances(gl, self.quad, &pack::folds(&scene.meshes), FOLD_STRIDE, fold_attribs)?);
+    }
     if same {
       for (g, m) in self.meshes.iter_mut().zip(&scene.meshes) {
         g.color = m.color;
@@ -433,12 +643,63 @@ impl Renderer {
 
   /// Renders the uploaded scene into the offscreen target (resized to `width` × `height`), in the
   /// CPU rasterizer's order: background, opaque meshes, lines and markers, transparent meshes,
-  /// then what's drawn on top.
+  /// then what's drawn on top. Everything is drawn at full detail; chunks outside the view are
+  /// left out (see [`Renderer::culling`]), which changes nothing in the picture.
   pub fn draw(&mut self, gl: &Gl, cam: &Camera, width: u32, height: u32) -> Result<(), String> {
+    self.draw_view(gl, cam, width, height, false)
+  }
+
+  /// [`Renderer::draw`] for a view on the move (orbit, pan, zoom): mesh chunks far enough away
+  /// are drawn coarser, at levels of detail whose cells look at most [`LOD_PIXELS`] wide. Picking
+  /// stays exact: [`Renderer::read_ids`] redraws the view at full detail first.
+  pub fn draw_navigating(&mut self, gl: &Gl, cam: &Camera, width: u32, height: u32) -> Result<(), String> {
+    self.draw_view(gl, cam, width, height, true)
+  }
+
+  /// What the last draw sent to the GPU.
+  pub fn stats(&self) -> DrawStats {
+    self.stats
+  }
+
+  fn draw_view(&mut self, gl: &Gl, cam: &Camera, width: u32, height: u32, lod: bool) -> Result<(), String> {
     let (w, h) = (width.clamp(1, fox_render::MAX_DIM), height.clamp(1, fox_render::MAX_DIM));
     self.ensure_target(gl, w, h)?;
+    self.last = Some((*cam, w, h, lod));
+    let vp_mat = cam.view_proj(w, h).as_mat4();
+    let view = View {
+      vp: vp_mat,
+      half_px: [w as f32 / 2.0, h as f32 / 2.0],
+      eye: cam.eye().as_vec3(),
+      persp: !cam.ortho,
+      px_per_unit: if cam.ortho {
+        h as f32 / cam.view_height() as f32
+      } else {
+        h as f32 / (2.0 * (cam.fov / 2.0).tan() as f32)
+      },
+      culling: self.culling,
+      lod,
+    };
+    let mut stats = DrawStats::default();
+    let runs: Vec<Vec<Range<usize>>> = self
+      .meshes
+      .iter()
+      .map(|m| {
+        merged(m.chunks.iter().filter_map(|c| {
+          if !view.sees(&c.full, 0.0) {
+            stats.culled += 1;
+            return None;
+          }
+          let level = view.level(c);
+          let r = if level == 0 { c.full.range.clone() } else { c.lods[level - 1].0.clone() };
+          stats.chunks += 1;
+          stats.coarse += (level > 0) as usize;
+          stats.triangles += r.len() / 3;
+          Some(r)
+        }))
+      })
+      .collect();
     let Some(t) = &self.target else { return Err("no render target".into()) };
-    let vp = cam.view_proj(w, h).as_mat4().to_cols_array();
+    let vp = vp_mat.to_cols_array();
     let size = [w as f32, h as f32];
     let (right, up, back) = cam.basis();
     let key = (back * 0.8 + up * 0.5 - right * 0.3).normalize().as_vec3();
@@ -481,12 +742,13 @@ impl Renderer {
       gl.uniform_1_i32(p.loc("u_persp"), !cam.ortho as i32);
       gl.depth_func(glow::LESS);
       let style = self.style;
-      let bodies = (!style.shaded()).then_some(false);
-      self.draw_meshes(gl, false, bodies);
-      if !style.shaded() && style.occludes() {
+      let surfaces = style.shaded() || style.line_drawing();
+      let bodies = (!surfaces).then_some(false);
+      self.draw_meshes(gl, &runs, false, bodies);
+      if !surfaces && style.occludes() {
         // wireframe surfaces only hide what's behind them
         gl.color_mask(false, false, false, false);
-        self.draw_meshes(gl, false, Some(true));
+        self.draw_meshes(gl, &runs, false, Some(true));
         gl.color_mask(true, true, true, true);
       }
 
@@ -497,22 +759,25 @@ impl Renderer {
         // the edges behind the surfaces, before any line writes depth
         gl.depth_func(glow::GREATER);
         gl.depth_mask(false);
-        self.draw_hidden_edges(gl, size, &vp);
+        self.draw_hidden_edges(gl, &view, cam, size, &vp);
         gl.depth_mask(true);
       }
       gl.depth_func(glow::LEQUAL);
-      self.draw_instances(gl, false, size, &vp);
+      stats.segments = self.draw_instances(gl, &view, false, size, &vp);
+      if style.silhouettes() {
+        self.draw_silhouettes(gl, &view, cam, size, &vp, false);
+      }
 
       // transparent meshes test against the depth but don't write it
       gl.depth_func(glow::LESS);
       gl.depth_mask(false);
       let p = &self.mesh;
       gl.use_program(Some(p.program));
-      self.draw_meshes(gl, true, bodies);
+      self.draw_meshes(gl, &runs, true, bodies);
 
       // sketch geometry in sketch mode and other on-top overlays
       gl.disable(glow::DEPTH_TEST);
-      self.draw_instances(gl, true, size, &vp);
+      stats.segments += self.draw_instances(gl, &view, true, size, &vp);
 
       gl.depth_mask(true);
       gl.disable(glow::BLEND);
@@ -520,17 +785,23 @@ impl Renderer {
       gl.use_program(None);
       gl.bind_framebuffer(glow::FRAMEBUFFER, None);
     }
+    self.stats = stats;
     Ok(())
   }
 
-  /// The opaque or the transparent meshes: with `bodies` set, only the body surfaces (true) or
-  /// all but them (false).
-  fn draw_meshes(&self, gl: &Gl, transparent: bool, bodies: Option<bool>) {
+  /// The opaque or the transparent meshes (the runs of each to draw): with `bodies` set, only
+  /// the body surfaces (true) or all but them (false).
+  fn draw_meshes(&self, gl: &Gl, runs: &[Vec<Range<usize>>], transparent: bool, bodies: Option<bool>) {
     let p = &self.mesh;
+    let paper = self.style.line_drawing();
     unsafe {
       let wanted = |m: &&GpuMesh| (m.color[3] < 255) == transparent && bodies.is_none_or(|b| m.analyze == b);
-      for m in self.meshes.iter().filter(wanted) {
+      for (m, runs) in self.meshes.iter().zip(runs).filter(|(m, _)| wanted(m)) {
+        if runs.is_empty() {
+          continue;
+        }
         let (mode, param) = match self.analysis.filter(|_| m.analyze) {
+          _ if paper && m.analyze => (4, [0.0; 4]),
           None => (0, [0.0; 4]),
           Some(Analysis::Zebra { stripes }) => (1, [stripes, 0.0, 0.0, 0.0]),
           Some(Analysis::Draft { pull, angle }) => {
@@ -542,26 +813,36 @@ impl Renderer {
             (3, [d.x, d.y, d.z, 0.0])
           }
         };
-        gl.uniform_4_f32_slice(p.loc("u_color"), &unit(m.color));
+        let color = if mode == 4 {
+          let p = fox_render::PAPER;
+          [p[0], p[1], p[2], m.color[3]]
+        } else {
+          m.color
+        };
+        gl.uniform_4_f32_slice(p.loc("u_color"), &unit(color));
         gl.uniform_4_f32_slice(p.loc("u_hl_color"), &unit(m.highlight_color));
         gl.uniform_1_u32(p.loc("u_hl"), m.highlight.unwrap_or(0));
         gl.uniform_1_i32(p.loc("u_has_hl"), m.highlight.is_some() as i32);
-        gl.uniform_1_i32(p.loc("u_vcolor"), m.vertex_colors as i32);
+        gl.uniform_1_i32(p.loc("u_vcolor"), (m.vertex_colors && mode != 4) as i32);
         gl.uniform_1_i32(p.loc("u_mode"), mode);
         gl.uniform_4_f32_slice(p.loc("u_param"), &param);
         gl.bind_vertex_array(Some(m.vao));
-        gl.draw_elements(glow::TRIANGLES, m.count, glow::UNSIGNED_INT, 0);
+        for r in runs {
+          gl.draw_elements(glow::TRIANGLES, r.len() as i32, glow::UNSIGNED_INT, (r.start * 4) as i32);
+        }
       }
     }
   }
 
-  /// Lines, then markers, of one layer (`on_top` or not). Things without a pick id leave the id
-  /// attachment alone, as the CPU path leaves `Frame::ids`.
-  fn draw_instances(&self, gl: &Gl, on_top: bool, size: [f32; 2], vp: &[f32; 16]) {
+  /// Lines, then markers, of one layer (`on_top` or not), the chunks in view. Things without a
+  /// pick id leave the id attachment alone, as the CPU path leaves `Frame::ids`. Returns the
+  /// line segments drawn.
+  fn draw_instances(&self, gl: &Gl, view: &View, on_top: bool, size: [f32; 2], vp: &[f32; 16]) -> usize {
     let kinds = [
       (&self.line, &self.lines, LINE_STRIDE, line_attribs as AttribFn),
       (&self.marker, &self.markers, MARKER_STRIDE, marker_attribs),
     ];
+    let mut segments = 0;
     unsafe {
       for (p, inst, stride, attribs) in kinds {
         let Some(inst) = inst else { continue };
@@ -571,8 +852,8 @@ impl Renderer {
         gl.bind_vertex_array(Some(inst.vao));
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(inst.vbo));
         for has_id in [false, true] {
-          let range = &inst.groups[on_top as usize * 2 + has_id as usize];
-          if range.is_empty() {
+          let runs = view.runs(&inst.chunks[on_top as usize * 2 + has_id as usize]);
+          if runs.is_empty() {
             continue;
           }
           if has_id {
@@ -580,36 +861,86 @@ impl Renderer {
           } else {
             gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
           }
-          attribs(gl, (range.start * stride * 4) as i32);
-          gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, range.len() as i32);
+          for r in runs {
+            if stride == LINE_STRIDE {
+              segments += r.len();
+            }
+            attribs(gl, (r.start * stride * 4) as i32);
+            gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, r.len() as i32);
+          }
         }
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
         gl.bind_buffer(glow::ARRAY_BUFFER, None);
       }
     }
+    segments
   }
 
-  /// The depth-tested edges (lines with pick ids) as hidden edges, with the depth test the caller
-  /// set; colour only.
-  fn draw_hidden_edges(&self, gl: &Gl, size: [f32; 2], vp: &[f32; 16]) {
-    let (p, Some(inst)) = (&self.line, &self.lines) else { return };
-    let range = &inst.groups[1];
-    if range.is_empty() {
+  /// The depth-tested edges (lines with pick ids) and silhouettes as hidden edges, with the depth
+  /// test the caller set; colour only.
+  fn draw_hidden_edges(&self, gl: &Gl, view: &View, cam: &Camera, size: [f32; 2], vp: &[f32; 16]) {
+    let alpha = self.style.hidden_alpha();
+    if let (p, Some(inst)) = (&self.line, &self.lines) {
+      let runs = view.runs(&inst.chunks[1]);
+      unsafe {
+        gl.use_program(Some(p.program));
+        gl.uniform_matrix_4_f32_slice(p.loc("u_vp"), false, vp);
+        gl.uniform_2_f32(p.loc("u_size"), size[0], size[1]);
+        gl.uniform_1_i32(p.loc("u_hidden"), 1);
+        gl.uniform_1_f32(p.loc("u_hidden_alpha"), alpha);
+        gl.bind_vertex_array(Some(inst.vao));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(inst.vbo));
+        gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
+        for r in runs {
+          line_attribs(gl, (r.start * LINE_STRIDE * 4) as i32);
+          gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, r.len() as i32);
+        }
+        gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
+        gl.uniform_1_i32(p.loc("u_hidden"), 0);
+        gl.bind_buffer(glow::ARRAY_BUFFER, None);
+      }
+    }
+    if self.style.silhouettes() {
+      self.draw_silhouettes(gl, view, cam, size, vp, true);
+    }
+  }
+
+  /// The silhouettes of the body surfaces: visible ones as edges, or (`hidden`) the parts behind
+  /// the surfaces, faint and dashed, without ids.
+  fn draw_silhouettes(&self, gl: &Gl, view: &View, cam: &Camera, size: [f32; 2], vp: &[f32; 16], hidden: bool) {
+    let (p, Some(inst)) = (&self.silhouette, &self.folds) else { return };
+    let chunks = inst.chunks[1].iter().zip(&inst.cones);
+    let runs = merged(
+      chunks.filter(|(b, c)| view.sees(b, REACH_PX) && view.may_outline(b, c, cam)).map(|(b, _)| b.range.clone()),
+    );
+    if runs.is_empty() {
       return;
     }
+    let toward = cam.basis().2.as_vec3();
     unsafe {
       gl.use_program(Some(p.program));
       gl.uniform_matrix_4_f32_slice(p.loc("u_vp"), false, vp);
       gl.uniform_2_f32(p.loc("u_size"), size[0], size[1]);
-      gl.uniform_1_i32(p.loc("u_hidden"), 1);
-      gl.uniform_1_f32(p.loc("u_hidden_alpha"), fox_render::HIDDEN_EDGE_ALPHA);
+      gl.uniform_1_i32(p.loc("u_hidden"), hidden as i32);
+      gl.uniform_1_f32(p.loc("u_hidden_alpha"), self.style.hidden_alpha());
+      gl.uniform_1_i32(p.loc("u_persp"), !cam.ortho as i32);
+      gl.uniform_3_f32_slice(p.loc("u_eye"), &view.eye.to_array());
+      gl.uniform_3_f32_slice(p.loc("u_toward"), &toward.to_array());
+      gl.uniform_4_f32_slice(p.loc("u_color"), &unit(fox_render::SILHOUETTE_COLOR));
+      let per_px = cam.view_height() as f32 / cam.distance as f32 / size[1];
+      let world_px = if cam.ortho { per_px * cam.distance as f32 } else { per_px };
+      gl.uniform_1_f32(p.loc("u_world_px"), world_px);
+      gl.uniform_1_f32(p.loc("u_nudge"), fox_render::SILHOUETTE_NUDGE_PX);
       gl.bind_vertex_array(Some(inst.vao));
       gl.bind_buffer(glow::ARRAY_BUFFER, Some(inst.vbo));
-      gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
-      line_attribs(gl, (range.start * LINE_STRIDE * 4) as i32);
-      gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, range.len() as i32);
+      if hidden {
+        gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
+      }
+      for r in runs {
+        fold_attribs(gl, (r.start * FOLD_STRIDE * 4) as i32);
+        gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, r.len() as i32);
+      }
       gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
-      gl.uniform_1_i32(p.loc("u_hidden"), 0);
       gl.bind_buffer(glow::ARRAY_BUFFER, None);
     }
   }
@@ -735,7 +1066,12 @@ impl Renderer {
 
   /// The pick ids of the last image as a frame (`rgba` and `depth` left empty), for
   /// [`Frame::pick`] and window selection.
-  pub fn read_ids(&self, gl: &Gl) -> Option<Frame> {
+  /// After [`Renderer::draw_navigating`] the view is drawn again at full detail first, so the
+  /// ids are always exact.
+  pub fn read_ids(&mut self, gl: &Gl) -> Option<Frame> {
+    if let Some((cam, w, h, true)) = self.last {
+      self.draw(gl, &cam, w, h).ok()?;
+    }
     let (w, h, px) = self.read(gl, glow::COLOR_ATTACHMENT1)?;
     let ids = px.chunks_exact(4).map(|p| u32::from_le_bytes([p[0], p[1], p[2], 0])).collect();
     Some(Frame { width: w, height: h, rgba: Vec::new(), depth: Vec::new(), ids })
@@ -766,14 +1102,14 @@ impl Renderer {
     for m in self.meshes.drain(..) {
       free_mesh(gl, m);
     }
-    for i in [self.lines.take(), self.markers.take()].into_iter().flatten() {
+    for i in [self.lines.take(), self.markers.take(), self.folds.take()].into_iter().flatten() {
       free_instances(gl, i);
     }
     if let Some(t) = self.target.take() {
       free_target(gl, t);
     }
     unsafe {
-      for p in [&self.mesh, &self.line, &self.marker, &self.background, &self.composite] {
+      for p in [&self.mesh, &self.line, &self.silhouette, &self.marker, &self.background, &self.composite] {
         gl.delete_program(p.program);
       }
       gl.delete_buffer(self.quad);
@@ -792,7 +1128,7 @@ fn program(gl: &Gl, header: &str, vs: &str, fs: &str, uniforms: &[&'static str])
     let mut shaders = Vec::new();
     for (kind, src) in [(glow::VERTEX_SHADER, vs), (glow::FRAGMENT_SHADER, fs)] {
       let s = gl.create_shader(kind)?;
-      gl.shader_source(s, &format!("{header}{}", src.replace("ID_COLOR", ID_COLOR)));
+      gl.shader_source(s, &format!("{header}{}", src.replace("LINE_QUAD", LINE_QUAD).replace("ID_COLOR", ID_COLOR)));
       gl.compile_shader(s);
       if !gl.get_shader_compile_status(s) {
         let log = gl.get_shader_info_log(s);
@@ -845,7 +1181,7 @@ fn upload_mesh(gl: &Gl, m: &fox_render::Mesh) -> Result<GpuMesh, String> {
       vao,
       vbo,
       ebo,
-      count: d.indices.len() as i32,
+      chunks: d.chunks,
       shape: shape(m),
       color: m.color,
       highlight: m.highlight,
@@ -874,7 +1210,18 @@ fn line_attribs(gl: &Gl, offset: i32) {
     gl.vertex_attrib_pointer_f32(2, 3, glow::FLOAT, false, s, offset + 12);
     gl.vertex_attrib_pointer_f32(3, 4, glow::UNSIGNED_BYTE, true, s, offset + 24);
     gl.vertex_attrib_pointer_i32(4, 1, glow::UNSIGNED_INT, s, offset + 28);
-    gl.vertex_attrib_pointer_f32(5, 3, glow::FLOAT, false, s, offset + 32);
+    gl.vertex_attrib_pointer_f32(5, 4, glow::FLOAT, false, s, offset + 32);
+  }
+}
+
+fn fold_attribs(gl: &Gl, offset: i32) {
+  let s = (FOLD_STRIDE * 4) as i32;
+  unsafe {
+    gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, s, offset);
+    gl.vertex_attrib_pointer_f32(2, 3, glow::FLOAT, false, s, offset + 12);
+    gl.vertex_attrib_pointer_f32(3, 3, glow::FLOAT, false, s, offset + 24);
+    gl.vertex_attrib_pointer_f32(4, 3, glow::FLOAT, false, s, offset + 36);
+    gl.vertex_attrib_pointer_i32(5, 2, glow::UNSIGNED_INT, s, offset + 48);
   }
 }
 
@@ -895,7 +1242,7 @@ fn upload_instances(
   stride: usize,
   attribs: AttribFn,
 ) -> Result<GpuInstances, String> {
-  let n_attribs = if stride == LINE_STRIDE { 5 } else { 4 };
+  let n_attribs = if stride == MARKER_STRIDE { 4 } else { 5 };
   unsafe {
     let vao = gl.create_vertex_array()?;
     let vbo = gl.create_buffer()?;
@@ -913,7 +1260,7 @@ fn upload_instances(
     gl.bind_vertex_array(None);
     gl.bind_buffer(glow::ARRAY_BUFFER, None);
     debug_assert_eq!(inst.data.len() % stride, 0);
-    Ok(GpuInstances { vao, vbo, groups: inst.groups.clone() })
+    Ok(GpuInstances { vao, vbo, chunks: inst.chunks.clone(), cones: inst.cones.clone() })
   }
 }
 

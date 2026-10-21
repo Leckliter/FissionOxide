@@ -901,7 +901,7 @@ pub fn to_sketch(plane: &Plane, p: DVec3) -> [f64; 2] {
 }
 
 /// Renders the design to a PNG for `view.render`: `{width?, height?, view?, yaw?, pitch?,
-/// target?, distance?, ortho?, fov?, bodies?, sketches?, grid?, edges?, background?}` plus the
+/// target?, distance?, ortho?, fov?, bodies?, sketches?, grid?, edges?, style?, background?}` plus the
 /// section and analysis options of [`view_options`]. Without
 /// `distance` the camera fits the bodies shown.
 pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::CmdError> {
@@ -961,14 +961,22 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
   if let Some(d) = crate::commands::opt_expr(p, "distance") {
     cam.distance = fox_expr::eval(&d, fox_expr::Kind::Length, &scope)?.max(1e-3);
   }
+  let style = match p.get("style").and_then(Value::as_str) {
+    Some(name) => fox_render::VisualStyle::parse(name).ok_or_else(|| {
+      let names: Vec<&str> = fox_render::VisualStyle::ALL.iter().map(|v| v.name()).collect();
+      CmdError::new(format!("unknown style '{name}' ({})", names.join(", ")))
+    })?,
+    None => fox_render::VisualStyle::default(),
+  };
   let opts = ViewOptions {
     hide_sketches: !flag("sketches", false),
     hide_grid: !flag("grid", false),
-    hide_edges: !flag("edges", true),
+    hide_edges: !flag("edges", style.edges()),
     only_bodies: only,
     ..view_options(s, p).map_err(CmdError::new)?
   };
   let (mut scene, _) = SceneBuilder::default().build(s, &opts);
+  scene.style = style;
   if let Some(bg) = p.get("background") {
     let c = crate::commands::parse_color(bg)?;
     scene.background_top = [c[0], c[1], c[2], 255];

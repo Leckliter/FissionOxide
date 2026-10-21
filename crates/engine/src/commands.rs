@@ -210,7 +210,7 @@ cmds! {
   "attribute.get" => "Attributes on a target", "{target?, group?, name?}";
   "attribute.find" => "Attributes anywhere in the design, by group, name and/or value (only on things that still exist)", "{group?, name?, value?}";
   "attribute.delete" => "Remove attributes from a target (no name = the whole group)", "{target?, group, name?}";
-  "view.render" => "Render the model to a PNG file: a standard view or yaw/pitch, ortho or perspective, fitted to the bodies shown; sketches and grid off unless asked", "{path, width?, height?, view?: home|top|bottom|front|back|left|right, yaw?, pitch?, fov?, ortho?, target?: [x,y,z], distance?, bodies?: [id] (only these), sketches?, grid?, edges?, background?: \"#rrggbb\"}";
+  "view.render" => "Render the model to a PNG file: a standard view or yaw/pitch, ortho or perspective, fitted to the bodies shown; sketches and grid off unless asked; style picks a visual style, the line drawings (hidden_line: visible edges and silhouettes solid, hidden ones dashed; visible_line: only what can be seen) included", "{path, width?, height?, view?: home|top|bottom|front|back|left|right, yaw?, pitch?, fov?, ortho?, target?: [x,y,z], distance?, bodies?: [id] (only these), sketches?, grid?, edges?, style?: shaded|shaded_visible_edges|shaded_hidden_edges|wireframe|wireframe_hidden_edges|wireframe_visible_edges|hidden_line|visible_line, background?: \"#rrggbb\"}";
   "view.named.save" => "Save a camera as a named view (an existing name is replaced)", "{name? (default Named View N), target: [x,y,z], yaw, pitch, distance, fov?, ortho?}";
   "view.named.list" => "The design's named views", "{}";
   "view.named.get" => "One named view's camera", "{name}";
