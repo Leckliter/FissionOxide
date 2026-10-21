@@ -1,0 +1,27 @@
+[package]
+name = "fox-hub-server"
+description = "Self-hostable FissionOxide hub server: the data panel's projects, designs and versions over HTTP and WebSocket, with presence and edit locks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fox-hub-server"
+path = "src/main.rs"
+
+[dependencies]
+fox-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+env_logger.workspace = true
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "signal"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+[dev-dependencies]
+tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+ureq = { version = "3", default-features = false }
+
+[lints]
+workspace = true
