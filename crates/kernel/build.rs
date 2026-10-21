@@ -90,7 +90,19 @@ fn main() {
     // OSD_Process (OpenProcessToken, GetUserNameW); newer std no longer links it for us.
     println!("cargo:rustc-link-lib=dylib=advapi32");
   }
+  // cxx-build reaches our headers as `fox-kernel/cpp/*.hxx` through a symlink it makes in
+  // OUT_DIR, which Windows refuses without Developer Mode; a copy of the headers always works.
+  let headers = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("fox-headers");
+  let header_dir = headers.join("fox-kernel").join("cpp");
+  std::fs::create_dir_all(&header_dir).unwrap();
+  for entry in std::fs::read_dir("cpp").unwrap().flatten() {
+    let path = entry.path();
+    if path.extension().is_some_and(|e| e == "hxx") {
+      std::fs::copy(&path, header_dir.join(entry.file_name())).unwrap();
+    }
+  }
   cxx_build::bridge("src/ffi.rs")
+    .include(&headers)
     .file("cpp/kernel.cpp")
     .file("cpp/features2.cpp")
     .file("cpp/surface2.cpp")
