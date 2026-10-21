@@ -422,7 +422,7 @@ fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.
 |---------------------------------|:-------------:|:------:|-----------------------------------------------------------------|
 | FissionOxide design `.fox`          | ✓             | ✓      | The parametric design as JSON                                   |
 | FissionOxide archive `.foxz`        | ✓             | ✓      | Design + thumbnail, optionally its whole version history        |
-| STEP `.step` `.stp`             | ✓             | ✓      | AP214 assemblies: components, body names and colours both ways; surface-only files are sewn into shells/solids |
+| STEP `.step` `.stp`             | ✓             | ✓      | AP214 assemblies both ways: nested sub-assemblies as nested components, parts and sub-assemblies placed more than once as linked component copies (written back as instances), body names, body and face colours; surface-only files are sewn into shells/solids |
 | IGES `.iges` `.igs`             | ✓             | ✓      | Faces are sewn; closed shells become solids                     |
 | OpenCASCADE BRep `.brep`        | ✓             | ✓      | Lossless kernel format                                          |
 | STL `.stl` (binary / ASCII)     | ✓             | ✓      | Imported meshes become faceted bodies (≤ 250k triangles)        |

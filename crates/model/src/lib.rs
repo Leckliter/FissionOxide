@@ -1183,12 +1183,18 @@ pub enum FeatureKind {
     lead: String,
   },
   /// Another instance of a component: copies of its bodies, rebuilt from the source on every
-  /// change (edit the original and every copy follows), placed by `translate`. Joints can then
-  /// position the copy's component like any other.
+  /// change (edit the original and every copy follows), placed by `transform` (a rigid
+  /// placement, column-major) and then `translate`. Joints can then position the copy's
+  /// component like any other. A source holding no bodies of its own (a sub-assembly) gives none.
   CopyComponent {
     source: ComponentId,
     #[serde(default = "zeros")]
     translate: [String; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transform: Option<[f64; 16]>,
+    /// The component holding the copies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    component: Option<ComponentId>,
   },
   /// Construction plane by another method (angle, midplane, three points, ...).
   PlaneBy {

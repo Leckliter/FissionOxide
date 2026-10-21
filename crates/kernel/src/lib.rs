@@ -1084,12 +1084,16 @@ pub use features2::{Inside, SweepOptions};
 mod surface;
 pub use surface::{Extension, Untrim};
 mod xcaf;
-pub use xcaf::{StepBody, StepPart, read_step_assembly, write_step_assembly};
+pub use xcaf::{
+  StepBody, StepNode, StepPart, StepWriter, is_rigid, read_step_assembly, read_step_tree, write_step_assembly,
+};
 
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_features2;
+#[cfg(test)]
+mod tests_xcaf;
 
 mod sheet2;
 
