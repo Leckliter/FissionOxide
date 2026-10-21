@@ -16,7 +16,6 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Surface   | Extend with corner closing between adjacent edges; untrim with an extension amount; trim by picking pieces to remove in the viewport |
 | Sheet     | A flat pattern sketch that follows the model; rounded bends where press-brake folds converge on a corner (they stay sharp); splines in flat pattern DXFs |
 | Assembly  | Contact sets during viewport drags; motion links and cams inside flexible sub-assemblies; roller (curved-face) cam followers and cams pushing along a curve |
-| Drawing   | Weld symbol contours, finishes and back/melt-through welds; composite frames in the Feature Control Frame dialog; datum target lines; picking dimension points on the sheet |
 | UI        | Manipulators for more commands (shell, draft, patterns); a triad that turns about any axis |
 | View      | Silhouette edges and hidden-line (dashed) display styles; GPU frustum culling and level of detail for huge assemblies |
 | Manufacture | Holder and fixture collision checks; turning and 4/5-axis; rest roughing after a larger tool in 3D; more pencil passes either side of a corner |

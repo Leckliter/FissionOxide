@@ -382,9 +382,19 @@ fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.
 - **Weld symbols** (`drawing.weld`): fillet, square, V, bevel, U, J, plug, spot and seam welds
   on the arrow side, the other side or both, with size, length-pitch, all-around, field weld and
   a tail; AWS A2.4 layout for ASME drawings (arrow side below the reference line), ISO 2553 for
-  ISO ones (a dashed identification line).
-- **Datum targets** (`drawing.datum_target`, points or circular areas) and **composite** position
-  and profile frames (`lower` on `drawing.feature_control`).
+  ISO ones (a dashed identification line). A `contour` (flush, convex or concave; parallel to a
+  fillet's face) with a `finish` letter beyond it (C chip, G grind, H hammer, M machine, R roll,
+  U unspecified), per side (`other_contour`, `other_finish` for a both-sides weld), and a `back`
+  weld (an open half circle) or `melt_through` (a filled one) across the reference line from a
+  groove weld.
+- **Datum targets** (`drawing.datum_target`): points (an ×), lines from `point` to `end` (a
+  phantom line in ASME Y14.5, a thin line between two × in ISO 5459) and circular areas; and
+  **composite** position and profile frames (`lower` on `drawing.feature_control`, or Composite
+  in the Feature Control Frame dialog).
+- **Picking on the sheet**: while Dimension or an annotation dialog (ordinate, angle, baseline,
+  chain, GD&T, weld, datum target, …) is open, the pointer snaps to the views' vertices, edge
+  middles and circle centres (the nearest to the viewer where they stack up, none in broken-out
+  stretches) and a click fills the dialog's next point and its view.
 - **Revision table** (`drawing.revision`, `drawing.remove_revision`) in the first sheet's top right
   corner; the next letter (ASME Y14.35: no I, O, Q, S, X, Z) by default, and the title block shows
   the latest revision.
