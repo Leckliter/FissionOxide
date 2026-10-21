@@ -801,7 +801,7 @@ cut, so bolt holes come out round. `gen.export` writes an outcome as STL, OBJ, 3
 ```sh
 fissionoxide-cli run examples/generative_bracket.jsonl --save bracket_gd.fox
 fissionoxide-cli exec bracket_gd.fox '{"cmd": "gen.outcomes"}'
-fissionoxide-cli exec bracket_gd.fox '{"cmd": "gen.insert", "outcome": 3, "brep": true, "merge_preserve": true}' --save bracket_gd.fox
+fissionoxide-cli exec bracket_gd.fox '{"cmd": "gen.insert", "outcome": 3, "reduce": 0.25, "brep": true, "merge_preserve": true}' --save bracket_gd.fox
 ```
 
 The analysis is linear static on a voxel model, a guide to the shape and not a validation:

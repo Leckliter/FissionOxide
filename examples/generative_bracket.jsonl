@@ -16,7 +16,7 @@
 {"cmd": "gen.study", "name": "Bracket"}
 {"cmd": "gen.preserve", "bodies": [1000, 3000, 5000]}
 {"cmd": "gen.obstacle", "bodies": [7000, 8000, 9000]}
-{"cmd": "gen.design_space", "margin": 2, "resolution": 2, "iterations": 60}
+{"cmd": "gen.design_space", "margin": 2, "resolution": 2.5, "iterations": 40}
 {"cmd": "gen.constraint", "point": [0, 0, 6], "radius": 6, "fix": "xyz"}
 {"cmd": "gen.constraint", "point": [0, 50, 6], "radius": 6, "fix": "xyz"}
 {"cmd": "gen.load", "case": "Side load", "point": [100, 25, 6], "radius": 5.5, "force": [0, -2000, 0]}
@@ -28,4 +28,4 @@
 {"cmd": "gen.precheck"}
 {"cmd": "gen.generate"}
 {"cmd": "gen.outcomes"}
-{"cmd": "gen.insert", "brep": true, "merge_preserve": true}
+{"cmd": "gen.insert", "reduce": 0.25, "brep": true, "merge_preserve": true}
