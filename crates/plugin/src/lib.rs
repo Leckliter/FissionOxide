@@ -476,7 +476,7 @@ impl Plugins {
     let mut text: Vec<String> = host.log.iter().map(|l| format!("[{}] {}", ["error", "warn", "info", "debug"][l.level as usize], l.message)).collect();
     let out = match result {
       Ok(result) => {
-        let changed = session.commit_transaction_named(&cmd.command.label()).map_err(|e| e.0)?;
+        let changed = session.commit_transaction_named(cmd.command.label()).map_err(|e| e.0)?;
         text.push(format!("{}: done ({} commands)", cmd.command.label(), host.commands));
         Ok(RunResult { result, changed, commands: host.commands, log: host.log, files: host.written })
       }
