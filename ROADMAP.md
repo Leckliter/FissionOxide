@@ -23,7 +23,6 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Add-ins   | Compiled-in add-ins under `addins/` with an add-in manager; an add-in's tab can list built-in commands in workflow order; LumenArt as the first (see [docs/LUMENART.md](docs/LUMENART.md)) |
 | Sketch    | Remove duplicate/overlapping curves; Clean Up (break links, delete constraints, splines to arcs/lines); Scale to Size and Fit in Box; a sketch library placed where you click |
 | Fabrication | Cut-service checks with shop profiles (SendCutSend, OSH Cut, Ponoko); cut estimate (area, cut length, pierces); every part's flat pattern on one sheet / DXF |
-| Inspect   | Properties panel for the selection (geometry, overall size) |
 | View      | Exploded views; batch render one image per component |
 | Features  | New component option on Extrude |
 

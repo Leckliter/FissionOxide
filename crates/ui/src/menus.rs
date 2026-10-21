@@ -254,6 +254,8 @@ const INSPECT: &[E] = &[
   E::Sep,
   x("History", Icon::History),
   x("Sustainability Insights", Icon::Sustainability),
+  E::Sep,
+  c("Properties", Icon::Properties, Cmd::Properties),
 ];
 
 const INSERT: &[E] = &[
@@ -863,6 +865,8 @@ const UTIL_INSPECT: &[E] = &[
   E::Sep,
   x("History", Icon::History),
   x("Sustainability Insights", Icon::Sustainability),
+  E::Sep,
+  c("Properties", Icon::Properties, Cmd::Properties),
 ];
 
 const UTILITIES: [Group; 5] = [

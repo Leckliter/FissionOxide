@@ -394,6 +394,8 @@ cmds! {
   "bounding_solid" => "Bounding Solid: a new box or cylinder body enclosing bodies (default all), lined up with a plane's frame (default world XY; its normal is the cylinder's axis) and grown by an offset; the bodies stay", "{bodies?: [body], component?, shape?: box|cylinder, plane?, offset?, sides?: [-x, +x, -y, +y, -z, +z] (per-side offsets instead of offset; the cylinder takes -z, +z for its ends)}";
   "pattern.path" => "Pattern on Path: copies of bodies, or features (their cut/join tools) re-applied, spaced by arc length along a sketch path; copies past its ends follow its straight extensions", "{path: sketch id, path_curves?: [id] (chained; default every line and arc), count, spacing | distance, extent?: bool (distance is the whole pattern's length) | distance_type?: spacing|extent, start?: 0..1 (where the original sits along the path), flip?, symmetric?, orientation?: identical|along_path, bodies? | features?: [feature id], join?}";
   "arrange" => "Arrange: copies of components laid flat on their largest planar face and packed on a rectangular envelope on a plane (length along its X, width along its Y) for manufacturing, by bounding rectangle or true shape; the sources stay put and the copies go under a new Arrange<n> > Envelope<n> component", "{components: [id | {component, rotation?, quantity?}], plane?: (default xy), length, width, solver?: rectangular|true_shape, spacing?, frame?, rotation?: none|180|90|all (default all)}";
+  "inspect.properties" => "Properties of entities (default the selection): type, id, parent component and geometry (face area, surface, normal at centre, box; edge length, curve, ends; vertex point; body kind, volume, area, mass with a material, box; component totals; sketch plane; sketch curve ends, centre, radius, length); export writes .json or .txt", "{items?: [selection item | {type: component, component} | {type: sketch, sketch}], export?: path}";
+  "inspect.overall_size" => "Overall width, height and thickness of bodies (default every visible one): in the frame of the largest planar face (thickness along its normal; mode planar), else the box extents largest first (mode box); export writes .json, .csv or .txt in units (default the design's)", "{bodies?: [id], components?: [id], export?: path, units?: mm|cm|m|in|ft}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -447,6 +449,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::groups::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::properties::run(s, name, p) {
     return r;
   }
   match name {

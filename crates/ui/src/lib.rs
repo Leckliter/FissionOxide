@@ -31,6 +31,7 @@ mod panels;
 mod params_ui;
 mod preferences;
 mod preview;
+mod props_ui;
 mod select;
 mod sheet;
 mod theme;
@@ -1482,6 +1483,9 @@ impl App {
     }
     data_panel::heartbeat(self, &ctx);
     data_panel::show(self, ui);
+    if self.drawing.is_none() {
+      props_ui::show(self, ui);
+    }
     if self.step_cam_move(now()) {
       ctx.request_repaint();
     }

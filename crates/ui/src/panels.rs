@@ -431,6 +431,8 @@ pub(crate) enum Cmd {
   Cut2d,
   /// INSERT > Canvas: a reference image on a plane.
   Canvas,
+  /// INSPECT > Properties: show or hide the docked Properties panel.
+  Properties,
 }
 
 impl Cmd {
@@ -588,6 +590,11 @@ impl Cmd {
       Cmd::Canvas => {
         (Icon::Canvas, "Canvas", "Place an image on a plane to model over; right-click it to Calibrate its size")
       }
+      Cmd::Properties => (
+        Icon::Properties,
+        "Properties",
+        "A panel with the type, geometry and overall size of the selection (or of the whole design)",
+      ),
     }
   }
 
@@ -601,6 +608,7 @@ impl Cmd {
       Cmd::Filter(f) => app.sel_filter.get(f),
       Cmd::WindowSelect => app.sel_mode == crate::select::Mode::Window,
       Cmd::SelectMode(m) => app.sel_mode == m,
+      Cmd::Properties => crate::props_ui::is_open(),
       _ => false,
     }
   }
@@ -711,6 +719,7 @@ impl Cmd {
       }
       Cmd::Cut2d => app.open_cut_window(),
       Cmd::Canvas => crate::canvas_ui::start_insert(app),
+      Cmd::Properties => crate::props_ui::toggle(),
     }
   }
 }

@@ -28,6 +28,7 @@ pub mod hub;
 mod inspect;
 mod mates;
 mod params;
+pub mod properties;
 pub mod scene;
 mod sheet2;
 mod solid;
@@ -588,3 +589,5 @@ mod tests_subassembly;
 mod tests_surface;
 #[cfg(test)]
 mod tests_trace;
+#[cfg(test)]
+mod tests_properties;

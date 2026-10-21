@@ -169,6 +169,13 @@ change a parameter and watch the whole history rebuild.
 - **Laser, plasma and waterjet cutting.** A flat pattern, faces or a sketch to G-code or R12
   DXF: kerf compensation with true arcs, leads in the scrap, holes first, micro-joints, and
   machine profiles you can add to. See [2D cutting](#2d-cutting-laser-plasma-waterjet).
+- **Properties panel.** Inspect → Properties docks a panel, as in Fusion, that follows the
+  selection: type, id, parent component and geometry of faces (area, surface, normal at the
+  centre, box), edges (length, curve, ends), vertices, bodies (solid or sheet metal, volume, area,
+  mass with a material, box), components, sketches and sketch curves (ends, centre, radius,
+  length, plane), plus the overall width, height and thickness of the selected (or all visible)
+  bodies, measured across their largest flat face. Copy it, or export JSON, TXT or CSV
+  (`inspect.properties`, `inspect.overall_size`).
 
 ## Install
 

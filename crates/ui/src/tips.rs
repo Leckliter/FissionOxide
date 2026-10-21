@@ -1607,6 +1607,14 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Find, install and update add-ins, libraries and content made by other developers. Installed \
        add-ins are then managed with Scripts and Add-Ins.",
     ),
+
+    // INSPECT > Properties
+    (_, "Properties") => (
+      "Shows a panel with the properties of what is selected.",
+      "Docks on the right and follows the selection: type, id, component and geometry (area, length, \
+       normal, box, volume, mass, sketch plane), and the overall width, height and thickness of the \
+       selected bodies, or of all of them when nothing is selected. Copy or export them as JSON, text or CSV.",
+    ),
     _ => return None,
   };
   Some(Tip { line, more })
