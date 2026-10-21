@@ -23,6 +23,7 @@ mod features;
 pub mod files;
 mod fillet;
 mod form;
+pub mod generative;
 mod groups;
 pub mod history;
 pub mod hub;
@@ -570,6 +571,8 @@ mod tests_files;
 mod tests_fillet;
 #[cfg(test)]
 mod tests_form;
+#[cfg(test)]
+mod tests_gen;
 #[cfg(test)]
 mod tests_hub_server;
 #[cfg(test)]

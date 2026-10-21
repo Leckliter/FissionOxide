@@ -351,6 +351,26 @@ cmds! {
   "cam.fixtures" => "Set the fixtures of a setup (vise jaws, clamps: bodies never machined, checked for collisions with tools and holders); empty clears them", "{setup?, fixtures?: [body], components?: [component]}";
   "cam.steep_shallow" => "3D steep and shallow finishing: waterline passes a step-down apart on areas steeper than the threshold, parallel rows a step-over apart on the rest", "{setup?, faces?, threshold?: degrees (default 45), tool_number? | tool | tool_diameter, stepover?, stepdown?}";
   "cam.contour3d" => "3D contour (waterline) finishing: passes at constant heights a step-down apart on areas at least min_slope steep", "{setup?, faces?, min_slope?: degrees, tool_number? | tool | tool_diameter, stepdown?}";
+  "gen.study" => "New generative design study (Generative Design workspace): default material Aluminum AlSi10Mg, unrestricted manufacturing, one load case", "{name?, resolution?: element size}";
+  "gen.studies" => "Generative design studies with their inputs", "{}";
+  "gen.info" => "A study's inputs", "{study?}";
+  "gen.delete" => "Delete a study and its outcomes", "{study?}";
+  "gen.preserve" => "Preserve geometry: bodies the outcome must keep (loads and constraints go on their faces)", "{study?, bodies, remove?, replace?}";
+  "gen.obstacle" => "Obstacle geometry: bodies the outcome must stay out of (bolt holes, clearances)", "{study?, bodies, remove?, replace?}";
+  "gen.starting_shape" => "Starting shape the optimisation begins from (its bounds join the design space); no body clears it", "{study?, body?}";
+  "gen.design_space" => "Design space and solver settings: margin around the preserve geometry, explicit bounds, element size or count, iterations", "{study?, margin?, min?: [x,y,z], max?: [x,y,z], clear_bounds?, resolution?, elements?, iterations?}";
+  "gen.case" => "Add, rename, clear or delete a load case (a new case copies the first case's constraints)", "{study?, case: name|index, rename?, clear?, delete?}";
+  "gen.load" => "Structural load on faces or near a point: a total force (N) or a pressure (MPa) pushing into the faces", "{study?, case?, face? | faces? | point?: [x,y,z], radius?, force?: [fx,fy,fz] | magnitude, direction?: +x..-z | [x,y,z], pressure?}";
+  "gen.constraint" => "Fixed constraint on faces or near a point (every load case unless one is named)", "{study?, case?, face? | faces? | point?, radius?, fix?: xyz|x|yz...}";
+  "gen.objective" => "Objective and limits: maximise stiffness at a mass target (solid fraction of the design space), or minimise mass; safety factor and displacement limits", "{study?, objective?: max_stiffness|min_mass, mass_target?: 0.01..1, safety_factor?, max_displacement?: mm|null}";
+  "gen.materials" => "Materials to generate outcomes in (library names or custom {name, youngs, poisson, density, yield})", "{study?, materials: [name | material]}";
+  "gen.material_library" => "The generative design material library", "{}";
+  "gen.manufacturing" => "Manufacturing methods (one outcome each per material), symmetry planes and minimum member size", "{study?, methods?: [unrestricted | milling_3axis | milling_2_5axis | {kind, directions?: [+z, -x ...]}], symmetry?: [yz|xz|xy | {plane, offset}], min_member?}";
+  "gen.precheck" => "Check a study before generating: grid size, element counts, nodes each load and constraint reaches, warnings", "{study?}";
+  "gen.generate" => "Generate outcomes: topology optimisation (SIMP, density filter, Heaviside projection, optimality criteria) for every material and method, then a smoothed iso-surface of each", "{study?}";
+  "gen.outcomes" => "Outcomes explorer: mass, volume, stiffness, displacement, peak stress and safety factor per outcome", "{study?}";
+  "gen.insert" => "Insert an outcome into the design as a mesh body; optionally decimated (quadric edge collapses), converted to B-rep and joined with the exact preserve geometry (obstacles cut)", "{study?, outcome?, reduce?: 0..1 | triangles?, brep?, merge_preserve?}";
+  "gen.export" => "Export an outcome's mesh (.stl .obj .3mf .ply)", "{study?, outcome?, path}";
   "cut.machines" => "Laser, plasma and waterjet machine profiles (built in, and the hub's machines.json) with their processes", "{}";
   "cut.machine.add" => "Add or replace a machine profile in the hub: G-code templates and any number of processes", "{machine: {id, name, kind?: laser|plasma|waterjet|dxf, extension?, arcs?, header?, pierce?, off?, footer?, rapid?, line?, arc_cw?, arc_ccw?, max_power?, rapid_rate?, processes?: [{name, kerf?, feed?, power?, pierce_delay?, ...}]}}";
   "cut.machine.delete" => "Delete a machine profile from the hub", "{id}";
@@ -472,6 +492,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::ecad::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::generative::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::form::run(s, name, p) {

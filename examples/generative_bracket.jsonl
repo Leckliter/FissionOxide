@@ -1,0 +1,31 @@
+# Generative design of a bracket: two bolt bosses on the left (preserved, their holes kept clear
+# by obstacles), a loaded pin boss on the right. Two load cases (a side load on the pin and a
+# downward push on its face), fixed bolt holes, maximum stiffness at a quarter of the design
+# space's mass, two materials and two manufacturing methods: four outcomes. The best one goes
+# into the design as B-rep joined with the exact bosses.
+{"cmd": "new", "name": "Generative bracket"}
+{"cmd": "cylinder", "at": [0, 0], "radius": 9, "height": 12}
+{"cmd": "cylinder", "at": [0, 0], "radius": 4.5, "height": 12, "operation": "cut", "targets": [1000]}
+{"cmd": "cylinder", "at": [0, 50], "radius": 9, "height": 12}
+{"cmd": "cylinder", "at": [0, 50], "radius": 4.5, "height": 12, "operation": "cut", "targets": [3000]}
+{"cmd": "cylinder", "at": [100, 25], "radius": 8, "height": 12}
+{"cmd": "cylinder", "at": [100, 25], "radius": 4, "height": 12, "operation": "cut", "targets": [5000]}
+{"cmd": "cylinder", "at": [0, 0], "radius": 4.5, "height": 12}
+{"cmd": "cylinder", "at": [0, 50], "radius": 4.5, "height": 12}
+{"cmd": "cylinder", "at": [100, 25], "radius": 4, "height": 12}
+{"cmd": "gen.study", "name": "Bracket"}
+{"cmd": "gen.preserve", "bodies": [1000, 3000, 5000]}
+{"cmd": "gen.obstacle", "bodies": [7000, 8000, 9000]}
+{"cmd": "gen.design_space", "margin": 2, "resolution": 2, "iterations": 60}
+{"cmd": "gen.constraint", "point": [0, 0, 6], "radius": 6, "fix": "xyz"}
+{"cmd": "gen.constraint", "point": [0, 50, 6], "radius": 6, "fix": "xyz"}
+{"cmd": "gen.load", "case": "Side load", "point": [100, 25, 6], "radius": 5.5, "force": [0, -2000, 0]}
+{"cmd": "gen.load", "case": "Push down", "face": {"point": [100, 31, 12]}, "force": 500, "direction": "-z"}
+{"cmd": "gen.case", "case": 0, "delete": true}
+{"cmd": "gen.objective", "objective": "max_stiffness", "mass_target": 0.25, "safety_factor": 2}
+{"cmd": "gen.materials", "materials": ["Aluminum AlSi10Mg", "Titanium 6Al-4V"]}
+{"cmd": "gen.manufacturing", "methods": ["unrestricted", {"kind": "milling_3axis", "directions": ["+z"]}], "symmetry": [{"plane": "xz", "offset": 25}], "min_member": 4}
+{"cmd": "gen.precheck"}
+{"cmd": "gen.generate"}
+{"cmd": "gen.outcomes"}
+{"cmd": "gen.insert", "brep": true, "merge_preserve": true}

@@ -17,6 +17,7 @@ fox-store.workspace = true
 fox-trace.workspace = true
 fox-cut.workspace = true
 fox-ecad.workspace = true
+fox-gen.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
