@@ -19,6 +19,7 @@ mod gl;
 #[cfg(feature = "headless")]
 pub mod headless;
 mod pack;
+pub mod pbr;
 
 pub use gl::{DrawStats, LOD_PIXELS, Renderer};
 pub use glow;

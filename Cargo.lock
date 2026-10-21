@@ -1695,11 +1695,13 @@ name = "fox-render-gl"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "fox-raytrace",
  "fox-render",
  "fox-render-gl",
  "glam",
  "glow",
  "glutin",
+ "image",
 ]
 
 [[package]]
