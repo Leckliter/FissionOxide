@@ -180,6 +180,8 @@ pub struct App {
   pub(crate) ghost: preview::Ghost,
   /// The 2D cut window (laser, plasma, waterjet), while open.
   pub cut_window: Option<cut_ui::CutWindow>,
+  /// A cut job whose preview failed at this design revision (not retried every frame).
+  pub cut_preview_failed: Option<(u32, u64)>,
   /// Software updates (Help → Check for Updates).
   pub updates: updates::Updates,
   /// The Preferences dialog and the saved preferences.
@@ -371,6 +373,7 @@ impl App {
       manip: manipulators::State::default(),
       ghost: preview::Ghost::default(),
       cut_window: None,
+      cut_preview_failed: None,
       updates: updates::Updates::default(),
       preferences: preferences::Preferences::default(),
       opening: None,
@@ -1416,6 +1419,8 @@ impl App {
       self.cam_generate(false);
       self.s.toolpaths_of = Some((self.s.toolpaths_of.map(|t| t.0).unwrap_or(0), self.s.revision));
     }
+    // and its 2D cut preview
+    self.refresh_cut_preview();
     self.dropped_files(&ctx);
     panels::app_bar(self, ui);
     panels::toolbar(self, ui);

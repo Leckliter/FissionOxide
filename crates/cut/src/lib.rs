@@ -5,7 +5,8 @@
 //! part again), offset by half the kerf towards the scrap with true arcs
 //! ([`cavalier_contours`]), given lead-ins and lead-outs on the scrap side, broken by
 //! micro-joints if asked, and ordered nearest-first with every contour cut before the contours
-//! around it. [`post`] turns the result into G-code for a machine profile, or an R12 DXF.
+//! around it. [`post`] turns the result into G-code for a machine profile, or an R12 DXF;
+//! [`nest`] lays copies of parts out on sheets first.
 //!
 //! Units are millimetres; segments are polyline-style: two points and a bulge (the tangent of a
 //! quarter of the arc's sweep, positive counter-clockwise, 0 for a line).
@@ -14,12 +15,14 @@ use std::f64::consts::{PI, TAU};
 
 use serde::{Deserialize, Serialize};
 
+pub mod nest;
 pub mod plan;
 pub mod post;
 #[cfg(test)]
 mod tests;
 
-pub use plan::{CutParams, Lead, LeadKind, Pass, Plan, SegKind, plan};
+pub use nest::{Nest, NestParams, NestPart, NestSheet, Placement, nest, parts_of};
+pub use plan::{CutParams, LEAD_SNAP, Lead, LeadKind, Pass, Plan, SegKind, plan};
 pub use post::{Machine, MachineKind, Process, builtin_machines};
 
 pub type P = [f64; 2];

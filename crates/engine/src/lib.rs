@@ -14,6 +14,7 @@ pub mod canvas;
 mod commands;
 pub mod config;
 mod cut;
+pub use cut::{CutLine, CutLineKind, CutPreview};
 pub mod diff;
 mod drawings;
 mod features;
@@ -173,6 +174,8 @@ pub struct Session {
   pub toolpaths_of: Option<(u32, u64)>,
   /// The last stock simulation (`cam.simulate`): its setup, design revision and result.
   pub simulation: Option<(u32, u64, fox_model::cam::sim::Simulation)>,
+  /// The last previewed 2D cut job (`cut.job.preview`), drawn in the viewport.
+  pub cut_preview: Option<cut::CutPreview>,
   /// A comparison of two hub versions (`hub.diff`), drawn instead of the bodies while set.
   pub diff: Option<diff::DiffView>,
   /// The drawing sheet being worked on, (drawing, sheet): where new views and notes go when a
@@ -210,6 +213,7 @@ impl Session {
       toolpaths: Vec::new(),
       toolpaths_of: None,
       simulation: None,
+      cut_preview: None,
       diff: None,
       drawing_sheet: None,
       active_component: None,

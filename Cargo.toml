@@ -42,6 +42,7 @@ quick-xml = "0.42"
 ttf-parser = "0.25"
 epaint_default_fonts = "0.36"
 cavalier_contours = "0.9"
+jagua-rs = { version = "1.1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

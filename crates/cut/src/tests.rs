@@ -268,3 +268,151 @@ fn time_and_lengths() {
   assert!(p.rapid_length() > 0.0);
   assert!(p.time(&params, 6000.0) > p.cut_length() / params.feed * 60.0);
 }
+
+#[test]
+fn lead_points_pick_the_start() {
+  // without a pick the outline starts near the last hole; with one on the far left edge it
+  // starts there, the lead-in coming from outside the part
+  let pick = [0.0, 40.0];
+  let p = plan(&contours(), &CutParams { lead_points: vec![pick], ..params() });
+  let outline = p.passes.iter().find(|q| !q.hole).unwrap();
+  let start = outline.segs.iter().find(|s| s.1 == SegKind::Cut).unwrap().0.a;
+  assert!(dist(start, [-1.0, 40.0]) < 1e-6, "{start:?}");
+  assert!(outline.start()[0] < -1.0, "lead-in from the scrap: {:?}", outline.start());
+  // a pick in the round hole moves only that hole's start
+  let q = plan(&contours(), &CutParams { lead_points: vec![[30.0, 20.5]], ..params() });
+  let hole = q.passes.iter().find(|s| s.hole && s.segs.iter().any(|x| !x.0.is_line())).unwrap();
+  let start = hole.segs.iter().find(|s| s.1 == SegKind::Cut).unwrap().0.a;
+  assert!(dist(start, [30.0, 21.0]) < 1e-6, "{start:?}");
+  // too far from any contour: ignored, with a warning
+  let r = plan(&contours(), &CutParams { lead_points: vec![[500.0, 500.0]], ..params() });
+  assert!(r.warnings.iter().any(|w| w.contains("lead point")), "{:?}", r.warnings);
+  assert_eq!(r.passes.len(), plan(&contours(), &params()).passes.len());
+}
+
+fn plate_part(quantity: u32) -> crate::NestPart {
+  let parts = crate::parts_of(&contours());
+  assert_eq!(parts.len(), 1);
+  assert_eq!(parts[0].len(), 3, "outline and two holes");
+  crate::NestPart { name: "plate".into(), contours: parts[0].clone(), quantity, lead_points: vec![[0.0, 40.0]] }
+}
+
+/// Every placed outline inside the sheet's margins and no two closer than the spacing (checked
+/// on the polygons, so arcs count).
+fn check_nest(n: &crate::Nest, parts: &[crate::NestPart], np: &crate::NestParams) {
+  for k in 0..n.sheets.len() {
+    let outlines: Vec<Contour> = n.sheets[k].placements.iter().map(|p| p.contour(&parts[p.part].contours[0])).collect();
+    for o in &outlines {
+      let (lo, hi) = o.bounds();
+      let m = np.margin - 0.06;
+      assert!(lo[0] >= m && lo[1] >= m, "{lo:?}");
+      assert!(hi[0] <= np.sheet_width - m && hi[1] <= np.sheet_height - m, "{hi:?}");
+    }
+    for i in 0..outlines.len() {
+      for j in i + 1..outlines.len() {
+        let pa = outlines[i].polygon(0.01);
+        let near = pa.iter().map(|p| outlines[j].closest(*p).2).fold(f64::INFINITY, f64::min);
+        assert!(near >= np.spacing - 0.15, "parts {i} and {j} on sheet {k} are {near} apart");
+        assert!(!outlines[j].contains(pa[0]) && !outlines[i].contains(outlines[j].segs[0].a));
+      }
+    }
+  }
+}
+
+#[test]
+fn nesting_fills_sheets() {
+  // 100 x 60 plates on a 500 x 300 sheet: 4 x 4 fit with 3 mm gaps inside 5 mm margins
+  let parts = vec![plate_part(20)];
+  let np = crate::NestParams { sheet_width: 500.0, sheet_height: 300.0, ..Default::default() };
+  let n = crate::nest(&parts, &np).unwrap();
+  assert!(n.unplaced.is_empty(), "{:?}", n.warnings);
+  assert_eq!(n.placed(), 20);
+  assert_eq!(n.sheets.len(), 2, "{:?}", n.sheets.iter().map(|s| s.placements.len()).collect::<Vec<_>>());
+  assert!(n.sheets[0].placements.len() >= 16);
+  check_nest(&n, &parts, &np);
+  let u = n.utilisation(&parts);
+  let area = parts[0].area();
+  assert!((area - (6000.0 - 100.0 * std::f64::consts::PI - 100.0)).abs() < 0.5, "{area}");
+  assert!((u - 20.0 * area / (2.0 * 500.0 * 300.0)).abs() < 1e-9);
+  assert!(n.sheets[0].utilisation > n.sheets[1].utilisation);
+
+  // the sheet's contours: three per part, and their lead points moved with them
+  let (cs, leads) = n.sheet(&parts, 0);
+  assert_eq!(cs.len(), 3 * n.sheets[0].placements.len());
+  assert_eq!(leads.len(), n.sheets[0].placements.len());
+  let p = plan(&cs, &params());
+  assert_eq!(p.paths.len(), cs.len());
+  assert_eq!(p.paths.iter().filter(|c| c.1).count(), 2 * n.sheets[0].placements.len());
+}
+
+#[test]
+fn nesting_rotates_to_fit() {
+  // a 100 x 60 plate fits a 70 x 120 sheet only turned a quarter
+  let parts = vec![plate_part(1)];
+  let tall = crate::NestParams { sheet_width: 70.0, sheet_height: 120.0, margin: 2.0, ..Default::default() };
+  let n = crate::nest(&parts, &tall).unwrap();
+  assert_eq!(n.placed(), 1, "{:?}", n.warnings);
+  let r = n.sheets[0].placements[0].rotation;
+  assert!((r - 90.0).abs() < 1e-3 || (r - 270.0).abs() < 1e-3, "{r}");
+  check_nest(&n, &parts, &tall);
+  // as drawn only: it doesn't fit
+  let n = crate::nest(&parts, &crate::NestParams { rotations: 1, ..tall.clone() }).unwrap();
+  assert_eq!(n.placed(), 0);
+  assert_eq!(n.unplaced, vec![(0, 1)]);
+  assert!(n.sheets.is_empty());
+  assert!(n.warnings[0].contains("doesn't fit"), "{:?}", n.warnings);
+  // a sheet limit leaves copies out
+  let n = crate::nest(&[plate_part(3)], &crate::NestParams { max_sheets: 2, ..tall }).unwrap();
+  assert_eq!(n.placed(), 2);
+  assert_eq!(n.unplaced, vec![(0, 1)]);
+}
+
+#[test]
+fn nesting_mixed_parts_and_mirror() {
+  // an L-shaped bracket (mirroring changes it) and small discs
+  let l = vec![
+    Edge::Line { a: [0.0, 0.0], b: [80.0, 0.0] },
+    Edge::Line { a: [80.0, 0.0], b: [80.0, 20.0] },
+    Edge::Line { a: [80.0, 20.0], b: [20.0, 20.0] },
+    Edge::Line { a: [20.0, 20.0], b: [20.0, 60.0] },
+    Edge::Line { a: [20.0, 60.0], b: [0.0, 60.0] },
+    Edge::Line { a: [0.0, 60.0], b: [0.0, 0.0] },
+  ];
+  let (lc, _) = chain(&l, JOIN_TOL);
+  let (dc, _) = chain(&[Edge::Circle { center: [0.0, 0.0], radius: 8.0 }], JOIN_TOL);
+  let parts = vec![
+    crate::NestPart { name: "L".into(), contours: lc, quantity: 6, lead_points: Vec::new() },
+    crate::NestPart { name: "disc".into(), contours: dc, quantity: 10, lead_points: Vec::new() },
+  ];
+  let np = crate::NestParams { sheet_width: 250.0, sheet_height: 200.0, spacing: 2.0, mirror: true, ..Default::default() };
+  let n = crate::nest(&parts, &np).unwrap();
+  assert_eq!(n.placed(), 16, "{:?}", n.warnings);
+  assert_eq!(n.sheets.len(), 1);
+  check_nest(&n, &parts, &np);
+  // mirrored copies keep their arcs' sense consistent: a mirrored disc is still a disc
+  for p in &n.sheets[0].placements {
+    let c = p.contour(&parts[p.part].contours[0]);
+    assert!((c.area().abs() - parts[p.part].contours[0].area().abs()).abs() < 1e-6);
+  }
+}
+
+#[test]
+fn nested_dxf_has_the_sheet() {
+  let parts = vec![plate_part(2)];
+  let n = crate::nest(&parts, &crate::NestParams { sheet_width: 300.0, sheet_height: 200.0, ..Default::default() }).unwrap();
+  let (cs, _) = n.sheet(&parts, 0);
+  let dx = find("dxf").unwrap();
+  let dp = dx.process(None).unwrap();
+  let mut p = plan(&cs, &dp);
+  p.sheet = Some(([0.0, 0.0], [300.0, 200.0]));
+  let d = dx.output(&p, &dp, "nest", false);
+  assert!(d.contains("SHEET"));
+  assert_eq!(d.matches("\n8\nSHEET\n").count(), 4);
+  assert_eq!(d.matches("\nCIRCLE\n").count() + d.matches("\nARC\n").count() >= 2, true);
+  // FireControl is there, marked untested
+  let fc = find("firecontrol").unwrap();
+  assert!(fc.name.contains("untested"));
+  let fp = fc.process(None).unwrap();
+  let g = fc.gcode(&plan(&cs, &fp), &fp, "nest", false);
+  assert!(g.contains("M3\nG4 P0.5\n") && g.ends_with("M30\n"), "{g}");
+}

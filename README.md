@@ -521,10 +521,30 @@ scrap side. Micro-joints (tabs) keep parts in the sheet, and small holes can run
 feed. The part is on the right of the cut by default (outlines clockwise), the good side of a
 clockwise-swirl plasma torch.
 
+**Lead positions** can be picked per contour: with *Pick lead positions* on, a click on the
+previewed cut moves the nearest contour's lead-in there (`cut.job.lead`, or `lead_points` in
+`cut.gcode`); the pick is kept as a point of the model, so it stays on its contour when the
+design changes, and on a nest every copy of the part starts at the same place.
+
+**Nesting** (`nest`, or *Nest on sheets* in the window) lays copies out on sheets with
+[jagua-rs](https://github.com/JeroenGar/jagua-rs) doing the geometry: sheet size, spacing between
+parts (3 mm or two kerfs by default), margin, the rotations a part may take (as drawn, 180°,
+every 90° or every 45°), mirroring, a quantity per part, other parts from other sketches, faces
+or bodies (`parts`), and as many sheets as it takes. Parts go largest first, each at the lowest,
+then leftmost, spot where it fits; `cut.nest` reports every sheet's placements and utilisation
+and what didn't fit, and `cut.gcode` writes one program (or DXF, with the sheet outline on its
+own layer) per sheet. Parts aren't placed inside other parts' holes.
+
+**Cut jobs kept in the design**: *Keep in design* (`cut.job.create`) stores the cut's source,
+machine, process, overrides, lead positions and nesting with the design. The cut is planned again
+whenever the design changes, and in the Manufacture workspace its toolpath is drawn in the
+viewport (outlines blue, holes purple, leads green, rapids dashed orange, a nest's sheets side by
+side); `cut.gcode {"job": …}` posts it.
+
 Machine profiles: GRBL and FluidNC lasers (M4 power that follows the speed), LinuxCNC
 QtPlasmaC (`M3 $0`, material table via `M190`), plasma with torch heights in the G-code
-(Mach-style), Wazer-style waterjet (lines only) and R12 DXF of the part geometry for OMAX-style
-software. Each is a set of G-code templates plus any number of processes (kerf, feed, power,
+(Mach-style), Langmuir FireControl (untested), Wazer-style waterjet (lines only) and R12 DXF of
+the part geometry for OMAX-style software. Each is a set of G-code templates plus any number of processes (kerf, feed, power,
 pierce delay and heights per material); add your own with `cut.machine.add` (kept in the hub's
 `machines.json`). Rapids are real rapids and there is no limit on processes.
 
@@ -533,10 +553,13 @@ fissionoxide-cli cut machines
 fissionoxide-cli cut bracket.fox bracket.ngc --machine qtplasmac --process "3 mm mild steel, 45 A"
 fissionoxide-cli cut bracket.fox bracket.gcode --machine grbl_laser '{"kerf": 0.15, "tabs": 2, "lead_in": "line"}'
 fissionoxide-cli exec plate.fox '{"cmd": "cut.gcode", "sketch": 1, "machine": "dxf", "path": "plate.dxf"}'
+fissionoxide-cli cut bracket.fox bracket.gcode --nest 1250x2500 --quantity 40 --spacing 4   # bracket-sheet1.gcode, …
+fissionoxide-cli exec plate.fox '{"cmd": "cut.job.create", "name": "Plate", "sketch": 1, "machine": "qtplasmac"}' --save plate.fox
+fissionoxide-cli cut plate.fox plate.ngc --job Plate
 ```
 
 The machine dialects were written from their documentation, not run on the machines: check a
-program in your control's preview (and on scrap) before cutting parts. Nesting is not there yet.
+program in your control's preview (and on scrap) before cutting parts.
 
 ## Headless CLI and scripting
 
