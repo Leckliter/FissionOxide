@@ -13,16 +13,36 @@ use crate::{Sel, Session};
 
 /// Fusion's default look (Steel - Satin): a warm light grey, about (205, 200, 190) on a top face.
 pub const BODY_COLOR: [u8; 4] = [205, 200, 190, 255];
+/// The highlight of what the browser or timeline peeks at, and of sketch geometry under the
+/// pointer while its sketch is edited: a light blue.
 pub const HOVER_COLOR: [u8; 4] = [128, 190, 238, 255];
-pub const SELECT_COLOR: [u8; 4] = [36, 142, 220, 255];
-pub const EDGE_COLOR: [u8; 4] = [35, 38, 44, 255];
+/// Hovering a face or profile lightens it and keeps its hue, as Fusion does: this much per
+/// channel before lighting, about +28 on a lit face (see [`hover_of`]).
+pub const HOVER_LIGHTEN: u8 = 32;
+/// A selected face, body or profile, before lighting: about (83, 138, 210) on a lit top face,
+/// as Fusion's medium selection blue.
+pub const SELECT_COLOR: [u8; 4] = [87, 144, 219, 255];
+/// A selected face under the pointer: lighter, about (133, 169, 220) lit.
+pub const SELECT_HOVER_COLOR: [u8; 4] = [139, 177, 230, 255];
+/// A selected edge, sketch curve or vertex: Fusion's bright blue, drawn over a pale halo one
+/// pixel wide on each side.
+pub const EDGE_SELECT_COLOR: [u8; 4] = [10, 131, 252, 255];
+pub const EDGE_SELECT_HALO: [u8; 4] = [214, 235, 255, 255];
+/// Body edges: a 1 px light grey silhouette on the body, a 2 px black line under the pointer.
+pub const EDGE_COLOR: [u8; 4] = [179, 178, 173, 255];
+pub const EDGE_HOVER_COLOR: [u8; 4] = [10, 10, 10, 255];
 /// A visible sketch's closed profiles seen from outside the sketch: Fusion's light blue.
 pub const PROFILE_COLOR: [u8; 4] = [178, 208, 240, 255];
 /// The profiles of the sketch being edited: Fusion's pale blue-white.
 pub const PROFILE_COLOR_EDIT: [u8; 4] = [226, 237, 250, 255];
-/// A profile under the cursor (a brighter blue) and a selected one (filled blue).
-pub const PROFILE_HOVER: [u8; 4] = [150, 198, 245, 255];
-pub const PROFILE_SELECTED: [u8; 4] = [96, 166, 232, 255];
+/// A profile under the cursor is lightened like a face (with a black outline); a selected one
+/// fills in the selection blue with a red outline, as Extrude shows them.
+pub const PROFILE_HOVER: [u8; 4] = lighten(PROFILE_COLOR, HOVER_LIGHTEN);
+pub const PROFILE_SELECTED: [u8; 4] = SELECT_COLOR;
+pub const PROFILE_OUTLINE_HOVER: [u8; 4] = EDGE_HOVER_COLOR;
+pub const PROFILE_OUTLINE_SELECTED: [u8; 4] = [220, 40, 40, 255];
+/// A sketch curve under the pointer seen from outside its sketch: thicker and a darker blue.
+pub const SKETCH_HOVER: [u8; 4] = [24, 96, 200, 255];
 pub const SKETCH_FREE: [u8; 4] = [30, 110, 235, 255];
 pub const SKETCH_FIXED: [u8; 4] = [20, 20, 24, 255];
 pub const SKETCH_CONSTRUCTION: [u8; 4] = [225, 130, 40, 255];
@@ -221,7 +241,7 @@ impl SceneBuilder {
       }
       let Some(m) = body.mesh() else { continue };
       let tint = |c: [u8; 4]| {
-        let c = if selected_bodies.contains(&body.id) { mix(c, SELECT_COLOR, 0.45) } else { c };
+        let c = if selected_bodies.contains(&body.id) { SELECT_COLOR } else { c };
         let c = if opts.peek.contains(&body.id) { mix(c, HOVER_COLOR, 0.6) } else { c };
         if editing { mix(c, [255, 255, 255, 255], 0.35) } else { c }
       };
@@ -324,21 +344,17 @@ impl SceneBuilder {
             None => points,
           };
           let (color, width) = if selected.contains(&pick) {
-            (SELECT_COLOR, 3.0)
+            (EDGE_SELECT_COLOR, 1.0)
           } else if opts.hover == Some(pick) {
-            (HOVER_COLOR, 3.0)
+            (EDGE_HOVER_COLOR, 2.0)
           } else {
             (EDGE_COLOR, 1.0)
           };
-          scene.lines.push(Polyline {
-            points,
-            color,
-            width,
-            id: picks.id(pick),
-            on_top: false,
-            dashed: false,
-            behind: false,
-          });
+          let id = picks.id(pick);
+          if selected.contains(&pick) {
+            scene.lines.push(halo(&points, id, false));
+          }
+          scene.lines.push(Polyline { points, color, width, id, on_top: false, dashed: false, behind: false });
         }
       }
     }
@@ -368,14 +384,13 @@ impl SceneBuilder {
           .entry((f.id, i))
           .or_insert_with(|| Shape::face(&r.plane, prof).ok().and_then(|face| face.tessellate(0.05).ok()));
         let Some(m) = mesh else { continue };
-        let color = if selected.contains(&pick) {
-          PROFILE_SELECTED
+        let base = if is_edit { PROFILE_COLOR_EDIT } else { PROFILE_COLOR };
+        let (color, outline) = if selected.contains(&pick) {
+          (PROFILE_SELECTED, Some(PROFILE_OUTLINE_SELECTED))
         } else if opts.hover == Some(pick) {
-          PROFILE_HOVER
-        } else if is_edit {
-          PROFILE_COLOR_EDIT
+          (lighten(base, HOVER_LIGHTEN), Some(PROFILE_OUTLINE_HOVER))
         } else {
-          PROFILE_COLOR
+          (base, None)
         };
         let id = picks.id(pick);
         // lift slightly off the plane so coplanar faces don't fight
@@ -385,9 +400,22 @@ impl SceneBuilder {
           *p = (fox_kernel::glam::Vec3::from(*p) + lift).to_array();
         }
         scene.meshes.push(pm);
+        if let Some(color) = outline {
+          for lp in std::iter::once(&prof.outer).chain(&prof.holes) {
+            let mut pts = lp.polygon();
+            if pts.len() < 2 {
+              continue;
+            }
+            pts.push(pts[0]);
+            let points = pts.iter().map(|p| (r.plane.to_world(*p).as_vec3() + lift).to_array()).collect();
+            scene.lines.push(Polyline { points, color, width: 1.0, id, on_top: false, dashed: false, behind: false });
+          }
+        }
       }
+      // a sketch shown only because it is peeked at isn't under the pointer
+      let pickable = is_edit || !opts.hide_sketches && f.visible.unwrap_or(auto);
       sketch_lines(
-        &mut scene, &mut picks, f.id, &r.sketch, &r.plane, is_edit, &r.report, &selected, opts.hover, peeked,
+        &mut scene, &mut picks, f.id, &r.sketch, &r.plane, is_edit, &r.report, &selected, opts.hover, peeked, pickable,
       );
     }
 
@@ -627,59 +655,49 @@ fn sketch_lines(
   selected: &[Pick],
   hover: Option<Pick>,
   peeked: bool,
+  pickable: bool,
 ) {
   let w = |p: [f64; 2]| plane.to_world(p).as_vec3().to_array();
+  // a curve's colour and width: selected curves draw bright blue (over a halo outside the
+  // sketch); a hovered curve is light blue in its sketch and a thicker darker blue outside it,
+  // where it is picked over the face it lies on
+  let look = |pick: Pick, idle: [u8; 4], construction: bool| -> ([u8; 4], f32, bool) {
+    if selected.contains(&pick) {
+      (EDGE_SELECT_COLOR, if editing { 2.0 } else { 1.0 }, !editing)
+    } else if hover == Some(pick) && !editing {
+      (SKETCH_HOVER, 2.0, false)
+    } else if hover == Some(pick) || peeked {
+      (HOVER_COLOR, if editing { 2.0 } else { 1.0 }, false)
+    } else if !editing {
+      (SKETCH_IDLE, 1.0, false)
+    } else if construction {
+      (SKETCH_CONSTRUCTION, 2.0, false)
+    } else {
+      (idle, 2.0, false)
+    }
+  };
+  let push = |scene: &mut Scene, points: Vec<[f32; 3]>, (color, width, haloed): ([u8; 4], f32, bool), id, dashed| {
+    if haloed {
+      scene.lines.push(halo(&points, id, editing));
+    }
+    scene.lines.push(Polyline { points, color, width, id, on_top: editing, dashed, behind: false });
+  };
   for c in &sk.curves {
     let pts = curve_polyline(sk, &c.kind);
     if pts.len() < 2 {
       continue;
     }
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
-    let is_free = report.curve_free(sk, c.id);
-    let color = if selected.contains(&pick) {
-      SELECT_COLOR
-    } else if hover == Some(pick) || peeked {
-      HOVER_COLOR
-    } else if !editing {
-      SKETCH_IDLE
-    } else if c.construction {
-      SKETCH_CONSTRUCTION
-    } else if is_free {
-      SKETCH_FREE
-    } else {
-      SKETCH_FIXED
-    };
-    scene.lines.push(Polyline {
-      points: pts.into_iter().map(w).collect(),
-      color,
-      width: if editing { 2.0 } else { 1.0 },
-      id: if editing { picks.id(pick) } else { 0 },
-      on_top: editing,
-      dashed: c.construction,
-      behind: false,
-    });
+    let idle = if report.curve_free(sk, c.id) { SKETCH_FREE } else { SKETCH_FIXED };
+    let id = if pickable { picks.id(pick) } else { 0 };
+    push(scene, pts.into_iter().map(w).collect(), look(pick, idle, c.construction), id, c.construction);
   }
   // included 3D geometry, at its world position
   for c in &sk.curves3d {
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
-    let color = if selected.contains(&pick) {
-      SELECT_COLOR
-    } else if hover == Some(pick) || peeked {
-      HOVER_COLOR
-    } else if editing {
-      SKETCH_FIXED
-    } else {
-      SKETCH_IDLE
-    };
-    scene.lines.push(Polyline {
-      points: c.kind.polyline(48).into_iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect(),
-      color,
-      width: if editing { 2.0 } else { 1.0 },
-      id: if editing { picks.id(pick) } else { 0 },
-      on_top: editing,
-      dashed: c.construction,
-      behind: false,
-    });
+    let points = c.kind.polyline(48).into_iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
+    let id = if pickable { picks.id(pick) } else { 0 };
+    push(scene, points, look(pick, SKETCH_FIXED, false), id, c.construction);
   }
   if editing {
     // spline tangent handles and Bézier handles: a thin line from the curve to each handle
@@ -721,7 +739,7 @@ fn sketch_lines(
     for p in sk.points.iter().filter(|p| !glyph_points.contains(&p.id)) {
       let pick = Pick::SketchPoint { sketch: sid, point: p.id };
       let color = if selected.contains(&pick) {
-        SELECT_COLOR
+        EDGE_SELECT_COLOR
       } else if hover == Some(pick) {
         HOVER_COLOR
       } else if p.id == fox_sketch::ORIGIN {
@@ -832,10 +850,15 @@ fn mesh_of(m: &TriMesh, tri_ids: Vec<u32>, color: [u8; 4], hover: Option<u32>) -
     id: 0,
     color,
     highlight: hover,
-    highlight_color: HOVER_COLOR,
+    highlight_color: hover_of(color),
     colors: Vec::new(),
     analyze: false,
   }
+}
+
+/// The pale halo under a selected edge or curve: one pixel wider on each side, the same pick.
+fn halo(points: &[[f32; 3]], id: u32, on_top: bool) -> Polyline {
+  Polyline { points: points.to_vec(), color: EDGE_SELECT_HALO, width: 3.0, id, on_top, dashed: false, behind: false }
 }
 
 /// Cuts away the triangles (and parts of triangles) in front of a section plane (on its
@@ -1004,6 +1027,21 @@ pub fn mix(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {
     o[i] = (a[i] as f32 * (1.0 - t) + b[i] as f32 * t).round() as u8;
   }
   o
+}
+
+/// `c` lightened by `amount` per channel (saturating), its hue kept.
+pub const fn lighten(c: [u8; 4], amount: u8) -> [u8; 4] {
+  [c[0].saturating_add(amount), c[1].saturating_add(amount), c[2].saturating_add(amount), c[3]]
+}
+
+/// What a face or profile of colour `c` draws in under the pointer: lightened by
+/// [`HOVER_LIGHTEN`], or the selected-and-hovered blue when it is selected.
+pub const fn hover_of(c: [u8; 4]) -> [u8; 4] {
+  if c[0] == SELECT_COLOR[0] && c[1] == SELECT_COLOR[1] && c[2] == SELECT_COLOR[2] {
+    SELECT_HOVER_COLOR
+  } else {
+    lighten(c, HOVER_LIGHTEN)
+  }
 }
 
 /// Projects a world point into a sketch plane (for clicking in the viewport).
@@ -1348,9 +1386,9 @@ fn vertex_markers(scene: &mut Scene, picks: &mut PickTable, s: &Session, opts: &
       }
       let pick = Pick::Vertex { body: body.id, edge, end };
       let (color, size) = if selected.contains(&pick) {
-        (SELECT_COLOR, 4.5)
+        (EDGE_SELECT_COLOR, 4.5)
       } else if opts.hover == Some(pick) {
-        (HOVER_COLOR, 4.5)
+        (EDGE_HOVER_COLOR, 4.5)
       } else {
         (VERTEX_COLOR, 3.0)
       };

@@ -1768,9 +1768,11 @@ impl Dialog {
     match self.kind {
       Kind::Extrude if matches!(self.extent, "one_side" | "symmetric" | "two_sides") => {
         let r = s.model.sketches.get(&self.sketch?)?;
+        // no arrow until a profile is picked (an edited extrude keeps its stored profiles)
         let at = match self.profiles.first() {
           Some(p) => *p,
-          None => r.profiles.first()?.interior_point(),
+          None if self.editing.is_some() => r.profiles.first()?.interior_point(),
+          None => return None,
         };
         let (distance, flip) = self.extrude_distance();
         let sign = if flip { -1.0 } else { 1.0 };
@@ -4917,6 +4919,67 @@ mod tests {
     assert_eq!(Dialog::blank(Kind::Hem).prompt(false).as_deref(), Some("Select edges"));
     // one with nothing to select or specify has no prompt
     assert_eq!(Dialog::blank(Kind::Inspect).prompt(false), None);
+  }
+
+  /// E opens Extrude with no profile picked, so nothing is previewed and no arrow shows, when
+  /// the sketch has more than one closed region; a picked profile then makes it ready.
+  #[test]
+  fn extrude_opens_with_nothing_picked_on_a_sketch_of_several_regions() {
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]})).unwrap();
+    app.run("sketch.rect", json!({"corner1": [20, 0], "corner2": [30, 10]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.s.selection.clear();
+    let mut d = Dialog::open(&mut app, Kind::Extrude);
+    assert_eq!(d.sketch, Some(sk));
+    assert!(d.profiles.is_empty() && !d.ready(), "{:?}", d.profiles);
+    assert_eq!(d.prompt(false).as_deref(), Some("Select sketch profiles or planar faces to extrude"));
+    assert!(d.manipulator(&app.s).is_none(), "no arrow before a pick");
+    let bodies = app.s.model.bodies.len();
+    d.preview(&mut app.s);
+    assert!(!d.applied && app.s.model.bodies.len() == bodies, "nothing is previewed");
+    // picking a profile makes it ready and previews just that region
+    app.s.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    d.sync_selection(&app.s);
+    assert_eq!(d.profiles.len(), 1);
+    assert!(d.ready());
+    d.preview(&mut app.s);
+    assert!(d.applied, "{:?}", d.error);
+    assert_eq!(app.s.model.bodies.len(), bodies + 1);
+    assert!(d.manipulator(&app.s).is_some());
+    d.cancel(&mut app.s);
+  }
+
+  /// A Fillet preview keeps the body's own colour: only the picked edge draws in the selection
+  /// blue, as Fusion's command picks look.
+  #[test]
+  fn a_fillet_preview_keeps_the_body_colour() {
+    use fox_engine::scene::{self, Pick, SceneBuilder, ViewOptions};
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    let body = app.s.model.bodies[0].id;
+    app.s.selection = vec![Sel::Edge { body, edge: 1 }];
+    let mut d = Dialog::open(&mut app, Kind::Fillet);
+    d.preview(&mut app.s);
+    assert!(d.applied, "{:?}", d.error);
+    let (sc, picks) = SceneBuilder::default().build(&app.s, &ViewOptions::default());
+    let colors: Vec<[u8; 4]> = sc
+      .meshes
+      .iter()
+      .filter(|m| matches!(m.tri_ids.first().and_then(|id| picks.get(*id)), Some(Pick::Face { .. })))
+      .map(|m| m.color)
+      .collect();
+    assert!(!colors.is_empty() && colors.iter().all(|c| *c == scene::BODY_COLOR), "{colors:?}");
+    for l in sc.lines.iter().filter(|l| matches!(picks.get(l.id), Some(Pick::Edge { .. }))) {
+      assert!(
+        [scene::EDGE_COLOR, scene::EDGE_SELECT_COLOR, scene::EDGE_SELECT_HALO].contains(&l.color),
+        "{:?}",
+        l.color
+      );
+    }
+    d.cancel(&mut app.s);
   }
 
   #[test]

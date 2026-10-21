@@ -254,3 +254,120 @@ fn sketch_points_draw_hollow_until_joined() {
   assert_eq!(points.len(), 5, "origin, three line ends, one point");
   assert_eq!(points.iter().filter(|m| m.hollow).count(), 3, "the shared corner and the origin are filled");
 }
+
+/// Hovering a face lightens it and keeps its hue; a selected face or body is the medium
+/// selection blue, lighter again under the pointer, as Fusion colours them.
+#[test]
+fn faces_lighten_under_the_pointer_and_select_blue() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
+  let body = s.model.bodies[0].id;
+  let face = Pick::Face { body, face: 1 };
+  let body_meshes = |sc: &fox_render::Scene, picks: &scene::PickTable| {
+    sc.meshes
+      .iter()
+      .filter(|m| matches!(m.tri_ids.first().and_then(|id| picks.get(*id)), Some(Pick::Face { .. })))
+      .map(|m| (m.color, m.highlight, m.highlight_color))
+      .collect::<Vec<_>>()
+  };
+  let mut b = SceneBuilder::default();
+  let (sc, picks) = b.build(&s, &ViewOptions { hover: Some(face), ..Default::default() });
+  let m = body_meshes(&sc, &picks);
+  assert_eq!(m.len(), 1, "{m:?}");
+  let (color, highlight, hl) = m[0];
+  assert_eq!((color, highlight), (scene::BODY_COLOR, picks.id_of(&face)));
+  assert_eq!(hl, scene::lighten(scene::BODY_COLOR, scene::HOVER_LIGHTEN));
+  // lighter in every channel and no blue tint: the warm grey stays warmer than blue
+  assert!((0..3).all(|i| hl[i] > scene::BODY_COLOR[i]) && hl[0] >= hl[2], "{hl:?}");
+  // a selected face draws in its own mesh in the selection blue, lighter under the pointer
+  s.selection = vec![face.to_sel()];
+  let (sc, picks) = b.build(&s, &ViewOptions { hover: Some(face), ..Default::default() });
+  let m = body_meshes(&sc, &picks);
+  let sel = m.iter().find(|m| m.0 == scene::SELECT_COLOR).expect("the selected face draws blue");
+  assert_eq!(sel.2, scene::SELECT_HOVER_COLOR);
+  assert!(m.iter().any(|m| m.0 == scene::BODY_COLOR), "the rest keeps the body colour: {m:?}");
+  // a selected body: every face in the same blue as a selected face
+  s.selection = vec![Sel::Body { body }];
+  let (sc, picks) = b.build(&s, &ViewOptions::default());
+  let m = body_meshes(&sc, &picks);
+  assert!(!m.is_empty() && m.iter().all(|m| m.0 == scene::SELECT_COLOR), "{m:?}");
+}
+
+/// Edges are a 1 px light grey silhouette, a 2 px black line under the pointer and bright blue
+/// over a pale halo when selected.
+#[test]
+fn edges_are_grey_silhouettes_black_under_the_pointer_and_haloed_blue_when_selected() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
+  let body = s.model.bodies[0].id;
+  let edge = Pick::Edge { body, edge: 1 };
+  let lines_of = |sc: &fox_render::Scene, picks: &scene::PickTable, p: &Pick| -> Vec<([u8; 4], f32)> {
+    let id = picks.id_of(p).unwrap();
+    sc.lines.iter().filter(|l| l.id == id).map(|l| (l.color, l.width)).collect()
+  };
+  let mut b = SceneBuilder::default();
+  let (sc, picks) = b.build(&s, &ViewOptions::default());
+  assert_eq!(lines_of(&sc, &picks, &edge), [(scene::EDGE_COLOR, 1.0)]);
+  let (sc, picks) = b.build(&s, &ViewOptions { hover: Some(edge), ..Default::default() });
+  assert_eq!(lines_of(&sc, &picks, &edge), [(scene::EDGE_HOVER_COLOR, 2.0)]);
+  s.selection = vec![edge.to_sel()];
+  let (sc, picks) = b.build(&s, &ViewOptions::default());
+  assert_eq!(
+    lines_of(&sc, &picks, &edge),
+    [(scene::EDGE_SELECT_HALO, 3.0), (scene::EDGE_SELECT_COLOR, 1.0)],
+    "the halo draws first, under the line"
+  );
+  assert_eq!(lines_of(&sc, &picks, &Pick::Edge { body, edge: 2 }), [(scene::EDGE_COLOR, 1.0)]);
+}
+
+/// A visible sketch's curves are picked from outside the sketch: they carry pick ids, draw
+/// thicker and darker blue under the pointer and bright blue over a halo when selected. Its
+/// profiles lighten with a black outline under the pointer and fill blue with a red outline when
+/// picked, as Extrude shows them.
+#[test]
+fn sketch_curves_and_profiles_highlight_outside_the_sketch() {
+  let mut s = Session::default();
+  let sk =
+    crate::model::FeatureId(run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32);
+  let made = run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 5]}));
+  let line = fox_sketch::CurveId(made["curves"][0].as_u64().unwrap() as u32);
+  run(&mut s, "sketch.finish", json!({}));
+  let curve = Pick::SketchCurve { sketch: sk, curve: line };
+  let profile = Pick::Profile { sketch: sk, index: 0 };
+  let lines = |sc: &fox_render::Scene, id: u32| -> Vec<([u8; 4], f32)> {
+    sc.lines.iter().filter(|l| l.id == id).map(|l| (l.color, l.width)).collect()
+  };
+  let mut b = SceneBuilder::default();
+  let (sc, picks) = b.build(&s, &ViewOptions::default());
+  let id = picks.id_of(&curve).expect("a finished sketch's curve has a pick id");
+  assert_eq!(lines(&sc, id), [(scene::SKETCH_IDLE, 1.0)]);
+  assert!(lines(&sc, picks.id_of(&profile).unwrap()).is_empty(), "no outline until hovered");
+  let (sc, picks) = b.build(&s, &ViewOptions { hover: Some(curve), ..Default::default() });
+  assert_eq!(lines(&sc, picks.id_of(&curve).unwrap()), [(scene::SKETCH_HOVER, 2.0)]);
+  s.selection = vec![curve.to_sel()];
+  let (sc, picks) = b.build(&s, &ViewOptions::default());
+  assert_eq!(
+    lines(&sc, picks.id_of(&curve).unwrap()),
+    [(scene::EDGE_SELECT_HALO, 3.0), (scene::EDGE_SELECT_COLOR, 1.0)]
+  );
+  // profiles
+  s.selection.clear();
+  let (sc, picks) = b.build(&s, &ViewOptions { hover: Some(profile), ..Default::default() });
+  let pid = picks.id_of(&profile).unwrap();
+  let fill = sc.meshes.iter().find(|m| m.tri_ids.first() == Some(&pid)).expect("the profile is shaded");
+  assert_eq!(fill.color, scene::PROFILE_HOVER);
+  assert_eq!(fill.color, scene::lighten(scene::PROFILE_COLOR, scene::HOVER_LIGHTEN));
+  assert_eq!(lines(&sc, pid), [(scene::PROFILE_OUTLINE_HOVER, 1.0)]);
+  let outline = sc.lines.iter().find(|l| l.id == pid).unwrap();
+  assert_eq!(outline.points.first(), outline.points.last(), "a closed outline");
+  s.selection = vec![profile.to_sel()];
+  let (sc, picks) = b.build(&s, &ViewOptions::default());
+  let pid = picks.id_of(&profile).unwrap();
+  let fill = sc.meshes.iter().find(|m| m.tri_ids.first() == Some(&pid)).unwrap();
+  assert_eq!(fill.color, scene::PROFILE_SELECTED);
+  assert_eq!(lines(&sc, pid), [(scene::PROFILE_OUTLINE_SELECTED, 1.0)]);
+  // a hidden sketch shown only because the browser peeks at it is not under the pointer
+  run(&mut s, "sketch.visible", json!({"sketch": sk.0, "visible": false}));
+  let (_, picks) = b.build(&s, &ViewOptions { peek_sketches: vec![sk], ..Default::default() });
+  assert_eq!(picks.id_of(&curve), None);
+}

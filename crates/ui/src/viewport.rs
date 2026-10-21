@@ -590,14 +590,7 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
     picks.get(id).filter(want)
   };
   let exact = picks.get(frame.pick(x, y, 0, |_| true));
-  app.hover = if sketching {
-    pick_kind(|p| matches!(p, Pick::SketchPoint { .. }))
-      .or_else(|| pick_kind(|p| matches!(p, Pick::SketchCurve { .. })))
-      .or(exact)
-  } else {
-    // vertices (drawn only with their filter on) before edges before faces
-    pick_kind(|p| matches!(p, Pick::Vertex { .. })).or_else(|| pick_kind(|p| matches!(p, Pick::Edge { .. }))).or(exact)
-  };
+  app.hover = preferred_pick(sketching, pick_kind, exact);
   // while a sketch tool draws, only points matter for snapping
   if sketching && app.tool.picks_curves() {
     // trim / extend / break / tangent circles / blend pick curves
@@ -612,6 +605,28 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
       // the front-most pick is filtered out: the nearest allowed one around the cursor wins
       app.hover = picks.get(frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| ok(&p)))).filter(ok);
     }
+  }
+}
+
+/// Which pick near the cursor wins: `nearest(want)` is the closest pick of a kind within the
+/// search radius and `exact` whatever is under the pixel. In a sketch, points beat curves beat the
+/// rest. Outside one, vertices (drawn only with their filter on) beat sketch curves and points,
+/// which beat edges, which beat faces, so a visible sketch's curve on a face is picked over the
+/// face, as in Fusion.
+pub(crate) fn preferred_pick(
+  sketching: bool,
+  nearest: impl Fn(fn(&Pick) -> bool) -> Option<Pick>,
+  exact: Option<Pick>,
+) -> Option<Pick> {
+  if sketching {
+    nearest(|p| matches!(p, Pick::SketchPoint { .. }))
+      .or_else(|| nearest(|p| matches!(p, Pick::SketchCurve { .. })))
+      .or(exact)
+  } else {
+    nearest(|p| matches!(p, Pick::Vertex { .. }))
+      .or_else(|| nearest(|p| matches!(p, Pick::SketchPoint { .. } | Pick::SketchCurve { .. })))
+      .or_else(|| nearest(|p| matches!(p, Pick::Edge { .. })))
+      .or(exact)
   }
 }
 
@@ -4158,6 +4173,25 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
 mod tests {
   use super::*;
   use fox_engine::Session;
+
+  /// Outside a sketch, a visible sketch's curve near the cursor is picked over the face it lies
+  /// on and over an edge, as a vertex is; in a sketch, points beat curves.
+  #[test]
+  fn sketch_curves_are_picked_over_faces_and_edges() {
+    let (body, sk) = (fox_engine::model::BodyId(1), FeatureId(2));
+    let face = Pick::Face { body, face: 1 };
+    let edge = Pick::Edge { body, edge: 1 };
+    let vertex = Pick::Vertex { body, edge: 1, end: false };
+    let curve = Pick::SketchCurve { sketch: sk, curve: fox_engine::sketch::CurveId(1) };
+    let point = Pick::SketchPoint { sketch: sk, point: fox_engine::sketch::PointId(1) };
+    let near = |around: Vec<Pick>| move |want: fn(&Pick) -> bool| around.iter().copied().find(want);
+    assert_eq!(preferred_pick(false, near(vec![face, edge, curve]), Some(face)), Some(curve));
+    assert_eq!(preferred_pick(false, near(vec![face, edge]), Some(face)), Some(edge));
+    assert_eq!(preferred_pick(false, near(vec![face, edge, curve, vertex]), Some(face)), Some(vertex));
+    assert_eq!(preferred_pick(false, near(vec![face]), Some(face)), Some(face));
+    assert_eq!(preferred_pick(true, near(vec![curve, point]), Some(face)), Some(point));
+    assert_eq!(preferred_pick(true, near(vec![curve]), Some(face)), Some(curve));
+  }
 
   /// The origin planes keep about 120 px on screen whatever the zoom: their half size follows
   /// the camera's distance.
