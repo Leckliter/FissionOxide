@@ -1,0 +1,20 @@
+# A drafted boss on a chamfered plate, 3+2 and simultaneous 5-axis on a table/table (trunnion)
+# machine: the top faced, the chamfer faced square to its own tilted work plane, then the
+# conical wall swarfed with the side of the tool; the voxel simulation checks the machine's tilt
+# travel, and the Fanuc program turns A and C with inverse-time feeds (check it before running
+# it).
+{"cmd": "new", "name": "Five-axis boss"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [-25, -25], "corner2": [25, 25]}
+{"cmd": "extrude", "distance": 8}
+{"cmd": "chamfer", "edges": [{"point": [0, -25, 8]}], "distance": 3}
+{"cmd": "sketch.create", "plane": {"point": [0, 0, 8], "normal": [0, 0, 1]}}
+{"cmd": "sketch.circle", "center": [0, 0], "diameter": 20}
+{"cmd": "extrude", "distance": 8, "taper": 10, "operation": "join"}
+{"cmd": "cam.setup", "name": "5-axis Op 10", "machine": "table_table", "tilt_min": -110, "tilt_max": 110, "stock_side": 2, "stock_top": 1, "post": "fanuc"}
+{"cmd": "cam.face", "tool_number": 1, "stepover": 0.6, "stepdown": 1}
+{"cmd": "cam.face", "tool_number": 2, "tool_axis": [0, -1, 1], "stepover": 0.6, "stepdown": 2}
+{"cmd": "cam.swarf", "faces": [{"point": [9.294692, 0, 12]}], "tool_number": 3, "stepdown": 4}
+{"cmd": "cam.generate"}
+{"cmd": "cam.simulate"}
+{"cmd": "cam.post"}

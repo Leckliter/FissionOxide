@@ -171,9 +171,16 @@ pub fn ids() -> Vec<&'static str> {
   POSTS.iter().map(|p| p.id).collect()
 }
 
-/// Text for a comment: upper case, without the parentheses that would end it.
-fn comment(s: &str) -> String {
-  s.to_uppercase().replace(['(', ')'], "").replace(['\n', '\r'], " ")
+/// Text for a comment: upper case ASCII, without the parentheses that would end it.
+pub(crate) fn comment(s: &str) -> String {
+  s.replace('°', " DEG")
+    .replace(['Ø', 'ø'], "DIA ")
+    .to_uppercase()
+    .replace(['(', ')'], "")
+    .replace(['\n', '\r'], " ")
+    .chars()
+    .map(|c| if c.is_ascii() { c } else { '-' })
+    .collect()
 }
 
 struct Out<'a> {

@@ -747,7 +747,7 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath])
     OpKind::Contour3d { faces, min_slope } => finish3d::contour(&mut p, setup, model, op, faces, *min_slope)?,
     OpKind::Rotary { .. } | OpKind::Swarf { .. } => return Err("this operation needs a 4/5-axis machine".into()),
     OpKind::TurnFace | OpKind::TurnRough | OpKind::TurnFinish | OpKind::Groove | OpKind::PartOff | OpKind::Thread { .. } => {
-      unreachable!("lathe operations are turned")
+      return Err("a lathe operation needs a turning setup".into());
     }
     OpKind::Drill { holes, peck } => {
       let mut found = Vec::new();

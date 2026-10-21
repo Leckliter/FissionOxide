@@ -745,6 +745,7 @@ so they leave tilted toolpaths out.
 fissionoxide-cli exec part.fox '{"cmd": "cam.setup", "machine": "table_table", "tilt_min": -110, "tilt_max": 110}' --save part.fox
 fissionoxide-cli exec part.fox '{"cmd": "cam.face", "work_plane": {"body": 1, "face": 7}, "tool_diameter": 10}' --save part.fox
 fissionoxide-cli exec part.fox '{"cmd": "cam.swarf", "faces": [{"body": 1, "face": 9}], "tool_diameter": 6}' --save part.fox
+fissionoxide-cli run examples/five_axis.jsonl --save boss.fox   # 3+2 and swarf, start to finish
 ```
 
 ### Turning
@@ -780,6 +781,7 @@ fissionoxide-cli exec shaft.fox '{"cmd": "cam.setup", "type": "turning", "post":
 fissionoxide-cli exec shaft.fox '{"cmd": "cam.turn_rough"}' --save shaft.fox
 fissionoxide-cli exec shaft.fox '{"cmd": "cam.thread", "face": {"point": [10, 0, 50]}, "pitch": 1.5}' --save shaft.fox
 fissionoxide-cli exec shaft.fox '{"cmd": "cam.post", "path": "shaft.nc"}'
+fissionoxide-cli run examples/turning.jsonl --save shaft.fox   # a whole lathe job
 ```
 
 The multi-axis and lathe posts haven't been run on real machines: rotary directions, the

@@ -1,0 +1,18 @@
+# A threaded, grooved shaft turned end to end on a lathe: the bar held in the chuck about the
+# shaft's axis, facing, profile roughing and finishing, a groove, an M20 × 1.5 thread and the
+# part parted off; then the stock simulation and Haas lathe G-code (check it before running it).
+{"cmd": "new", "name": "Turned shaft"}
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[0, 0], [15, 0], [15, 10], [12, 10], [12, 14], [15, 14], [15, 40], [10, 40], [10, 60], [0, 60]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "axis": "z", "angle": 360}
+{"cmd": "cam.setup", "type": "turning", "name": "Lathe Op 10", "axis": "-z", "stock_side": 2, "stock_front": 1, "post": "haas_lathe"}
+{"cmd": "cam.turn_face", "stepdown": 0.5}
+{"cmd": "cam.turn_rough", "stepdown": 1.5, "stock_to_leave": 0.2}
+{"cmd": "cam.turn_finish"}
+{"cmd": "cam.groove"}
+{"cmd": "cam.thread", "face": {"point": [10, 0, -50]}, "pitch": 1.5}
+{"cmd": "cam.part_off"}
+{"cmd": "cam.generate"}
+{"cmd": "cam.simulate"}
+{"cmd": "cam.post"}

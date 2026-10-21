@@ -491,6 +491,27 @@ fn swarf(setup: &Setup, op: &Operation, model: &Model, faces: &[FaceRef]) -> Res
     }
     chain(segs, 1e-6 * (zt - zb).max(1.0))
   };
+  // the walls' top edge: each tool axis runs along the wall to it (the ruling), so the tool's
+  // side follows the wall itself rather than one facet extended up
+  let top_z = zt - 1e-3 * (zt - zb);
+  let top: Vec<(DVec3, DVec3)> = rails(top_z).into_iter().flat_map(|c| c.0).map(|s| (s.0.p, s.1.p)).collect();
+  let ruling = |w: &Rail, up: DVec3| -> DVec3 {
+    let guess = w.p + up * ((top_z - w.p.z) / up.z);
+    let near = top
+      .iter()
+      .map(|(a, b)| {
+        let d = *b - *a;
+        let t = if d.length_squared() > 0.0 { ((guess - *a).dot(d) / d.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+        *a + d * t
+      })
+      .min_by(|a, b| a.distance(guess).total_cmp(&b.distance(guess)));
+    match near {
+      Some(q) if q.distance(guess) < 0.1 * (zt - zb) && q.z - w.p.z > 0.05 * (zt - zb) => {
+        (q - w.p).try_normalize().unwrap_or(up)
+      }
+      _ => up,
+    }
+  };
   let safe = super::stock(setup, model)?.1.z + CLEARANCE;
   let (r, leave) = (tool.radius(), op.stock_to_leave);
   let mut moves = Vec::new();
@@ -514,8 +535,9 @@ fn swarf(setup: &Setup, op: &Operation, model: &Model, faces: &[FaceRef]) -> Res
       }
       let mut first = true;
       for w in densify(&pts, 2f64.to_radians()) {
-        let up = steepest(w.n).ok_or("swarf walls can't be flat")?;
-        let tip = w.p + w.n * (r + leave);
+        let up = ruling(&w, steepest(w.n).ok_or("swarf walls can't be flat")?);
+        let out = w.n.reject_from(up).try_normalize().unwrap_or(w.n);
+        let tip = w.p + out * (r + leave);
         if first {
           let lift = up * ((safe - tip.z).max(0.0) / up.z);
           moves.push(Move { rapid: true, to: tip + lift, feed: 0.0 });

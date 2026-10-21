@@ -166,6 +166,7 @@ fn lathe_posts_read_back() {
   ] {
     let g = run(&mut s, "cam.post", json!({"post": post, "units": units}));
     let code = g["gcode"].as_str().unwrap();
+    assert!(code.is_ascii(), "{post}: plain ASCII for the control");
     let got = turn::read(code).unwrap_or_else(|e| panic!("{post}: {e}\n{code}"));
     assert_eq!(got.len(), want.len(), "{post} {units}");
     let tol = if units == "inch" { 0.0026 } else { 0.0011 };

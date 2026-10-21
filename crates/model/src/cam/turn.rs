@@ -467,14 +467,18 @@ fn turn(ctx: &Ctx, op: &Operation, model: &Model) -> Result<Vec<LatheMove>, Stri
           p.rapid(start, level);
           p.cut(z_stop, level);
           // up the shoulder to the level above, so no step is left
+          let mut climb = vec![(z_stop, level)];
           let mut i = stop;
           while i > last {
             i -= 1;
             let x = (c[i] - rn).min(above);
-            p.cut(ctx.prof.centre(i) - rn, x);
+            climb.push((ctx.prof.centre(i) - rn, x));
             if x >= above - 1e-9 {
               break;
             }
+          }
+          for &(a, x) in &simplify(&climb, 0.001)[1..] {
+            p.cut(a, x);
           }
           p.leave();
           above = level;
@@ -527,11 +531,10 @@ fn turn(ctx: &Ctx, op: &Operation, model: &Model) -> Result<Vec<LatheMove>, Stri
         let steps = ((g1 - g0 - w) / (w * op.stepover)).ceil().max(0.0) as usize;
         for k in 0..=steps {
           let a = if steps == 0 { g0 } else { g0 + (g1 - g0 - w) * k as f64 / steps as f64 };
-          let top = under(a, fv) + CLEAR / 2.0;
+          // in from above the bar: earlier passes may not have cleared the way
           let bottom = under(a, r) + leave;
           p.rapid(a, bar + CLEAR);
-          p.rapid(a, top);
-          plunge(&mut p, a, top, bottom, op.stepdown);
+          plunge(&mut p, a, bar + CLEAR, bottom, op.stepdown);
           p.rapid(a, bar + CLEAR);
         }
       }
@@ -601,6 +604,10 @@ fn turn(ctx: &Ctx, op: &Operation, model: &Model) -> Result<Vec<LatheMove>, Stri
       let mut depths: Vec<f64> = (1..=n).map(|k| (first * (k as f64).sqrt()).min(full)).collect();
       depths.push(full);
       let (start, end) = (a1 + 2.0 * pitch, a0);
+      let ahead = (0..ctx.front_view.len()).filter(|&i| ctx.prof.centre(i) > a1 + h && ctx.prof.centre(i) < start);
+      if ahead.into_iter().any(|i| ctx.front_view[i] > major + 1e-3) {
+        return Err("the thread starts behind a larger diameter".into());
+      }
       for d in depths {
         p.rapid(start, major + CLEAR / 2.0);
         p.rapid(start, major - d);
@@ -609,7 +616,7 @@ fn turn(ctx: &Ctx, op: &Operation, model: &Model) -> Result<Vec<LatheMove>, Stri
       }
       p.rapid(start, major + CLEAR / 2.0);
     }
-    _ => unreachable!(),
+    _ => return Err("a lathe setup only takes lathe operations".into()),
   }
   p.rapid(ctx.stock_front + CLEAR, bar + CLEAR);
   Ok(p.moves)
@@ -921,7 +928,7 @@ impl LOut {
 /// surface speed where the tool has one, threads as spindle-synchronised moves.
 pub fn write(post: &LathePost, imperial: bool, title: &str, paths: &[Toolpath]) -> String {
   let mut o = LOut { dialect: post.dialect, scale: if imperial { 1.0 / 25.4 } else { 1.0 }, imperial, g: String::new() };
-  let comment = |s: &str| s.to_uppercase().replace(['(', ')'], "").replace(['\n', '\r'], " ");
+  let comment = super::post::comment;
   let units = if imperial { "G20" } else { "G21" };
   if post.dialect != Dialect::LinuxCnc {
     o.line("%");
