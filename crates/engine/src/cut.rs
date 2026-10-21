@@ -720,10 +720,15 @@ fn nest_cmd(s: &Session, p: &Value) -> CmdResult {
   let j = job(s, &p)?;
   let (n, parts, _) = j.nest.as_ref().ok_or(CmdError::new("nothing to nest"))?;
   let mut out = nest_report(n, parts);
-  out["cut"] = json!(j.plans.iter().map(|pl| json!({
-    "contours": pl.paths.len(), "pierces": pl.pierces(), "cut_length": pl.cut_length(),
-    "time_s": pl.time(&j.params, j.machine.rapid_rate),
-  })).collect::<Vec<_>>());
+  out["cut"] = json!(
+    j.plans
+      .iter()
+      .map(|pl| json!({
+        "contours": pl.paths.len(), "pierces": pl.pierces(), "cut_length": pl.cut_length(),
+        "time_s": pl.time(&j.params, j.machine.rapid_rate),
+      }))
+      .collect::<Vec<_>>()
+  );
   Ok(out)
 }
 
@@ -759,7 +764,8 @@ fn job_create(s: &mut Session, p: &Value) -> CmdResult {
   }
   let j = job(s, &params)?;
   let id = s.design.cut_jobs.iter().map(|j| j.id).max().unwrap_or(0) + 1;
-  let name = opt_str(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or_else(|| format!("Cut{id}"));
+  let name =
+    opt_str(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or_else(|| format!("Cut{id}"));
   let mut out = summary(&j, None);
   s.edit(|d| {
     d.cut_jobs.push(CutJob { id, name: name.clone(), params });
@@ -776,7 +782,7 @@ fn job_edit(s: &mut Session, p: &Value) -> CmdResult {
   if !params.is_object() {
     params = json!({});
   }
-  let obj = params.as_object_mut().expect("an object");
+  let Some(obj) = params.as_object_mut() else { return Err(CmdError::new("the job's parameters are not an object")) };
   for (k, v) in p.as_object().into_iter().flatten() {
     if RUN_KEYS.contains(&k.as_str()) {
       continue;
@@ -936,7 +942,8 @@ fn job_lead(s: &mut Session, p: &Value) -> CmdResult {
     let slot = if si == 0 { &mut stored } else { &mut stored["parts"][si - 1] };
     let old = lead_points(slot.get("lead_points"), src)?;
     let raw: Vec<Value> = slot.get("lead_points").and_then(Value::as_array).cloned().unwrap_or_default();
-    let mut keep: Vec<Value> = raw.into_iter().zip(old).filter(|(_, l)| nearest(*l) != target).map(|(v, _)| v).collect();
+    let mut keep: Vec<Value> =
+      raw.into_iter().zip(old).filter(|(_, l)| nearest(*l) != target).map(|(v, _)| v).collect();
     // kept as a model point, so it stays put when the cut's lower-left corner moves
     let m = src.to_model(local);
     keep.push(json!([m.x, m.y, m.z]));

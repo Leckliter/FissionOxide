@@ -131,7 +131,11 @@ impl Placement {
     let segs = c
       .segs
       .iter()
-      .map(|s| crate::Seg { a: self.apply(s.a), b: self.apply(s.b), bulge: if self.mirrored { -s.bulge } else { s.bulge } })
+      .map(|s| crate::Seg {
+        a: self.apply(s.a),
+        b: self.apply(s.b),
+        bulge: if self.mirrored { -s.bulge } else { s.bulge },
+      })
       .collect();
     Contour { segs }
   }
@@ -272,7 +276,8 @@ fn find_spot(layout: &Layout, item: &Item, angles: &[f64], mirror: bool) -> Opti
   for &mirrored in if mirror { &[false, true][..] } else { &[false][..] } {
     for &a in angles {
       let r = a.to_radians() as f32;
-      let turned = item.shape_cd().transform_clone(&DTransformation::new(r, (0.0, 0.0)).with_reflection(mirrored).compose());
+      let turned =
+        item.shape_cd().transform_clone(&DTransformation::new(r, (0.0, 0.0)).with_reflection(mirrored).compose());
       let b = turned.bbox();
       // a hair in from the container's edges, where touching counts as a collision
       const IN: f32 = 0.01;

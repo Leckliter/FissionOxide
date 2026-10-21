@@ -272,7 +272,14 @@ pub fn dxf(plan: &Plan) -> String {
     let c = [lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]];
     for i in 0..4 {
       let (a, b) = (c[i], c[(i + 1) % 4]);
-      let _ = write!(s, "0\nLINE\n8\nSHEET\n10\n{}\n20\n{}\n30\n0\n11\n{}\n21\n{}\n31\n0\n", f(a[0]), f(a[1]), f(b[0]), f(b[1]));
+      let _ = write!(
+        s,
+        "0\nLINE\n8\nSHEET\n10\n{}\n20\n{}\n30\n0\n11\n{}\n21\n{}\n31\n0\n",
+        f(a[0]),
+        f(a[1]),
+        f(b[0]),
+        f(b[1])
+      );
     }
   }
   for pass in &plan.passes {
@@ -458,7 +465,13 @@ pub fn builtin_machines() -> Vec<Machine> {
       rapid_rate: 10000.0,
       decimals: 4,
       // pierce height, cut height and torch height control are set in FireControl itself
-      header: lines(&["({name})", "(FireControl: heights and THC from the FireControl settings; untested)", "G90 G94", "G17", "{units}"]),
+      header: lines(&[
+        "({name})",
+        "(FireControl: heights and THC from the FireControl settings; untested)",
+        "G90 G94",
+        "G17",
+        "{units}",
+      ]),
       pierce: lines(&["M3", "?pierce_delay G4 P{pierce_delay}"]),
       off: lines(&["M5"]),
       footer: lines(&["G0 X0 Y0", "M30"]),

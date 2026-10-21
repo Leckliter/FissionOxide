@@ -384,7 +384,8 @@ fn nesting_mixed_parts_and_mirror() {
     crate::NestPart { name: "L".into(), contours: lc, quantity: 6, lead_points: Vec::new() },
     crate::NestPart { name: "disc".into(), contours: dc, quantity: 10, lead_points: Vec::new() },
   ];
-  let np = crate::NestParams { sheet_width: 250.0, sheet_height: 200.0, spacing: 2.0, mirror: true, ..Default::default() };
+  let np =
+    crate::NestParams { sheet_width: 250.0, sheet_height: 200.0, spacing: 2.0, mirror: true, ..Default::default() };
   let n = crate::nest(&parts, &np).unwrap();
   assert_eq!(n.placed(), 16, "{:?}", n.warnings);
   assert_eq!(n.sheets.len(), 1);
@@ -399,7 +400,8 @@ fn nesting_mixed_parts_and_mirror() {
 #[test]
 fn nested_dxf_has_the_sheet() {
   let parts = vec![plate_part(2)];
-  let n = crate::nest(&parts, &crate::NestParams { sheet_width: 300.0, sheet_height: 200.0, ..Default::default() }).unwrap();
+  let n =
+    crate::nest(&parts, &crate::NestParams { sheet_width: 300.0, sheet_height: 200.0, ..Default::default() }).unwrap();
   let (cs, _) = n.sheet(&parts, 0);
   let dx = find("dxf").unwrap();
   let dp = dx.process(None).unwrap();
@@ -408,7 +410,7 @@ fn nested_dxf_has_the_sheet() {
   let d = dx.output(&p, &dp, "nest", false);
   assert!(d.contains("SHEET"));
   assert_eq!(d.matches("\n8\nSHEET\n").count(), 4);
-  assert_eq!(d.matches("\nCIRCLE\n").count() + d.matches("\nARC\n").count() >= 2, true);
+  assert!(d.contains("\nARC\n"));
   // FireControl is there, marked untested
   let fc = find("firecontrol").unwrap();
   assert!(fc.name.contains("untested"));

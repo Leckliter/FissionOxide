@@ -305,10 +305,16 @@ fn lead_positions_picked_per_contour() {
   run(&mut s, "cut.job.lead", json!({"point": [ox, oy + 20.0, 0.0]}));
   let leads = s.design.cut_jobs[0].params["lead_points"].as_array().unwrap().clone();
   assert_eq!(leads.len(), 1);
-  assert!((leads[0][0].as_f64().unwrap()).abs() < 1e-6 && (leads[0][1].as_f64().unwrap() - 20.0).abs() < 1e-6, "{leads:?}");
+  assert!(
+    (leads[0][0].as_f64().unwrap()).abs() < 1e-6 && (leads[0][1].as_f64().unwrap() - 20.0).abs() < 1e-6,
+    "{leads:?}"
+  );
   let g = run(&mut s, "cut.gcode", json!({"job": 1, "sheet": 1}));
   let text = g["gcode"].as_str().unwrap();
-  // every outline starts on its copy's left edge: a G1 to x = offset - 0.5 after each lead-in
-  let starts = text.lines().filter(|l| l.starts_with("G0 ")).count();
-  assert_eq!(starts, g["pierces"].as_u64().unwrap() as usize);
+  // every copy's outline starts on its left edge, 20 up: the lead-in ends there
+  for pl in job["sheets"][0]["placements"].as_array().unwrap() {
+    let (ox, oy) = (pl["offset"][0].as_f64().unwrap(), pl["offset"][1].as_f64().unwrap());
+    let at = format!("X{} Y{}", fox_cut::post::fmt(ox - 0.5, 3), fox_cut::post::fmt(oy + 20.0, 3));
+    assert!(text.lines().any(|l| l.starts_with("G1 ") && l.contains(&at)), "no start at {at}:\n{text}");
+  }
 }
