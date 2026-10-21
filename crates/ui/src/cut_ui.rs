@@ -122,7 +122,8 @@ impl CutWindow {
   fn load(&mut self, id: u32, p: &Value) {
     self.job = Some(id);
     let mid = p["machine"].as_str().unwrap_or("grbl_laser");
-    self.machine = self.machines.iter().position(|m| m["id"].as_str().is_some_and(|i| i.eq_ignore_ascii_case(mid))).unwrap_or(0);
+    self.machine =
+      self.machines.iter().position(|m| m["id"].as_str().is_some_and(|i| i.eq_ignore_ascii_case(mid))).unwrap_or(0);
     self.process = 0;
     if let Some(name) = p["process"].as_str()
       && let Some(procs) = self.machines.get(self.machine).and_then(|m| m["processes"].as_array())
@@ -192,8 +193,8 @@ impl CutWindow {
       p["nest"] = unset.clone();
       p["quantity"] = unset;
     }
-    if !edit {
-      p.as_object_mut().expect("an object").retain(|_, v| !v.is_null());
+    if !edit && let Some(o) = p.as_object_mut() {
+      o.retain(|_, v| !v.is_null());
     }
     p
   }
@@ -230,7 +231,8 @@ pub fn lead_clicks(app: &mut App, resp: &egui::Response, ray: &dyn Fn(Pos2) -> (
 pub fn cut_window(app: &mut App, ctx: &egui::Context) {
   let Some(mut w) = app.cut_window.take() else { return };
   let mut open = true;
-  let (mut preview, mut save, mut keep, mut update, mut delete, mut clear_leads) = (false, false, false, false, false, false);
+  let (mut preview, mut save, mut keep, mut update, mut delete, mut clear_leads) =
+    (false, false, false, false, false, false);
   let mut load: Option<Option<u32>> = None;
   egui::Window::new("2D Cut").open(&mut open).resizable(true).default_width(440.0).show(ctx, |ui| {
     let jobs: Vec<(u32, String)> = app.s.design.cut_jobs.iter().map(|j| (j.id, j.name.clone())).collect();
@@ -305,7 +307,8 @@ pub fn cut_window(app: &mut App, ctx: &egui::Context) {
       ui.checkbox(&mut w.inch, "Inches");
       ui.end_row();
     });
-    ui.checkbox(&mut w.nest, "Nest on sheets").on_hover_text("Lay copies of the part out on sheets, as few as it takes");
+    ui.checkbox(&mut w.nest, "Nest on sheets")
+      .on_hover_text("Lay copies of the part out on sheets, as few as it takes");
     if w.nest {
       egui::Grid::new("cut-nest").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         ui.label("Sheet (mm)");
@@ -341,7 +344,12 @@ pub fn cut_window(app: &mut App, ctx: &egui::Context) {
       preview = ui.button("Preview").clicked();
       save = ui.button("Save…").clicked();
       match w.job {
-        None => keep = ui.button("Keep in design").on_hover_text("Store the cut with the design; it follows design changes").clicked(),
+        None => {
+          keep = ui
+            .button("Keep in design")
+            .on_hover_text("Store the cut with the design; it follows design changes")
+            .clicked()
+        }
         Some(_) => {
           update = ui.button("Update").clicked();
           delete = ui.button("Delete").clicked();
@@ -450,12 +458,13 @@ pub fn cut_window(app: &mut App, ctx: &egui::Context) {
       Err(e) => Some(Err(e.0)),
     };
   }
-  if delete && let Some(id) = w.job {
-    if app.run("cut.job.delete", json!({"job": id})).is_some() {
-      w.job = None;
-      w.pick_leads = false;
-      w.result = None;
-    }
+  if delete
+    && let Some(id) = w.job
+    && app.run("cut.job.delete", json!({"job": id})).is_some()
+  {
+    w.job = None;
+    w.pick_leads = false;
+    w.result = None;
   }
   if save {
     let ext = w.machines.get(w.machine).and_then(|m| m["extension"].as_str()).unwrap_or("nc").to_string();
