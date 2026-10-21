@@ -8,6 +8,9 @@ namespace fox {
 
 std::unique_ptr<Shape> fillet_law(const Shape &s, rust::Slice<const uint32_t> edges, rust::Slice<const double> at,
                                   rust::Slice<const double> radii);
+std::unique_ptr<Shape> fillet_laws(const Shape &s, rust::Slice<const uint32_t> edges,
+                                   rust::Slice<const uint32_t> counts, rust::Slice<const double> at,
+                                   rust::Slice<const double> radii);
 std::unique_ptr<Shape> unify_faces_internal(const Shape &s);
 
 } // namespace fox

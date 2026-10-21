@@ -215,6 +215,7 @@ pub(crate) mod ffi {
     fn offset_joined(s: &Shape, d: f64, round: bool, thicken: bool) -> Result<UniquePtr<Shape>>;
     // sheet2.cpp
     fn ruled_bspline(a: &[f64], b: &[f64], u: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn edge_nurbs(s: &Shape, edge: u32) -> Result<Vec<f64>>;
 
     // STEP assemblies with names and colours (cpp/xcaf.cpp)
     include!("fox-kernel/cpp/xcaf.hxx");
@@ -240,6 +241,7 @@ pub(crate) mod ffi {
     // fillets with a radius law, merging split hole walls (cpp/refparts.cpp)
     include!("fox-kernel/cpp/refparts.hxx");
     fn fillet_law(s: &Shape, edges: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn fillet_laws(s: &Shape, edges: &[u32], counts: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify_faces_internal(s: &Shape) -> Result<UniquePtr<Shape>>;
 
     // form (T-spline / subdivision) bodies (cpp/form.cpp)

@@ -1123,6 +1123,7 @@ pub use path3d::Seg3;
 
 mod form;
 pub use form::BSplineSurface;
+pub use sheet2::EdgeNurbs;
 mod spun;
 pub use spun::AxialEvents;
 #[cfg(test)]

@@ -63,64 +63,104 @@ std::unique_ptr<Shape> valid_shape(const TopoDS_Shape &s, const char *what) {
 
 } // namespace
 
+namespace {
+
+// A radius law for BRepFilletAPI_MakeFillet: (fraction along the edge, radius) points sorted, a
+// radius of zero raised to a thousandth of the largest, held flat to both ends of the edge.
+std::vector<std::pair<double, double>> radius_law(const double *at, const double *radii, size_t n) {
+  std::vector<std::pair<double, double>> pts;
+  double rmax = 0;
+  for (size_t i = 0; i < n; ++i) {
+    pts.emplace_back(std::clamp(at[i], 0.0, 1.0), radii[i]);
+    rmax = std::max(rmax, radii[i]);
+  }
+  if (!(rmax > 0)) throw std::runtime_error("fillet radii must not all be zero");
+  std::sort(pts.begin(), pts.end());
+  const double rmin = rmax * 1e-3;
+  std::vector<std::pair<double, double>> law;
+  for (auto p : pts) {
+    if (p.second < 0) throw std::runtime_error("fillet radii must not be negative");
+    p.second = std::max(p.second, rmin);
+    if (!law.empty() && p.first - law.back().first < 1e-9) law.back() = p;
+    else law.push_back(p);
+  }
+  if (law.size() < 2) throw std::runtime_error("the radius points are all at one place");
+  if (law.front().first > 1e-9) law.insert(law.begin(), {0.0, law.front().second});
+  if (law.back().first < 1 - 1e-9) law.push_back({1.0, law.back().second});
+  return law;
+}
+
+// Fillets edges (1-based), edge k with law k.
+std::unique_ptr<Shape> fillet_with_laws(const Shape &s, rust::Slice<const uint32_t> edges,
+                                        const std::vector<std::vector<std::pair<double, double>>> &laws) {
+  TopTools_IndexedMapOfShape map;
+  TopExp::MapShapes(s.s, TopAbs_EDGE, map);
+  BRepFilletAPI_MakeFillet mk(s.s);
+  int added = 0;
+  for (size_t k = 0; k < edges.size(); ++k) {
+    uint32_t i = edges[k];
+    if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
+    const auto &law = laws[std::min(k, laws.size() - 1)];
+    TColgp_Array1OfPnt2d uandr(1, static_cast<int>(law.size()));
+    for (size_t l = 0; l < law.size(); ++l) uandr.SetValue(static_cast<int>(l) + 1, gp_Pnt2d(law[l].first, law[l].second));
+    const TopoDS_Edge &e = TopoDS::Edge(map(static_cast<int>(i)));
+    mk.Add(e);
+    const int ic = mk.Contour(e);
+    if (ic == 0) continue;
+    for (int j = 1; j <= mk.NbEdges(ic); ++j) {
+      if (mk.Edge(ic, j).IsSame(e)) {
+        mk.SetRadius(uandr, ic, j);
+        ++added;
+      }
+    }
+  }
+  if (added == 0) throw std::runtime_error("no edges to fillet");
+  mk.Build();
+  if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
+  auto out = valid_shape(mk.Shape(), "fillet");
+  Track t({&s});
+  t.step(s.s, mk);
+  if (out->s.IsSame(mk.Shape())) t.attach(*out);
+  return out;
+}
+
+// OpenCASCADE's fillet code keeps some state in statics, and a radius law built from points fails
+// now and then when two threads fillet at once; one law fillet at a time.
+std::mutex law_lock;
+
+} // namespace
+
 // Fillets edges (1-based) with a radius law: radii[i] at the fraction at[i] along each edge (0 at
 // its start, 1 at its end), interpolated smoothly in between. OpenCASCADE needs a radius above
 // zero everywhere, so a radius of zero becomes a hair-thin round (a thousandth of the largest).
 std::unique_ptr<Shape> fillet_law(const Shape &s, rust::Slice<const uint32_t> edges, rust::Slice<const double> at,
                                   rust::Slice<const double> radii) {
-  // OpenCASCADE's fillet code keeps some state in statics, and a radius law built from points
-  // fails now and then when two threads fillet at once; one law fillet at a time.
-  static std::mutex lock;
-  std::lock_guard<std::mutex> hold(lock);
+  std::lock_guard<std::mutex> hold(law_lock);
   try {
     if (at.size() != radii.size() || at.size() < 2) throw std::runtime_error("a radius law needs two or more points");
-    std::vector<std::pair<double, double>> pts;
-    double rmax = 0;
-    for (size_t i = 0; i < at.size(); ++i) {
-      pts.emplace_back(std::clamp(at[i], 0.0, 1.0), radii[i]);
-      rmax = std::max(rmax, radii[i]);
-    }
-    if (!(rmax > 0)) throw std::runtime_error("fillet radii must not all be zero");
-    std::sort(pts.begin(), pts.end());
-    const double rmin = rmax * 1e-3;
-    std::vector<std::pair<double, double>> law;
-    for (auto p : pts) {
-      if (p.second < 0) throw std::runtime_error("fillet radii must not be negative");
-      p.second = std::max(p.second, rmin);
-      if (!law.empty() && p.first - law.back().first < 1e-9) law.back() = p;
-      else law.push_back(p);
-    }
-    if (law.size() < 2) throw std::runtime_error("the radius points are all at one place");
-    if (law.front().first > 1e-9) law.insert(law.begin(), {0.0, law.front().second});
-    if (law.back().first < 1 - 1e-9) law.push_back({1.0, law.back().second});
-    TColgp_Array1OfPnt2d uandr(1, static_cast<int>(law.size()));
-    for (size_t i = 0; i < law.size(); ++i) uandr.SetValue(static_cast<int>(i) + 1, gp_Pnt2d(law[i].first, law[i].second));
+    return fillet_with_laws(s, edges, {radius_law(at.data(), radii.data(), at.size())});
+  } catch (...) {
+    fail("variable fillet");
+  }
+}
 
-    TopTools_IndexedMapOfShape map;
-    TopExp::MapShapes(s.s, TopAbs_EDGE, map);
-    BRepFilletAPI_MakeFillet mk(s.s);
-    int added = 0;
-    for (uint32_t i : edges) {
-      if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
-      const TopoDS_Edge &e = TopoDS::Edge(map(static_cast<int>(i)));
-      mk.Add(e);
-      const int ic = mk.Contour(e);
-      if (ic == 0) continue;
-      for (int j = 1; j <= mk.NbEdges(ic); ++j) {
-        if (mk.Edge(ic, j).IsSame(e)) {
-          mk.SetRadius(uandr, ic, j);
-          ++added;
-        }
-      }
+// Fillets edges (1-based), each with its own radius law: edge k's law is the next counts[k]
+// (fraction, radius) points of at / radii, as in fillet_law.
+std::unique_ptr<Shape> fillet_laws(const Shape &s, rust::Slice<const uint32_t> edges,
+                                   rust::Slice<const uint32_t> counts, rust::Slice<const double> at,
+                                   rust::Slice<const double> radii) {
+  std::lock_guard<std::mutex> hold(law_lock);
+  try {
+    if (counts.size() != edges.size() || at.size() != radii.size()) throw std::runtime_error("bad radius laws");
+    std::vector<std::vector<std::pair<double, double>>> laws;
+    size_t next = 0;
+    for (uint32_t c : counts) {
+      if (c < 2 || next + c > at.size()) throw std::runtime_error("a radius law needs two or more points");
+      laws.push_back(radius_law(at.data() + next, radii.data() + next, c));
+      next += c;
     }
-    if (added == 0) throw std::runtime_error("no edges to fillet");
-    mk.Build();
-    if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
-    auto out = valid_shape(mk.Shape(), "fillet");
-    Track t({&s});
-    t.step(s.s, mk);
-    if (out->s.IsSame(mk.Shape())) t.attach(*out);
-    return out;
+    if (laws.empty()) throw std::runtime_error("no edges to fillet");
+    return fillet_with_laws(s, edges, laws);
   } catch (...) {
     fail("variable fillet");
   }
