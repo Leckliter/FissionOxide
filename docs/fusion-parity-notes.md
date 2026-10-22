@@ -510,3 +510,15 @@ after Close, lacks four analyses, Decal and Derive, and its "+" silently replace
 16 rows in four batches (`parity/batches/map-wave27.json`), two match rows, Configure blocked by the
 licence, one key verified. The area is done; joints need an assembly with components (new coverage
 row).
+
+## 2026-10-22, prober 13: SURFACE tab
+
+The SURFACE tab's ribbon, tooltips, dropdowns and every create/modify dialog as it opens (and after
+the first pick in Fusion), a Patch made in both apps and a surface Extrude in FissionOxide (report
+`parity/reports/2026-10-22-surface-tab.md`). The shared panels and the MODIFY order match; Fusion's
+surface dialogs are their own (no Operation row, rows that appear after a pick, manipulators,
+continuity tables) where FissionOxide uses the generic form dialog, its Ruled is a different command,
+surface Sweep and Loft are missing, surface bodies and features get solid icons, the menus carry four
+rows Fusion does not, and Finish Sketch drops back to SOLID. 20 rows in four batches
+(`parity/batches/map-wave28.json`), three match rows, three sketch keys verified (the dimension
+tooltip's light box split out). The area is done.

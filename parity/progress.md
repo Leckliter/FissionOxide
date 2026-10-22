@@ -1,36 +1,47 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 10:58, session "Parity prober 12"
+## Last stop: 2026-10-22, 11:25, session "Parity prober 13"
 
-Finished this session: "Configure, Construct (every plane/axis/point), Inspect, Insert, Assemble,
-Select menu" (done, with a not-exercised list in `coverage.md`). Report
-`parity/reports/2026-10-22-construct-inspect-insert.md`, `map-wave27.json`, batches
-`ui-construct-methods` (5), `ui-inspect-measure-section` (3), `ui-inspect-analyses` (4) and
-`ui-insert-new-design` (4, one P0: "+" replaces the open design), all `ready` in `index.jsonl` with no
-fixer yet. Prober 11's wave-26 batches (`ui-edit-more-features`, `ui-timeline-failed-items`,
-`ui-inspect-insert-assemble`) were assigned to cloud fixers by the coordinator during this session.
+Finished this session: "SURFACE tab: every create/modify command and dialog" (done, with a
+not-exercised list in `coverage.md`). Report `parity/reports/2026-10-22-surface-tab.md`,
+`map-wave28.json`, batches `ui-surface-menus` (5), `ui-surface-create-dialogs` (6),
+`ui-surface-modify-dialogs` (5) and `ui-surface-results` (4), all `ready` in `index.jsonl` with no
+fixer yet. Prober 12's wave-27 batches (`ui-construct-methods`, `ui-inspect-measure-section`,
+`ui-inspect-analyses`, `ui-insert-new-design`) were assigned to cloud fixers by the coordinator
+during this session. Re-verified: `ui:sketch:horizontal-conflict`,
+`ui:sketch:tangent-arc-snap-marker` and `ui:sketch:dimension-label-and-hover` (verified; the
+dimension tooltip's light box is the new key `ui:sketch:dimension-hover-tooltip-style`).
 
 ## Next prober: start here
 
-1. Take the next `todo` in `coverage.md`: "SURFACE tab: every create/modify command and dialog"
-   (Design workspace, SURFACE tab in both apps). Compare the tab's panels and dropdowns, then every
-   command's dialog as it opens and after its first pick, the result's browser row, timeline icon and
-   right-click menu.
-2. Re-verify in the app the `fixing-merged` keys still not re-checked: `ui:sketch:horizontal-conflict`,
-   `ui:sketch:dimension-label-and-hover` (hover part), `ui:sketch:tangent-arc-snap-marker`, plus any
-   key in the SURFACE area marked `fixing-merged`.
-3. Rebuild before probing: the running binary is `main` at `c4d97aa9`; kill `fissionoxide.exe` first,
-   `cargo build --release -p fissionoxide` took about 2 minutes this time.
+1. Take the next `todo` in `coverage.md`: "MESH tab: every command" (Design workspace, MESH tab in
+   both apps). Compare the tab's panels and dropdowns, every command's dialog as it opens and after
+   its first pick (Fusion needs a mesh body: Insert Mesh of an .stl/.obj, or Convert a body), the
+   result's browser row, timeline icon and right-click menu.
+2. Re-verify in the app any key in the MESH area marked `fixing-merged`, and any wave-27/28 key a
+   fixer has set to `fixing-merged` since (`python -c` over `ui-features.jsonl`, status
+   `fixing-merged`, history entries dated after 2026-10-22 11:00).
+3. Rebuild before probing: the running binary is `main` at `de1a1c5a`; kill `fissionoxide.exe`
+   first, `cargo build --release -p fissionoxide` took 2m 12s this time.
 
 Where the documents stand: Fusion has three tabs: "Untitled*" (older), "Untitled*(1)" (Part Design,
-inches: plate, cylinder with a failed Chamfer1, spheres, coil, torus, Plane1, Point1, an Analysis
-folder with Section1 and CenterOfMass1) and "Untitled(2)" (an empty Assembly Design, active); window
-at screenshot x 0..907, y 82..733. FissionOxide (built `c4d97aa9`) holds one new design with a Box
-(the earlier design was lost to "+", see `ui:chrome:new-tab-replaces-design`); Data Panel closed,
-window at x 8..1012, y 103..755. Both left of the overlay; Fusion's taskbar button at (497,803),
+inches, active, on the SURFACE tab: plate, cylinder with a failed Chamfer1, spheres, coil, torus,
+Plane1, Point1, an Analysis folder, and now Body8, a patch on the disc from SurfacePatch1) and
+"Untitled(2)" (an empty Assembly Design); window at screenshot x 0..907, y 82..733. FissionOxide
+(built `de1a1c5a`) holds one design on the SURFACE tab: Sketch1 (circle), a surface Extrude (Body1),
+a Patch (Body2) and Sketch2 open on the patch face (circle, a line, a diameter dimension); its window
+was snapped with Win+Left and widened to x 0..850, y 0..790. Fusion's taskbar button at (497,803),
 FissionOxide's at (572,803).
 
 ## Traps
+- FissionOxide's sketch shortcut "D" twice did nothing after the Coincident and Horizontal/Vertical
+  toolbar flows (CREATE > Sketch Dimension worked); unrecorded, check whether shortcuts die after a
+  constraint command.
+- `left_click_drag` does not drag sketch points in FissionOxide; use `left_mouse_down`, two or three
+  `mouse_move` steps and `left_mouse_up`.
+- Fusion's Ctrl+Z right after Finish Sketch reopens the sketch rather than removing it.
+- Win+Left on FissionOxide opens Windows snap assist over the right half (File Explorer, click tier):
+  click FissionOxide's own canvas to dismiss it; a drag that ends over Explorer is refused.
 - FissionOxide's "+" (and Ctrl+N) throws the open design away without asking; do not press it
   with work you still need.
 - FissionOxide's analyses (Draft, Accessibility, Zebra, Curvature Map) stay on after Close and

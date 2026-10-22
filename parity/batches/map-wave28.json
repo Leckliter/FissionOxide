@@ -1,0 +1,22 @@
+{
+  "ui:surface:create-menu-extras": "ui-surface-menus",
+  "ui:surface:modify-menu-extras": "ui-surface-menus",
+  "ui:surface:toolbar-quick-buttons": "ui-surface-menus",
+  "ui:surface:tooltip-texts": "ui-surface-menus",
+  "ui:surface:finish-sketch-returns-tab": "ui-surface-menus",
+  "ui:surface:patch-rows": "ui-surface-create-dialogs",
+  "ui:surface:extrude-rows": "ui-surface-create-dialogs",
+  "ui:surface:revolve-rows": "ui-surface-create-dialogs",
+  "ui:surface:ruled-rows": "ui-surface-create-dialogs",
+  "ui:surface:offset-rows": "ui-surface-create-dialogs",
+  "ui:surface:sweep-loft-missing": "ui-surface-create-dialogs",
+  "ui:surface:trim-rows": "ui-surface-modify-dialogs",
+  "ui:surface:extend-rows": "ui-surface-modify-dialogs",
+  "ui:surface:untrim-rows": "ui-surface-modify-dialogs",
+  "ui:surface:stitch-rows": "ui-surface-modify-dialogs",
+  "ui:surface:unstitch-reverse-rows": "ui-surface-modify-dialogs",
+  "ui:surface:body-row-icon": "ui-surface-results",
+  "ui:surface:timeline-icons": "ui-surface-results",
+  "ui:surface:body-context-menu": "ui-surface-results",
+  "ui:sketch:dimension-hover-tooltip-style": "ui-surface-results"
+}

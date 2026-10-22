@@ -85,3 +85,7 @@
 {"name": "ui-insert-new-design", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_749e3adf (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-inspect-analyses", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_12943e51 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-inspect-measure-section", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_5841e2e8 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-surface-create-dialogs", "items": 6, "status": "ready", "pr": null}
+{"name": "ui-surface-menus", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-surface-modify-dialogs", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-surface-results", "items": 4, "status": "ready", "pr": null}
