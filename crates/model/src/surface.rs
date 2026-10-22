@@ -129,3 +129,67 @@ pub fn open_edges(model: &crate::regen::Model, bodies: &[BodyId], max_gap: f64) 
   out.sort_by(|a, b| b.gap.total_cmp(&a.gap));
   out
 }
+
+/// How a patch meets the face beside a boundary edge (Fusion's Patch continuity column).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Continuity {
+  /// G0: the patch only touches the edge.
+  #[default]
+  Connected,
+  /// G1: the patch leaves the edge along the face.
+  Tangent,
+  /// G2: the patch's curvature matches the face's too.
+  Curvature,
+}
+
+impl Continuity {
+  pub fn kernel(self) -> fox_kernel::Continuity {
+    match self {
+      Continuity::Connected => fox_kernel::Continuity::Connected,
+      Continuity::Tangent => fox_kernel::Continuity::Tangent,
+      Continuity::Curvature => fox_kernel::Continuity::Curvature,
+    }
+  }
+}
+
+/// Which way a ruled surface grows from its edges (Fusion's Ruled Type).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuledType {
+  /// Along the normal of the face beside the edge.
+  #[default]
+  Normal,
+  /// Along that face, away from it.
+  Tangent,
+}
+
+/// How Offset joins the offsets of picked faces that meet (Fusion's Offset Type).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OffsetCorners {
+  /// Each face offset on its own (offsets made before the Offset Type row).
+  #[default]
+  Separate,
+  /// The faces of a body offset together, extended until they meet.
+  Sharp,
+  /// The faces of a body offset together, joined by rounds.
+  Round,
+}
+
+impl OffsetCorners {
+  pub fn is_separate(&self) -> bool {
+    *self == OffsetCorners::Separate
+  }
+}
+
+/// A surface loft section: a sketch's profile (an interior point), or some of its curves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SurfaceSection {
+  pub sketch: FeatureId,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub profile: Option<[f64; 2]>,
+  /// The curves (joined end to end); with no profile and no curves, every curve of the sketch.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub curves: Vec<CurveId>,
+}

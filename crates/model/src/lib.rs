@@ -1468,6 +1468,16 @@ pub enum FeatureKind {
     symmetric: bool,
     #[serde(default)]
     flip: bool,
+    /// Profiles (interior points) extruded by their boundaries, as well as `curves` (with
+    /// profiles and no curves, only the profiles).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    profiles: Vec<[f64; 2]>,
+    /// Fusion's Start: Offset, the distance from the profile plane it starts at; empty = on it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    offset: String,
+    /// Two sides: the distance the other way (`distance` goes the first way).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    distance2: Option<String>,
   },
   /// A surface revolved from sketch curves.
   SurfaceRevolve {
@@ -1477,6 +1487,15 @@ pub enum FeatureKind {
     axis: AxisRef,
     #[serde(default = "full_turn")]
     angle: String,
+    /// Profiles (interior points) revolved by their boundaries, as well as `curves`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    profiles: Vec<[f64; 2]>,
+    /// `angle` each way from the profile.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    symmetric: bool,
+    /// Two sides: the angle turned the other way as well.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    angle2: Option<String>,
   },
   /// A surface filling a closed boundary: body edges or a sketch's curves.
   Patch {
@@ -1484,6 +1503,13 @@ pub enum FeatureKind {
     edges: Vec<EdgeRef>,
     #[serde(default)]
     sketch: Option<FeatureId>,
+    /// How the patch meets the face beside each boundary edge (one per edge; missing ones
+    /// are connected).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    continuity: Vec<surface::Continuity>,
+    /// Reverse the patch's normal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    flip: bool,
   },
   /// Sews surface bodies into one (a solid when they close up).
   Stitch {
@@ -1513,6 +1539,9 @@ pub enum FeatureKind {
     /// Faces offset by distances of their own (variable offset).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     face_distances: Vec<surface::FaceDistance>,
+    /// How the offsets of picked faces that meet are joined.
+    #[serde(default, skip_serializing_if = "surface::OffsetCorners::is_separate")]
+    corners: surface::OffsetCorners,
   },
   /// Trims surface bodies with a plane, keeping the side behind it (or in front, flipped).
   Trim {
@@ -2094,6 +2123,40 @@ pub enum FeatureKind {
     #[serde(default)]
     keep_body: bool,
   },
+  /// Fusion's Ruled surface: grown from edges (chained) out of the face beside them, along its
+  /// normal or along the face, by a distance and turned by an angle about the edges.
+  RuledSurface {
+    edges: Vec<EdgeRef>,
+    distance: String,
+    #[serde(default = "zero_angle")]
+    angle: String,
+    #[serde(default)]
+    along: surface::RuledType,
+  },
+  /// A surface swept from sketch curves or profile boundaries along a path (Fusion's surface
+  /// Sweep, single path).
+  SurfaceSweep {
+    sketch: FeatureId,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    profiles: Vec<[f64; 2]>,
+    /// The swept curves (with no profiles and no curves, every curve of the sketch).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    curves: Vec<CurveId>,
+    path_sketch: FeatureId,
+    /// The path's curves, chained end to end (default every curve of the path sketch).
+    #[serde(default)]
+    path_curves: Vec<CurveId>,
+    /// Orientation Parallel: the profile keeps its own orientation (default: square to the path).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    parallel: bool,
+  },
+  /// A surface lofted through sketch curves or profile boundaries (Fusion's surface Loft).
+  SurfaceLoft {
+    sections: Vec<surface::SurfaceSection>,
+    /// Loop back to the first section.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    closed: bool,
+  },
 }
 
 fn medium() -> String {
@@ -2163,6 +2226,10 @@ fn one() -> String {
 
 fn full_turn() -> String {
   "360 deg".to_string()
+}
+
+fn zero_angle() -> String {
+  "0 deg".to_string()
 }
 
 fn zeros() -> [String; 3] {
@@ -2273,6 +2340,9 @@ impl FeatureKind {
       FeatureKind::MeshShell { .. } => "MeshShell",
       FeatureKind::MeshCombine { .. } => "MeshCombine",
       FeatureKind::MeshSeparate { .. } => "MeshSeparate",
+      FeatureKind::RuledSurface { .. } => "Ruled",
+      FeatureKind::SurfaceSweep { .. } => "SurfaceSweep",
+      FeatureKind::SurfaceLoft { .. } => "SurfaceLoft",
     }
   }
 
@@ -2377,6 +2447,8 @@ impl FeatureKind {
         std::iter::once(curves.sketch).chain(with.iter().map(|w| w.sketch)).collect()
       }
       FeatureKind::Canvas { plane, .. } => plane_dep(plane),
+      FeatureKind::SurfaceSweep { sketch, path_sketch, .. } => vec![*sketch, *path_sketch],
+      FeatureKind::SurfaceLoft { sections, .. } => sections.iter().map(|x| x.sketch).collect(),
       _ => vec![],
     }
   }
@@ -3152,8 +3224,21 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Ruled { .. } | FeatureKind::Trim { .. } => {}
-    FeatureKind::SurfaceExtrude { distance, .. } => f(distance),
-    FeatureKind::SurfaceRevolve { angle, .. } => f(angle),
+    FeatureKind::SurfaceExtrude { distance, offset, distance2, .. } => {
+      f(distance);
+      if !offset.is_empty() {
+        f(offset);
+      }
+      if let Some(d) = distance2 {
+        f(d);
+      }
+    }
+    FeatureKind::SurfaceRevolve { angle, angle2, .. } => {
+      f(angle);
+      if let Some(a) = angle2 {
+        f(a);
+      }
+    }
     FeatureKind::Stitch { tolerance, .. } => f(tolerance),
     FeatureKind::Mesh { amount, .. } => f(amount),
     FeatureKind::ConstructionAxis { .. }
@@ -3280,6 +3365,11 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     }
     FeatureKind::MeshShell { thickness, .. } => f(thickness),
     FeatureKind::MeshCombine { .. } | FeatureKind::MeshSeparate { .. } => {}
+    FeatureKind::RuledSurface { distance, angle, .. } => {
+      f(distance);
+      f(angle);
+    }
+    FeatureKind::SurfaceSweep { .. } | FeatureKind::SurfaceLoft { .. } => {}
   }
 }
 

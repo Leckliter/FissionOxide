@@ -63,6 +63,7 @@ mod sheet_flat_tests;
 #[cfg(test)]
 mod sketch_row_tests;
 mod solid;
+pub(crate) mod surface;
 mod thread;
 
 mod mesh_modify;
@@ -172,6 +173,11 @@ pub enum Kind {
   PlaneCut,
   /// Export Flat Pattern (the flat pattern environment's EXPORT panel, the Flat Pattern row).
   ExportFlat,
+  /// The SURFACE tab's Extrude, Revolve, Sweep and Loft (see [`surface`]).
+  SurfExtrude,
+  SurfRevolve,
+  SurfSweep,
+  SurfLoft,
 }
 
 impl Kind {
@@ -200,6 +206,10 @@ impl Kind {
       Kind::InsertMesh => "INSERT MESH",
       Kind::PlaneCut => "PLANE CUT",
       Kind::ExportFlat => "EXPORT FLAT PATTERN",
+      Kind::SurfExtrude => "EXTRUDE",
+      Kind::SurfRevolve => "REVOLVE",
+      Kind::SurfSweep => "SWEEP",
+      Kind::SurfLoft => "LOFT",
       Kind::Loft => "LOFT",
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
@@ -283,6 +293,10 @@ impl Kind {
       Kind::InsertMesh => Icon::InsertMesh,
       Kind::PlaneCut => Icon::PlaneCut,
       Kind::ExportFlat => Icon::Export,
+      Kind::SurfExtrude => Icon::Extrude,
+      Kind::SurfRevolve => Icon::Revolve,
+      Kind::SurfSweep => Icon::Sweep,
+      Kind::SurfLoft => Icon::Loft,
       Kind::Loft => Icon::Loft,
       Kind::Sweep => Icon::Sweep,
       Kind::Hole => Icon::Hole,
@@ -406,6 +420,10 @@ impl Kind {
       Kind::InsertMesh => ("Insert Mesh", "Place a mesh file in the design: its unit, up direction and position"),
       Kind::PlaneCut => ("Plane Cut", "Cut a mesh body with a plane: trim it, split it in two or split its faces"),
       Kind::ExportFlat => ("Export Flat Pattern", "Save the flat pattern as a DXF or STEP file"),
+      Kind::SurfExtrude => ("Extrude", "A surface extruded from sketch profiles or curves"),
+      Kind::SurfRevolve => ("Revolve", "A surface revolved from sketch profiles or curves"),
+      Kind::SurfSweep => ("Sweep", "A surface swept from a profile or curves along a path"),
+      Kind::SurfLoft => ("Loft", "A surface lofted through profiles or curves"),
       _ => (self.title(), ""),
     };
     (self.icon(), name, hint)
@@ -704,6 +722,8 @@ pub struct Dialog {
   flange: flange::State,
   /// Plane Cut's plane and settings (see [`plane_cut`]).
   plane_cut: plane_cut::State,
+  /// The SURFACE tab's dialogs' picks and values, and the Analysis tab (see [`surface`]).
+  surf: surface::State,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -846,6 +866,7 @@ impl Dialog {
       }),
       flange: flange::State::default(),
       plane_cut: plane_cut::State::default(),
+      surf: surface::State::default(),
     }
   }
 
@@ -1208,12 +1229,18 @@ impl Dialog {
       d.rules = s.design.sheet_metal_rules.iter().map(|r| r.name.clone()).collect();
     }
     // Fusion finishes the sketch when a feature starts from it
-    if matches!(kind, Kind::Extrude | Kind::Revolve | Kind::Loft | Kind::Sweep | Kind::Hole | Kind::Flange | Kind::Fold)
+    if (matches!(
+      kind,
+      Kind::Extrude | Kind::Revolve | Kind::Loft | Kind::Sweep | Kind::Hole | Kind::Flange | Kind::Fold
+    ) || surface::is_surface(kind))
       && app.s.edit_sketch.is_some()
     {
       app.last_sketch = app.s.edit_sketch;
       app.left_sketch();
       let _ = app.s.execute("sketch.finish", &json!({}));
+    }
+    if surface::is_surface(kind) {
+      d.surf_open(app);
     }
     if kind.reports() {
       d.refresh_report(&mut app.s);
@@ -1584,6 +1611,7 @@ impl Dialog {
     }
     let op = self.op;
     Some(match self.kind {
+      Kind::SurfExtrude | Kind::SurfRevolve | Kind::SurfSweep | Kind::SurfLoft => return self.surf_command(),
       Kind::Form(f) => crate::forms::engine_command(f, self.form.params(f)),
       Kind::PickPlane
       | Kind::Inspect
@@ -2102,6 +2130,7 @@ impl Dialog {
       return false;
     }
     match self.kind {
+      k if surface::is_surface(k) => self.surf_ready(),
       Kind::Form(f) => self.form.missing(f).is_none(),
       Kind::Extrude => (self.sketch.is_some() && !self.profiles.is_empty()) || self.extrudes_faces(),
       Kind::Revolve => self.sketch.is_some() && !self.axis.is_empty(),
@@ -2341,6 +2370,7 @@ impl Dialog {
       Kind::Extrude | Kind::Revolve | Kind::Flange | Kind::Hole => self.sketch.into_iter().collect(),
       Kind::Sweep => self.sketch.into_iter().chain(self.path).collect(),
       Kind::Loft => self.sections.iter().map(|(sk, _)| FeatureId(*sk)).collect(),
+      k if surface::is_surface(k) => self.surf_sketches(),
       _ => Vec::new(),
     }
   }
@@ -2355,6 +2385,7 @@ impl Dialog {
       return;
     }
     match self.kind {
+      k if surface::is_surface(k) => self.surf_sync(s),
       Kind::OffsetPlane => self.sync_offset_base(s),
       Kind::Form(f) if !self.applied || !self.picks() => {
         let before = self.form.values.clone();
@@ -2641,7 +2672,7 @@ impl Dialog {
             );
             let close_only = matches!(self.kind, Kind::Form(f) if crate::forms::close_only(f));
             if !self.kind.reports() && !close_only {
-              if self.picks() && !self.picks_fixed() {
+              if self.picks() && !self.picks_fixed() && !self.no_preview_box() {
                 self.live_checkbox(ui, &mut app.s);
               }
               if self.kind == Kind::InsertMesh
@@ -2805,6 +2836,9 @@ impl Dialog {
     if self.wants_cut_plane() {
       return Some(section::CUT_PLANE_HINT.into());
     }
+    if let Some(p) = self.surface_prompt(hovering) {
+      return Some(p);
+    }
     if !self.ready() {
       // a form's own wording for the row waiting for a pick
       if let Kind::Form(f) = self.kind
@@ -2950,6 +2984,10 @@ impl Dialog {
           | Kind::Scale
           | Kind::Analysis(_)
           | Kind::CenterOfMass
+          | Kind::SurfExtrude
+          | Kind::SurfRevolve
+          | Kind::SurfSweep
+          | Kind::SurfLoft
       )
   }
 
@@ -2998,6 +3036,7 @@ impl Dialog {
 
   fn missing_input(&self) -> &'static str {
     match self.kind {
+      k if surface::is_surface(k) => self.surf_missing(),
       Kind::Form(f) => self.form.missing(f).unwrap_or("missing input"),
       Kind::Revolve if self.sketch.is_some() => "select the axis to revolve the profile around",
       Kind::Extrude | Kind::Revolve => "select a profile",
@@ -3067,6 +3106,7 @@ impl Dialog {
       // drawn in the viewport (`viewport::plane_picker`) with the cursor hint
       Kind::PickPlane => {}
       Kind::Extrude => self.extrude_rows(ui),
+      k if surface::is_surface(k) => self.surf_rows(ui),
       Kind::Revolve => self.revolve_fields(ui),
       Kind::Fillet => {
         self.fillet_rows(app, ui, creating);
@@ -3241,7 +3281,7 @@ impl Dialog {
       self.remove_features_fields(app, ui);
       return;
     }
-    // Extend's Analysis tab
+    // Extend's, Patch's and Ruled's Analysis tab
     if crate::forms::has_analysis_tab(f) && self.solid.rsl.analysis_tab {
       self.analysis_rows(ui);
       return;
@@ -3262,6 +3302,9 @@ impl Dialog {
         continue;
       }
       if crate::forms::mesh_modify_form(f) && self.mesh_modify_field(f, i, ui, dirty) {
+        continue;
+      }
+      if self.surface_form_field(f, i, ui, dirty) {
         continue;
       }
       let v = self.form.values[i].clone();

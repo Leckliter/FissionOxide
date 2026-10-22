@@ -4430,7 +4430,10 @@ pub(crate) fn feature_tint(k: &FeatureKind) -> icons::Tint {
     | FeatureKind::Untrim { .. }
     | FeatureKind::Stitch { .. }
     | FeatureKind::Unstitch { .. }
-    | FeatureKind::ReverseNormal { .. } => icons::Tint::Orange,
+    | FeatureKind::ReverseNormal { .. }
+    | FeatureKind::RuledSurface { .. }
+    | FeatureKind::SurfaceSweep { .. }
+    | FeatureKind::SurfaceLoft { .. } => icons::Tint::Orange,
     _ => icons::Tint::Blue,
   }
 }
@@ -4537,6 +4540,9 @@ pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::MeshShell { .. } => Icon::Shell,
     FeatureKind::MeshCombine { .. } => Icon::Combine,
     FeatureKind::MeshSeparate { .. } => Icon::Separate,
+    FeatureKind::RuledSurface { .. } => Icon::Ruled,
+    FeatureKind::SurfaceSweep { .. } => Icon::Sweep,
+    FeatureKind::SurfaceLoft { .. } => Icon::Loft,
   }
 }
 

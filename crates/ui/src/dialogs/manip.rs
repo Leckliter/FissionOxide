@@ -399,6 +399,9 @@ impl Dialog {
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => self.text_handles(s),
       Kind::Revolve => self.revolve_handles(s),
       Kind::PlaneCut => self.plane_cut_handles(s),
+      // the SURFACE tab's Extrude, Revolve, Ruled and Offset (see [`super::surface`])
+      Kind::SurfExtrude | Kind::SurfRevolve => self.surface_handles(s),
+      Kind::Form(f) if matches!(f.cmd, "surface.ruled.form" | "surface.offset.form") => self.surface_handles(s),
       // Box, Cylinder, Sphere, Torus and Coil (see [`super::primitive`])
       k if super::primitive::base_of(k).is_some() => self.primitive_handles(s),
       Kind::Section if !self.plane.is_null() => self.section_handles(s),
@@ -570,7 +573,11 @@ impl Dialog {
         let Some(i) = f.inputs.iter().position(|x| x.key() == "angle") else { return };
         self.form.values[i] = json!(deg(v_snapped));
       }
-      _ => return,
+      _ => {
+        if !self.set_surface_handle(v, step) {
+          return;
+        }
+      }
     }
     self.dirty = true;
   }
@@ -732,6 +739,7 @@ impl Dialog {
       (Kind::SkRectPattern, 3) => Some(&mut self.count2),
       (Kind::Revolve, 0) => Some(&mut self.angle),
       (k, _) if super::primitive::base_of(k).is_some() => self.primitive_field(i),
+      (_, 0) => self.surface_handle_field(),
       _ => None,
     }
   }
@@ -1019,7 +1027,7 @@ fn closest_on_segment(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> [f64; 2] {
 
 /// Where an arrow sits and points for a picked edge (its midpoint, out between its faces) or face
 /// (planar: its centre along the normal; curved: a point of it along the surface normal).
-fn anchor(s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
+pub(super) fn anchor(s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
   let get = |k: &str| key.get(k).and_then(Value::as_u64).map(|v| v as u32);
   let body = s.model.body(BodyId(get("body")?))?;
   if let Some(edge) = get("edge") {

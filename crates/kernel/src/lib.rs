@@ -1156,3 +1156,8 @@ mod movefaces;
 mod tests_history;
 #[cfg(test)]
 mod tests_movefaces;
+
+mod surface3;
+pub use surface3::Continuity;
+#[cfg(test)]
+mod tests_surface3;

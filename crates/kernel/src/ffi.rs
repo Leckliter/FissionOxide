@@ -300,6 +300,18 @@ pub(crate) mod ffi {
     fn has_labels(s: &Shape) -> bool;
     fn face_labels(s: &Shape) -> Result<LabelData>;
     fn same_faces(now: &Shape, before: &Shape) -> Result<Vec<u32>>;
+    // surface Patch, Ruled, Sweep and Loft as Fusion's (cpp/surface3.cpp)
+    include!("fox-kernel/cpp/surface3.hxx");
+    fn patch_with(boundary: &Shape, supports: &Shape, orders: &[u8], interior: &Shape) -> Result<UniquePtr<Shape>>;
+    fn ruled_from_edge(
+      edge: &Shape,
+      face: &Shape,
+      distance: f64,
+      angle: f64,
+      tangent: bool,
+    ) -> Result<UniquePtr<Shape>>;
+    fn sweep_open(profile: &Shape, spine: &Shape, parallel: bool) -> Result<UniquePtr<Shape>>;
+    fn loft_open(sections: &Shape, closed: bool) -> Result<UniquePtr<Shape>>;
   }
 }
 

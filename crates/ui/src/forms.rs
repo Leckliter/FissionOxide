@@ -822,6 +822,10 @@ impl State {
         ["moving", "fixed"].iter().all(|k| get(k).is_some_and(|v| !v.is_null()))
       }
       "sketch.project_to_surface" if key == "direction" => get("type").and_then(Value::as_str) == Some("along_vector"),
+      // the SURFACE tab's Create dialogs: value rows wait for the first pick, as in Fusion
+      "surface.ruled.form" | "surface.offset.form" | "surface.patch.form" => {
+        crate::dialogs::surface::form_row_shown(form.cmd, key, &get)
+      }
       // Coil's Type names the two values it asks for
       "coil.form" => {
         let ty = get("type").and_then(Value::as_str).unwrap_or("");
@@ -939,6 +943,7 @@ impl State {
       // Chain Selection off
       TRIM_CMD => key == "bodies",
       UNSTITCH_CMD => key == "faces",
+      "surface.offset.form" => key == "bodies",
       _ => false,
     }
   }
@@ -1132,6 +1137,9 @@ impl State {
     }
     if form.cmd == "surface.untrim" && picked("faces") && get("loops").and_then(Value::as_str) == Some("manual") {
       return Some("Untrimming picked loops (Manual) isn't in FissionOxide yet");
+    }
+    if let Some(m) = crate::dialogs::surface::form_missing(form.cmd, &get) {
+      return m;
     }
     if form.cmd == "pipe.form" && get("path_curves").and_then(Value::as_array).is_none_or(Vec::is_empty) {
       return Some("Select a path to sweep the profile along");
@@ -1371,7 +1379,7 @@ pub const REVERSE_CMD: &str = "surface.reverse.form";
 
 /// Forms with Feature and Analysis tabs above their rows, as Fusion's Extend.
 pub fn has_analysis_tab(form: &Form) -> bool {
-  form.cmd == EXTEND_CMD
+  matches!(form.cmd, EXTEND_CMD | "surface.patch.form" | "surface.ruled.form")
 }
 
 /// Trim's tool from the selection: the first pick that can be one (see [`Input::TrimTool`]).
@@ -1937,47 +1945,23 @@ pub static POINT_ALONG_PATH: Form = Form {
   picks_model: false,
 };
 
-pub static SURFACE_EXTRUDE: Form = Form {
-  title: "EXTRUDE",
-  name: "Extrude",
-  hint: "A surface extruded from sketch curves (open or closed)",
-  icon: Icon::Extrude,
-  cmd: "surface.extrude",
-  fixed: &[],
-  inputs: &[
-    Input::Sketch { key: "sketch", label: "Sketch" },
-    Input::Curves { key: "curves", label: "Curves (default all)" },
-    Input::Expr { key: "distance", label: "Distance", default: "10 mm" },
-    Input::Check { key: "symmetric", label: "Symmetric" },
-    Input::Check { key: "flip", label: "Flip" },
-  ],
-  picks_model: false,
-};
-
-pub static SURFACE_REVOLVE: Form = Form {
-  title: "REVOLVE",
-  name: "Revolve",
-  hint: "A surface revolved from sketch curves",
-  icon: Icon::Revolve,
-  cmd: "surface.revolve",
-  fixed: &[],
-  inputs: &[
-    Input::Sketch { key: "sketch", label: "Sketch" },
-    Input::Curves { key: "curves", label: "Curves (default all)" },
-    Input::Axis { key: "axis", label: "Axis" },
-    Input::Expr { key: "angle", label: "Angle", default: "360 deg" },
-  ],
-  picks_model: false,
-};
-
 pub static PATCH: Form = Form {
   title: "PATCH",
   name: "Patch",
   hint: "A surface filling a closed boundary of edges",
   icon: Icon::Patch,
-  cmd: "surface.patch",
+  cmd: "surface.patch.form",
   fixed: &[],
-  inputs: &[Input::Edges { key: "edges", label: "Boundary edges" }],
+  // Fusion's Feature tab; the continuity table (one row per picked boundary) appears under
+  // Group Edges once a boundary is picked (see `crate::dialogs::surface`)
+  inputs: &[
+    Input::Edges { key: "edges", label: "Boundary Edges" },
+    Input::Check { key: "group", label: "Group Edges" },
+    Input::Text { key: "continuity", label: "Continuity", default: "" },
+    Input::Curves { key: "interior", label: "Interior Rails/Points" },
+    Input::CheckOn { key: "chain", label: "Enable Chaining" },
+    Input::Check { key: "flip", label: "Flip" },
+  ],
   picks_model: true,
 };
 
@@ -2350,6 +2334,9 @@ fn text_params(p: &Value) -> Value {
 /// Filter, Text's frame, …). Returns the engine command and parameters.
 pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
   match form.cmd {
+    "surface.patch.form" | "surface.ruled.form" | "surface.offset.form" => {
+      crate::dialogs::surface::form_command(form.cmd, &p)
+    }
     "coil.form" => ("coil", coil_params(&p)),
     "pipe.form" => ("pipe", pipe_params(&p)),
     // Mesh Combine's Target Body chip holds one body
@@ -2578,12 +2565,20 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
 pub static RULED: Form = Form {
   title: "RULED",
   name: "Ruled",
-  hint: "A ruled surface between two edges",
+  hint: "A ruled surface grown from edges, along or across the face beside them",
   icon: Icon::Ruled,
-  cmd: "surface.ruled",
+  cmd: "surface.ruled.form",
   fixed: &[],
-  inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
-  picks_model: false,
+  // Distance, Angle and Mitered Corners appear once an edge is picked, as in Fusion
+  inputs: &[
+    Input::Edges { key: "edges", label: "Edges" },
+    Input::CheckOn { key: "chain", label: "Chain Selection" },
+    Input::Choice { key: "kind", label: "Type", options: &[("normal", "Normal"), ("tangent", "Tangent")] },
+    Input::Expr { key: "distance", label: "Distance", default: "0 mm" },
+    Input::Expr { key: "angle", label: "Angle", default: "0 deg" },
+    Input::Check { key: "mitered", label: "Mitered Corners" },
+  ],
+  picks_model: true,
 };
 
 pub static SURFACE_OFFSET: Form = Form {
@@ -2591,11 +2586,22 @@ pub static SURFACE_OFFSET: Form = Form {
   name: "Offset",
   hint: "New surfaces offset from faces along their normals",
   icon: Icon::SurfOffset,
-  cmd: "surface.offset",
+  cmd: "surface.offset.form",
   fixed: &[],
+  // one row picks faces or whole surface bodies; Distance appears after the pick
   inputs: &[
-    Input::Faces { key: "faces", label: "Faces" },
-    Input::Expr { key: "distance", label: "Distance", default: "2 mm" },
+    Input::FacesOpt { key: "faces", label: "Faces / Surface Bodies" },
+    Input::Bodies { key: "bodies", label: "Surface Bodies", required: false },
+    Input::CheckOn { key: "tangent_chain", label: "Chain Selection" },
+    Input::Icons {
+      key: "corners",
+      label: "Offset Type",
+      options: &[
+        ("sharp", Icon::ShellSharp, "Sharp Offset: Creates sharp offset corners."),
+        ("round", Icon::ShellRound, "Rounded Offset: Creates rounded offset corners."),
+      ],
+    },
+    Input::Expr { key: "distance", label: "Distance", default: "0 mm" },
   ],
   picks_model: true,
 };

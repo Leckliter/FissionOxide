@@ -367,46 +367,8 @@ impl Ctx<'_> {
         self.operate(id, union_all(tools)?, *operation)?;
         Ok(None)
       }
-      FeatureKind::SurfaceExtrude { sketch, curves, distance, symmetric, flip } => {
-        let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
-        let d = self.len(distance)?;
-        let n = sk.plane.normal() * if *flip { -1.0 } else { 1.0 };
-        let mut faces = Vec::new();
-        for w in sketch_wires(&sk.plane, &sk.sketch, curves)? {
-          let w = if *symmetric { w.translated(-n * d).map_err(ke)? } else { w };
-          faces.push(w.extrude(n * if *symmetric { 2.0 * d } else { d }).map_err(ke)?);
-        }
-        self.new_surface(id, faces)?;
-        Ok(None)
-      }
-      FeatureKind::SurfaceRevolve { sketch, curves, axis, angle } => {
-        let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
-        let (o, d) = self.resolve_axis(axis, Some(*sketch))?;
-        let a = self.angle(angle)?;
-        let mut faces = Vec::new();
-        for w in sketch_wires(&sk.plane, &sk.sketch, curves)? {
-          faces.push(w.revolve(o, d, a).map_err(ke)?);
-        }
-        self.new_surface(id, faces)?;
-        Ok(None)
-      }
-      FeatureKind::Patch { edges, sketch } => {
-        let mut parts = Vec::new();
-        if let Some(sk) = sketch {
-          let sk = self.state.sketches.get(sk).ok_or("its sketch failed")?.clone();
-          parts.extend(sketch_wires(&sk.plane, &sk.sketch, &[])?);
-        }
-        for e in edges.iter_mut() {
-          let (bi, info) = self.edge_info(e)?;
-          parts.push(self.state.bodies[bi].shape.edge_shape(info.id).map_err(ke)?);
-        }
-        if parts.is_empty() {
-          return Err("pick the boundary edges or a sketch".into());
-        }
-        let boundary = Shape::compound(parts.iter()).map_err(ke)?;
-        let face = boundary.patch().map_err(ke)?;
-        self.new_body(id, face);
-        Ok(None)
+      FeatureKind::SurfaceExtrude { .. } | FeatureKind::SurfaceRevolve { .. } | FeatureKind::Patch { .. } => {
+        self.apply_surface3(id, kind)
       }
       FeatureKind::Stitch { bodies, tolerance } => {
         let tol = self.len(tolerance)?;
@@ -543,6 +505,9 @@ impl Ctx<'_> {
       FeatureKind::SurfaceExtend { .. } | FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {
         self.apply_surface(id, kind)
       }
+      FeatureKind::RuledSurface { .. } | FeatureKind::SurfaceSweep { .. } | FeatureKind::SurfaceLoft { .. } => {
+        self.apply_surface3(id, kind)
+      }
       FeatureKind::LoftedFlange { .. } | FeatureKind::MiterFlange { .. } => self.apply_sheet2(id, kind),
       FeatureKind::JoinByBend { .. } | FeatureKind::SheetFillet { .. } | FeatureKind::SheetChamfer { .. } => {
         self.apply_sheet_modify(id, kind)
@@ -585,7 +550,7 @@ impl Ctx<'_> {
   }
 
   /// New surface bodies: the faces sewn into one shell.
-  fn new_surface(&mut self, id: FeatureId, faces: Vec<Shape>) -> Result<(), String> {
+  pub(super) fn new_surface(&mut self, id: FeatureId, faces: Vec<Shape>) -> Result<(), String> {
     if faces.is_empty() {
       return Err("the sketch has no curves to make a surface from".into());
     }

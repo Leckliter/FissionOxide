@@ -153,15 +153,15 @@ cmds! {
   "split_face" => "Split faces along a plane (the body stays one piece)", "{faces, tool: plane}";
   "remove_faces" => "Remove faces and heal the body (fillets, holes, bosses)", "{faces}";
   "thicken" => "Thicken faces or surface bodies into solids", "{faces? | bodies?, thickness, symmetric?: thickness on each side, flip?, operation?, corners?: \"sharp\"|\"round\"}";
-  "surface.extrude" => "Surface body extruded from sketch curves", "{sketch?, curves?, distance, symmetric?, flip?}";
-  "surface.revolve" => "Surface body revolved from sketch curves", "{sketch?, curves?, axis, angle?}";
-  "surface.patch" => "Surface filling a closed boundary of body edges or a sketch", "{edges? | sketch?}";
+  "surface.extrude" => "Surface body extruded from sketch curves or profile boundaries (profiles alone: just them); offset starts it off the sketch plane, distance2 makes it two-sided", "{sketch?, curves?, profiles?: [[x,y]] | indices, distance, symmetric?, distance2?, offset?, flip?}";
+  "surface.revolve" => "Surface body revolved from sketch curves or profile boundaries; symmetric turns angle each way, angle2 the other way too", "{sketch?, curves?, profiles?, axis, angle?, symmetric?, angle2?}";
+  "surface.patch" => "Surface filling a closed boundary of body edges or a sketch; continuity (one for all edges or one each: connected, tangent, curvature) sets how it meets the face beside each edge; chain adds the boundary loop the edges are on", "{edges? | sketch?, continuity?, chain?, flip?}";
   "surface.stitch" => "Sew surface bodies together (into a solid when they close)", "{bodies, tolerance?}";
   "surface.stitch.gaps" => "The open edges of bodies that face another open edge less than max_gap (mm, default 1) away, widest gap first (Stitch's Unstitched Edges)", "{bodies, max_gap?}";
   "surface.unstitch" => "Break bodies into one surface body per face; picked faces come off their body each as a surface body of its own", "{bodies? | faces?}";
   "surface.reverse" => "Flip surface normals", "{bodies}";
-  "surface.ruled" => "Ruled surface between two edges", "{a: edge, b: edge}";
-  "surface.offset" => "New surfaces offset from faces or bodies; face_distances give faces distances of their own (variable offset)", "{faces? | bodies?, distance, face_distances?: [{face, distance}]}";
+  "surface.ruled" => "Ruled surface grown from edges out of the face beside them (kind normal: along its normal; tangent: along it) by distance, turned by angle about the edges; chain adds the edges that continue them smoothly; or (a, b) a ruled surface between two edges", "{edges, distance, angle?, kind?: normal|tangent, chain?} | {a: edge, b: edge}";
+  "surface.offset" => "New surfaces offset from faces or bodies; face_distances give faces distances of their own (variable offset); corners offsets the picked faces of a body together, sharp or round where they meet; tangent_chain adds the faces that continue them smoothly", "{faces? | bodies?, distance, face_distances?: [{face, distance}], corners?: sharp|round, tangent_chain?}";
   "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it), a body (keeps what's outside a solid or behind a surface) or a sketch projected onto them (cuts its profiles away, or keeps the right of its curves); flip keeps the other side, keep points pick the pieces to keep, remove points the pieces to remove (the rest stays); cut_only (Fusion's Trim) changes only the bodies the tool cuts, removing just the remove pieces, and fails when it cuts none", "{bodies, tool: plane | {body} | {sketch, curves?}, flip?, keep?: [[x,y,z]], remove?: [[x,y,z]], cut_only?: bool}";
   "mesh.reduce" => "Fewer triangles on mesh bodies (Fusion's Reduce: a tolerance, a proportion of the triangles kept or a face count; a mesh already at its minimum stays as it is)", "{body | bodies, type?: tolerance|proportion|face_count, proportion?: percent (25), tolerance?: length, face_count?, remesh?: adaptive|uniform} | {bodies, keep: 0.05..1} (older files)";
   "mesh.smooth" => "Smooth mesh bodies, keeping their volume", "{body | bodies, smoothness?: 0..1 (1)} | {bodies, passes} (older files)";
@@ -537,6 +537,8 @@ cmds! {
   "mesh.combine" => "Mesh Combine: join, cut or intersect tool bodies with a target mesh body, or merge them into it as they are", "{target, tools, operation?: join|cut|intersect|merge, keep_tools?}";
   "mesh.separate" => "Separate: split a mesh body into one body per connected shell", "{body, type?: shells, keep_body?}";
   "mesh.scale" => "Scale Mesh: scale mesh bodies about a point (default their centre), uniformly or per axis", "{bodies, center?: [x,y,z], scale_type?: uniform|non_uniform, factor? | x, y, z}";
+  "surface.sweep" => "Surface body swept from sketch curves or profile boundaries along a path", "{sketch?, curves?, profiles?, path: sketch id, path_curves?: [id], orientation?: perpendicular|parallel}";
+  "surface.loft" => "Surface body lofted through sections: a sketch's profile boundary or curves, in order", "{sections: [sketch id | {sketch, profile?: [x,y], curves?: [id]}], closed?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -556,6 +558,10 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::simplify::run(s, name, p) {
+    return r;
+  }
+  // before features: it takes the SURFACE tab's Create commands
+  if let Some(r) = crate::surface_create::run(s, name, p) {
     return r;
   }
   // before features: it takes surface.trim with a body or sketch tool

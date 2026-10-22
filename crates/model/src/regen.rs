@@ -2678,6 +2678,7 @@ pub use spun::outline as spun_outline;
 mod intersect;
 pub use intersect::outline as intersect_outline;
 mod surface;
+mod surface3;
 /// Offsets along one direction of a rectangular pattern, the original's (zero) included, as
 /// Fusion places them: one way from the original, or with `symmetric` the original at index
 /// `(n - 1) / 2` (an even count puts the extra instance on the positive side). With `extent`,

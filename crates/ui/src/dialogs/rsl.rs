@@ -192,7 +192,7 @@ impl Dialog {
 
   /// Sweep, Loft and Extend have Feature and Analysis tabs.
   pub(super) fn has_tabs(&self) -> bool {
-    matches!(self.kind, Kind::Sweep | Kind::Loft)
+    matches!(self.kind, Kind::Sweep | Kind::Loft | Kind::SurfSweep | Kind::SurfLoft)
       || matches!(self.kind, Kind::Form(f) if crate::forms::has_analysis_tab(f))
   }
 

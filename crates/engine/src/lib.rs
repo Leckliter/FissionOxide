@@ -50,6 +50,8 @@ mod simplify;
 mod solid;
 mod step;
 mod subassembly;
+mod surface_create;
+pub use surface_create::chain_boundary;
 mod surfaces;
 mod trace;
 mod views;
@@ -706,5 +708,7 @@ mod tests_step;
 mod tests_subassembly;
 #[cfg(test)]
 mod tests_surface;
+#[cfg(test)]
+mod tests_surface_create;
 #[cfg(test)]
 mod tests_trace;

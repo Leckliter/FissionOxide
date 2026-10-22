@@ -204,48 +204,6 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         },
       )
     })(),
-    "surface.extrude" => (|| {
-      let sketch = sketch_for_feature(s, p)?;
-      let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
-      add_feature(
-        s,
-        FeatureKind::SurfaceExtrude {
-          sketch,
-          curves: ids(p, "curves").into_iter().map(CurveId).collect(),
-          distance: req_expr(p, "distance")?,
-          symmetric: flag("symmetric"),
-          flip: flag("flip"),
-        },
-      )
-    })(),
-    "surface.revolve" => (|| {
-      let sketch = sketch_for_feature(s, p)?;
-      let axis = axis_ref(s, p.get("axis").ok_or(CmdError::new("missing 'axis'"))?)?;
-      add_feature(
-        s,
-        FeatureKind::SurfaceRevolve {
-          sketch,
-          curves: ids(p, "curves").into_iter().map(CurveId).collect(),
-          axis,
-          angle: opt_expr(p, "angle").unwrap_or_else(|| "360 deg".into()),
-        },
-      )
-    })(),
-    "surface.patch" => (|| {
-      let mut edges = Vec::new();
-      for e in p.get("edges").and_then(Value::as_array).into_iter().flatten() {
-        edges.push(edge_ref_of(s, e)?);
-      }
-      let sketch = p.get("sketch").map(|_| req_u32(p, "sketch").map(FeatureId)).transpose()?;
-      if let Some(sk) = sketch {
-        s.design.sketch(sk)?;
-        s.edit_sketch = None;
-      }
-      if edges.is_empty() && sketch.is_none() {
-        return Err(CmdError::new("pass the boundary 'edges' or a 'sketch'"));
-      }
-      add_feature(s, FeatureKind::Patch { edges, sketch })
-    })(),
     "surface.stitch" => (|| {
       let bodies = body_list(s, p)?;
       add_feature(
@@ -261,12 +219,6 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "surface.ruled" => (|| {
       let (a, b) = (edge(s, p, "a")?, edge(s, p, "b")?);
       add_feature(s, FeatureKind::Ruled { a, b })
-    })(),
-    "surface.offset" => (|| {
-      let faces = if p.get("faces").is_some() { faces(s, p)? } else { Vec::new() };
-      let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
-      let face_distances = crate::surfaces::face_distances(s, p)?;
-      add_feature(s, FeatureKind::SurfaceOffset { faces, bodies, distance: req_expr(p, "distance")?, face_distances })
     })(),
     "surface.trim" => (|| {
       let cut_only = crate::surfaces::cut_only(p)?;

@@ -6,7 +6,7 @@ use fox_kernel::{Plane, Shape};
 use fox_sketch::{Profile, Seg};
 
 use super::{Ctx, FResult, ke};
-use crate::surface::{FaceDistance, TrimTool, UntrimLoops};
+use crate::surface::{FaceDistance, OffsetCorners, TrimTool, UntrimLoops};
 use crate::{BodyId, FaceRef, FeatureId, FeatureKind};
 
 /// Which side of a trimming tool a point of the trimmed surface is on: > 0 is cut away by
@@ -117,8 +117,8 @@ impl Ctx<'_> {
       FeatureKind::TrimWith { bodies, tool, flip, keep, remove, cut_only } => {
         self.trim_with(id, bodies, tool, (*flip, *cut_only), keep, remove)
       }
-      FeatureKind::SurfaceOffset { faces, bodies, distance, face_distances } => {
-        self.surface_offset(id, faces, bodies, distance, face_distances)
+      FeatureKind::SurfaceOffset { faces, bodies, distance, face_distances, corners } => {
+        self.surface_offset(id, faces, bodies, distance, face_distances, *corners)
       }
       _ => Err("this feature type isn't supported".into()),
     }
@@ -241,6 +241,7 @@ impl Ctx<'_> {
     bodies: &[BodyId],
     distance: &str,
     face_distances: &mut [FaceDistance],
+    corners: OffsetCorners,
   ) -> FResult {
     let d = self.len(distance)?;
     // per-face distances, by body index and face id
@@ -254,6 +255,19 @@ impl Ctx<'_> {
     let mut skins = Vec::new();
     let mut picked: Vec<(usize, u32)> = Vec::new();
     for (bi, fids) in self.face_ids(faces)? {
+      // Offset Type: the picked faces of a body offset as one surface, so where they meet the
+      // offsets run on until they meet (sharp) or are joined by rounds
+      let together = !corners.is_separate() && fids.len() > 1 && fids.iter().all(|f| dist_of(bi, *f) == d);
+      if together {
+        let shape = &self.state.bodies[bi].shape;
+        let parts = fids.iter().map(|f| shape.face_shape(*f)).collect::<Result<Vec<_>, _>>().map_err(ke)?;
+        let skin = Shape::compound(parts.iter()).map_err(ke)?.sewn(1e-6).map_err(ke)?;
+        if let Ok(off) = skin.offset_joined(d, corners == OffsetCorners::Round) {
+          self.new_body(id, off);
+          picked.extend(fids.iter().map(|f| (bi, *f)));
+          continue;
+        }
+      }
       for f in fids {
         skins.push((self.state.bodies[bi].shape.face_shape(f).map_err(ke)?, dist_of(bi, f), Vec::new()));
         picked.push((bi, f));
@@ -272,7 +286,7 @@ impl Ctx<'_> {
         skins.push((self.state.bodies[bi].shape.face_shape(f).map_err(ke)?, dist, Vec::new()));
       }
     }
-    if skins.is_empty() {
+    if skins.is_empty() && picked.is_empty() {
       return Err("select faces or bodies to offset".into());
     }
     for (skin, dist, overrides) in skins {
@@ -391,7 +405,7 @@ mod tests {
     let mut sk = Sketch::new();
     sk.add_rectangle([0.0, 0.0], [10.0, 10.0]).unwrap();
     let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: sk, links: Vec::new() }).unwrap();
-    d.add_feature(FeatureKind::Patch { edges: vec![], sketch: Some(s) }).unwrap();
+    d.add_feature(FeatureKind::Patch { edges: vec![], sketch: Some(s), continuity: vec![], flip: false }).unwrap();
     let m = regenerate(&mut d);
     let b = &m.bodies[0];
     let e = b.edges().iter().find(|e| (e.mid - DVec3::new(10.0, 5.0, 0.0)).length() < 1e-6).unwrap();
@@ -485,7 +499,7 @@ mod tests {
       let mut sk = Sketch::new();
       sk.add_rectangle([0.0, 0.0], [10.0, 10.0]).unwrap();
       let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: sk, links: Vec::new() }).unwrap();
-      d.add_feature(FeatureKind::Patch { edges: vec![], sketch: Some(s) }).unwrap();
+      d.add_feature(FeatureKind::Patch { edges: vec![], sketch: Some(s), continuity: vec![], flip: false }).unwrap();
       let body = regenerate(&mut d).bodies[0].id;
       d.add_feature(FeatureKind::Thicken {
         faces: vec![],

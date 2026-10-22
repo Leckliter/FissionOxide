@@ -502,6 +502,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= crate::form_ui::overlay(app, &resp, &painter, &ctx, &project, &ray);
   consumed |= crate::handles::show(app, &resp, &painter, &ctx, &project, &ray, step);
+  crate::dialogs::surface::patch_overlay(app, &painter, &project);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
   if app.objects.joints || app.objects.joint_origins {
     consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);

@@ -2937,3 +2937,62 @@ fn the_material_browser_tree_has_one_library_per_row() {
   assert!(window.bottom() - bar.bottom() < 24.0, "{bar:?} in {window:?}");
   assert!(window.bottom() <= 785.0, "the browser fits the window: {window:?}");
 }
+
+/// The SURFACE tab's Create dialogs draw Fusion's rows (`ui:surface:*-rows`,
+/// `ui:surface:sweep-loft-missing`): no Operation row and no Preview checkbox, Feature and
+/// Analysis tabs on Sweep, Loft, Patch and Ruled, and the value rows once something is picked.
+#[test]
+fn surface_create_dialogs_draw_fusions_rows() {
+  use crate::dialogs::Kind;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"}));
+  h.app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+  h.app.run("sketch.finish", json!({}));
+  h.app.s.selection.clear();
+  let rows = |h: &mut Harness, kind: Kind| -> Vec<String> {
+    h.app.start(kind);
+    for _ in 0..3 {
+      h.frame(vec![]);
+    }
+    let t: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t.trim().to_string()).collect();
+    h.app.cancel_dialog();
+    h.frame(vec![]);
+    t
+  };
+  let has = |t: &[String], want: &[&str]| {
+    for w in want {
+      assert!(t.iter().any(|x| x == w), "no {w:?} in {t:?}");
+    }
+    for no in ["Operation", "Preview", "Sketch", "Curves (default all)"] {
+      assert!(!t.iter().any(|x| x == no), "{no:?} drawn: {t:?}");
+    }
+  };
+  let t = rows(&mut h, Kind::SurfExtrude);
+  has(&t, &["EXTRUDE", "Profiles", "1 selected", "Chaining", "Start", "Profile Plane", "Direction", "One Side"]);
+  has(&t, &["Extent Type", "Distance", "Taper Angle"]);
+  let t = rows(&mut h, Kind::SurfRevolve);
+  has(&t, &["REVOLVE", "Profile", "1 selected", "Chaining", "Axis", "Select", "Project Axis"]);
+  assert!(!t.iter().any(|x| x == "Angle"), "Angle waits for the axis: {t:?}");
+  let t = rows(&mut h, Kind::SurfSweep);
+  has(&t, &["SWEEP", "Feature", "Analysis", "Type", "Single Path", "Profile", "Path", "Chain Selection"]);
+  has(&t, &["Orientation", "Perpendicular"]);
+  let t = rows(&mut h, Kind::SurfLoft);
+  has(&t, &["LOFT", "Feature", "Analysis", "Profiles", "Guide Type", "Rails", "Chain Selection", "Closed"]);
+  has(&t, &["Tangent Edges"]);
+  let t = rows(&mut h, Kind::Form(&crate::forms::PATCH));
+  has(&t, &["PATCH", "Feature", "Analysis", "Boundary Edges", "Group Edges", "Interior Rails/Points", "Flip"]);
+  has(&t, &["Enable Chaining"]);
+  let t = rows(&mut h, Kind::Form(&crate::forms::RULED));
+  has(&t, &["RULED", "Feature", "Analysis", "Edges", "Chain Selection", "Type", "Normal"]);
+  assert!(!t.iter().any(|x| x == "Distance"), "Distance waits for an edge: {t:?}");
+  let t = rows(&mut h, Kind::Form(&crate::forms::SURFACE_OFFSET));
+  has(&t, &["OFFSET", "Faces / Surface Bodies", "Chain Selection", "Offset Type"]);
+  assert!(!t.iter().any(|x| x == "Feature"), "no tabs: {t:?}");
+  // the Analysis tab keeps the picks and hides the Feature rows
+  h.app.start(Kind::SurfSweep);
+  h.frame(vec![]);
+  let tab = h.find(vec![], "Analysis").expect("the Analysis tab");
+  h.move_then_click(tab.center());
+  let t: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
+  assert!(!t.iter().any(|x| x == "Orientation"), "{t:?}");
+}
