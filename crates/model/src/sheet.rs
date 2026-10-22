@@ -13,7 +13,7 @@ use fox_kernel::glam::DVec3;
 use fox_kernel::{Bend, FaceInfo, Plane, Shape, SurfaceKind};
 use fox_sketch::{CurveId, CurveKind, Loop, Profile, Seg, Sketch};
 
-use crate::{CornerRelief, ReliefShape, SheetMetalRule};
+use crate::{Corner3Relief, CornerPlacement, CornerRelief, ReliefShape, SheetMetalRule};
 
 /// Points closer than this join a path.
 const JOIN_TOL: f64 = 1e-6;
@@ -31,6 +31,8 @@ pub struct SheetInfo {
   pub relief_width: f64,
   /// Past the bend.
   pub relief_depth: f64,
+  /// Narrower material beside a relief goes with it.
+  pub relief_remnant: f64,
   /// Mitered corners and rips.
   pub gap: f64,
   /// The body is a flat pattern (after Unfold).
@@ -38,6 +40,10 @@ pub struct SheetInfo {
   pub corner_relief: CornerRelief,
   /// mm; `None` = the default for the shape.
   pub corner_relief_size: Option<f64>,
+  pub corner_placement: CornerPlacement,
+  pub corner3_relief: Corner3Relief,
+  /// mm
+  pub corner3_radius: f64,
   /// Set on lofted flanges, which the B-rep unfolder can't flatten (see [`crate::sheet2`]).
   pub developed: Option<std::sync::Arc<crate::sheet2::Development>>,
 }
@@ -71,16 +77,34 @@ impl SheetInfo {
   }
 }
 
-/// Evaluates a rule's expressions.
+/// A rule's scope: the design's parameters, and `Thickness` once the thickness is known.
+struct RuleScope<'a> {
+  params: &'a HashMap<String, f64>,
+  thickness: Option<f64>,
+}
+
+impl fox_expr::Scope for RuleScope<'_> {
+  fn get(&self, name: &str) -> Option<f64> {
+    match self.thickness {
+      Some(t) if name == "Thickness" => Some(t),
+      _ => self.params.get(name).copied(),
+    }
+  }
+}
+
+/// Evaluates a rule's expressions. Every value but the thickness may use `Thickness`.
 pub fn eval_rule(rule: &SheetMetalRule, params: &HashMap<String, f64>) -> Result<SheetInfo, String> {
-  let len = |e: &str| fox_expr::eval(e, fox_expr::Kind::Length, params).map_err(|err| format!("'{e}': {err}"));
-  let thickness = len(&rule.thickness)?;
-  let bend_radius = len(&rule.bend_radius)?;
-  let k_factor = fox_expr::eval(&rule.k_factor, fox_expr::Kind::Unitless, params)
-    .map_err(|err| format!("'{}': {err}", rule.k_factor))?;
+  let mut scope = RuleScope { params, thickness: None };
+  let thickness = fox_expr::eval(&rule.thickness, fox_expr::Kind::Length, &scope)
+    .map_err(|err| format!("'{}': {err}", rule.thickness))?;
   if !(thickness > 1e-6 && thickness.is_finite()) {
     return Err(format!("rule {}: the thickness must be positive", rule.name));
   }
+  scope.thickness = Some(thickness);
+  let len = |e: &str| fox_expr::eval(e, fox_expr::Kind::Length, &scope).map_err(|err| format!("'{e}': {err}"));
+  let bend_radius = len(&rule.bend_radius)?;
+  let k_factor = fox_expr::eval(&rule.k_factor, fox_expr::Kind::Unitless, &scope)
+    .map_err(|err| format!("'{}': {err}", rule.k_factor))?;
   if !(bend_radius >= 0.0 && bend_radius.is_finite()) {
     return Err(format!("rule {}: the bend radius must not be negative", rule.name));
   }
@@ -90,8 +114,10 @@ pub fn eval_rule(rule: &SheetMetalRule, params: &HashMap<String, f64>) -> Result
   let or = |e: &str, default: f64| -> Result<f64, String> { if e.trim().is_empty() { Ok(default) } else { len(e) } };
   let relief_width = or(&rule.relief_width, thickness)?;
   let relief_depth = or(&rule.relief_depth, thickness / 2.0)?;
+  let relief_remnant = or(&rule.relief_remnant, thickness * 2.0)?;
   let gap = or(&rule.gap, thickness / 2.0)?;
-  if !(relief_width > 0.0 && relief_depth >= 0.0 && gap > 0.0) {
+  let corner3_radius = or(&rule.corner3_radius, thickness)?;
+  if !(relief_width > 0.0 && relief_depth >= 0.0 && relief_remnant >= 0.0 && gap > 0.0 && corner3_radius > 0.0) {
     return Err(format!("rule {}: relief sizes and the gap must be positive", rule.name));
   }
   let corner_relief_size = if rule.corner_relief_size.trim().is_empty() {
@@ -111,10 +137,14 @@ pub fn eval_rule(rule: &SheetMetalRule, params: &HashMap<String, f64>) -> Result
     relief: rule.relief,
     relief_width,
     relief_depth,
+    relief_remnant,
     gap,
     flat: false,
     corner_relief: rule.corner_relief,
     corner_relief_size,
+    corner_placement: rule.corner_placement,
+    corner3_relief: rule.corner3_relief,
+    corner3_radius,
     developed: None,
   })
 }

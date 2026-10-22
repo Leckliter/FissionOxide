@@ -62,7 +62,8 @@ use fox_sketch::{CurveId, PointId, Sketch};
 /// Current file format version.
 ///
 /// - 2: a symmetric thicken's `thickness` is the thickness on each side (it was the total).
-pub const FORMAT_VERSION: u32 = 2;
+/// - 3: the built-in sheet metal rule is Fusion's ".063 Aluminum" (it was a 1 mm "Default").
+pub const FORMAT_VERSION: u32 = 3;
 /// Hostile-file guards.
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMETERS: usize = 10_000;
@@ -273,7 +274,9 @@ pub struct Parameter {
   pub favorite: bool,
 }
 
-/// A sheet metal rule, as in Fusion: the material settings sheet metal features share.
+/// A sheet metal rule, as in Fusion: the material settings sheet metal features share. Every
+/// value but the thickness may refer to `Thickness`; an empty value takes Fusion's default
+/// expression (see [`sheet::eval_rule`]).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SheetMetalRule {
   pub name: String,
@@ -291,32 +294,143 @@ pub struct SheetMetalRule {
   /// How far reliefs reach past the bend; empty = half the thickness.
   #[serde(default)]
   pub relief_depth: String,
+  /// Material narrower than this left beside a relief is removed with it; empty = twice the
+  /// thickness.
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub relief_remnant: String,
   /// Gap left at mitered corners and rips; empty = half the thickness.
   #[serde(default)]
   pub gap: String,
-  /// Notch cut where two flanges' bends meet at a corner.
+  /// Notch cut where two flanges' bends meet at a corner (Fusion's 2-Bend Intersection).
   #[serde(default)]
   pub corner_relief: CornerRelief,
   /// Corner relief size (square side / round diameter / tear width); empty = default, see
   /// [`sheet::SheetInfo::corner_relief_size`].
   #[serde(default)]
   pub corner_relief_size: String,
+  /// Where a 2-bend corner relief is centred.
+  #[serde(default, skip_serializing_if = "is_default")]
+  pub corner_placement: CornerPlacement,
+  /// What is cut where three bends meet (Fusion's 3-Bend Intersection).
+  #[serde(default, skip_serializing_if = "is_default")]
+  pub corner3_relief: Corner3Relief,
+  /// Radius of a Round with Radius 3-bend relief; empty = the thickness.
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub corner3_radius: String,
 }
 
-impl Default for SheetMetalRule {
-  fn default() -> Self {
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+  *v == T::default()
+}
+
+/// The library's default rule, which a design's first sheet metal feature takes.
+pub const DEFAULT_SHEET_RULE: &str = ".063 Aluminum";
+
+impl SheetMetalRule {
+  /// A rule with Fusion's default expressions: `thickness` and `bend_radius` as given, the rest
+  /// in terms of the thickness (round reliefs, round 2-bend and round-with-radius 3-bend corner
+  /// reliefs).
+  pub fn library(name: &str, thickness: &str, bend_radius: &str, k_factor: &str) -> Self {
     SheetMetalRule {
-      name: "Default".into(),
+      name: name.into(),
+      thickness: thickness.into(),
+      bend_radius: bend_radius.into(),
+      k_factor: k_factor.into(),
+      relief: ReliefShape::Round,
+      relief_width: "Thickness".into(),
+      relief_depth: "Thickness * 0.5".into(),
+      relief_remnant: "Thickness * 2.0".into(),
+      gap: "Thickness".into(),
+      corner_relief: CornerRelief::Round,
+      corner_relief_size: "Thickness * 4.0".into(),
+      corner_placement: CornerPlacement::Intersection,
+      corner3_relief: Corner3Relief::RoundWithRadius,
+      corner3_radius: "Thickness".into(),
+    }
+  }
+}
+
+impl SheetMetalRule {
+  /// A plain rule, 1 mm thick with a 1 mm bend radius and K 0.44, whose reliefs and gap follow
+  /// the thickness (the empty values) and with no corner relief: what `sheet.rule` starts a new
+  /// rule from, and the built-in rule of designs saved before format 3.
+  pub fn plain(name: &str) -> Self {
+    SheetMetalRule {
+      name: name.into(),
       thickness: "1 mm".into(),
       bend_radius: "1 mm".into(),
       k_factor: "0.44".into(),
       relief: ReliefShape::Rectangular,
       relief_width: String::new(),
       relief_depth: String::new(),
+      relief_remnant: String::new(),
       gap: String::new(),
       corner_relief: CornerRelief::None,
       corner_relief_size: String::new(),
+      corner_placement: CornerPlacement::Intersection,
+      corner3_relief: Corner3Relief::NoReplacement,
+      corner3_radius: String::new(),
     }
+  }
+}
+
+impl Default for SheetMetalRule {
+  /// The library default, ".063 Aluminum".
+  fn default() -> Self {
+    SheetMetalRule::library(DEFAULT_SHEET_RULE, "0.063 in", "0.035 in", "0.4")
+  }
+}
+
+/// Fusion's sheet metal rule library, in its order. [`DEFAULT_SHEET_RULE`] is the default.
+pub fn sheet_rule_library() -> Vec<SheetMetalRule> {
+  let r = SheetMetalRule::library;
+  vec![
+    r("Steel (mm)", "2.5 mm", "Thickness", "0.44"),
+    r("Stainless Steel (mm)", "2.5 mm", "Thickness", "0.44"),
+    r("Aluminum (mm)", "2.5 mm", "Thickness", "0.4"),
+    r("Steel (in)", "0.1 in", "Thickness", "0.44"),
+    r("Stainless Steel (in)", "0.1 in", "Thickness", "0.44"),
+    r("Aluminum (in)", "0.1 in", "Thickness", "0.4"),
+    r("Stainless Steel (0.0329 in)", "0.0329 in", "Thickness", "0.44"),
+    r(".050 Aluminum", "0.05 in", "Thickness", "0.4"),
+    r("18 Gauge Steel", "0.0478 in", "Thickness", "0.44"),
+    r(".125 Aluminum", "0.125 in", "Thickness", "0.4"),
+    SheetMetalRule::default(),
+    r(".125 Steel", "0.125 in", "Thickness", "0.44"),
+    r("10 Gauge Steel", "0.1345 in", "Thickness", "0.44"),
+    r(".063 Steel", "0.063 in", "Thickness", "0.44"),
+    r("16 Gauge Steel", "0.0598 in", "Thickness", "0.44"),
+    r("5/32 Single Wall Cardboard", "0.15625 in", "Thickness", "0.5"),
+    r(".25 Aluminum", "0.25 in", "Thickness", "0.4"),
+    r("Stainless Steel (18 Gauge)", "0.05 in", "Thickness", "0.44"),
+    r("Steel (in)(1)", "0.1 in", "Thickness", "0.44"),
+  ]
+}
+
+/// A sheet metal rule library: the rules a design can take, and the one a design's first sheet
+/// metal feature takes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SheetRuleLibrary {
+  pub rules: Vec<SheetMetalRule>,
+  /// The default rule's name.
+  pub default: String,
+}
+
+impl Default for SheetRuleLibrary {
+  /// Fusion's library ([`sheet_rule_library`]).
+  fn default() -> Self {
+    SheetRuleLibrary { rules: sheet_rule_library(), default: DEFAULT_SHEET_RULE.into() }
+  }
+}
+
+impl SheetRuleLibrary {
+  pub fn get(&self, name: &str) -> Option<&SheetMetalRule> {
+    self.rules.iter().find(|r| r.name == name)
+  }
+
+  /// The default rule (Fusion's default if the named one is gone).
+  pub fn default_rule(&self) -> SheetMetalRule {
+    self.get(&self.default).or_else(|| self.rules.first()).cloned().unwrap_or_default()
   }
 }
 
@@ -356,6 +470,28 @@ pub enum CornerRelief {
   Round,
   Square,
   Tear,
+}
+
+/// Where a 2-bend corner relief is centred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerPlacement {
+  /// On the point where the bends' outer lines cross.
+  #[default]
+  Intersection,
+  /// Tangent to the bends' ends.
+  Tangent,
+}
+
+/// What is cut where three bends meet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Corner3Relief {
+  #[default]
+  NoReplacement,
+  Intersection,
+  FullRound,
+  RoundWithRadius,
 }
 
 /// One profile of a lofted flange: a sketch's largest closed profile, or an open chain of its
@@ -2357,6 +2493,16 @@ impl FeatureKind {
     }
   }
 
+  pub fn sheet_rule_mut(&mut self) -> Option<&mut String> {
+    match self {
+      FeatureKind::Flange { rule, .. }
+      | FeatureKind::ContourFlange { rule, .. }
+      | FeatureKind::ConvertToSheetMetal { rule, .. }
+      | FeatureKind::LoftedFlange { rule, .. } => Some(rule),
+      _ => None,
+    }
+  }
+
   /// Features this one depends on directly (sketches, construction planes).
   pub fn depends_on(&self) -> Vec<FeatureId> {
     let plane_dep = |p: &PlaneRef| match p {
@@ -2919,9 +3065,33 @@ impl Design {
   }
 
   /// The rule a sheet metal feature uses: by name, or the default (the first rule, else the
-  /// built-in one) for an empty name.
+  /// library default) for an empty name. A name the design lacks resolves in Fusion's library.
   pub fn sheet_rule(&self, name: &str) -> Option<SheetMetalRule> {
     self.clone_rules().get(name).ok()
+  }
+
+  /// The rule the design's sheet metal uses, as the browser's Rule row shows it: the first sheet
+  /// metal feature's. `None` before the first one.
+  pub fn component_sheet_rule(&self) -> Option<SheetMetalRule> {
+    let name = self.features.iter().find_map(|f| f.kind.sheet_rule())?;
+    self.sheet_rule(name)
+  }
+
+  /// Switch Rule: makes `rule` the design's default (adding or replacing it) and points every
+  /// sheet metal feature at it.
+  pub fn switch_sheet_rule(&mut self, rule: SheetMetalRule) -> Result<(), DesignError> {
+    let name = rule.name.clone();
+    self.set_sheet_rule(rule)?;
+    if let Some(i) = self.sheet_metal_rules.iter().position(|r| r.name == name) {
+      let r = self.sheet_metal_rules.remove(i);
+      self.sheet_metal_rules.insert(0, r);
+    }
+    for f in &mut self.features {
+      if let Some(r) = f.kind.sheet_rule_mut() {
+        *r = name.clone();
+      }
+    }
+    Ok(())
   }
 
   /// Adds a rule or replaces the one with the same name.
@@ -2936,6 +3106,21 @@ impl Design {
           return Err(DesignError::TooMany);
         }
         self.sheet_metal_rules.push(rule)
+      }
+    }
+    Ok(())
+  }
+
+  /// Renames a rule, keeping its place in the list, and the features that name it follow.
+  pub fn rename_sheet_rule(&mut self, from: &str, to: &str) -> Result<(), DesignError> {
+    if to.trim().is_empty() || self.sheet_metal_rules.iter().any(|r| r.name == to) {
+      return Err(DesignError::BadParameterName(to.to_string()));
+    }
+    let r = self.sheet_metal_rules.iter_mut().find(|r| r.name == from);
+    r.ok_or_else(|| DesignError::NoParameter(from.to_string()))?.name = to.to_string();
+    for f in &mut self.features {
+      if let Some(r) = f.kind.sheet_rule_mut().filter(|r| *r == from) {
+        *r = to.to_string();
       }
     }
     Ok(())
@@ -3012,6 +3197,13 @@ impl Design {
         }
       }
     }
+    if self.version < 3
+      && self.sheet_metal_rules.is_empty()
+      && self.features.iter().any(|f| f.kind.sheet_rule().is_some())
+    {
+      // the built-in rule was "Default", 1 mm thick, before it became Fusion's ".063 Aluminum"
+      self.sheet_metal_rules.push(SheetMetalRule::plain("Default"));
+    }
     self.version = FORMAT_VERSION;
   }
 
@@ -3041,8 +3233,10 @@ impl Rules {
     }
     match self.list.iter().find(|r| r.name == name) {
       Some(r) => Ok(r.clone()),
-      None if name == "Default" && self.list.is_empty() => Ok(SheetMetalRule::default()),
-      None => Err(format!("there is no sheet metal rule '{name}'")),
+      None => sheet_rule_library()
+        .into_iter()
+        .find(|r| r.name == name)
+        .ok_or_else(|| format!("there is no sheet metal rule '{name}'")),
     }
   }
 }

@@ -233,6 +233,9 @@ pub struct Session {
   pub active_component: Option<fox_model::ComponentId>,
   /// Simulation studies meshed (and solved) in this session: their meshes and results.
   pub sim_runs: Vec<sim::SimRun>,
+  /// The sheet metal rule library: a sheet metal feature naming one of its rules copies it into
+  /// the design, and a design's first one takes its default.
+  pub sheet_library: fox_model::SheetRuleLibrary,
 }
 
 impl Default for Session {
@@ -267,6 +270,7 @@ impl Session {
       drawing_sheet: None,
       active_component: None,
       sim_runs: Vec::new(),
+      sheet_library: fox_model::SheetRuleLibrary::default(),
     };
     s.rebuild();
     s
@@ -690,6 +694,8 @@ mod tests_sheet3;
 mod tests_sheet4;
 #[cfg(test)]
 mod tests_sheet5;
+#[cfg(test)]
+mod tests_sheet_rules;
 #[cfg(test)]
 mod tests_sim;
 #[cfg(test)]

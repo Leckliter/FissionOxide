@@ -450,7 +450,7 @@ fn sheet_design() -> Design {
     thickness: "t".into(),
     bend_radius: "3 mm".into(),
     k_factor: "0.5".into(),
-    ..SheetMetalRule::default()
+    ..SheetMetalRule::plain("")
   })
   .unwrap();
   d
@@ -1059,7 +1059,7 @@ fn frames_design(legacy: bool) -> (Design, Model, [FeatureId; 4]) {
     let json = d.to_json();
     assert!(!json.contains("behaviours"), "a file without flags");
     d = Design::from_json(&json).unwrap();
-    assert!(d.behaviours.is_empty() && d.version == 2);
+    assert!(d.behaviours.is_empty() && d.version == crate::FORMAT_VERSION);
   }
   let m = regenerate(&mut d);
   ok(&m);

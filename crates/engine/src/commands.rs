@@ -285,8 +285,10 @@ cmds! {
   "drawing.surface_finish" => "Surface texture symbol (Ra, µm) on a model point", "{drawing?, view?, point: [x,y,z], offset?: [x,y], roughness, process?: any|removal|no_removal}";
   "drawing.balloon" => "Balloon with a component's parts list item number (follows the parts list)", "{drawing?, view?, component: id|name, point?: [x,y,z], offset?: [x,y]}";
   "drawing.remove_dimension" => "Remove a dimension, note or annotation by index", "{drawing?, index}";
-  "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?, corner_relief?: none|round|square|tear, corner_relief_size?}";
+  "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default); values may use Thickness", "{name?, from? (renames this rule to name), thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, relief_remnant?, gap?, corner_relief?: none|round|square|tear, corner_relief_size?, corner_placement?: intersection|tangent, corner3_relief?: no_replacement|intersection|full_round|round_with_radius, corner3_radius?}";
   "sheet.rules" => "List the sheet metal rules", "{}";
+  "sheet.library" => "List the sheet metal rule library (rules a design can take) and its default", "{}";
+  "sheet.switch_rule" => "Switch Rule: the design's sheet metal takes another rule (from the design or the library)", "{rule}";
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
   "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, center? (the sheet straddles the sketch), operation?: new_body|join, targets?: [body] (bodies join/cut may change)}";
   "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
@@ -1513,22 +1515,32 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Ok(json!({"removed": n}))
     }
     "sheet.rule" => {
-      let name = opt_str(p, "name").unwrap_or("Default").to_string();
-      let mut rule = s
-        .design
-        .sheet_metal_rules
-        .iter()
-        .find(|r| r.name == name)
-        .cloned()
-        .unwrap_or_else(|| SheetMetalRule { name: name.clone(), ..s.design.sheet_rule("").unwrap_or_default() });
+      let default = s.design.sheet_rule("").unwrap_or_default();
+      let name = opt_str(p, "name").map(str::to_string).unwrap_or_else(|| default.name.clone());
+      // `from`: the rule is renamed from it (Edit Rule's Rule Name)
+      let from = opt_str(p, "from").filter(|f| *f != name).map(str::to_string);
+      let existing = from.as_deref().unwrap_or(&name);
+      let mut rule = match s.design.sheet_metal_rules.iter().find(|r| r.name == existing) {
+        Some(r) => r.clone(),
+        // a new rule starts as the design's default rule; in a design without rules, unnamed it
+        // is the library default, named a plain rule
+        None => match s.design.sheet_metal_rules.first() {
+          Some(r) => r.clone(),
+          None if opt_str(p, "name").is_none() => default.clone(),
+          None => SheetMetalRule::plain(&name),
+        },
+      };
+      rule.name = name.clone();
       for (k, slot) in [
         ("thickness", &mut rule.thickness),
         ("bend_radius", &mut rule.bend_radius),
         ("k_factor", &mut rule.k_factor),
         ("relief_width", &mut rule.relief_width),
         ("relief_depth", &mut rule.relief_depth),
+        ("relief_remnant", &mut rule.relief_remnant),
         ("gap", &mut rule.gap),
         ("corner_relief_size", &mut rule.corner_relief_size),
+        ("corner3_radius", &mut rule.corner3_radius),
       ] {
         if let Some(e) = opt_expr(p, k) {
           *slot = e;
@@ -1551,15 +1563,40 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           o => return Err(CmdError::new(format!("unknown corner relief '{o}' (none, round, square, tear)"))),
         };
       }
+      if let Some(r) = opt_str(p, "corner_placement") {
+        rule.corner_placement = match r {
+          "intersection" => fox_model::CornerPlacement::Intersection,
+          "tangent" => fox_model::CornerPlacement::Tangent,
+          o => return Err(CmdError::new(format!("unknown corner placement '{o}' (intersection, tangent)"))),
+        };
+      }
+      if let Some(r) = opt_str(p, "corner3_relief") {
+        rule.corner3_relief = match r {
+          "no_replacement" => fox_model::Corner3Relief::NoReplacement,
+          "intersection" => fox_model::Corner3Relief::Intersection,
+          "full_round" => fox_model::Corner3Relief::FullRound,
+          "round_with_radius" => fox_model::Corner3Relief::RoundWithRadius,
+          o => {
+            return Err(CmdError::new(format!(
+              "unknown 3-bend relief '{o}' (no_replacement, intersection, full_round, round_with_radius)"
+            )));
+          }
+        };
+      }
       let info = fox_model::sheet::eval_rule(&rule, &params_scope(s)).map_err(CmdError::new)?;
-      s.edit(|d| Ok(d.set_sheet_rule(rule)?))?;
+      s.edit(|d| {
+        if let Some(f) = &from {
+          d.rename_sheet_rule(f, &rule.name)?;
+        }
+        Ok(d.set_sheet_rule(rule)?)
+      })?;
       Ok(json!({"name": name, "thickness": info.thickness, "bend_radius": info.bend_radius, "k_factor": info.k_factor}))
     }
     "sheet.rules" => {
       let scope = params_scope(s);
       let mut rules = s.design.sheet_metal_rules.clone();
       if rules.is_empty() {
-        rules.push(SheetMetalRule::default());
+        rules.push(s.sheet_library.default_rule());
       }
       Ok(json!(
         rules
@@ -1574,6 +1611,18 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           })
           .collect::<Vec<_>>()
       ))
+    }
+    "sheet.library" => {
+      let lib = &s.sheet_library;
+      Ok(json!({"default": lib.default, "rules": lib.rules.iter().map(|r| r.name.as_str()).collect::<Vec<_>>()}))
+    }
+    "sheet.switch_rule" => {
+      let name = req_str(p, "rule")?;
+      let rule =
+        library_rule(s, name).ok_or_else(|| CmdError::new(format!("there is no sheet metal rule '{name}'")))?;
+      fox_model::sheet::eval_rule(&rule, &params_scope(s)).map_err(CmdError::new)?;
+      s.edit(|d| Ok(d.switch_sheet_rule(rule)?))?;
+      Ok(json!({"rule": name}))
     }
     "sheet.rule_remove" => {
       let name = req_str(p, "name")?.to_string();
@@ -1890,7 +1939,11 @@ pub(crate) fn body_sel(p: &Value) -> BodySel {
 
 pub(crate) fn add_feature(s: &mut Session, kind: FeatureKind) -> CmdResult {
   let active = s.active_component;
+  let adopt = rule_to_adopt(s, &kind);
   let id = s.edit(|d| {
+    if let Some(r) = adopt {
+      d.set_sheet_rule(r)?;
+    }
     let id = d.add_feature(kind)?;
     crate::newcomp::attach(d, id, None, active)?;
     Ok(id)
@@ -1906,7 +1959,11 @@ pub(crate) fn add_op_feature(s: &mut Session, kind: FeatureKind, p: &Value) -> C
   }
   let active = s.active_component;
   let name = crate::newcomp::name_param(p);
+  let adopt = rule_to_adopt(s, &kind);
   let id = s.edit(|d| {
+    if let Some(r) = adopt {
+      d.set_sheet_rule(r)?;
+    }
     let id = d.add_feature(kind)?;
     if let Some(f) = d.feature_mut(id) {
       f.targets = targets;
@@ -2112,13 +2169,35 @@ fn body_topology(s: &Session, p: &Value) -> CmdResult {
   Ok(Value::Object(out))
 }
 
-/// `rule`: a rule name that must exist (empty / absent = the default rule).
+/// `rule`: a rule name that must exist in the design or the library (empty / absent = the
+/// default rule).
 pub(crate) fn rule_name(s: &Session, p: &Value) -> Result<String, CmdError> {
   let name = opt_str(p, "rule").unwrap_or("").to_string();
-  if s.design.sheet_rule(&name).is_none() {
+  if library_rule(s, &name).is_none() {
     return Err(CmdError::new(format!("there is no sheet metal rule '{name}'")));
   }
   Ok(name)
+}
+
+/// A rule by name: the design's, else the library's; "" is the design's default, else the
+/// library's.
+pub(crate) fn library_rule(s: &Session, name: &str) -> Option<SheetMetalRule> {
+  let design = &s.design.sheet_metal_rules;
+  if name.is_empty() {
+    return Some(design.first().cloned().unwrap_or_else(|| s.sheet_library.default_rule()));
+  }
+  design.iter().find(|r| r.name == name).or_else(|| s.sheet_library.get(name)).cloned()
+}
+
+/// The library rule a new sheet metal feature copies into the design, as Fusion records the rule
+/// a design uses: the one it names, or the library default for a design's first.
+fn rule_to_adopt(s: &Session, kind: &FeatureKind) -> Option<SheetMetalRule> {
+  let name = kind.sheet_rule()?;
+  let design = &s.design.sheet_metal_rules;
+  if design.iter().any(|r| r.name == name) || (name.is_empty() && !design.is_empty()) {
+    return None;
+  }
+  library_rule(s, name)
 }
 
 /// `body`, or the only sheet metal body.

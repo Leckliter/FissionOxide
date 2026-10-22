@@ -17,7 +17,7 @@ fn sheet_design() -> Design {
     thickness: "2 mm".into(),
     bend_radius: "3 mm".into(),
     k_factor: "0.5".into(),
-    ..SheetMetalRule::default()
+    ..SheetMetalRule::plain("")
   })
   .unwrap();
   d
