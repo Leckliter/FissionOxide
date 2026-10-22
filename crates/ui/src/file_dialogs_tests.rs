@@ -244,7 +244,7 @@ fn escape_closes_the_prompts_image_options_and_3d_print_but_not_save() {
   h.app.data.open = true;
   crate::capture::open_print(&mut h.app);
   crate::capture::open_image(&mut h.app);
-  h.app.data.ask_new_folder();
+  h.app.data.ask_connect();
   h.frame(vec![]);
   h.frame(vec![]);
   assert!(h.area(egui::Id::new(crate::capture::PRINT_AREA)).is_some(), "3D PRINT shows");

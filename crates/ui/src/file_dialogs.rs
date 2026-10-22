@@ -186,7 +186,8 @@ pub(crate) fn modal_open(app: &App) -> bool {
 /// Returns whether the key was taken.
 pub(crate) fn escape(app: &mut App, ctx: &egui::Context) -> bool {
   let pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape) && !i.modifiers.any());
-  if !pressed || egui::Popup::is_any_open(ctx) || modal_open(app) {
+  // the data panel's Upload, Move and Copy windows and its inline name editor take Escape
+  if !pressed || egui::Popup::is_any_open(ctx) || modal_open(app) || app.data.takes_keys() {
     return false;
   }
   let closed = if app.data.prompt_open() {
