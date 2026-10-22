@@ -1473,9 +1473,12 @@ pub enum FeatureKind {
     #[serde(default = "stitch_tolerance")]
     tolerance: String,
   },
-  /// Breaks bodies into one surface body per face.
+  /// Breaks bodies into one surface body per face; picked faces come off their body each as a
+  /// surface body of its own (the rest of the body stays together).
   Unstitch {
     bodies: Vec<BodyId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    faces: Vec<FaceRef>,
   },
   /// A ruled surface between two edges.
   Ruled {
@@ -1505,6 +1508,10 @@ pub enum FeatureKind {
     /// Points picking the pieces to remove (everything else stays).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     remove: Vec<[f64; 3]>,
+    /// Fusion's Trim: only the bodies the tool cuts change, and only the pieces nearest the
+    /// `remove` points go (none: the cut bodies are just split); a tool that cuts none fails.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    cut_only: bool,
   },
   /// Flips the normals of surface bodies.
   ReverseNormal {
@@ -1610,6 +1617,10 @@ pub enum FeatureKind {
     /// Points picking the pieces to remove (everything else stays).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     remove: Vec<[f64; 3]>,
+    /// Fusion's Trim: only the bodies the tool cuts change, and only the pieces nearest the
+    /// `remove` points go (none: the cut bodies are just split); a tool that cuts none fails.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    cut_only: bool,
   },
   /// Sheet metal lofted flange: a sheet between two profiles (closed profiles are opened by the
   /// rule's gap so the flange unfolds). The profiles are one face of the sheet.

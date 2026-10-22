@@ -196,6 +196,13 @@ impl Dialog {
           self.manip.anchor = super::flange::flange_anchor(s, &key).map(|(o, d)| (key, o, d));
         }
       }
+      // Extend's arrow leaves its first edge across the surface
+      Kind::Form(f) if f.cmd == crate::forms::EXTEND_CMD && !self.applied => {
+        let key = self.form_value("edges").and_then(|e| e.as_array()?.first().cloned()).unwrap_or(Value::Null);
+        if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
+          self.manip.anchor = extend_anchor(s, &key).map(|(o, d)| (key, o, d));
+        }
+      }
       // the arrow's reach is measured afresh each frame (the preview scales the very curves)
       Kind::SkScale => self.manip.anchor = self.scale_anchor(s).map(|(o, d)| (Value::Null, o, d)),
       _ => {}
@@ -298,6 +305,15 @@ impl Dialog {
         dir: *dir * sign,
         value: self.len(s, &self.distance).unwrap_or(0.0),
       });
+    }
+    // Extend: the distance along the arrow out of the first edge
+    if let Kind::Form(f) = self.kind
+      && f.cmd == crate::forms::EXTEND_CMD
+    {
+      let edges = self.form_value("edges")?.as_array()?;
+      let (_, origin, dir) = self.manip.anchor.as_ref().filter(|a| edges.first() == Some(&a.0))?;
+      let value = self.len(s, self.form_value("distance")?.as_str()?).unwrap_or(0.0);
+      return Some(Manipulator { origin: *origin, dir: *dir, value });
     }
     if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::OffsetFace | Kind::SkOffset)
       || (self.editing.is_some() && !matches!(self.kind, Kind::Fillet | Kind::Chamfer))
@@ -629,6 +645,11 @@ impl Dialog {
       Kind::PressPull | Kind::OffsetFace => self.distance = mm(self.unit, v),
       // a flange's height stops at the edge
       Kind::Flange if self.choice == "edge" => self.distance = mm(self.unit, v.max(0.0)),
+      // Extend doesn't go backwards
+      Kind::Form(f) if f.cmd == crate::forms::EXTEND_CMD => {
+        let Some(i) = f.inputs.iter().position(|x| x.key() == "distance") else { return false };
+        self.form.values[i] = json!(mm(self.unit, v.max(0.0)));
+      }
       // an offset is never zero: it keeps to the side it is on
       Kind::SkOffset => {
         self.distance = mm(self.unit, nonzero(v, step));
@@ -985,6 +1006,23 @@ fn anchor(s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
   let at = (v(0, &m.positions) + v(1, &m.positions) + v(2, &m.positions)) / 3.0;
   let n = (v(0, &m.normals) + v(1, &m.normals) + v(2, &m.normals)).try_normalize()?;
   Some((at, n))
+}
+
+/// Extend's arrow: the middle of the edge `key` names, pointing away from its face across the
+/// surface (the way the extension grows).
+fn extend_anchor(s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
+  let get = |k: &str| key.get(k).and_then(Value::as_u64).map(|v| v as u32);
+  let body = s.model.body(BodyId(get("body")?))?;
+  let edge = get("edge")?;
+  let e = body.edges().iter().find(|e| e.id == edge)?;
+  let f = body.faces().iter().find(|f| f.id == e.faces[0])?;
+  let along = (e.end - e.start).try_normalize().unwrap_or(DVec3::ZERO);
+  let mut d = e.mid - f.center;
+  d -= along * d.dot(along);
+  if f.kind == fox_engine::kernel::SurfaceKind::Plane {
+    d -= f.normal * d.dot(f.normal);
+  }
+  Some((e.mid, d.try_normalize()?))
 }
 
 /// The joint origin frame of a picked face, edge or point (as the joint command reads them).

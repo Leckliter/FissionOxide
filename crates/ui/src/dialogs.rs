@@ -30,6 +30,7 @@ mod pieces;
 mod press_owner;
 mod rows;
 mod simplify;
+mod stitch;
 pub(crate) use analysis::center_of_mass;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
@@ -2265,6 +2266,8 @@ impl Dialog {
         let before = self.form.values.clone();
         self.form.sync(f, s, last_unconsumed_sketch(s));
         self.form.chain_path(f, s);
+        self.extend_chain(f, s);
+        stitch::find_open_edges(&mut self.form, f, s);
         if self.form.values != before {
           self.dirty = !self.picks();
         }
@@ -2521,6 +2524,12 @@ impl Dialog {
             egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
               self.fields(app, ui);
             });
+          }
+          // Stitch's Stitch Result and Unstitched Edges groups
+          if let Kind::Form(f) = self.kind
+            && f.cmd == "surface.stitch"
+          {
+            self.stitch_groups(app, ui);
           }
           // a failed preview's message is in the error toast instead, as Fusion shows it
           if let Some(e) = self.error.as_ref().filter(|_| !self.failed()) {
@@ -2849,6 +2858,10 @@ impl Dialog {
       Kind::Section => !self.plane.is_null(),
       // Remove Features applies from its own Remove button
       Kind::Form(f) if crate::forms::close_only(f) => false,
+      // Trim previews its tool's cut, but OK waits for a piece to remove
+      Kind::Form(f) if f.cmd == crate::forms::TRIM_CMD => {
+        self.ready() && self.form_value("remove").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+      }
       // an offset of 0.00 sits on its curve, a fillet or shell of 0.00 has no size: OK waits
       // for a value
       _ => self.ready() && !self.waits_for_value(),
@@ -3116,6 +3129,11 @@ impl Dialog {
       self.remove_features_fields(app, ui);
       return;
     }
+    // Extend's Analysis tab
+    if crate::forms::has_analysis_tab(f) && self.solid.rsl.analysis_tab {
+      self.analysis_rows(ui);
+      return;
+    }
     let text_form = f.cmd == "sketch.text.form";
     let params = if text_form { crate::value_box::params_of(&app.s) } else { Vec::new() };
     for (i, input) in f.inputs.iter().enumerate() {
@@ -3133,6 +3151,11 @@ impl Dialog {
       }
       let v = self.form.values[i].clone();
       let greyed = crate::forms::greyed(f, input.key());
+      // Stitch's Tolerance has a slider under it
+      if f.cmd == "surface.stitch" && input.key() == "tolerance" {
+        self.stitch_tolerance(i, input, ui, dirty);
+        continue;
+      }
       // Coil's Profile: the circle drawn before the dialog opened
       if f.cmd == "coil.form" && input.key() == "plane" {
         ui.label("Profile");
@@ -3364,6 +3387,15 @@ impl Dialog {
         // counted on the tools' chip
         Input::Planes { .. } => {}
         Input::Pick { label, multi, .. } => self.form_pick_row(app, ui, i, label, *multi),
+        Input::TrimTool { label, .. } => {
+          ui.label(*label);
+          let n = match v.get("curves").and_then(Value::as_array) {
+            Some(c) => c.len().max(1),
+            None => usize::from(!v.is_null()),
+          };
+          sel_chip(ui, accent, &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
+          ui.end_row();
+        }
       }
     }
     if crate::forms::takes_sheet_points(f) {
@@ -5370,6 +5402,19 @@ fn press_pull_kind(s: &Session) -> Kind {
   }
 }
 
+impl Dialog {
+  /// Extend with Tangent Chain: the picked edges and the edges that continue them smoothly.
+  fn extend_chain(&mut self, f: &crate::forms::Form, s: &Session) {
+    let at = |k: &str| f.inputs.iter().position(|x| x.key() == k);
+    let (Some(ei), Some(ci)) = (at("edges"), at("chain")) else { return };
+    if f.cmd != crate::forms::EXTEND_CMD || self.form.values[ci] != json!(true) {
+      return;
+    }
+    let edges = self.form.values[ei].as_array().cloned().unwrap_or_default();
+    self.form.values[ei] = json!(with_tangent_chain(s, &edges));
+  }
+}
+
 /// `edges` (`{body, edge}`) with the edges that continue each of them smoothly, as Fusion's
 /// Tangent Chain picks them.
 fn with_tangent_chain(s: &Session, edges: &[Value]) -> Vec<Value> {
@@ -7264,7 +7309,7 @@ mod tests {
     let b = s.model.bodies[0].id;
     // extend the edge at x = 10 by the default 5 mm
     let e = s.model.bodies[0].edges().iter().find(|e| (e.mid.x - 10.0).abs() < 1e-6).unwrap().id;
-    let mut d = form(&mut s, &EXTEND, vec![Sel::Edge { body: b, edge: e }], &[]);
+    let mut d = form(&mut s, &EXTEND, vec![Sel::Edge { body: b, edge: e }], &[("distance", json!("5 mm"))]);
     apply(&mut s, &mut d);
     assert!((area(&s, b) - 150.0).abs() < 1e-6, "{}", area(&s, b));
     d.applied = false;

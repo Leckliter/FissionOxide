@@ -254,8 +254,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       )
     })(),
     "surface.unstitch" => (|| {
-      let bodies = body_list(s, p)?;
-      add_feature(s, FeatureKind::Unstitch { bodies })
+      let faces = if p.get("faces").is_some() { faces(s, p)? } else { Vec::new() };
+      let bodies = if faces.is_empty() || p.get("bodies").is_some() { body_list(s, p)? } else { Vec::new() };
+      add_feature(s, FeatureKind::Unstitch { bodies, faces })
     })(),
     "surface.ruled" => (|| {
       let (a, b) = (edge(s, p, "a")?, edge(s, p, "b")?);
@@ -268,11 +269,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       add_feature(s, FeatureKind::SurfaceOffset { faces, bodies, distance: req_expr(p, "distance")?, face_distances })
     })(),
     "surface.trim" => (|| {
+      let cut_only = crate::surfaces::cut_only(p)?;
       let bodies = body_list(s, p)?;
       let tool = plane_of(s, p, "tool")?;
       let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
       let (keep, remove) = (crate::surfaces::points(p, "keep")?, crate::surfaces::points(p, "remove")?);
-      add_feature(s, FeatureKind::Trim { bodies, tool, flip, keep, remove })
+      add_feature(s, FeatureKind::Trim { bodies, tool, flip, keep, remove, cut_only })
     })(),
     "surface.reverse" => (|| {
       let bodies = body_list(s, p)?;

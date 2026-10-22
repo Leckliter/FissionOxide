@@ -174,6 +174,12 @@ pub enum Input {
     multi: bool,
     prompt: &'static str,
   },
+  /// Trim's tool, from the first pick: a construction plane, sketch curves (every picked curve
+  /// of its sketch) or a body (of a picked body, face or edge).
+  TrimTool {
+    key: &'static str,
+    label: &'static str,
+  },
 }
 
 /// What a [`Input::Pick`] row takes.
@@ -221,7 +227,42 @@ impl Input {
       | Input::CheckOn { key, .. }
       | Input::Flip { key, .. }
       | Input::Planes { key }
-      | Input::Pick { key, .. } => key,
+      | Input::Pick { key, .. }
+      | Input::TrimTool { key, .. } => key,
+    }
+  }
+
+  /// The row's label.
+  pub fn label(&self) -> &'static str {
+    match self {
+      Input::Faces { label, .. }
+      | Input::FacesOpt { label, .. }
+      | Input::Face { label, .. }
+      | Input::Edges { label, .. }
+      | Input::Edge { label, .. }
+      | Input::Bodies { label, .. }
+      | Input::Curves { label, .. }
+      | Input::Sketch { label, .. }
+      | Input::Plane { label, .. }
+      | Input::Axis { label, .. }
+      | Input::Expr { label, .. }
+      | Input::Text { label, .. }
+      | Input::Check { label, .. }
+      | Input::Choice { label, .. }
+      | Input::Vec3 { label, .. }
+      | Input::DrawingView { label, .. }
+      | Input::Component { label, .. }
+      | Input::Profiles { label, .. }
+      | Input::FaceOther { label, .. }
+      | Input::PlaneOpt { label, .. }
+      | Input::Cells { label, .. }
+      | Input::Pieces { label, .. }
+      | Input::Icons { label, .. }
+      | Input::CheckOn { label, .. }
+      | Input::Flip { label, .. }
+      | Input::Pick { label, .. }
+      | Input::TrimTool { label, .. } => label,
+      Input::Planes { .. } => "",
     }
   }
 }
@@ -251,6 +292,12 @@ pub struct State {
   pub edit: bool,
   /// The [`Input::Pick`] row the next picks go to (an index into the form's inputs).
   pub row: usize,
+  /// Stitch: the picked bodies' open edges across a gap from another (see
+  /// [`fox_engine::model::surface::open_edges`]), and the bodies they were found for.
+  pub open_edges: Vec<fox_engine::model::surface::OpenEdge>,
+  pub open_edges_for: Value,
+  /// The row of the Unstitched Edges table picked (the magnifier zooms to its edge).
+  pub open_edge_row: Option<usize>,
 }
 
 impl State {
@@ -294,10 +341,14 @@ impl State {
       cells: Vec::new(),
       cells_for: Value::Null,
       picks: 0,
-      picking_pieces: false,
+      // Trim picks pieces once its tool is picked, with no switch for it
+      picking_pieces: form.inputs.iter().any(|i| matches!(i, Input::TrimTool { .. })),
       text_corner: false,
       edit: false,
       row: form.inputs.iter().position(|i| matches!(i, Input::Pick { .. })).unwrap_or(0),
+      open_edges: Vec::new(),
+      open_edges_for: Value::Null,
+      open_edge_row: None,
     }
   }
 
@@ -423,10 +474,22 @@ impl State {
         true
       }
     });
+    let tool = trim_tool(s);
     let mut ns = 0;
     let (mut nf, mut ne, mut np, mut na) = (0, 0, 0, 0);
     for (i, input) in form.inputs.iter().enumerate() {
       let v = match input {
+        Input::TrimTool { .. } => tool.clone(),
+        // Trim cuts every visible surface body but its tool
+        Input::Bodies { .. } if form.cmd == TRIM_CMD => {
+          let surfaces = s
+            .model
+            .bodies
+            .iter()
+            .filter(|b| b.shape.solid_count() == 0 && s.body_visible(b.id) && tool.get("body") != Some(&json!(b.id.0)))
+            .map(|b| b.id.0);
+          json!(if tool.is_null() { Vec::new() } else { surfaces.collect::<Vec<_>>() })
+        }
         Input::Profiles { .. } => json!(profiles),
         Input::Planes { .. } => json!(construction),
         Input::FaceOther { .. } => other.clone(),
@@ -675,6 +738,14 @@ impl State {
       "sheet.corner_closure" => key == "edges" || self.picked(form, &["edges"]),
       // Joint Origin: Origin Mode and Snap until the snap is picked, as in Fusion
       "joint_origin" => matches!(key, "mode" | "face") || get("face").is_some_and(|v| !v.is_null()),
+      // Trim lists pieces once its tool is picked; Extend's Distance appears with its edges;
+      // Untrim's Extension with its faces, for the types that restore the outer boundary
+      TRIM_CMD if key == "remove" => get("tool").is_some_and(|v| !v.is_null()),
+      EXTEND_CMD if key == "distance" => get("edges").and_then(Value::as_array).is_some_and(|a| !a.is_empty()),
+      "surface.untrim" if key == "extension" => {
+        get("faces").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+          && matches!(get("loops").and_then(Value::as_str), Some("all" | "outer"))
+      }
       "drawing.feature_control" if key.starts_with("lower_") => {
         get("composite").and_then(Value::as_bool).unwrap_or(false)
       }
@@ -713,6 +784,10 @@ impl State {
       // (Fusion names joint origins itself; the browser renames them)
       "joint_origin" => key == "name",
       "pattern.path" => matches!(key, "path" | "start" | "join"),
+      // Trim's surfaces are every surface its tool cuts; Unstitch's faces are its picks with
+      // Chain Selection off
+      TRIM_CMD => key == "bodies",
+      UNSTITCH_CMD => key == "faces",
       _ => false,
     }
   }
@@ -786,6 +861,10 @@ impl State {
 
   /// Selection Filter set to faces: the form's picks are faces, not whole bodies.
   pub fn filter_faces(&self, form: &Form) -> bool {
+    if form.cmd == UNSTITCH_CMD {
+      let chain = form.inputs.iter().position(|x| x.key() == "chain").and_then(|j| self.values.get(j));
+      return chain == Some(&json!(false));
+    }
     form
       .inputs
       .iter()
@@ -836,7 +915,20 @@ impl State {
             }
           }
         }
+        // Trim's surfaces aren't picks: they are every surface the tool may cut
+        Input::Bodies { .. } if form.cmd == TRIM_CMD => {}
         Input::Bodies { .. } => bodies.extend(picks.iter().filter_map(|x| x.as_u64()).map(|b| b as u32)),
+        Input::TrimTool { .. } => {
+          let id = |k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
+          if let Some(f) = id("feature") {
+            out.push(Sel::Feature { feature: FeatureId(f) });
+          } else if let Some(b) = id("body") {
+            bodies.push(b);
+          } else if let Some(sk) = id("sketch") {
+            sketch = Some(FeatureId(sk));
+            curves.extend(v["curves"].as_array().into_iter().flatten().filter_map(Value::as_u64).map(|c| c as u32));
+          }
+        }
         Input::Curves { .. } => curves.extend(picks.iter().filter_map(|x| x.as_u64()).map(|c| c as u32)),
         Input::Sketch { .. } if sketch.is_none() => sketch = v.as_u64().map(|f| FeatureId(f as u32)),
         Input::Planes { .. } => {
@@ -867,6 +959,14 @@ impl State {
       return crate::mesh_ui::missing(form, self);
     }
     let get = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
+    let picked = |k: &str| get(k).and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+    // Extend waits for a distance once its edges are picked, as Fusion's does
+    if form.cmd == EXTEND_CMD && picked("edges") && !length_set(get("distance").and_then(Value::as_str).unwrap_or("")) {
+      return Some("Select extension type or specify distance");
+    }
+    if form.cmd == "surface.untrim" && picked("faces") && get("loops").and_then(Value::as_str) == Some("manual") {
+      return Some("Untrimming picked loops (Manual) isn't in FissionOxide yet");
+    }
     if form.cmd == "pipe.form" && get("path_curves").and_then(Value::as_array).is_none_or(Vec::is_empty) {
       return Some("Select a path to sweep the profile along");
     }
@@ -928,8 +1028,11 @@ impl State {
         }
         Input::Pick { key, prompt, .. } if empty => return Some((key, prompt)),
         Input::DrawingView { key, label } | Input::Component { key, label } if empty => return Some((key, label)),
-        // picking pieces: nothing to preview until one is clicked
-        Input::Pieces { key, label } if self.picking_pieces && empty => return Some((key, label)),
+        Input::TrimTool { key, label } if empty => return Some((key, label)),
+        // picking pieces: nothing to preview until one is clicked (Trim previews its tool's cut)
+        Input::Pieces { key, label } if self.picking_pieces && empty && form.cmd != TRIM_CMD => {
+          return Some((key, label));
+        }
         _ => {}
       }
     }
@@ -1071,6 +1174,56 @@ pub fn short(x: f64) -> String {
   let t = format!("{x:.3}");
   let t = t.trim_end_matches('0').trim_end_matches('.');
   if t == "-0" { "0".into() } else { t.into() }
+}
+
+/// The commands of Fusion's Trim, Extend and Unstitch forms (see [`engine_command`]).
+pub const TRIM_CMD: &str = "surface.trim.tool";
+pub const EXTEND_CMD: &str = "surface.extend.form";
+pub const UNSTITCH_CMD: &str = "surface.unstitch.form";
+pub const REVERSE_CMD: &str = "surface.reverse.form";
+
+/// Forms with Feature and Analysis tabs above their rows, as Fusion's Extend.
+pub fn has_analysis_tab(form: &Form) -> bool {
+  form.cmd == EXTEND_CMD
+}
+
+/// Trim's tool from the selection: the first pick that can be one (see [`Input::TrimTool`]).
+fn trim_tool(s: &Session) -> Value {
+  for x in &s.selection {
+    match x {
+      Sel::Feature { feature }
+        if matches!(
+          s.design.feature(*feature).map(|f| &f.kind),
+          Some(FeatureKind::ConstructionPlane { .. } | FeatureKind::PlaneBy { .. })
+        ) =>
+      {
+        return json!({"feature": feature.0});
+      }
+      Sel::SketchCurve { sketch, .. } => {
+        let curves: Vec<u32> = s
+          .selection
+          .iter()
+          .filter_map(|y| match y {
+            Sel::SketchCurve { sketch: k, curve } if k == sketch => Some(curve.0),
+            _ => None,
+          })
+          .collect();
+        return json!({"sketch": sketch.0, "curves": curves});
+      }
+      Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } => return json!({"body": body.0}),
+      _ => {}
+    }
+  }
+  Value::Null
+}
+
+/// Does a length box hold a distance other than 0 (a parameter's name counts; a half-typed
+/// value such as "." or "-" doesn't)?
+fn length_set(text: &str) -> bool {
+  match fox_engine::expr::eval(text, fox_engine::expr::Kind::Length, &fox_engine::expr::Empty) {
+    Ok(v) => v.abs() >= 1e-9,
+    Err(_) => !text.trim().trim_matches(['.', '-', '+', ' ']).is_empty(),
+  }
 }
 
 fn planar(s: &Session, body: BodyId, face: u32) -> bool {
@@ -1619,9 +1772,11 @@ pub static STITCH: Form = Form {
   icon: Icon::Stitch,
   cmd: "surface.stitch",
   fixed: &[],
+  // Fusion's rows: the Tolerance has a slider under it, then the Stitch Result and Unstitched
+  // Edges groups (see `dialogs::stitch`)
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies", required: true },
-    Input::Expr { key: "tolerance", label: "Tolerance", default: "0.01 mm" },
+    Input::Bodies { key: "bodies", label: "Stitch Surfaces", required: true },
+    Input::Expr { key: "tolerance", label: "Tolerance", default: "0.10 mm" },
   ],
   picks_model: true,
 };
@@ -1631,9 +1786,14 @@ pub static UNSTITCH: Form = Form {
   name: "Unstitch",
   hint: "Break bodies into one surface per face",
   icon: Icon::Unstitch,
-  cmd: "surface.unstitch",
+  cmd: UNSTITCH_CMD,
   fixed: &[],
-  inputs: &[Input::Bodies { key: "bodies", label: "Bodies", required: true }],
+  // Chain Selection picks whole bodies; off, the picked faces
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Faces / Bodies", required: true },
+    Input::FacesOpt { key: "faces", label: "Faces" },
+    Input::CheckOn { key: "chain", label: "Chain Selection" },
+  ],
   picks_model: true,
 };
 
@@ -1642,9 +1802,9 @@ pub static REVERSE_NORMAL: Form = Form {
   name: "Reverse Normal",
   hint: "Flip the normals of surface bodies",
   icon: Icon::ReverseNormal,
-  cmd: "surface.reverse",
+  cmd: REVERSE_CMD,
   fixed: &[],
-  inputs: &[Input::Bodies { key: "bodies", label: "Bodies", required: true }],
+  inputs: &[Input::Faces { key: "faces", label: "Faces" }],
   picks_model: true,
 };
 
@@ -1901,6 +2061,49 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       (form.cmd, q)
     }
     "thread" => ("thread", crate::thread_form::engine_params(&p)),
+    // Fusion's Trim: every surface its tool cuts; the pieces clicked go (none yet: just the cut)
+    TRIM_CMD => {
+      let mut q = json!({
+        "bodies": p.get("bodies").cloned().unwrap_or(json!([])),
+        "tool": p.get("tool").cloned().unwrap_or(Value::Null),
+        "cut_only": true,
+      });
+      if let Some(r) = p.get("remove") {
+        q["remove"] = r.clone();
+      }
+      ("surface.trim", q)
+    }
+    // Align Edges closes the corners between the extended edges
+    EXTEND_CMD => {
+      let mut q = json!({
+        "edges": p.get("edges").cloned().unwrap_or(json!([])),
+        "distance": p.get("distance").cloned().unwrap_or(json!("0 mm")),
+        "mode": p.get("mode").cloned().unwrap_or(json!("natural")),
+      });
+      if p.get("alignment") == Some(&json!("align")) {
+        q["close_corners"] = json!(true);
+      }
+      ("surface.extend", q)
+    }
+    // Chain Selection unstitches whole bodies; without it, just the picked faces come off
+    UNSTITCH_CMD => {
+      let q = if p.get("chain") == Some(&json!(false)) {
+        json!({"faces": p.get("faces").cloned().unwrap_or(json!([]))})
+      } else {
+        json!({"bodies": p.get("bodies").cloned().unwrap_or(json!([]))})
+      };
+      ("surface.unstitch", q)
+    }
+    // the picked faces' bodies flip
+    REVERSE_CMD => {
+      let mut bodies: Vec<Value> = Vec::new();
+      for b in p.get("faces").and_then(Value::as_array).into_iter().flatten().filter_map(|f| f.get("body")) {
+        if !bodies.contains(b) {
+          bodies.push(b.clone());
+        }
+      }
+      ("surface.reverse", json!({"bodies": bodies}))
+    }
     "surface.trim.body" => {
       // the tool is the body of the picked face; it doesn't trim itself
       let tool = p.pointer("/tool/body").cloned().unwrap_or(Value::Null);
@@ -2038,14 +2241,14 @@ pub static SURFACE_OFFSET: Form = Form {
 pub static TRIM: Form = Form {
   title: "TRIM",
   name: "Trim",
-  hint: "Trim surface bodies with a plane, or click the pieces to remove",
+  hint: "Trim surface bodies with a body, sketch curves or a plane: click the pieces to remove",
   icon: Icon::Trim,
-  cmd: "surface.trim",
+  cmd: TRIM_CMD,
   fixed: &[],
+  // Fusion's rows: the tool first; then the pieces it cuts are clicked in the viewport
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Surfaces", required: true },
-    Input::Plane { key: "tool", label: "Trimming tool" },
-    Input::Check { key: "flip", label: "Keep the other side" },
+    Input::TrimTool { key: "tool", label: "Trim Tool" },
+    Input::Bodies { key: "bodies", label: "Surfaces", required: false },
     Input::Pieces { key: "remove", label: "Pieces to remove" },
   ],
   picks_model: true,
@@ -2657,17 +2860,23 @@ pub static EXTEND: Form = Form {
   name: "Extend",
   hint: "Extend open surface edges by a distance",
   icon: Icon::Extend,
-  cmd: "surface.extend",
+  cmd: EXTEND_CMD,
   fixed: &[],
+  // Fusion's rows (Feature tab): Distance appears once edges are picked
   inputs: &[
     Input::Edges { key: "edges", label: "Edges" },
-    Input::Expr { key: "distance", label: "Distance", default: "5 mm" },
+    Input::CheckOn { key: "chain", label: "Tangent Chain" },
+    Input::Expr { key: "distance", label: "Distance", default: "0.00 mm" },
     Input::Choice {
       key: "mode",
-      label: "Extend type",
-      options: &[("natural", "Natural"), ("tangent", "Tangent"), ("perpendicular", "Perpendicular")],
+      label: "Type",
+      options: &[("natural", "Natural"), ("perpendicular", "Perpendicular"), ("tangent", "Tangent")],
     },
-    Input::Check { key: "close_corners", label: "Close corners" },
+    Input::Choice {
+      key: "alignment",
+      label: "Edge Alignment",
+      options: &[("free", "Free Edges"), ("align", "Align Edges")],
+    },
   ],
   picks_model: true,
 };
@@ -2683,8 +2892,8 @@ pub static UNTRIM: Form = Form {
     Input::Faces { key: "faces", label: "Faces" },
     Input::Choice {
       key: "loops",
-      label: "Loop type",
-      options: &[("all", "All loops"), ("inner", "Internal loops"), ("outer", "External loops")],
+      label: "Type",
+      options: &[("all", "All Edges"), ("inner", "Internal Edges"), ("outer", "External Edges"), ("manual", "Manual")],
     },
     Input::Expr { key: "extension", label: "Extension", default: "0 mm" },
   ],
@@ -3325,9 +3534,24 @@ pub fn specify_prompt(form: &Form) -> Option<&'static str> {
   }
 }
 
-/// Forms whose Fusion dialog has no Preview check box: they always preview.
+/// Forms whose Fusion dialog has no Preview check box: they always preview (the surface MODIFY
+/// dialogs among them).
 pub fn always_previews(form: &Form) -> bool {
-  matches!(form.cmd, "thread" | "emboss" | "thicken" | "boundary_fill" | "rib" | "web")
+  matches!(
+    form.cmd,
+    "thread"
+      | "emboss"
+      | "thicken"
+      | "boundary_fill"
+      | "rib"
+      | "web"
+      | TRIM_CMD
+      | EXTEND_CMD
+      | "surface.untrim"
+      | "surface.stitch"
+      | UNSTITCH_CMD
+      | REVERSE_CMD
+  )
 }
 
 /// Forms whose drop-downs show an icon before each value, as Fusion's Extent Type, Direction

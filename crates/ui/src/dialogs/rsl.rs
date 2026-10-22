@@ -166,7 +166,7 @@ impl Dialog {
 
   /// Sweep's and Loft's Feature and Analysis tabs, above the rows.
   pub(super) fn tab_strip(&mut self, ui: &mut egui::Ui) {
-    if !matches!(self.kind, Kind::Sweep | Kind::Loft) {
+    if !self.has_tabs() {
       return;
     }
     ui.horizontal(|ui| {
@@ -190,9 +190,15 @@ impl Dialog {
     ui.add_space(10.0);
   }
 
+  /// Sweep, Loft and Extend have Feature and Analysis tabs.
+  pub(super) fn has_tabs(&self) -> bool {
+    matches!(self.kind, Kind::Sweep | Kind::Loft)
+      || matches!(self.kind, Kind::Form(f) if crate::forms::has_analysis_tab(f))
+  }
+
   /// The Analysis tab: Analysis Type (four icon toggles; a lit one clicked again turns off) and
   /// Bodies.
-  fn analysis_rows(&mut self, ui: &mut egui::Ui) {
+  pub(super) fn analysis_rows(&mut self, ui: &mut egui::Ui) {
     ui.label("Analysis Type");
     ui.horizontal(|ui| {
       ui.spacing_mut().item_spacing.x = 2.0;
@@ -216,10 +222,9 @@ impl Dialog {
     ui.end_row();
   }
 
-  /// The analysis the open Sweep or Loft's Analysis tab shows in the canvas, if any.
+  /// The analysis the open Sweep, Loft or Extend's Analysis tab shows in the canvas, if any.
   pub fn tab_analysis(&self) -> Option<&'static str> {
-    (matches!(self.kind, Kind::Sweep | Kind::Loft) && !self.solid.rsl.analysis.is_empty())
-      .then_some(self.solid.rsl.analysis)
+    (self.has_tabs() && !self.solid.rsl.analysis.is_empty()).then_some(self.solid.rsl.analysis)
   }
 
   // ---- revolve ----

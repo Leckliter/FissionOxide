@@ -157,11 +157,12 @@ cmds! {
   "surface.revolve" => "Surface body revolved from sketch curves", "{sketch?, curves?, axis, angle?}";
   "surface.patch" => "Surface filling a closed boundary of body edges or a sketch", "{edges? | sketch?}";
   "surface.stitch" => "Sew surface bodies together (into a solid when they close)", "{bodies, tolerance?}";
-  "surface.unstitch" => "Break bodies into one surface body per face", "{bodies}";
+  "surface.stitch.gaps" => "The open edges of bodies that face another open edge less than max_gap (mm, default 1) away, widest gap first (Stitch's Unstitched Edges)", "{bodies, max_gap?}";
+  "surface.unstitch" => "Break bodies into one surface body per face; picked faces come off their body each as a surface body of its own", "{bodies? | faces?}";
   "surface.reverse" => "Flip surface normals", "{bodies}";
   "surface.ruled" => "Ruled surface between two edges", "{a: edge, b: edge}";
   "surface.offset" => "New surfaces offset from faces or bodies; face_distances give faces distances of their own (variable offset)", "{faces? | bodies?, distance, face_distances?: [{face, distance}]}";
-  "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it), a body (keeps what's outside a solid or behind a surface) or a sketch projected onto them (cuts its profiles away, or keeps the right of its curves); flip keeps the other side, keep points pick the pieces to keep, remove points the pieces to remove (the rest stays)", "{bodies, tool: plane | {body} | {sketch, curves?}, flip?, keep?: [[x,y,z]], remove?: [[x,y,z]]}";
+  "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it), a body (keeps what's outside a solid or behind a surface) or a sketch projected onto them (cuts its profiles away, or keeps the right of its curves); flip keeps the other side, keep points pick the pieces to keep, remove points the pieces to remove (the rest stays); cut_only (Fusion's Trim) changes only the bodies the tool cuts, removing just the remove pieces, and fails when it cuts none", "{bodies, tool: plane | {body} | {sketch, curves?}, flip?, keep?: [[x,y,z]], remove?: [[x,y,z]], cut_only?: bool}";
   "mesh.reduce" => "Fewer triangles on mesh bodies", "{bodies, keep?: 0.05..1}";
   "mesh.smooth" => "Smooth mesh bodies", "{bodies, passes?}";
   "mesh.convert" => "Mesh bodies to clean B-rep (coplanar triangles merged into faces)", "{bodies}";

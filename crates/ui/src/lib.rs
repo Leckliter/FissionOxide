@@ -825,6 +825,16 @@ impl App {
     self.fly_to(to);
   }
 
+  /// The camera moves smoothly to frame the box `lo`..`hi` (a few times its size, so what is
+  /// around it shows too).
+  pub(crate) fn zoom_to(&mut self, lo: fox_engine::kernel::glam::DVec3, hi: fox_engine::kernel::glam::DVec3) {
+    let pad = ((hi - lo).length() * 2.0).max(5.0);
+    let mut to = self.view_now();
+    let aspect = self.frame.as_ref().map(|f| f.width as f64 / f.height.max(1) as f64).unwrap_or(1.6);
+    to.fit(lo - pad, hi + pad, aspect);
+    self.fly_to(to);
+  }
+
   /// Frames the whole model at once (a design just opened).
   pub fn fit_view_now(&mut self) {
     self.cam_move = None;

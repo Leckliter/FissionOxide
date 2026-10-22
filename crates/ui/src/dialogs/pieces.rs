@@ -50,12 +50,15 @@ impl Dialog {
   /// The pieces row: the switch for picking in the viewport, and the pieces picked so far (each
   /// can be put back).
   pub(super) fn pieces_field(&mut self, i: usize, label: &str, ui: &mut egui::Ui, dirty: &mut bool) {
+    // Fusion's Trim picks pieces as soon as its tool is picked: no switch
+    let switch = !matches!(self.kind, Kind::Form(f) if f.cmd == crate::forms::TRIM_CMD);
     ui.label(label);
     ui.vertical(|ui| {
-      if ui
-        .checkbox(&mut self.form.picking_pieces, "Pick in the viewport")
-        .on_hover_text("Click the pieces of the surfaces to remove, instead of keeping a side")
-        .changed()
+      if switch
+        && ui
+          .checkbox(&mut self.form.picking_pieces, "Pick in the viewport")
+          .on_hover_text("Click the pieces of the surfaces to remove, instead of keeping a side")
+          .changed()
       {
         *dirty = true;
       }
@@ -87,7 +90,7 @@ impl Dialog {
 
 #[cfg(test)]
 mod tests {
-  use fox_engine::model::BodyId;
+  use fox_engine::model::{BodyId, FeatureId};
   use fox_engine::{Sel, Session};
   use serde_json::{Value, json};
 
@@ -157,22 +160,86 @@ mod tests {
     assert!(d.command().unwrap().1.get("remove").is_none());
   }
 
+  fn plane(s: &mut Session, x: f64) -> Sel {
+    let f = run(s, "plane.offset", json!({"plane": "yz", "offset": format!("{x} mm")}))["feature"].as_u64().unwrap();
+    Sel::Feature { feature: FeatureId(f as u32) }
+  }
+
   #[test]
-  fn plane_trim_removes_a_clicked_piece() {
-    // the sheet split at x = 4 by a plane; the clicked strip left of it goes
+  fn trim_picks_its_tool_then_the_pieces() {
+    // the sheet split at x = 4 by a construction plane; the clicked strip left of it goes
     let mut s = Session::default();
     let b = sheet(&mut s);
+    let tool = plane(&mut s, 4.0);
     let mut d = Dialog::blank(Kind::Form(&TRIM));
-    let i = TRIM.inputs.iter().position(|x| x.key() == "tool").unwrap();
-    d.form.chosen[i] = Some(json!({"origin": [4, 0, 0], "normal": [1, 0, 0]}));
-    d.form.picking_pieces = true;
-    s.selection = vec![Sel::Body { body: b }];
+    // one row, the tool, and OK greyed until it is picked
     frame(&mut s, &mut d);
-    assert!(!d.applied);
+    assert_eq!(d.form.missing(&TRIM), Some("Trim Tool"));
+    assert!(!d.ok_enabled() && !d.applied);
+    assert!(!d.form.shown(&TRIM, 2), "no pieces row before the tool");
+    s.selection = vec![tool];
+    frame(&mut s, &mut d);
+    // the tool's cut previews: the sheet in two pieces, nothing gone yet; OK waits for a piece
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    assert_eq!(s.model.body(b).unwrap().faces().len(), 2);
+    assert!((area(&s, b) - 100.0).abs() < 1e-6, "{}", area(&s, b));
+    assert!(d.form.shown(&TRIM, 2) && !d.ok_enabled());
+    assert!(d.picks_piece_of(b));
     d.add_piece([2.0, 5.0, 0.0]);
     frame(&mut s, &mut d);
     assert!(d.applied && d.error.is_none(), "{:?}", d.error);
     assert!((area(&s, b) - 60.0).abs() < 1e-6, "{}", area(&s, b));
+    assert!(d.ok_enabled());
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, &p["cut_only"], &p["bodies"]), ("surface.trim", &json!(true), &json!([b.0])));
+  }
+
+  #[test]
+  fn trim_tool_that_cuts_nothing_is_an_error() {
+    // Plane1 past the sheet: Fusion's error, and OK stays greyed
+    let mut s = Session::default();
+    sheet(&mut s);
+    s.selection = vec![plane(&mut s, 40.0)];
+    let mut d = Dialog::blank(Kind::Form(&TRIM));
+    frame(&mut s, &mut d);
+    assert!(
+      d.error.as_deref().is_some_and(|e| e.contains("Cutting Tool does not intersect any surface!")),
+      "{:?}",
+      d.error
+    );
+    assert!(!d.ok_enabled());
+  }
+
+  #[test]
+  fn trim_with_a_body_or_sketch_curves_as_the_tool() {
+    // a sphere picked by a face cuts a disc out of the sheet; the clicked outer part goes
+    let mut s = Session::default();
+    let b = sheet(&mut s);
+    run(&mut s, "sphere", json!({"at": [5, 5], "radius": 2}));
+    let ball = s.model.bodies[1].id;
+    s.selection = vec![Sel::Face { body: ball, face: 1 }];
+    let mut d = Dialog::blank(Kind::Form(&TRIM));
+    frame(&mut s, &mut d);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    // the solid tool isn't one of the surfaces it trims
+    assert!(d.picks_piece_of(b) && !d.picks_piece_of(ball));
+    d.add_piece([1.0, 1.0, 0.0]);
+    frame(&mut s, &mut d);
+    assert!((area(&s, b) - 4.0 * std::f64::consts::PI).abs() < 1e-6, "{}", area(&s, b));
+    d.cancel(&mut s);
+    // a sketch line at x = 5: the half clicked goes
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.line", json!({"points": [[5, -1], [5, 11]]}));
+    let sk = s.edit_sketch.unwrap();
+    let curve = s.design.sketch(sk).unwrap().curves[0].id;
+    run(&mut s, "sketch.finish", json!({}));
+    s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
+    let mut d = Dialog::blank(Kind::Form(&TRIM));
+    frame(&mut s, &mut d);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    d.add_piece([2.0, 5.0, 0.0]);
+    frame(&mut s, &mut d);
+    assert!((area(&s, b) - 50.0).abs() < 1e-6, "{}", area(&s, b));
   }
 
   #[test]
@@ -187,12 +254,17 @@ mod tests {
     let mut d = Dialog::blank(Kind::Form(&EXTEND));
     s.selection = vec![edge(&s, 10.0, 5.0)];
     frame(&mut s, &mut d);
+    // the Distance row starts at 0: nothing previews until it is set
+    assert!(!d.applied);
+    let i = EXTEND.inputs.iter().position(|x| x.key() == "distance").unwrap();
+    d.form.values[i] = json!("5 mm");
+    frame(&mut s, &mut d);
     assert!(d.applied);
     d.unpreview(&mut s);
     assert_eq!(s.selection.len(), 1, "the pick is back");
     s.selection.push(edge(&s, 5.0, 0.0));
-    let i = EXTEND.inputs.iter().position(|x| x.key() == "close_corners").unwrap();
-    d.form.values[i] = json!(true);
+    let i = EXTEND.inputs.iter().position(|x| x.key() == "alignment").unwrap();
+    d.form.values[i] = json!("align");
     frame(&mut s, &mut d);
     assert!(d.applied && d.error.is_none(), "{:?}", d.error);
     assert!((area(&s, b) - 225.0).abs() < 1e-6, "15 x 15 with the corner: {}", area(&s, b));
