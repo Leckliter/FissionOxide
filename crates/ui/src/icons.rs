@@ -321,6 +321,12 @@ pub enum Icon {
   SkChamferAngle,
   /// Sketch Two Distance Chamfer: a lopsided bevel with a tick on each leg.
   SkChamfer2,
+  // Change Parameters' toolbar
+  FilterFavorites,
+  Star,
+  Duplicate,
+  Trash,
+  Export,
 }
 
 #[derive(Clone, Copy)]
@@ -2368,7 +2374,49 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.sk(&[(0.04, 0.62), (0.2, 0.62)], Teal);
       k.sk(&[(0.36, 0.04), (0.36, 0.2)], Teal);
     }
+    // ---- Change Parameters ----
+    Icon::FilterFavorites => {
+      // a funnel with a small star at its mouth
+      k.solid(&[(0.06, 0.16), (0.74, 0.16), (0.48, 0.52), (0.48, 0.9), (0.32, 0.8), (0.32, 0.52)], Light);
+      k.closed(&star_pts((0.78, 0.26), 0.2, 0.08), Blue);
+    }
+    Icon::Star => {
+      k.closed(&star_pts((0.5, 0.5), 0.44, 0.19), Blue);
+    }
+    Icon::Duplicate => {
+      // two sheets, the copy in front
+      k.solid(&[(0.3, 0.06), (0.9, 0.06), (0.9, 0.7), (0.3, 0.7)], Light);
+      k.solid(&[(0.1, 0.3), (0.7, 0.3), (0.7, 0.94), (0.1, 0.94)], White);
+      k.closed(&[(0.1, 0.3), (0.7, 0.3), (0.7, 0.94), (0.1, 0.94)], Blue);
+    }
+    Icon::Trash => {
+      // a bin with its lid off
+      k.solid(&[(0.18, 0.3), (0.82, 0.3), (0.74, 0.94), (0.26, 0.94)], Light);
+      k.thick((0.1, 0.3), (0.9, 0.3), Ink, 1.2);
+      k.line((0.38, 0.3), (0.38, 0.14), Ink);
+      k.line((0.62, 0.3), (0.62, 0.14), Ink);
+      k.line((0.38, 0.14), (0.62, 0.14), Ink);
+      k.line((0.4, 0.42), (0.42, 0.82), Blue);
+      k.line((0.6, 0.42), (0.58, 0.82), Blue);
+    }
+    Icon::Export => {
+      // Import's tray, the arrow up out of it
+      k.solid(&[(0.08, 0.6), (0.92, 0.6), (0.92, 0.92), (0.08, 0.92)], Fill);
+      k.thick((0.5, 0.52), (0.5, 0.06), Blue, 1.6);
+      k.arrow_head((0.5, 0.04), (0.0, -1.0), 0.2, Blue);
+    }
   }
+}
+
+/// A five-pointed star's outline (unit-square coordinates), its first point straight up.
+fn star_pts(c: (f32, f32), outer: f32, inner: f32) -> Vec<(f32, f32)> {
+  (0..10)
+    .map(|i| {
+      let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+      let r = if i % 2 == 0 { outer } else { inner };
+      (c.0 + a.cos() * r, c.1 + a.sin() * r)
+    })
+    .collect()
 }
 
 /// A large toolbar icon (Fusion shows toolbar commands as icons only; the name is the tooltip),

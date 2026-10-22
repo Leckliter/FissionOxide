@@ -235,7 +235,7 @@ impl Dialog {
     if !self.move_picked() {
       return Some(match self.mv.object {
         "faces" => "select faces",
-        "sketch" => "select sketch curves (in an open sketch)",
+        "sketch" => "select sketch geometry to move",
         "components" => "select a body of a component",
         _ => "select bodies",
       });
@@ -694,14 +694,29 @@ impl Dialog {
     ui.end_row();
   }
 
+  /// A value Move/Copy shows but can't act on, greyed with the reason as its tooltip.
+  fn greyed_value(ui: &mut egui::Ui, label: &str, text: &str, why: &str) {
+    ui.label(label);
+    let mut t = text.to_string();
+    ui.add_enabled_ui(false, |ui| value_edit(ui, &mut t)).inner.on_disabled_hover_text(why);
+    ui.end_row();
+  }
+
   /// The Move/Copy dialog's rows, in Fusion's order.
   pub(super) fn move_fields(&mut self, app: &mut App, ui: &mut egui::Ui) {
+    let sketch = self.mv.object == "sketch";
     ui.label("Move Object");
-    self.move_combo(ui, "move-object", &OBJECTS, false);
+    if sketch && app.s.edit_sketch.is_some() {
+      // in a sketch the only thing to move is its geometry: Fusion shows one icon, not a drop-down
+      let mut one: &'static str = "sketch";
+      icon_row(ui, &mut one, &[ic("sketch", Icon::Sketch, "Sketch Objects")], "");
+    } else {
+      self.move_combo(ui, "move-object", &OBJECTS, false);
+    }
     ui.end_row();
     let (name, text, has) = match self.mv.object {
       "faces" => ("Faces", format!("{} selected", self.faces.len()), !self.faces.is_empty()),
-      "sketch" => ("Objects", format!("{} selected", self.curves.len()), !self.curves.is_empty()),
+      "sketch" => ("Selection", format!("{} selected", self.curves.len()), !self.curves.is_empty()),
       "components" => {
         let c = self.comps.first().copied().flatten().and_then(|c| app.s.design.component(ComponentId(c)));
         ("Component", c.map_or("Select".into(), |c| c.name.clone()), c.is_some())
@@ -720,22 +735,37 @@ impl Dialog {
       self.dirty = true;
     }
     ui.end_row();
-    let sketch = self.mv.object == "sketch";
-    if !sketch && self.editing.is_none() {
+    if self.editing.is_none() {
       self.set_pivot_row(app, ui);
+    }
+    // in a sketch the distances, angles and Create Copy wait for a pick, as in Fusion
+    if sketch && !self.move_picked() {
+      return;
     }
     let n = if sketch { 2 } else { 3 };
     const DIST: [&str; 3] = ["X Distance", "Y Distance", "Z Distance"];
     const ANGLE: [&str; 3] = ["X Angle", "Y Angle", "Z Angle"];
     const POS: [&str; 3] = ["X", "Y", "Z"];
+    const FLAT: &str = "Sketch geometry stays in its plane in FissionOxide";
     match self.mv.mtype {
       "free" | "translate" => {
-        for (i, l) in DIST.iter().enumerate().take(n) {
-          self.move_value(ui, l, (0, i));
+        for (i, l) in DIST.iter().enumerate() {
+          // a sketch's Z distance (out of its plane) is shown as Fusion does, but can't be set
+          if sketch && i == 2 {
+            Self::greyed_value(ui, l, &mm(self.unit, 0.0), FLAT);
+          } else {
+            self.move_value(ui, l, (0, i));
+          }
         }
         if self.mv.mtype == "free" {
           if sketch {
-            self.move_value(ui, "Angle", (1, 2));
+            for (i, l) in ANGLE.iter().enumerate() {
+              if i < 2 {
+                Self::greyed_value(ui, l, "0 deg", FLAT);
+              } else {
+                self.move_value(ui, l, (1, 2));
+              }
+            }
           } else if self.mv.object != "faces" {
             for (i, l) in ANGLE.iter().enumerate() {
               self.move_value(ui, l, (1, i));
@@ -1017,6 +1047,47 @@ mod tests {
     apply(&mut s, &mut d);
     assert_eq!(pts(&s), vec![[20.0, 0.0], [30.0, 0.0]], "the original stays");
     assert_eq!(s.design.sketch(FeatureId(sk)).unwrap().curves.len(), 2);
+  }
+
+  /// In a sketch Move/Copy waits for a pick (OK greyed, "Select sketch geometry to move") and
+  /// Set Pivot turns the geometry about the picked sketch point.
+  #[test]
+  fn sketch_move_waits_for_a_pick_and_turns_about_the_set_pivot() {
+    let mut s = Session::default();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32;
+    let r = run(&mut s, "sketch.line", json!({"points": [[20, 0], [30, 0]]}));
+    let line = r["curves"][0].as_u64().or(r["curve"].as_u64()).unwrap_or_else(|| panic!("{r}")) as u32;
+    run(&mut s, "sketch.point", json!({"at": [10, 0]}));
+    let pt = s.design.sketch(FeatureId(sk)).unwrap().points.iter().find(|p| (p.x - 10.0).abs() < 1e-9).unwrap().id;
+    // nothing picked: OK waits and the prompt asks for geometry
+    let mut d = move_dialog(&mut s, vec![]);
+    d.mv.object = "sketch";
+    d.sync_move(&s);
+    assert!(!d.move_ready() && !d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select sketch geometry to move"));
+    // the line picked: ready
+    s.selection = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: fox_engine::sketch::CurveId(line) }];
+    d.sync_move(&s);
+    assert!(d.move_ready() && d.ok_enabled());
+    // Set Pivot: the sketch point picked next is where the triad sits and the turn is about
+    d.mv.picking_pivot = Some(s.selection.clone());
+    s.selection.push(Sel::SketchPoint { sketch: FeatureId(sk), point: pt });
+    d.sync_move(&s);
+    assert!(d.mv.picking_pivot.is_none() && d.mv.pivot_at.is_some());
+    d.refresh_manip(&s);
+    let t = d.triad(&s).unwrap();
+    assert!(close(t.origin, DVec3::new(10.0, 0.0, 0.0)), "{:?}", t.origin);
+    d.mv.rotate[2] = "90 deg".into();
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!(cmd, "sketch.transform");
+    let c: Vec<f64> = p["center"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!((c[0] - 10.0).abs() < 1e-9 && c[1].abs() < 1e-9, "{p}");
+    apply(&mut s, &mut d);
+    let sketch = s.design.sketch(FeatureId(sk)).unwrap();
+    let pts: Vec<[f64; 2]> =
+      sketch.curve_points(fox_engine::sketch::CurveId(line)).iter().map(|p| sketch.pos(*p).unwrap()).collect();
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+    assert!(near(pts[0], [10.0, 10.0]) && near(pts[1], [10.0, 20.0]), "{pts:?}");
   }
 
   #[test]

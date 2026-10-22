@@ -1,7 +1,10 @@
-//! Change Parameters (Modify > Change Parameters), as in Fusion: one table of Favorites, User
-//! Parameters and Model Parameters (every feature's and sketch's dimensions d1, d2, ... grouped
-//! by feature), with a star, name, unit, expression, value and comment per row and a filter box.
-//! Expressions are editable and change the model as they're committed.
+//! Change Parameters (Modify > Change Parameters), as in Fusion: a PARAMETERS modal with one
+//! table of Favorites, User Parameters and Model Parameters (the document, then every feature's
+//! and sketch's dimensions d1, d2, ... grouped by feature), with a star, name, unit, expression,
+//! value and comment per row. Its toolbar filters (ƒx: set by an expression; favourites; the
+//! filter box), stars, adds, copies, deletes, imports and exports user parameters, and
+//! Automatic Compute decides whether an edit applies at once or waits for OK. Expressions are
+//! editable and change the model as they're committed; OK, ✕ or Escape closes it.
 
 use egui::{Color32, Pos2, Rect, RichText, Stroke, pos2, vec2};
 use fox_engine::Session;
@@ -29,7 +32,7 @@ pub(crate) struct Row {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum Source {
+pub enum Source {
   User,
   Model { feature: FeatureId, index: usize },
 }
@@ -130,9 +133,13 @@ const UNIT: f32 = 300.0;
 const EXPR: f32 = 350.0;
 const VALUE: f32 = 520.0;
 const COMMENT: f32 = 600.0;
-const DELETE: f32 = 770.0;
 const END: f32 = 796.0;
 const ROW_H: f32 = 24.0;
+/// The modal's size.
+const SIZE: egui::Vec2 = vec2(END + 24.0, 520.0);
+const TOOL: f32 = 24.0;
+/// The modal's area id (tests look the window up by it).
+pub const MODAL_ID: &str = "change-parameters";
 
 struct Table {
   left: f32,
@@ -146,7 +153,7 @@ impl Table {
 }
 
 /// The New Parameter row's state.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 struct NewParam {
   name: String,
   /// 0 = the design's length unit, 1 = degrees, 2 = no unit.
@@ -157,95 +164,411 @@ struct NewParam {
   started: bool,
 }
 
+/// The dialog's own state while it is open: Fusion's toolbar filters, the Parameter column's
+/// sort, the row picked (for the star, copy and delete buttons) and Automatic Compute.
+#[derive(Debug, Clone, Default)]
+pub struct Panel {
+  pub filter: String,
+  /// ƒx: only parameters set by an expression, not a plain number.
+  pub expressions_only: bool,
+  pub favorites_only: bool,
+  /// The Parameter column's sort: None = the design's order, Some(false) ascending, Some(true)
+  /// descending (by what a row sets).
+  pub sort: Option<bool>,
+  /// The row picked, as [`row_key`] names it.
+  pub selected: Option<String>,
+  /// Automatic Compute off: expression edits are held in `pending` until OK (or until it is
+  /// switched back on).
+  pub manual: bool,
+  /// (source, name, expression) of each held edit.
+  pub pending: Vec<(Source, String, String)>,
+  new: Option<NewParam>,
+}
+
+/// What names a row across frames (and in [`Panel::selected`]).
+pub fn row_key(source: &Source, name: &str) -> String {
+  match source {
+    Source::User => format!("u-{name}"),
+    Source::Model { feature, index } => format!("m-{}-{index}", feature.0),
+  }
+}
+
+/// Is a stored expression more than a plain number (with or without a unit)? The ƒx filter
+/// keeps these.
+pub fn is_expression(expr: &str) -> bool {
+  let mut parts = expr.split_whitespace();
+  let number = parts.next().is_some_and(|t| t.parse::<f64>().is_ok());
+  let unit = parts.next().is_none_or(|u| u.chars().all(char::is_alphabetic));
+  !(number && unit && parts.next().is_none())
+}
+
+/// Does a row pass the toolbar's filters (the box, ƒx and favourites)?
+pub fn shown(panel: &Panel, row: &Row, group: &str) -> bool {
+  matches(row, group, &panel.filter)
+    && (!panel.favorites_only || row.favorite)
+    && (!panel.expressions_only || is_expression(&row.expr))
+}
+
+/// Rows in the Parameter column's order.
+pub fn sorted(panel: &Panel, mut rows: Vec<Row>) -> Vec<Row> {
+  if let Some(desc) = panel.sort {
+    rows.sort_by_cached_key(|r| r.label.to_lowercase());
+    if desc {
+      rows.reverse();
+    }
+  }
+  rows
+}
+
+/// User parameters as Fusion exports them: a CSV of name, unit, expression, value and comment.
+pub fn csv_text(rows: &[Row], unit: LengthUnit) -> String {
+  let cell = |t: &str| {
+    if t.contains([',', '"', '\n']) { format!("\"{}\"", t.replace('"', "\"\"")) } else { t.to_string() }
+  };
+  let mut out = String::from("Name,Unit,Expression,Value,Comments\n");
+  for r in rows.iter().filter(|r| r.source == Source::User) {
+    let value = r.value.map(|v| value_text(r.kind, v, unit)).unwrap_or_default();
+    let line = [&r.name, unit_label(r.kind, unit), &shown_expr(r, unit), &value, &r.comment];
+    out.push_str(&line.iter().map(|c| cell(c)).collect::<Vec<_>>().join(","));
+    out.push('\n');
+  }
+  out
+}
+
+/// One CSV line's cells (quotes and doubled quotes as spreadsheets write them).
+fn csv_cells(line: &str) -> Vec<String> {
+  let mut out = Vec::new();
+  let mut cur = String::new();
+  let mut quoted = false;
+  let mut chars = line.chars().peekable();
+  while let Some(c) = chars.next() {
+    match c {
+      '"' if quoted && chars.peek() == Some(&'"') => {
+        chars.next();
+        cur.push('"');
+      }
+      '"' => quoted = !quoted,
+      ',' if !quoted => out.push(std::mem::take(&mut cur)),
+      c => cur.push(c),
+    }
+  }
+  out.push(cur);
+  out.into_iter().map(|c| c.trim().to_string()).collect()
+}
+
+/// User parameters read from a CSV as [`csv_text`] writes it (the columns found by their
+/// header; a bare length means the design's unit): (name, kind, expression, comment).
+pub fn parse_csv(text: &str, unit: LengthUnit) -> Vec<(String, ParamKind, String, String)> {
+  let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+  let Some(head) = lines.next() else { return Vec::new() };
+  let heads: Vec<String> = csv_cells(head).iter().map(|h| h.to_lowercase()).collect();
+  let col = |n: &str| heads.iter().position(|h| h == n);
+  let (Some(name), Some(expr)) = (col("name"), col("expression")) else { return Vec::new() };
+  let (unit_col, comment) = (col("unit"), col("comments").or_else(|| col("comment")));
+  let mut out = Vec::new();
+  for l in lines {
+    let cells = csv_cells(l);
+    let get = |i: Option<usize>| i.and_then(|i| cells.get(i)).cloned().unwrap_or_default();
+    let (n, e) = (get(Some(name)), get(Some(expr)));
+    if n.is_empty() || e.is_empty() {
+      continue;
+    }
+    let kind = match get(unit_col).to_lowercase().as_str() {
+      "deg" | "rad" => ParamKind::Angle,
+      "" | "none" | "unitless" => ParamKind::Unitless,
+      _ => ParamKind::Length,
+    };
+    out.push((n, kind, typed_expr(kind, &e, unit), get(comment)));
+  }
+  out
+}
+
+/// What the toolbar asked for this frame.
+enum Act {
+  Star(Row),
+  Copy(Row),
+  Delete(Row),
+  Import,
+  Export,
+}
+
+/// Change Parameters, as Fusion's: a centred modal titled PARAMETERS.
 pub fn window(app: &mut App, ctx: &egui::Context) {
-  let mut open = true;
-  let center = app.canvas.center();
-  egui::Window::new("Parameters")
-    .id(egui::Id::new("change-parameters"))
-    .open(&mut open)
-    .collapsible(false)
-    .resizable(true)
-    .default_size(vec2(END + 24.0, 480.0))
-    .default_pos(center)
-    .pivot(egui::Align2::CENTER_CENTER)
-    .show(ctx, |ui| contents(app, ui));
-  if !open {
-    app.show_params = false;
+  if !app.show_params {
+    return;
+  }
+  let mut close = false;
+  let frame = egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::same(8));
+  egui::Modal::new(egui::Id::new(MODAL_ID)).frame(frame).backdrop_color(Color32::from_black_alpha(60)).show(
+    ctx,
+    |ui| {
+      ui.set_width(SIZE.x);
+      ui.set_height(SIZE.y);
+      ui.horizontal(|ui| {
+        ui.label(RichText::new("PARAMETERS").strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+          if ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Close").clicked() {
+            close = true;
+          }
+        });
+      });
+      ui.separator();
+      contents(app, ui);
+      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+        ui.horizontal(|ui| {
+          let (r, _) = ui.allocate_exact_size(vec2(18.0, 24.0), egui::Sense::hover());
+          ui.painter().circle_stroke(r.center(), 7.0, Stroke::new(1.2, theme::GROUP_LABEL));
+          ui.painter().text(
+            r.center(),
+            egui::Align2::CENTER_CENTER,
+            "i",
+            egui::FontId::proportional(11.0),
+            theme::GROUP_LABEL,
+          );
+          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if crate::panels::primary_button(ui, "OK", theme::ACCENT).clicked() {
+              close = true;
+            }
+          });
+        });
+      });
+    },
+  );
+  if !close && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    close = true;
+  }
+  if close {
+    finish(app);
+  }
+}
+
+/// OK, ✕ or Escape: the edits held while Automatic Compute was off are applied, and the
+/// dialog closes.
+pub fn finish(app: &mut App) {
+  compute(app);
+  app.show_params = false;
+  app.params_ui.new = None;
+  app.params_ui.selected = None;
+}
+
+/// Applies the held edits (together, in the foreground: OK waits for them).
+pub fn compute(app: &mut App) {
+  for (source, name, expr) in std::mem::take(&mut app.params_ui.pending) {
+    match source {
+      Source::User => app.run("param.set", json!({"name": name, "expr": expr})),
+      Source::Model { feature, index } => {
+        app.run("param.model_set", json!({"feature": feature.0, "index": index, "expr": expr}))
+      }
+    };
   }
 }
 
 fn contents(app: &mut App, ui: &mut egui::Ui) {
   let unit = app.s.design.units;
-  let fid = egui::Id::new("params-filter");
-  let mut filter = ui.data_mut(|d| d.get_temp::<String>(fid)).unwrap_or_default();
-  let nid = egui::Id::new("params-new");
-  let mut new = ui.data_mut(|d| d.get_temp::<NewParam>(nid));
-  ui.horizontal(|ui| {
-    if ui.button("＋ User Parameter").on_hover_text("Add a user parameter").clicked() && new.is_none() {
-      new = Some(NewParam::default());
-    }
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-      ui.add(egui::TextEdit::singleline(&mut filter).hint_text("🔍 Filter").desired_width(200.0));
-    });
-  });
-  ui.add_space(4.0);
-  let users: Vec<Row> = user_rows(&app.s).into_iter().filter(|r| matches(r, "", &filter)).collect();
+  let doc = crate::panels::doc_name(app);
+  let panel = app.params_ui.clone();
+  let users: Vec<Row> = sorted(&panel, user_rows(&app.s).into_iter().filter(|r| shown(&panel, r, "")).collect());
   let groups: Vec<Group> = model_groups(&app.s)
     .into_iter()
     .map(|mut g| {
       let name = g.name.clone();
-      g.rows.retain(|r| matches(r, &name, &filter));
+      g.rows.retain(|r| shown(&panel, r, &name));
+      g.rows = sorted(&panel, std::mem::take(&mut g.rows));
       g
     })
     .filter(|g| !g.rows.is_empty())
     .collect();
   let favorites: Vec<Row> =
     users.iter().chain(groups.iter().flat_map(|g| g.rows.iter())).filter(|r| r.favorite).cloned().collect();
-  let filtering = !filter.trim().is_empty();
-  egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+  let selected: Option<Row> = panel.selected.as_ref().and_then(|k| {
+    users.iter().chain(groups.iter().flat_map(|g| g.rows.iter())).find(|r| row_key(&r.source, &r.name) == *k).cloned()
+  });
+  toolbar(app, ui, selected);
+  ui.add_space(4.0);
+  let filtering = !app.params_ui.filter.trim().is_empty();
+  let body = SIZE.y - 2.0 * 30.0 - TOOL - 24.0;
+  egui::ScrollArea::both().auto_shrink([false, false]).max_height(body).show(ui, |ui| {
     ui.set_min_width(END);
     ui.spacing_mut().item_spacing.y = 0.0;
     let t = Table { left: ui.max_rect().left(), unit };
-    header(ui, &t);
-    section(ui, "params-favorites", &format!("Favorites ({})", favorites.len()), true, filtering, |ui| {
-      if favorites.is_empty() {
-        ui.label(RichText::new("Star a parameter to keep it here.").small().color(theme::MUTED));
-      }
+    header(app, ui, &t);
+    section(ui, "params-favorites", "Favorites", true, filtering, |ui| {
       for r in &favorites {
         row(app, ui, &t, r, "fav");
       }
     });
-    section(ui, "params-user", &format!("User Parameters ({})", users.len()), true, filtering, |ui| {
+    section(ui, "params-user", "User Parameters", true, filtering, |ui| {
       for r in &users {
         row(app, ui, &t, r, "user");
       }
-      if let Some(n) = new.as_mut()
-        && new_row(app, ui, &t, n)
-      {
-        new = None;
+      if let Some(mut n) = app.params_ui.new.take() {
+        app.params_ui.new = if new_row(app, ui, &t, &mut n) { None } else { Some(n) };
       }
     });
-    let n: usize = groups.iter().map(|g| g.rows.len()).sum();
-    section(ui, "params-model", &format!("Model Parameters ({n})"), true, filtering, |ui| {
-      for g in &groups {
-        let id = format!("params-feature-{}", g.feature.0);
-        section(ui, &id, &format!("{} ({})", g.name, g.rows.len()), false, filtering, |ui| {
-          for r in &g.rows {
-            row(app, ui, &t, r, "model");
-          }
+    section(ui, "params-model", "Model Parameters", true, filtering, |ui| {
+      // Fusion lists the document, then each feature with parameters
+      section(ui, "params-doc", &doc, true, filtering, |ui| {
+        for g in &groups {
+          let id = format!("params-feature-{}", g.feature.0);
+          section(ui, &id, &g.name, false, filtering, |ui| {
+            for r in &g.rows {
+              row(app, ui, &t, r, "model");
+            }
+          });
+        }
+      });
+    });
+  });
+}
+
+/// Fusion's toolbar row: ƒx and favourites filters, the star, the filter box, add, copy, delete,
+/// import and export, and Automatic Compute.
+fn toolbar(app: &mut App, ui: &mut egui::Ui, selected: Option<Row>) {
+  use crate::icons::{Icon, icon_button};
+  let mut act: Option<Act> = None;
+  let user_picked = selected.as_ref().is_some_and(|r| r.source == Source::User);
+  ui.horizontal(|ui| {
+    ui.spacing_mut().item_spacing.x = 4.0;
+    let p = &mut app.params_ui;
+    if icon_button(ui, Icon::Params, TOOL, "Show only parameters set by an expression", p.expressions_only, None)
+      .clicked()
+    {
+      p.expressions_only = !p.expressions_only;
+    }
+    if icon_button(ui, Icon::FilterFavorites, TOOL, "Show only Favorites", p.favorites_only, None).clicked() {
+      p.favorites_only = !p.favorites_only;
+    }
+    let star_tip = match &selected {
+      Some(r) if r.favorite => "Remove the selected parameter from Favorites",
+      _ => "Add the selected parameter to Favorites",
+    };
+    if ui
+      .add_enabled_ui(selected.is_some(), |ui| icon_button(ui, Icon::Star, TOOL, star_tip, false, None))
+      .inner
+      .on_disabled_hover_text("Pick a parameter row first")
+      .clicked()
+      && let Some(r) = &selected
+    {
+      act = Some(Act::Star(r.clone()));
+    }
+    ui.add(egui::TextEdit::singleline(&mut p.filter).hint_text("Filter all parameters").desired_width(200.0));
+    if icon_button(ui, Icon::Plus, TOOL, "Add a user parameter", p.new.is_some(), None).clicked() && p.new.is_none() {
+      p.new = Some(NewParam::default());
+    }
+    let user_only = "Pick a user parameter row first";
+    if ui
+      .add_enabled_ui(user_picked, |ui| {
+        icon_button(ui, Icon::Duplicate, TOOL, "Copy the selected user parameter", false, None)
+      })
+      .inner
+      .on_disabled_hover_text(user_only)
+      .clicked()
+      && let Some(r) = &selected
+    {
+      act = Some(Act::Copy(r.clone()));
+    }
+    if ui
+      .add_enabled_ui(user_picked, |ui| {
+        icon_button(ui, Icon::Trash, TOOL, "Delete the selected user parameter (only if unused)", false, None)
+      })
+      .inner
+      .on_disabled_hover_text(user_only)
+      .clicked()
+      && let Some(r) = &selected
+    {
+      act = Some(Act::Delete(r.clone()));
+    }
+    if icon_button(ui, Icon::Import, TOOL, "Import user parameters from a CSV file", false, None).clicked() {
+      act = Some(Act::Import);
+    }
+    if icon_button(ui, Icon::Export, TOOL, "Export the user parameters to a CSV file", false, None).clicked() {
+      act = Some(Act::Export);
+    }
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+      let mut auto = !p.manual;
+      if ui
+        .checkbox(&mut auto, "Automatic Compute")
+        .on_hover_text("Apply each change as it is made; off, changes wait for OK")
+        .changed()
+      {
+        p.manual = !auto;
+      }
+    });
+  });
+  if !app.params_ui.manual && !app.params_ui.pending.is_empty() {
+    compute(app);
+  }
+  match act {
+    Some(Act::Star(r)) => {
+      let p = match r.source {
+        Source::User => json!({"name": r.name, "on": !r.favorite}),
+        Source::Model { feature, index } => json!({"feature": feature.0, "index": index, "on": !r.favorite}),
+      };
+      app.run("param.favorite", p);
+    }
+    Some(Act::Copy(r)) => {
+      let taken: Vec<String> = app.s.design.parameters.iter().map(|p| p.name.clone()).collect();
+      let name = std::iter::once(format!("{}_copy", r.name))
+        .chain((2..).map(|k| format!("{}_copy{k}", r.name)))
+        .find(|n| !taken.contains(n))
+        .unwrap_or_default();
+      let kind = ["length", "angle", "unitless"][match r.kind {
+        ParamKind::Length => 0,
+        ParamKind::Angle => 1,
+        ParamKind::Unitless => 2,
+      }];
+      app.run("param.add", json!({"name": name, "expr": r.expr, "kind": kind, "comment": r.comment}));
+    }
+    Some(Act::Delete(r)) => {
+      app.run("param.remove", json!({"name": r.name}));
+      app.params_ui.selected = None;
+    }
+    Some(Act::Import) => {
+      if let Some(path) = rfd::FileDialog::new().set_title("Import parameters").add_filter("CSV", &["csv"]).pick_file()
+      {
+        match std::fs::read_to_string(&path) {
+          Ok(text) => import(app, &text),
+          Err(e) => app.status = Some((format!("Couldn't read {}: {e}", path.display()), true)),
+        }
+      }
+    }
+    Some(Act::Export) => {
+      let name = format!("{} parameters.csv", crate::panels::doc_name(app));
+      if let Some(path) = rfd::FileDialog::new()
+        .set_title("Export parameters")
+        .add_filter("CSV", &["csv"])
+        .set_file_name(name)
+        .save_file()
+      {
+        let text = csv_text(&user_rows(&app.s), app.s.design.units);
+        app.status = Some(match std::fs::write(&path, text) {
+          Ok(()) => (format!("Exported {}", path.display()), false),
+          Err(e) => (format!("Couldn't write {}: {e}", path.display()), true),
         });
       }
-    });
-  });
-  ui.data_mut(|d| {
-    d.insert_temp(fid, filter);
-    match new {
-      Some(n) => {
-        d.insert_temp(nid, n);
-      }
-      None => d.remove::<NewParam>(nid),
     }
-  });
+    None => {}
+  }
+}
+
+/// Adds the user parameters of a CSV (an existing name takes the new expression and comment).
+pub fn import(app: &mut App, text: &str) {
+  let rows = parse_csv(text, app.s.design.units);
+  let n = rows.len();
+  for (name, kind, expr, comment) in rows {
+    if app.s.design.parameters.iter().any(|p| p.name == name) {
+      app.run("param.set", json!({"name": name, "expr": expr}));
+      app.run("param.comment", json!({"name": name, "comment": comment}));
+    } else {
+      let kname = match kind {
+        ParamKind::Length => "length",
+        ParamKind::Angle => "angle",
+        ParamKind::Unitless => "unitless",
+      };
+      app.run("param.add", json!({"name": name, "expr": expr, "kind": kname, "comment": comment}));
+    }
+  }
+  app.status = Some((format!("Imported {n} parameters"), false));
 }
 
 /// A collapsible group; open while the filter is in use.
@@ -257,7 +580,8 @@ fn section(ui: &mut egui::Ui, id: &str, title: &str, open: bool, filtering: bool
   h.show(ui, body);
 }
 
-fn header(ui: &mut egui::Ui, t: &Table) {
+/// The column headings; the Parameter column's arrow sorts the rows.
+fn header(app: &mut App, ui: &mut egui::Ui, t: &Table) {
   let (rect, _) = ui.allocate_exact_size(vec2(END, ROW_H), egui::Sense::hover());
   let p = ui.painter();
   p.rect_filled(rect, 0.0, theme::DIALOG_HEADER);
@@ -272,19 +596,34 @@ fn header(ui: &mut egui::Ui, t: &Table) {
   ] {
     p.text(pos2(t.left + x, rect.center().y), egui::Align2::LEFT_CENTER, label, font.clone(), theme::GROUP_LABEL);
   }
+  let sort = app.params_ui.sort;
+  let ar = Rect::from_center_size(pos2(t.left + PARAM + 72.0, rect.center().y), vec2(16.0, 16.0));
+  let resp = ui.interact(ar, egui::Id::new("params-sort"), egui::Sense::click());
+  let (glyph, col) = match sort {
+    None => ("▲", theme::MUTED),
+    Some(false) => ("▲", theme::TEXT),
+    Some(true) => ("▼", theme::TEXT),
+  };
+  ui.painter().text(ar.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(10.0), col);
+  if resp.on_hover_text("Sort by parameter").clicked() {
+    app.params_ui.sort = Some(sort != Some(false));
+  }
 }
 
 /// One parameter row. `ctx` keeps a row's boxes apart where it shows twice (Favorites).
 fn row(app: &mut App, ui: &mut egui::Ui, t: &Table, r: &Row, ctx: &str) {
-  let (rect, _) =
-    ui.allocate_exact_size(vec2((t.left + END - ui.cursor().left()).max(10.0), ROW_H), egui::Sense::hover());
+  let (rect, resp) =
+    ui.allocate_exact_size(vec2((t.left + END - ui.cursor().left()).max(10.0), ROW_H), egui::Sense::click());
   let rect = Rect::from_min_max(pos2(rect.left(), rect.top()), pos2(t.left + END, rect.bottom()));
-  let key = match r.source {
-    Source::User => format!("u-{}", r.name),
-    Source::Model { feature, index } => format!("m-{}-{index}", feature.0),
-  };
+  let key = row_key(&r.source, &r.name);
   let id = egui::Id::new(("param-row", ctx, &key));
-  if ui.rect_contains_pointer(rect) {
+  // a click on the row picks it (for the toolbar's star, copy and delete)
+  if resp.clicked() {
+    app.params_ui.selected = Some(key.clone());
+  }
+  if app.params_ui.selected.as_deref() == Some(key.as_str()) {
+    ui.painter().rect_filled(rect, 0.0, theme::SELECTED);
+  } else if ui.rect_contains_pointer(rect) {
     ui.painter().rect_filled(rect, 0.0, theme::HOVER);
   }
   // ★
@@ -310,8 +649,9 @@ fn row(app: &mut App, ui: &mut egui::Ui, t: &Table, r: &Row, ctx: &str) {
     text(ui, NAME, &r.name, theme::TEXT);
   }
   text(ui, UNIT, unit_label(r.kind, t.unit), theme::MUTED);
-  // expression
-  let shown = shown_expr(r, t.unit);
+  // expression (an edit held by Automatic Compute off shows in the box)
+  let held = app.params_ui.pending.iter().find(|(s, ..)| *s == r.source).map(|(.., e)| e.clone());
+  let shown = held.clone().unwrap_or_else(|| shown_expr(r, t.unit));
   let eid = id.with("expr");
   let mut buf = ui.data_mut(|d| d.get_temp::<String>(eid)).unwrap_or_else(|| shown.clone());
   let resp = ui.put(t.col(rect, EXPR, VALUE), egui::TextEdit::singleline(&mut buf));
@@ -321,11 +661,11 @@ fn row(app: &mut App, ui: &mut egui::Ui, t: &Table, r: &Row, ctx: &str) {
   if resp.lost_focus() {
     if buf.trim() != shown.trim() && !buf.trim().is_empty() {
       let expr = typed_expr(r.kind, &buf, t.unit);
-      match r.source {
-        Source::User => app.run_background("param.set", json!({"name": r.name, "expr": expr})),
-        Source::Model { feature, index } => {
-          app.run("param.model_set", json!({"feature": feature.0, "index": index, "expr": expr}));
-        }
+      if app.params_ui.manual {
+        app.params_ui.pending.retain(|(s, ..)| *s != r.source);
+        app.params_ui.pending.push((r.source, r.name.clone(), expr));
+      } else {
+        apply_expr(app, r.source, &r.name, expr);
       }
     }
     ui.data_mut(|d| d.remove::<String>(eid));
@@ -344,7 +684,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, t: &Table, r: &Row, ctx: &str) {
   if r.source == Source::User {
     let cid = id.with("comment");
     let mut c = ui.data_mut(|d| d.get_temp::<String>(cid)).unwrap_or_else(|| r.comment.clone());
-    let resp = ui.put(t.col(rect, COMMENT, DELETE), egui::TextEdit::singleline(&mut c).hint_text("comment"));
+    let resp = ui.put(t.col(rect, COMMENT, END), egui::TextEdit::singleline(&mut c).hint_text("comment"));
     if resp.changed() {
       ui.data_mut(|d| d.insert_temp(cid, c.clone()));
     }
@@ -354,9 +694,15 @@ fn row(app: &mut App, ui: &mut egui::Ui, t: &Table, r: &Row, ctx: &str) {
       }
       ui.data_mut(|d| d.remove::<String>(cid));
     }
-    let dr = Rect::from_center_size(pos2(t.left + DELETE + 10.0, rect.center().y), vec2(20.0, 20.0));
-    if ui.put(dr, egui::Button::new("🗑").small().frame(false)).on_hover_text("Delete (only if unused)").clicked() {
-      app.run("param.remove", json!({"name": r.name}));
+  }
+}
+
+/// Sets a row's expression in the design.
+fn apply_expr(app: &mut App, source: Source, name: &str, expr: String) {
+  match source {
+    Source::User => app.run_background("param.set", json!({"name": name, "expr": expr})),
+    Source::Model { feature, index } => {
+      app.run("param.model_set", json!({"feature": feature.0, "index": index, "expr": expr}));
     }
   }
 }
@@ -391,7 +737,7 @@ fn new_row(app: &mut App, ui: &mut egui::Ui, t: &Table, n: &mut NewParam) -> boo
     t.col(rect, EXPR, VALUE),
     egui::TextEdit::singleline(&mut n.expr).hint_text(format!("10 {}", units[n.unit.min(2)])),
   ));
-  boxes.push(ui.put(t.col(rect, COMMENT, DELETE), egui::TextEdit::singleline(&mut n.comment).hint_text("comment")));
+  boxes.push(ui.put(t.col(rect, COMMENT, END), egui::TextEdit::singleline(&mut n.comment).hint_text("comment")));
   // Enter in one of the row's boxes adds it
   let enter = ui.input(|i| i.key_pressed(egui::Key::Enter)) && boxes.iter().any(|b| b.lost_focus());
   let ok_r =
@@ -494,35 +840,108 @@ mod tests {
     assert_eq!(typed_expr(ParamKind::Unitless, "2", LengthUnit::In), "2");
   }
 
+  /// One frame of the dialog in a 1200 × 800 window, with `events`.
+  fn frame(ctx: &egui::Context, app: &mut App, events: Vec<egui::Event>) {
+    let raw = egui::RawInput {
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+      events,
+      ..Default::default()
+    };
+    ctx.run_ui(raw, |ui| window(app, ui.ctx())).drop_without_applying_deltas();
+  }
+
   #[test]
-  fn the_dialog_draws_every_section() {
+  fn the_dialog_draws_every_section_and_escape_closes_it() {
     let mut app = App::with_session(session());
     app.show_params = true;
     let ctx = egui::Context::default();
-    let frame = |app: &mut App, f: &mut dyn FnMut(&egui::Context)| {
-      let raw = egui::RawInput {
-        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
-        ..Default::default()
-      };
-      let mut out = ctx.run_ui(raw, |ui| {
-        f(ui.ctx());
-        window(app, ui.ctx());
-      });
-      out.textures_delta.clear();
-    };
-    frame(&mut app, &mut |_| {});
-    // a new parameter row and a filter
-    frame(&mut app, &mut |c| {
-      c.data_mut(|d| {
-        d.insert_temp(egui::Id::new("params-new"), NewParam::default());
-        d.insert_temp(egui::Id::new("params-filter"), "extrude".to_string());
-      })
-    });
-    frame(&mut app, &mut |_| {});
+    frame(&ctx, &mut app, vec![]);
+    // a new parameter row, the filters and a sort
+    app.params_ui.new = Some(NewParam::default());
+    app.params_ui.filter = "extrude".into();
+    app.params_ui.sort = Some(true);
+    frame(&ctx, &mut app, vec![]);
+    app.params_ui.filter.clear();
+    app.params_ui.favorites_only = true;
+    app.params_ui.expressions_only = true;
+    frame(&ctx, &mut app, vec![]);
     assert!(app.show_params);
-    // the window sits over the canvas, not at the top left over the toolbar
-    let r = ctx.memory(|m| m.area_rect(egui::Id::new("change-parameters"))).unwrap();
+    // the modal sits over the canvas, not at the top left over the toolbar
+    let r = ctx.memory(|m| m.area_rect(egui::Id::new(MODAL_ID))).unwrap();
     assert!(r.left() > 50.0 && r.top() > 50.0, "{r:?}");
+    // Escape closes it, as OK does
+    let esc = egui::Event::Key {
+      key: egui::Key::Escape,
+      physical_key: None,
+      pressed: true,
+      repeat: false,
+      modifiers: egui::Modifiers::NONE,
+    };
+    frame(&ctx, &mut app, vec![esc]);
+    assert!(!app.show_params);
+  }
+
+  #[test]
+  fn expression_filter_sort_and_csv() {
+    // ƒx keeps the rows that are more than a number
+    assert!(!is_expression("10") && !is_expression("10 mm") && !is_expression("2.5 deg"));
+    assert!(is_expression("w / 2") && is_expression("2 * 3") && is_expression("w"));
+    let s = session();
+    let mut panel = Panel { expressions_only: true, ..Panel::default() };
+    let groups = model_groups(&s);
+    assert!(shown(&panel, &groups[0].rows[0], &groups[0].name), "d1 = w is an expression");
+    assert!(!shown(&panel, &groups[1].rows[0], &groups[1].name), "the extrude's 5 mm isn't");
+    panel.expressions_only = false;
+    panel.favorites_only = true;
+    assert!(!shown(&panel, &groups[0].rows[0], &groups[0].name));
+    // the Parameter column's arrow sorts by what a row sets
+    let rows: Vec<Row> = groups.into_iter().flat_map(|g| g.rows).collect();
+    let labels = |rows: &[Row]| rows.iter().map(|r| r.label.clone()).collect::<Vec<_>>();
+    let natural = labels(&rows);
+    panel.sort = Some(false);
+    let up = labels(&sorted(&panel, rows.clone()));
+    let mut want = natural.clone();
+    want.sort_by_key(|l| l.to_lowercase());
+    assert_eq!(up, want);
+    panel.sort = Some(true);
+    want.reverse();
+    assert_eq!(labels(&sorted(&panel, rows.clone())), want);
+    panel.sort = None;
+    assert_eq!(labels(&sorted(&panel, rows)), natural);
+    // export and import round-trip the user parameters (a comma in a comment included)
+    let mut s = s;
+    s.execute("param.comment", &json!({"name": "w", "comment": "width, outer"})).unwrap();
+    s.execute("param.add", &json!({"name": "a", "expr": "30 deg", "kind": "angle"})).unwrap();
+    let text = csv_text(&user_rows(&s), LengthUnit::Mm);
+    assert!(text.starts_with("Name,Unit,Expression,Value,Comments\n"), "{text}");
+    assert!(text.contains("w,mm,10,10,\"width, outer\"\n"), "{text}");
+    let back = parse_csv(&text, LengthUnit::Mm);
+    assert_eq!(
+      back,
+      vec![
+        ("w".to_string(), ParamKind::Length, "10".to_string(), "width, outer".to_string()),
+        ("a".to_string(), ParamKind::Angle, "30 deg".to_string(), String::new()),
+      ]
+    );
+  }
+
+  #[test]
+  fn held_edits_apply_on_ok_and_imports_add_or_update() {
+    let mut app = App::with_session(session());
+    app.show_params = true;
+    // Automatic Compute off: the edit waits
+    app.params_ui.manual = true;
+    app.params_ui.pending.push((Source::User, "w".into(), "20 mm".into()));
+    assert_eq!(app.s.model.params.get("w"), Some(&10.0));
+    finish(&mut app);
+    assert!(!app.show_params && app.params_ui.pending.is_empty());
+    assert_eq!(app.s.model.params.get("w"), Some(&20.0));
+    // an import adds new parameters and updates existing ones
+    import(&mut app, "Name,Unit,Expression,Value,Comments\nh,mm,7,7,height\nw,mm,12,12,wider\n");
+    assert_eq!(app.s.model.params.get("h"), Some(&7.0));
+    assert_eq!(app.s.model.params.get("w"), Some(&12.0));
+    let w = app.s.design.parameters.iter().find(|p| p.name == "w").unwrap();
+    assert_eq!(w.comment, "wider");
   }
 
   #[test]

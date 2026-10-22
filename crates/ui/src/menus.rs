@@ -657,7 +657,7 @@ const SKETCH_MODIFY: &[E] = &[
   c("Trim", Icon::SkTrim, T(Tool::Trim)).k("T"),
   c("Extend", Icon::SkExtend, T(Tool::Extend)),
   c("Break", Icon::SkBreak, T(Tool::Break)),
-  c("Sketch Scale", Icon::SkScale, D(Kind::Form(&forms::SK_SCALE))),
+  c("Sketch Scale", Icon::SkScale, D(Kind::SkScale)),
   c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
@@ -1815,7 +1815,7 @@ mod tests {
     use crate::forms;
     let wired = [
       (Tab::Sketch, "MODIFY", "Move/Copy", D(Kind::Move)),
-      (Tab::Sketch, "MODIFY", "Sketch Scale", D(Kind::Form(&forms::SK_SCALE))),
+      (Tab::Sketch, "MODIFY", "Sketch Scale", D(Kind::SkScale)),
       (Tab::Sketch, "INSERT", "Sketch Library...", Cmd::SketchLibrary),
       (Tab::Sketch, "CREATE", "Project To Surface", D(Kind::Form(&forms::SK_PROJECT_SURFACE))),
       (Tab::Sketch, "CREATE", "Intersection Curve", D(Kind::Form(&forms::SK_INTERSECTION_CURVE))),

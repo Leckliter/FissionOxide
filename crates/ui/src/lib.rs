@@ -95,6 +95,8 @@ pub struct App {
   /// clears when that tool or command ends, as Fusion's canvas hint does.
   hint: Option<String>,
   pub show_params: bool,
+  /// Change Parameters' filters, sort, selection and Automatic Compute (see [`params_ui`]).
+  pub params_ui: params_ui::Panel,
   /// Display Settings ▸ Visual Style.
   pub visual_style: fox_engine::render::VisualStyle,
   /// Display Settings ▸ Object Visibility and Effects.
@@ -394,6 +396,7 @@ impl App {
       status: None,
       hint: None,
       show_params: false,
+      params_ui: params_ui::Panel::default(),
       drawing: None,
       sheet_cache: None,
       sheet_view: (1.0, egui::Vec2::ZERO),
@@ -883,8 +886,8 @@ impl App {
   }
 
   fn shortcuts(&mut self, ctx: &egui::Context) {
-    if self.key_capture.is_some() || self.preferences.open {
-      // Change Keyboard Shortcut and the Preferences modal take the keys
+    if self.key_capture.is_some() || self.preferences.open || self.show_params {
+      // Change Keyboard Shortcut and the Preferences and Parameters modals take the keys
       return;
     }
     // Esc closes an open menu (File, Help, a panel's drop-down, a right-click menu) before it
@@ -1972,6 +1975,18 @@ mod tests {
     assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Fillet));
     assert_eq!(app.last_cmd, Some(panels::Cmd::Dialog(dialogs::Kind::Fillet)));
     assert_eq!(app.recent[..2], [panels::Cmd::Dialog(dialogs::Kind::Fillet), panels::Cmd::NewSketch]);
+  }
+
+  /// In a sketch M opens Move/Copy (the sketch MODIFY row shows the M hint), as in Fusion.
+  #[test]
+  fn m_opens_move_copy_in_a_sketch() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let mid = app.canvas.center();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    assert_eq!(app.key_for(panels::Cmd::Dialog(dialogs::Kind::Move)).as_deref(), Some("M"));
+    press(&mut app, &ctx, egui::Key::M, mid);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Move));
   }
 
   #[test]

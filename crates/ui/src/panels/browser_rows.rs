@@ -31,7 +31,8 @@ pub(crate) fn unsaved(app: &App) -> bool {
 }
 
 /// The design's name as the tab and title show it: the file's stem, else the design name.
-fn doc_name(app: &App) -> String {
+/// The document's name: its file's stem once saved, else the design's name.
+pub(crate) fn doc_name(app: &App) -> String {
   app
     .s
     .path

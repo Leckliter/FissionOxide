@@ -166,8 +166,45 @@ impl Dialog {
         self.manip.pivot = centre(s, &self.bodies).map(|c| (self.bodies.clone(), c));
       }
       Kind::Move => self.refresh_move(s),
+      // the arrow's reach is measured afresh each frame (the preview scales the very curves)
+      Kind::SkScale => self.manip.anchor = self.scale_anchor(s).map(|(o, d)| (Value::Null, o, d)),
       _ => {}
     }
+  }
+
+  /// Sketch Scale's factor as a number.
+  fn scale_factor(&self, s: &Session) -> Option<f64> {
+    fox_engine::expr::eval(&self.a, fox_engine::expr::Kind::Unitless, &s.model.params).ok()
+  }
+
+  /// Where Sketch Scale's arrow hangs: the picked point, and the sketch's x axis scaled to how
+  /// far the entities reach from the point before the preview scaled them (the arrow is that
+  /// long at a factor of 1).
+  fn scale_anchor(&self, s: &Session) -> Option<(DVec3, DVec3)> {
+    if self.center.is_none() || self.curves.is_empty() {
+      return None;
+    }
+    let sk = s.edit_sketch?;
+    let sketch = s.design.sketch(sk).ok()?;
+    let plane = s.model.sketches.get(&sk)?.plane;
+    let at = self.at_pt()?;
+    let mut reach: f64 = 0.0;
+    for c in &self.curves {
+      for p in sketch.curve_points(CurveId(*c)) {
+        if let Some(q) = sketch.pos(p) {
+          reach = reach.max((q[0] - at[0]).hypot(q[1] - at[1]));
+        }
+      }
+    }
+    if self.applied
+      && let Some(f) = self.scale_factor(s).filter(|f| f.abs() > 1e-9)
+    {
+      reach /= f.abs();
+    }
+    if reach < 1e-6 {
+      reach = 10.0;
+    }
+    Some((plane.to_world(at), plane.x * reach))
   }
 
   /// The arrows of Fillet and Chamfer (radius, out of the first edge) and Press Pull (distance,
@@ -175,6 +212,13 @@ impl Dialog {
   /// feature stored (see [`Dialog::load_edit_anchor`]); Press Pull's picks name the body before
   /// it, so it has none while editing.
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
+    // Sketch Scale: the arrow from the point, the factor times the entities' reach long
+    if self.kind == Kind::SkScale {
+      let (_, origin, reach) =
+        self.manip.anchor.as_ref().filter(|_| self.center.is_some() && !self.curves.is_empty())?;
+      let r = reach.length();
+      return Some(Manipulator { origin: *origin, dir: *reach / r, value: self.scale_factor(s)? * r });
+    }
     if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset)
       || (self.editing.is_some() && !matches!(self.kind, Kind::Fillet | Kind::Chamfer))
     {
@@ -365,6 +409,12 @@ impl Dialog {
       Kind::SkOffset => {
         self.distance = mm(self.unit, nonzero(v, step));
         self.follow = false;
+      }
+      // the factor to two decimals, never zero or negative
+      Kind::SkScale => {
+        let Some(r) = self.manip.anchor.as_ref().map(|a| a.2.length()).filter(|r| *r > 1e-9) else { return false };
+        let f = (v / r * 100.0).round() / 100.0;
+        self.a = fox_engine::expr::trim_number(f.max(0.01));
       }
       _ => return false,
     }

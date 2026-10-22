@@ -1434,16 +1434,6 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       }
       ("sketch.text_edit", q)
     }
-    "sketch.scale" => {
-      let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
-      let mut q = json!({"center": [num("x"), num("y")], "scale": p.get("scale").cloned().unwrap_or(json!("1"))});
-      for k in ["sketch", "curves"] {
-        if let Some(v) = p.get(k) {
-          q[k] = v.clone();
-        }
-      }
-      ("sketch.transform", q)
-    }
     // Closest Point takes no direction
     "sketch.project_to_surface" => {
       let mut q = p.clone();
@@ -2552,22 +2542,6 @@ pub static PATH_PATTERN: Form = Form {
     Input::Check { key: "join", label: "Join to the original" },
   ],
   picks_model: true,
-};
-
-pub static SK_SCALE: Form = Form {
-  title: "SKETCH SCALE",
-  name: "Sketch Scale",
-  hint: "Scale sketch curves about a point (sketch X, Y); dimensions inside them scale too",
-  icon: Icon::SkScale,
-  cmd: "sketch.scale",
-  fixed: &[],
-  inputs: &[
-    Input::Curves { key: "curves", label: "Entities (default all)" },
-    Input::Expr { key: "x", label: "Point X", default: "0" },
-    Input::Expr { key: "y", label: "Point Y", default: "0" },
-    Input::Expr { key: "scale", label: "Scale factor", default: "1" },
-  ],
-  picks_model: false,
 };
 
 const PROJECTION_TYPES: &[(&str, &str)] = &[("closest_point", "Closest Point"), ("along_vector", "Along Vector")];

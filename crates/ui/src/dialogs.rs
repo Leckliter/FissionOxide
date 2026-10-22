@@ -85,6 +85,8 @@ pub enum Kind {
   SkMirror,
   SkCircPattern,
   SkRectPattern,
+  /// Sketch Scale: curves scaled about a picked sketch point.
+  SkScale,
   Project,
   Refold,
   // assembly motion and component copies
@@ -161,6 +163,7 @@ impl Kind {
       Kind::SkMirror => "MIRROR",
       Kind::SkCircPattern => "CIRCULAR PATTERN",
       Kind::SkRectPattern => "RECTANGULAR PATTERN",
+      Kind::SkScale => "SKETCH SCALE",
       Kind::Project => "PROJECT",
       Kind::Refold => "REFOLD FACES",
       Kind::DriveJoint => "DRIVE JOINTS",
@@ -236,6 +239,7 @@ impl Kind {
       Kind::SkMirror => Icon::SkMirror,
       Kind::SkCircPattern => Icon::SkCircPattern,
       Kind::SkRectPattern => Icon::SkRectPattern,
+      Kind::SkScale => Icon::SkScale,
       Kind::Project => Icon::Project,
       Kind::Refold => Icon::Refold,
       Kind::DriveJoint => Icon::DriveJoint,
@@ -295,6 +299,7 @@ impl Kind {
       Kind::SkMirror => ("Mirror", "Mirror sketch curves across a line"),
       Kind::SkCircPattern => ("Circular Pattern", "Copy sketch curves around a point"),
       Kind::SkRectPattern => ("Rectangular Pattern", "Copy sketch curves in rows and columns"),
+      Kind::SkScale => ("Sketch Scale", "Scale sketch curves about a point; dimensions inside them scale too"),
       Kind::Project => ("Project", "Project a body's or face's edges into the sketch"),
       Kind::Refold => ("Refold Faces", "Fold an unfolded sheet back up, keeping cuts made while flat"),
       Kind::DriveJoint => ("Drive Joints", "Set a joint's rotation and slide"),
@@ -378,6 +383,7 @@ impl Kind {
         | Kind::SkMirror
         | Kind::SkCircPattern
         | Kind::SkRectPattern
+        | Kind::SkScale
         | Kind::Project
         | Kind::TraceImage
     )
@@ -927,6 +933,7 @@ impl Dialog {
         d.count = "6".into();
         d.angle = "360 deg".into();
       }
+      Kind::SkScale => d.a = "1".into(),
       Kind::SkRectPattern => {
         // Fusion patterns in two directions from the start
         d.count = "3".into();
@@ -958,6 +965,7 @@ impl Dialog {
         | Kind::SkMirror
         | Kind::SkCircPattern
         | Kind::SkRectPattern
+        | Kind::SkScale
     ) {
       d.curves = sel_curves(s);
       if kind == Kind::SkMirror {
@@ -1399,6 +1407,7 @@ impl Dialog {
         json!({"curves": self.curves, "center": self.at_pt()?, "count": self.count.trim().parse::<u64>().ok()?, "angle": self.angle,
           "symmetric": self.flag}),
       ),
+      Kind::SkScale => ("sketch.transform", json!({"curves": self.curves, "center": self.at_pt()?, "scale": self.a})),
       Kind::SkRectPattern => {
         let v = |a: &str| if a == "y" { [0.0, 1.0] } else { [1.0, 0.0] };
         // picked lines set the directions (the second at right angles to a lone first), else
@@ -1709,7 +1718,7 @@ impl Dialog {
       Kind::Material => self.comps.iter().any(Option::is_some),
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
-      Kind::SkCircPattern => !self.curves.is_empty() && self.center.is_some(),
+      Kind::SkCircPattern | Kind::SkScale => !self.curves.is_empty() && self.center.is_some(),
       Kind::SkOffset | Kind::SkRectPattern => !self.curves.is_empty(),
       Kind::TraceImage => self.trace.as_ref().is_some_and(|t| t.path.is_some()),
       Kind::DriveJoint | Kind::CopyComponent => self.target.is_some(),
@@ -1994,7 +2003,7 @@ impl Dialog {
           self.origins = o;
         }
       }
-      Kind::SkMirror | Kind::SkCircPattern | Kind::SkRectPattern => self.sync_sketch_picks(s),
+      Kind::SkMirror | Kind::SkCircPattern | Kind::SkRectPattern | Kind::SkScale => self.sync_sketch_picks(s),
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle | Kind::SkOffset => {
         let c = if self.kind == Kind::SkOffset { self.offset_picks(s) } else { sel_curves(s) };
         if !c.is_empty() && c != self.curves {
@@ -2229,6 +2238,10 @@ impl Dialog {
         Kind::Combine => "Select tool bodies".into(),
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
         Kind::Draft => "Select faces to draft".into(),
+        // one prompt for the whole pick, as Fusion words it
+        Kind::SkScale => {
+          "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
+        }
         _ => sentence(self.missing_input()),
       });
     }
@@ -2252,6 +2265,7 @@ impl Dialog {
       Kind::Loft | Kind::Sweep | Kind::Combine => "Specify operation",
       Kind::RectPattern | Kind::CircPattern => "Specify quantity and distance",
       Kind::Move => "Specify distance or angle",
+      Kind::SkScale => "Specify scale factor",
       _ => return None,
     };
     Some(specify.into())
@@ -2284,6 +2298,7 @@ impl Dialog {
           | Kind::SkOffset
           | Kind::SkCircPattern
           | Kind::SkRectPattern
+          | Kind::SkScale
       )
   }
 
@@ -2340,6 +2355,8 @@ impl Dialog {
       Kind::SkCircPattern if self.curves.is_empty() => "select sketch curves to pattern",
       Kind::SkCircPattern => "select the center point",
       Kind::SkRectPattern => "select sketch curves to pattern",
+      Kind::SkScale if self.curves.is_empty() => "select the sketch geometry to scale",
+      Kind::SkScale => "select the point to scale from",
       Kind::SkOffset => "select sketch curves",
       Kind::TraceImage => "pick an image to trace",
       Kind::DriveJoint => "the design has no joints",
@@ -3366,6 +3383,17 @@ impl Dialog {
         let line = if self.line.is_some() { "1 selected" } else { "Select" };
         self.pick_row_chip(ui, "Mirror Line", 1, line, self.line.is_some());
       }
+      Kind::SkScale => {
+        // Fusion: Entities and Point pick buttons; the Scale Factor row appears once the point is
+        // picked (the arrow at the point and its value box set it too)
+        let entities = chip_text(self.curves.len(), "selected");
+        self.pick_row_chip(ui, "Entities", 0, &entities, !self.curves.is_empty());
+        let point = if self.center.is_some() { "1 selected" } else { "Select" };
+        self.pick_row_chip(ui, "Point", 1, point, self.center.is_some());
+        if self.center.is_some() {
+          Self::field(ui, "Scale Factor", &mut self.a, dirty);
+        }
+      }
       Kind::SkCircPattern => {
         let objects = chip_text(self.curves.len(), "selected");
         self.pick_row_chip(ui, "Objects", 0, &objects, !self.curves.is_empty());
@@ -3656,9 +3684,10 @@ impl Dialog {
     ui.end_row();
   }
 
-  /// Sketch Mirror and patterns: the picks, routed by the active row. Objects take every picked
-  /// curve not used by the other row; the other row takes the newest pick that fits it (a line
-  /// for the mirror line or a direction, a sketch point or circle for the centre).
+  /// Sketch Mirror, patterns and Scale: the picks, routed by the active row. Objects take every
+  /// picked curve not used by the other row; the other row takes the newest pick that fits it (a
+  /// line for the mirror line or a direction, a sketch point or circle for the centre). Scale's
+  /// point is a sketch point, taken whichever row is active (points are never entities).
   fn sync_sketch_picks(&mut self, s: &Session) {
     use fox_engine::sketch::{CurveId, CurveKind};
     let Some(sk) = s.edit_sketch else { return };
@@ -3671,7 +3700,7 @@ impl Dialog {
       (len > 1e-9).then(|| [dx / len, dy / len])
     };
     let picked = sel_curves(s);
-    if self.pick_row == 1 {
+    if self.pick_row == 1 || self.kind == Kind::SkScale {
       let used = self.other_row_curves();
       let fresh = picked.iter().copied().find(|c| !self.curves.contains(c) && !used.contains(c));
       match self.kind {
@@ -3695,7 +3724,8 @@ impl Dialog {
             Sel::SketchPoint { sketch, point } if *sketch == sk => Some((*x, r.sketch.pos(*point)?)),
             _ => None,
           });
-          let circle = fresh.and_then(|c| match r.sketch.curve(CurveId(c))?.kind {
+          // (a circle's centre only with the centre row active: it is an object otherwise)
+          let circle = fresh.filter(|_| self.pick_row == 1).and_then(|c| match r.sketch.curve(CurveId(c))?.kind {
             CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. } => {
               Some((Sel::SketchCurve { sketch: sk, curve: CurveId(c) }, r.sketch.pos(center)?))
             }
@@ -5021,11 +5051,12 @@ pub(crate) fn take_typing(ctx: &egui::Context) -> Option<String> {
 impl Dialog {
   /// The field the floating value box beside the drag arrow edits (see [`crate::value_box`]):
   /// the distance of Extrude, Press Pull, Offset Plane and Sketch Offset, the radius or distance
-  /// of Fillet and Chamfer. None for dialogs without an arrow.
+  /// of Fillet and Chamfer, Sketch Scale's factor. None for dialogs without an arrow.
   pub fn value_box_field(&mut self) -> Option<&mut String> {
     match self.kind {
       Kind::Extrude | Kind::OffsetPlane | Kind::PressPull | Kind::SkOffset => Some(&mut self.distance),
       Kind::Fillet | Kind::Chamfer => Some(&mut self.radius),
+      Kind::SkScale => Some(&mut self.a),
       _ => None,
     }
   }
@@ -5959,16 +5990,43 @@ mod tests {
     assert!(!s.model.sketches[&sk].profiles.is_empty());
   }
 
+  /// Sketch Scale, as Fusion's: Entities and Point picks (OK waits for both, one prompt
+  /// throughout), the Scale Factor row and the arrow at the point once it is picked; a 10 mm
+  /// square doubled about its corner.
   #[test]
-  fn sketch_scale_project_intersect_and_align_forms() {
-    use crate::forms::*;
-    // Sketch Scale: a 10 mm square doubled about the origin
+  fn sketch_scale_picks_entities_and_a_point_then_scales() {
+    use fox_engine::kernel::glam::DVec3;
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "xy"}));
     run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
     let sk = s.edit_sketch.unwrap();
-    let mut d = form(&mut s, &SK_SCALE, vec![], &[("scale", json!("2"))]);
-    assert_eq!(d.command().unwrap().0, "sketch.transform");
+    let sketch = s.design.sketch(sk).unwrap();
+    let curves: Vec<Sel> = sketch.curves.iter().map(|c| Sel::SketchCurve { sketch: sk, curve: c.id }).collect();
+    let corner = sketch.points.iter().find(|p| p.x.abs() < 1e-9 && p.y.abs() < 1e-9).unwrap().id;
+    let mut d = Dialog::blank(Kind::SkScale);
+    d.a = "1".into();
+    let prompt = "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor";
+    assert!(!d.ready() && !d.ok_enabled() && d.prompt(false).as_deref() == Some(prompt));
+    assert!(d.manipulator(&s).is_none() && d.value_box_field().is_some());
+    s.selection = curves;
+    d.sync_selection(&s);
+    assert_eq!(d.curves.len(), 4);
+    assert!(!d.ready() && !d.ok_enabled() && d.prompt(false).as_deref() == Some(prompt));
+    // the point picked with the Entities row still active is the point
+    s.selection.push(Sel::SketchPoint { sketch: sk, point: corner });
+    d.sync_selection(&s);
+    assert!(d.center.is_some() && d.at == ["0".to_string(), "0".to_string()] && d.ready() && d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Specify scale factor"));
+    // the arrow sits at the point along the sketch's x axis, as long as the entities reach
+    let reach = 200f64.sqrt();
+    d.refresh_manip(&s);
+    let m = d.manipulator(&s).unwrap();
+    assert!(m.origin.length() < 1e-9 && (m.dir - DVec3::X).length() < 1e-9 && (m.value - reach).abs() < 1e-6);
+    // dragged to twice its reach: a factor of 2
+    d.set_manipulator(2.0 * reach, 0.0);
+    assert_eq!(d.a, "2");
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, &p["scale"], &p["center"]), ("sketch.transform", &json!("2"), &json!([0.0, 0.0])));
     apply(&mut s, &mut d);
     let sketch = s.design.sketch(sk).unwrap();
     let max_x = sketch
@@ -5979,7 +6037,15 @@ mod tests {
       .map(|p| p[0])
       .fold(f64::MIN, f64::max);
     assert!((max_x - 20.0).abs() < 1e-6, "{max_x}");
+    // under the preview the arrow reaches as far as the scaled entities
+    d.refresh_manip(&s);
+    let m = d.manipulator(&s).unwrap();
+    assert!((m.value - 2.0 * reach).abs() < 1e-6, "{}", m.value);
+  }
 
+  #[test]
+  fn sketch_project_intersect_and_align_forms() {
+    use crate::forms::*;
     // a box under a sketch 30 mm up: Project To Surface and Intersection Curve onto its top
     let setup = |s: &mut Session| {
       run(s, "box", json!({"width": 40, "depth": 40, "height": 10}));

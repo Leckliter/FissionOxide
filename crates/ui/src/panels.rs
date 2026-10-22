@@ -3833,7 +3833,7 @@ mod browser_edit;
 mod browser_rows;
 mod timeline_groups;
 
-pub(crate) use browser_rows::window_title;
+pub(crate) use browser_rows::{doc_name, window_title};
 
 #[cfg(test)]
 mod row_menu_tests {
