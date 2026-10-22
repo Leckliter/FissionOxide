@@ -1881,6 +1881,8 @@ impl Dialog {
         let mut p = json!({"body": self.bodies.first()?, "associative": self.flag});
         if let Some(f) = self.faces.first().and_then(|f| f.get("face")) {
           p["face"] = f.clone();
+        } else if !self.edges.is_empty() {
+          p["edges"] = self.edges.iter().map(|e| e["edge"].clone()).collect();
         }
         ("sketch.project", p)
       }
@@ -2486,9 +2488,16 @@ impl Dialog {
       Kind::ConvertSheet | Kind::Project if !self.applied || !self.picks() => {
         let f: Vec<Value> = sel_faces(s).into_iter().take(1).collect();
         let b = sel_bodies(s);
-        if (f != self.faces || b != self.bodies) && (!b.is_empty() || self.kind != Kind::Project) {
+        // Project's Specified Entities: edges picked (of the first body) project alone
+        let e: Vec<Value> = if self.kind == Kind::Project && f.is_empty() {
+          sel_edges(s).into_iter().filter(|e| e["body"].as_u64() == b.first().map(|b| *b as u64)).collect()
+        } else {
+          Vec::new()
+        };
+        if (f != self.faces || b != self.bodies || e != self.edges) && (!b.is_empty() || self.kind != Kind::Project) {
           self.faces = f;
           self.bodies = b;
+          self.edges = e;
           self.dirty = !self.picks();
         }
       }
@@ -4260,8 +4269,12 @@ impl Dialog {
       }
       Kind::Project => {
         ui.label("Geometry");
-        let what = if self.faces.is_empty() { "body" } else { "face" };
-        chip(ui, self.bodies.len().min(1), what);
+        let (n, what) = match (self.faces.is_empty(), self.edges.len()) {
+          (false, _) => (1, "face"),
+          (true, 0) => (self.bodies.len().min(1), "body"),
+          (true, n) => (n, "edge"),
+        };
+        chip(ui, n, what);
         ui.end_row();
         // Fusion's Selection Filter: specified entities (faces and edges), or whole bodies
         let mut filter: &'static str = if self.choice == "bodies" { "bodies" } else { "specified" };
@@ -5310,6 +5323,8 @@ impl Dialog {
     }
     // Measure's picks are its own: closing it lets them go, as in Fusion
     if self.kind == Kind::Inspect {
+      // opened from a dimension box, it writes its measurement there
+      crate::viewport::fill_dim_from_measure(app);
       app.s.selection.clear();
       app.measure = None;
     }
@@ -6421,6 +6436,35 @@ mod tests {
     assert!(d.bodies == [body.0] && d.faces.is_empty(), "{:?} {:?}", d.bodies, d.faces);
     d.leave(&mut app);
     assert_eq!(app.sel_priority, Priority::Face, "the filter is put back on close");
+  }
+
+  /// `ui:sketch:project-specified-edge`: under Specified Entities an edge pick projects that
+  /// edge alone (the chip counts edges), a face pick that face's edges.
+  #[test]
+  fn project_specified_edge_projects_the_edge_alone() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 20, "depth": 20, "height": 10})).unwrap();
+    app.run("plane.offset", json!({"plane": "xy", "offset": 25})).unwrap();
+    let pl = app.s.design.features.last().unwrap().id.0;
+    app.run("sketch.create", json!({"plane": {"feature": pl}})).unwrap();
+    let body = app.s.model.bodies[0].id;
+    let b = app.s.model.body(body).unwrap();
+    let edge = b.edges().iter().find(|e| e.start.z > 9.9 && e.end.z > 9.9).unwrap().id;
+    let face = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let mut d = Dialog::open(&mut app, Kind::Project);
+    app.s.selection = vec![Sel::Edge { body, edge }];
+    d.sync_selection(&app.s);
+    assert_eq!(d.bodies, [body.0]);
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, &p["edges"]), ("sketch.project", &json!([edge])));
+    assert!(p.get("face").is_none());
+    let r = app.run(cmd, p).unwrap();
+    assert_eq!(r["curves"].as_array().unwrap().len(), 1, "{r}");
+    // a face pick takes its edges, no edges list
+    app.s.selection = vec![Sel::Face { body, face }];
+    d.sync_selection(&app.s);
+    let (_, p) = d.command().unwrap();
+    assert!(p.get("edges").is_none() && p["face"] == json!(face), "{p}");
   }
 
   /// Previews the dialog's command and checks it applied without an error.

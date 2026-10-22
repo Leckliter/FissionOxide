@@ -1139,3 +1139,71 @@ fn mesh_remesh_shell_combine_separate_and_scale() {
   assert_eq!(s.model.bodies.len(), 2);
   assert!((s.model.body(fox_model::BodyId(a)).unwrap().shape.mass().unwrap().volume - 3000.0).abs() < 1.0);
 }
+
+/// `ui:sketch:vertical-on-horizontal-line`: Vertical on a line already constrained Horizontal
+/// (or the reverse, or the same two points) is refused as a conflict and the line stays.
+#[test]
+fn vertical_on_a_horizontal_line_is_refused() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 3]]}));
+  let line = r["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.constrain", json!({"type": "horizontal", "curves": [line]}));
+  let before = run(&mut s, "sketch.info", json!({}));
+  let e = s.execute("sketch.constrain", &json!({"type": "vertical", "curves": [line]})).unwrap_err();
+  assert!(e.to_string().contains("conflicts"), "{e}");
+  let after = run(&mut s, "sketch.info", json!({}));
+  assert_eq!(before["geometry"], after["geometry"], "the line keeps its length");
+  assert_eq!(before["dof"], after["dof"]);
+  // the same through the line's two points, and a vertical line made horizontal
+  let sk = s.edit_sketch.unwrap();
+  let ends = s.design.sketch(sk).unwrap().curve_points(fox_sketch::CurveId(line as u32));
+  let pts = [ends[1].0, ends[0].0];
+  assert!(s.execute("sketch.constrain", &json!({"type": "vertical", "points": pts})).is_err());
+  let r = run(&mut s, "sketch.line", json!({"points": [[40, 0], [41, 15]]}));
+  let upright = r["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.constrain", json!({"type": "vertical", "curves": [upright]}));
+  assert!(s.execute("sketch.constrain", &json!({"type": "horizontal", "curves": [upright]})).is_err());
+  // Horizontal on the horizontal line again is not a conflict of this kind
+  assert!(
+    !s.design
+      .sketch(sk)
+      .unwrap()
+      .contradicts(&fox_sketch::ConstraintKind::Horizontal { line: fox_sketch::CurveId(line as u32) })
+  );
+}
+
+/// `ui:sketch:project-specified-edge`: Project with edges given projects those edges alone,
+/// linked to them (they follow the body), rather than the body's silhouette.
+#[test]
+fn project_specified_edges_alone() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 30, "depth": 20, "height": 10}));
+  let body = &s.model.bodies[0];
+  let b = body.id.0;
+  // the top face's edge along x at the back, and a vertical edge
+  let top_back = body
+    .edges()
+    .iter()
+    .find(|e| e.start.z > 9.9 && e.end.z > 9.9 && (e.start.y - e.end.y).abs() < 1e-9 && e.start.y > 1.0)
+    .unwrap()
+    .id;
+  let upright = body.edges().iter().find(|e| (e.start.z - e.end.z).abs() > 9.9).unwrap().id;
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 25}));
+  let pl = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
+  let r = run(&mut s, "sketch.project", json!({"body": b, "edges": [top_back]}));
+  assert_eq!(r["curves"].as_array().unwrap().len(), 1, "that edge alone: {r}");
+  let sk = s.edit_sketch.unwrap();
+  let links = match &s.design.feature(sk).unwrap().kind {
+    fox_model::FeatureKind::Sketch { links, .. } => links.len(),
+    _ => 0,
+  };
+  assert_eq!(links, 1, "linked to the edge");
+  let info = run(&mut s, "sketch.info", json!({}));
+  let length = info["geometry"][0]["length"].as_f64().unwrap();
+  assert!((length - 30.0).abs() < 1e-6, "{info}");
+  // an edge along the sketch normal projects to a point: nothing to add, but no silhouette either
+  let r = run(&mut s, "sketch.project", json!({"body": b, "edges": [upright]}));
+  assert!(r["curves"].as_array().unwrap().is_empty(), "{r}");
+}

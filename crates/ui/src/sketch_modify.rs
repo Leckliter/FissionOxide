@@ -587,9 +587,9 @@ mod tests {
     let d = dims(&app, sk);
     assert_eq!(d.len(), 4);
     assert!((d[2].1 - 2.0).abs() < 1e-9);
-    // 2 along the first line at 30°: the second leg is 2·sin30/sin60 (a dimension's value is
-    // rounded as its expression is)
-    assert!((d[3].1 - 2.0 * 30f64.to_radians().sin() / 60f64.to_radians().sin()).abs() < 1e-4, "{d:?}");
+    // 2 along the first line and, as in Fusion, a 30° angle between the chamfer and that line
+    assert_eq!(d[3].0, "Angle");
+    assert!((d[3].1 - 30f64.to_radians()).abs() < 1e-9, "{d:?}");
   }
 
   /// The prober's case: a vertical line picked near its bottom and a diagonal picked near its top,

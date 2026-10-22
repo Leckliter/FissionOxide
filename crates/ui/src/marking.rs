@@ -477,15 +477,27 @@ fn ring_items(app: &App, cx: &Context) -> [Option<Item>; 8] {
     Item::new(Action::Repeat(c), icon, &format!("Repeat {name}"))
   });
   if app.s.edit_sketch.is_some() {
+    // Fusion's ring in a sketch is its 3D one: Press Pull and Hole finish the sketch first, and
+    // the Sketch slot holds the sketch tools
+    let launch = |c: Cmd| {
+      let mut it = Item::cmd(c);
+      it.action = Action::Repeat(c);
+      it.hint = app.key_for(c);
+      it
+    };
+    let mut sketch = Item::new(Action::Open, Icon::Sketch, "Sketch");
+    for t in [Tool::Line, Tool::Rect, Tool::Circle, Tool::Arc3, Tool::Point] {
+      sketch.children.push(Item::cmd(Cmd::SketchTool(t)));
+    }
     return [
       repeat,
       Some(Item::cmd(Cmd::Delete)),
+      Some(launch(Cmd::Dialog(Kind::PressPull))),
       Some(Item::cmd(Cmd::Redo)),
-      Some(Item::with_label(Cmd::SketchTool(Tool::Circle), "Circle")),
-      Some(Item::cmd(Cmd::SketchTool(Tool::Dimension))),
-      Some(Item::with_label(Cmd::SketchTool(Tool::Rect), "Rectangle")),
+      Some(launch(Cmd::Dialog(Kind::Hole))),
+      Some(sketch),
+      Some(launch(Cmd::Dialog(Kind::Move))),
       Some(Item::cmd(Cmd::Undo)),
-      Some(Item::cmd(Cmd::SketchTool(Tool::Line))),
     ];
   }
   // Fusion's ring: Repeat, Delete, Press Pull, Redo, Hole, Sketch ▾, Move/Copy, Undo; the east
@@ -538,12 +550,41 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
     v.push(Some(Item::new(Action::Cancel, Icon::Close, "Cancel")));
     sep(&mut v);
   }
-  if app.s.edit_sketch.is_some() {
-    v.push(Some(Item::cmd(Cmd::FinishSketch)));
-    sep(&mut v);
+  if let Some(sk) = app.s.edit_sketch {
     // Fusion's commands for picked sketch geometry
     let curve = app.s.selection.iter().any(|s| matches!(s, Sel::SketchCurve { .. }));
     let point = app.s.selection.iter().any(|s| matches!(s, Sel::SketchPoint { .. }));
+    let glyph = app.s.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { .. }));
+    if curve || point || glyph {
+      // on picked geometry or a constraint glyph Fusion lists OK (Return) and Cancel (Esc), the
+      // geometry's commands, then Create Selection Set, Find in Browser and Find in Window
+      if app.dialog.is_none() {
+        let mut ok = Item::new(Action::Ok, Icon::Finish, "OK");
+        ok.hint = Some("Return".into());
+        let mut cancel = Item::new(Action::Cancel, Icon::Close, "Cancel");
+        cancel.hint = Some("Esc".into());
+        v.push(Some(ok));
+        v.push(Some(cancel));
+        sep(&mut v);
+      }
+      if curve {
+        v.push(Some(Item::with_label(Cmd::Construction, "Normal/Construction")));
+      }
+      if curve || point {
+        v.push(Some(Item::cmd(Cmd::Constraint("fix"))));
+      }
+      if curve {
+        v.push(Some(Item::with_label(Cmd::SketchTool(Tool::Dimension), "Dimension")));
+        v.push(Some(Item::cmd(Cmd::SketchTool(Tool::Trim))));
+      }
+      sep(&mut v);
+      v.push(Some(Item::greyed(Icon::Select, "Create Selection Set")));
+      v.push(Some(Item::new(Action::FindInBrowser(Sel::Feature { feature: sk }), Icon::Folder, "Find in Browser")));
+      v.push(Some(Item::new(Action::FindInWindow, Icon::Fit, "Find in Window")));
+      return v;
+    }
+    v.push(Some(Item::cmd(Cmd::FinishSketch)));
+    sep(&mut v);
     if curve {
       v.push(Some(Item::with_label(Cmd::Construction, "Normal/Construction")));
     }
@@ -753,6 +794,9 @@ fn run(app: &mut App, action: Action) {
     Action::Ok => {
       if let Some(d) = app.dialog.as_mut() {
         d.ok_requested = true;
+      } else if app.s.edit_sketch.is_some() {
+        // a sketch's OK (Return) finishes it
+        app.finish_sketch();
       }
     }
     Action::Cancel => {
@@ -777,6 +821,8 @@ fn run(app: &mut App, action: Action) {
           let bodies = feature_bodies(app, f);
           find_in_window(app, &bodies, Some(f));
         }
+        // in a sketch, its geometry: the sketch
+        _ if bodies.is_empty() && app.s.edit_sketch.is_some() => find_in_window(app, &[], app.s.edit_sketch),
         _ => find_in_window(app, &bodies, None),
       }
     }
@@ -1641,6 +1687,38 @@ mod tests {
     app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
     run(&mut app, Action::Cmd(Cmd::Constraint("fix")));
     assert_eq!(fixes(&app), 0, "a fixed line is unfixed");
+  }
+
+  /// `ui:sketch:marking-ring-in-sketch`: in a sketch the ring is Fusion's 3D one (Repeat,
+  /// Delete, Press Pull, Redo, Hole, Sketch, Move/Copy, Undo) and a right-click on a constraint
+  /// glyph lists OK (Return), Cancel (Esc), Create Selection Set, Find in Browser and Find in
+  /// Window; OK finishes the sketch.
+  #[test]
+  fn sketch_ring_is_fusions_and_a_glyph_lists_ok_cancel_and_find() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.expect("sketching");
+    let r = app.run("sketch.line", json!({"points": [[5, 5], [15, 6]]})).unwrap();
+    app.run("sketch.constrain", json!({"type": "horizontal", "curves": [r["curves"][0]]}));
+    app.note_cmd(Cmd::SketchTool(Tool::Line));
+    let cx = context(&app);
+    let names: Vec<String> =
+      ring_items(&app, &cx).iter().map(|i| i.as_ref().map_or(String::new(), |i| i.label.clone())).collect();
+    assert_eq!(names[1..], ["Delete", "Press Pull", "Redo", "Hole", "Sketch", "Move/Copy", "Undo"], "{names:?}");
+    assert!(names[0].starts_with("Repeat "), "{names:?}");
+    let ring = ring_items(&app, &cx);
+    let sketch = ring[5].as_ref().unwrap();
+    assert!(sketch.children.iter().any(|c| matches!(c.action, Action::Cmd(Cmd::SketchTool(Tool::Line)))));
+    // a glyph's constraint picked: Fusion's short list
+    let c = app.s.design.sketch(sk).unwrap().constraints.iter().find(|c| c.kind.name() == "Horizontal").unwrap().id;
+    app.s.selection = vec![Sel::SketchConstraint { sketch: sk, constraint: c }];
+    let cx = context(&app);
+    let list = overflow(&app, &cx);
+    assert_eq!(labels(&list), ["OK", "Cancel", "Create Selection Set", "Find in Browser", "Find in Window"]);
+    let hints: Vec<Option<&str>> = list.iter().flatten().take(2).map(|i| i.hint.as_deref()).collect();
+    assert_eq!(hints, [Some("Return"), Some("Esc")]);
+    run(&mut app, Action::Ok);
+    assert!(app.s.edit_sketch.is_none(), "OK finishes the sketch");
   }
 
   #[test]

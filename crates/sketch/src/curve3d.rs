@@ -26,6 +26,10 @@ pub struct Curve3d {
   pub construction: bool,
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub source: Option<CurveSource>,
+  /// Drawn with 3D Sketch on (a 3D sketch line), not included from other geometry: drawn as the
+  /// sketch's own curves are, whatever the palette's Projected Geometries says.
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub drawn: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -137,7 +141,20 @@ impl Sketch {
   /// Adds an included 3D curve and returns its id (shared with the 2D curves' ids).
   pub fn add_curve3d(&mut self, kind: Curve3dKind, source: Option<CurveSource>) -> CurveId {
     let id = CurveId(self.alloc());
-    self.curves3d.push(Curve3d { id, kind, construction: false, source });
+    self.curves3d.push(Curve3d { id, kind, construction: false, source, drawn: false });
+    id
+  }
+
+  /// Adds a 3D sketch line from `a` to `b` (world positions), as 3D Sketch draws it.
+  pub fn add_line3d(&mut self, a: P3, b: P3) -> CurveId {
+    let id = CurveId(self.alloc());
+    self.curves3d.push(Curve3d {
+      id,
+      kind: Curve3dKind::Line { a, b },
+      construction: false,
+      source: None,
+      drawn: true,
+    });
     id
   }
 
