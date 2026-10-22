@@ -59,7 +59,7 @@
 {"name": "ui-data-panel-2", "items": 8, "status": "done", "pr": "27f64a9", "fixer": "cloud task_31b67b87 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-file-dialogs", "items": 8, "status": "done", "pr": "02f5ad5", "fixer": "cloud task_76a3d33e (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-document-settings-views", "items": 6, "status": "done", "pr": "6d43b74", "fixer": "cloud task_6ece50ff (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-status-readouts", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_7bb6ebf6 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-status-readouts", "items": 4, "status": "done", "pr": "e7b12a7", "fixer": "cloud task_7bb6ebf6 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-camera-navbar", "items": 5, "status": "done", "pr": "6951023", "fixer": "cloud task_17e44523 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-display-settings-3", "items": 5, "status": "done", "pr": "e315cfc", "fixer": "cloud session_011WRufzngKGK1csRsEmb2Lu (requested 2026-10-21)"}
 {"name": "ui-grid-snaps-2", "items": 3, "status": "done", "pr": "26b9c61", "fixer": "cloud task_90348c0f (requested 2026-10-22 by the coordinator)"}
