@@ -1350,7 +1350,9 @@ fn work_out_references(session: &fox_engine::Session, item: &str, tab: CardTab) 
       .unwrap_or_default()
       .iter()
       .enumerate()
-      .map(|(k, d)| d.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| format!("Drawing {}", k + 1)))
+      .map(|(k, d)| {
+        d.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| format!("Drawing {}", k + 1))
+      })
       .collect(),
   }
 }
