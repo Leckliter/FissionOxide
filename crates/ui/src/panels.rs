@@ -2338,55 +2338,36 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
       // Fusion draws the navigation bar as bare icons on the canvas
       ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
+        let [orbit, look_at, pan, zoom, zoom_window, display, grid, viewports] = crate::navbar::BUTTONS;
+        let tip = crate::navbar::dark_tip;
         let mode_btn = |ui: &mut egui::Ui, app: &mut App, icon, hint, mode| {
-          if icons::icon_button(ui, icon, 28.0, hint, app.nav_mode == Some(mode), None).clicked() {
+          if tip(icons::icon_button(ui, icon, 28.0, "", app.nav_mode == Some(mode), None), hint).clicked() {
             app.nav_mode = if app.nav_mode == Some(mode) { None } else { Some(mode) };
           }
         };
-        let orbit_hint = if app.free_orbit {
-          "Free Orbit: left-drag to orbit and roll (Esc to stop)"
-        } else {
-          "Constrained Orbit: left-drag to orbit (Esc to stop)"
-        };
-        mode_btn(ui, app, Icon::Orbit, orbit_hint, NavMode::Orbit);
+        mode_btn(ui, app, Icon::Orbit, orbit, NavMode::Orbit);
         let c = nav_caret(ui, "Orbit type");
         egui::Popup::menu(&c).show(|ui| crate::navbar::orbit_menu(app, ui));
-        if icons::icon_button(
-          ui,
-          Icon::LookAt,
-          28.0,
-          "Look At: the sketch plane or a selected planar face",
-          false,
-          None,
-        )
-        .clicked()
-        {
+        if tip(icons::icon_button(ui, Icon::LookAt, 28.0, "", false, None), look_at).clicked() {
           app.look_at_selection();
         }
-        mode_btn(ui, app, Icon::Pan, "Pan: left-drag to pan (Esc to stop)", NavMode::Pan);
-        mode_btn(ui, app, Icon::Zoom, "Zoom: left-drag to zoom (Esc to stop)", NavMode::Zoom);
-        let window = app.nav_mode == Some(NavMode::ZoomWindow);
-        let hint = if window { "Zoom Window: drag a box to zoom into (Esc to stop)" } else { "Fit (F6)" };
-        if icons::icon_button(ui, Icon::Fit, 28.0, hint, window, None).clicked() {
-          if window {
-            app.nav_mode = None;
-          } else {
-            app.fit_view();
-          }
-        }
-        let c = nav_caret(ui, "Fit and Zoom Window");
-        egui::Popup::menu(&c).show(|ui| crate::navbar::fit_menu(app, ui));
+        mode_btn(ui, app, Icon::Pan, pan, NavMode::Pan);
+        mode_btn(ui, app, Icon::Zoom, zoom, NavMode::Zoom);
+        // Fusion's fifth button is Zoom Window; Fit is in its fly-out (and on F6)
+        mode_btn(ui, app, Icon::ZoomWindow, zoom_window, NavMode::ZoomWindow);
+        let c = nav_caret(ui, "Zoom Window and Fit");
+        egui::Popup::menu(&c).show(|ui| crate::navbar::zoom_menu(app, ui));
         nav_sep(ui);
-        let d = icons::icon_button(ui, Icon::Display, 28.0, "Display Settings", false, None);
+        let d = tip(icons::icon_button(ui, Icon::Display, 28.0, "", false, None), display);
         let c = nav_caret(ui, "Display Settings");
         egui::Popup::menu(&d).show(|ui| crate::navbar::display_menu(app, ui));
         egui::Popup::menu(&c).show(|ui| crate::navbar::display_menu(app, ui));
-        let g = icons::icon_button(ui, Icon::Grid, 28.0, "Grid and Snaps", false, None);
+        let g = tip(icons::icon_button(ui, Icon::Grid, 28.0, "", false, None), grid);
         let c = nav_caret(ui, "Grid and Snaps");
         let adaptive = fox_engine::scene::grid_step(&app.s);
         egui::Popup::menu(&g).show(|ui| crate::navbar::grid_menu(app, ui, adaptive));
         egui::Popup::menu(&c).show(|ui| crate::navbar::grid_menu(app, ui, adaptive));
-        let v = icons::icon_button(ui, Icon::Viewports, 28.0, "Viewports", false, None);
+        let v = tip(icons::icon_button(ui, Icon::Viewports, 28.0, "", false, None), viewports);
         let c = nav_caret(ui, "Viewports");
         egui::Popup::menu(&v).show(|ui| {
           let _ = ui.selectable_label(true, "Single View");
@@ -3026,9 +3007,12 @@ fn sketch_coord(u: fox_engine::model::LengthUnit, mm: f64) -> String {
 
 /// Status message and sketch hint at the bottom-left of the canvas, above COMMENTS.
 pub fn canvas_status(app: &mut App, ctx: &egui::Context) {
-  let Some((msg, err)) = app.status.clone() else { return };
+  // the Zoom Window tool names itself there while it waits for its box, as in Fusion
+  let tool = (app.nav_mode == Some(NavMode::ZoomWindow)).then(|| (crate::navbar::BUTTONS[4].to_string(), false));
+  let is_tool = app.status.is_none() && tool.is_some();
+  let Some((msg, err)) = app.status.clone().or(tool) else { return };
   // Preferences → General → Show command prompt
-  if !err && !app.preferences.values.show_prompt && app.hint.as_deref() == Some(msg.as_str()) {
+  if !err && !app.preferences.values.show_prompt && (is_tool || app.hint.as_deref() == Some(msg.as_str())) {
     return;
   }
   let canvas = app.canvas;

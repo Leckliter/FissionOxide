@@ -353,6 +353,8 @@ pub enum Icon {
   // Grid and Snaps' two commands
   GridSettings,
   SetIncrements,
+  /// The navigation bar's Zoom Window: a magnifier inside a dashed box.
+  ZoomWindow,
 }
 
 #[derive(Clone, Copy)]
@@ -2568,6 +2570,20 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.line((0.14, 0.3), (0.76, 0.3), Blue);
       k.arrow_head((0.86, 0.3), (1.0, 0.0), 0.16, Blue);
       k.line((0.14, 0.18), (0.14, 0.42), Ink);
+    }
+    Icon::ZoomWindow => {
+      for (a, b) in [
+        ((0.06, 0.06), (0.94, 0.06)),
+        ((0.94, 0.06), (0.94, 0.94)),
+        ((0.94, 0.94), (0.06, 0.94)),
+        ((0.06, 0.94), (0.06, 0.06)),
+      ] {
+        k.dashed(a, b, Ink);
+      }
+      k.circle((0.44, 0.44), 0.2, Some(White), Some(Ink));
+      k.thick((0.59, 0.59), (0.78, 0.78), Ink, 2.0);
+      k.line((0.34, 0.44), (0.54, 0.44), Ink);
+      k.line((0.44, 0.34), (0.44, 0.54), Ink);
     }
   }
 }

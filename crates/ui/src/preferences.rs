@@ -48,8 +48,9 @@ impl Units {
 /// Default modeling orientation: which world axis points up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UpAxis {
-  Y,
+  /// Fusion's default.
   #[default]
+  Y,
   Z,
 }
 
@@ -87,13 +88,23 @@ pub enum NavPreset {
   SolidWorks,
   Inventor,
   Alias,
+  PowerMill,
+  Tinkercad,
 }
 
 /// Modifier keys a mapping needs held: (shift, ctrl, alt).
 type Held = (bool, bool, bool);
 
 impl NavPreset {
-  pub const ALL: [NavPreset; 4] = [NavPreset::Fusion, NavPreset::SolidWorks, NavPreset::Inventor, NavPreset::Alias];
+  /// In the order Fusion's Mouse setup list shows them.
+  pub const ALL: [NavPreset; 6] = [
+    NavPreset::Fusion,
+    NavPreset::Alias,
+    NavPreset::Inventor,
+    NavPreset::PowerMill,
+    NavPreset::SolidWorks,
+    NavPreset::Tinkercad,
+  ];
 
   pub fn key(self) -> &'static str {
     match self {
@@ -101,15 +112,19 @@ impl NavPreset {
       NavPreset::SolidWorks => "solidworks",
       NavPreset::Inventor => "inventor",
       NavPreset::Alias => "alias",
+      NavPreset::PowerMill => "powermill",
+      NavPreset::Tinkercad => "tinkercad",
     }
   }
 
   pub fn label(self) -> &'static str {
     match self {
       NavPreset::Fusion => "Fusion",
-      NavPreset::SolidWorks => "SolidWorks",
+      NavPreset::SolidWorks => "SOLIDWORKS",
       NavPreset::Inventor => "Inventor",
       NavPreset::Alias => "Alias",
+      NavPreset::PowerMill => "PowerMill",
+      NavPreset::Tinkercad => "Tinkercad",
     }
   }
 
@@ -130,6 +145,10 @@ impl NavPreset {
       NavPreset::SolidWorks => &[(Middle, NONE, Orbit), (Middle, CTRL, Pan), (Middle, SHIFT, Zoom)],
       NavPreset::Inventor => &[(Middle, NONE, Pan), (Middle, SHIFT, Orbit)],
       NavPreset::Alias => &[(Primary, SHIFT_ALT, Orbit), (Middle, SHIFT_ALT, Pan), (Secondary, SHIFT_ALT, Zoom)],
+      // PowerMill's: middle turns the view, Shift+middle pans, Ctrl+middle zooms
+      NavPreset::PowerMill => &[(Middle, NONE, Orbit), (Middle, SHIFT, Pan), (Middle, CTRL, Zoom)],
+      // Tinkercad's: right turns the view, middle or Shift+right pans
+      NavPreset::Tinkercad => &[(Secondary, NONE, Orbit), (Middle, NONE, Pan), (Secondary, SHIFT, Pan)],
     }
   }
 
@@ -289,7 +308,7 @@ impl Default for Prefs {
   fn default() -> Self {
     Prefs {
       units: Units::Mm,
-      up_axis: UpAxis::Z,
+      up_axis: UpAxis::Y,
       nav: NavPreset::Fusion,
       reverse_zoom: false,
       zoom_to_cursor: true,
@@ -682,12 +701,19 @@ fn choice<T: Copy + PartialEq>(
   label: impl Fn(T) -> &'static str,
 ) -> bool {
   let mut changed = false;
-  egui::ComboBox::from_id_salt(id).selected_text(label(*value)).width(170.0).show_ui(ui, |ui| {
+  let r = egui::ComboBox::from_id_salt(id).selected_text(label(*value)).width(170.0).show_ui(ui, |ui| {
     for v in all {
       changed |= ui.selectable_value(value, *v, label(*v)).changed();
     }
   });
+  // where each drop-down sits, for the tests that click one
+  ui.ctx().data_mut(|d| d.insert_temp(combo_rect_id(id), r.response.rect));
   changed
+}
+
+/// The id under which a drop-down's rect is kept (see [`choice`]).
+pub(crate) fn combo_rect_id(id: &str) -> egui::Id {
+  egui::Id::new(("prefs-combo-rect", id))
 }
 
 fn note(ui: &mut egui::Ui, text: &str) {
@@ -715,6 +741,12 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
     return;
   }
   let mut action = None;
+  // Esc on an open drop-down closes the drop-down only, as in Fusion; the window waits for OK or
+  // Cancel (or a second Esc)
+  let dropdown = egui::Popup::is_any_open(ctx);
+  if dropdown && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    egui::Popup::close_all(ctx);
+  }
   let frame = egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::same(8));
   egui::Modal::new(egui::Id::new(MODAL_ID)).frame(frame).backdrop_color(Color32::from_black_alpha(60)).show(
     ctx,
@@ -774,7 +806,7 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
       });
     },
   );
-  if action.is_none() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+  if action.is_none() && !dropdown && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
     action = Some(Action::Cancel);
   }
   match action {
@@ -869,6 +901,14 @@ fn fixed_row(ui: &mut egui::Ui, label: &str, value: &str) {
   });
 }
 
+/// A check box Fusion has that FissionOxide can't act on yet, greyed at Fusion's default.
+fn fixed_flag_row(ui: &mut egui::Ui, label: &str, value: bool) {
+  row(ui, label, |ui| {
+    let mut v = value;
+    ui.add_enabled(false, egui::Checkbox::new(&mut v, "")).on_disabled_hover_text("Not in FissionOxide yet");
+  });
+}
+
 fn page_ui(app: &mut App, ui: &mut egui::Ui) {
   let mut values = app.preferences.draft.clone();
   let p = &mut values;
@@ -897,11 +937,6 @@ fn page_ui(app: &mut App, ui: &mut egui::Ui) {
         row(ui, "Mouse setup (pan, zoom, orbit)", |ui| {
           choice(ui, "prefs-nav-preset", &mut p.nav, &NavPreset::ALL, NavPreset::label);
         });
-        for (name, a) in [("Orbit", NavAction::Orbit), ("Pan", NavAction::Pan), ("Zoom", NavAction::Zoom)] {
-          ui.label(RichText::new(format!("    {name}")).color(theme::MUTED));
-          ui.label(p.nav.describe(a));
-          ui.end_row();
-        }
         row(ui, "Default Orbit type", |ui| {
           choice(ui, "prefs-orbit", &mut p.orbit, &OrbitType::ALL, OrbitType::label);
         });
@@ -911,11 +946,13 @@ fn page_ui(app: &mut App, ui: &mut egui::Ui) {
           &mut p.reverse_zoom,
           "Off, as in Fusion: rolling the wheel toward you zooms in",
         );
-        flag_row(ui, "Zoom toward the cursor", &mut p.zoom_to_cursor, "");
         flag_row(ui, "Enable camera pivot", &mut p.camera_pivot, "Shows the orbit's pivot while orbiting");
         row(ui, "ViewCube size", |ui| {
           choice(ui, "prefs-cube", &mut p.cube_size, &CubeSize::ALL, CubeSize::label);
         });
+        // Fusion's touch rows; FissionOxide reads no touch gestures yet
+        fixed_flag_row(ui, "Use gesture-based view navigation", false);
+        fixed_flag_row(ui, "Use Windows touchpad for gestures", false);
         flag_row(ui, "Spacebar repeats last command", &mut p.space_repeats, "");
       });
       ui.add_space(6.0);
@@ -1002,7 +1039,7 @@ mod tests {
   fn preferences_round_trip_through_settings_ini() {
     let p = Prefs {
       units: Units::In,
-      up_axis: UpAxis::Y,
+      up_axis: UpAxis::Z,
       nav: NavPreset::SolidWorks,
       reverse_zoom: true,
       zoom_to_cursor: false,
@@ -1192,5 +1229,34 @@ mod tests {
     assert_eq!(sw.describe(Pan), "Ctrl+Middle drag");
     assert_eq!(al.describe(Zoom), "Wheel, Shift+Alt+Right drag");
     assert_eq!(f.describe(Orbit), "Shift+Middle drag, Right drag");
+    let pm = NavPreset::PowerMill;
+    assert_eq!(pm.action(Middle, none), Some(Orbit));
+    assert_eq!(pm.action(Middle, shift), Some(Pan));
+    assert_eq!(pm.action(Middle, ctrl), Some(Zoom));
+    let tc = NavPreset::Tinkercad;
+    assert_eq!(tc.action(Secondary, none), Some(Orbit));
+    assert_eq!(tc.action(Middle, none), Some(Pan));
+    assert_eq!(tc.action(Secondary, shift), Some(Pan));
+    assert_eq!(tc.action(Primary, none), None, "left drags select");
+  }
+
+  #[test]
+  fn mouse_setup_lists_fusions_presets_in_its_order() {
+    let labels: Vec<&str> = NavPreset::ALL.iter().map(|n| n.label()).collect();
+    assert_eq!(labels, ["Fusion", "Alias", "Inventor", "PowerMill", "SOLIDWORKS", "Tinkercad"]);
+    // each preset's saved key reads back as that preset, and the old SolidWorks key still does
+    for n in NavPreset::ALL {
+      let back = Prefs::from_pairs(&[("Navigation".into(), n.key().into())]);
+      assert_eq!(back.nav, n);
+    }
+    assert_eq!(Prefs::from_pairs(&[("Navigation".into(), "SolidWorks".into())]).nav, NavPreset::SolidWorks);
+  }
+
+  #[test]
+  fn the_default_modeling_orientation_is_y_up_as_in_fusion() {
+    assert_eq!(Prefs::default().up_axis, UpAxis::Y);
+    assert_eq!(UpAxis::default().label(), "Y up");
+    // a saved choice still wins
+    assert_eq!(Prefs::from_pairs(&[("UpAxis".into(), "z".into())]).up_axis, UpAxis::Z);
   }
 }

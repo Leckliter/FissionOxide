@@ -7,7 +7,7 @@ use fox_engine::render::{Effects, VisualStyle};
 
 use crate::icons::Icon;
 use crate::viewcube::Projection;
-use crate::{App, NavMode};
+use crate::{App, NavMode, theme};
 
 /// Display Settings ▸ Object Visibility: which kinds of things the viewport draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,16 +111,45 @@ pub fn orbit_menu(app: &mut App, ui: &mut egui::Ui) {
   }
 }
 
-/// The fly-out after Fit: Fit, and Zoom Window (drag a box to zoom into).
-pub fn fit_menu(app: &mut App, ui: &mut egui::Ui) {
+/// The navigation bar's buttons, left to right, by their tooltips: Fusion's one or two words.
+pub const BUTTONS: [&str; 8] =
+  ["Orbit", "Look At", "Pan", "Zoom", "Zoom Window", "Display Settings", "Grid and Snaps", "Viewports"];
+
+/// The Zoom Window button's fly-out, as Fusion's: Zoom Window, then Fit with its F6 key, each
+/// with its icon.
+pub const ZOOM_MENU: [(Icon, &str, Option<&str>); 2] =
+  [(Icon::ZoomWindow, "Zoom Window", None), (Icon::Fit, "Fit", Some("F6"))];
+
+/// A navigation bar button's tooltip, as Fusion draws it: the button's name in white on a dark
+/// panel, nothing more.
+pub(crate) fn dark_tip(resp: egui::Response, text: &str) -> egui::Response {
+  let style = resp.ctx.global_style();
+  let frame = egui::Frame::new()
+    .fill(theme::TOOLTIP)
+    .corner_radius(egui::CornerRadius::same(3))
+    .inner_margin(egui::Margin::symmetric(8, 4))
+    .shadow(style.visuals.popup_shadow);
+  let mut tip = egui::Tooltip::for_enabled(&resp);
+  tip.popup = tip.popup.frame(frame);
+  tip.show(|ui| {
+    ui.style_mut().visuals.override_text_color = Some(theme::TOOLTIP_TITLE);
+    ui.add(egui::Label::new(text).extend());
+  });
+  resp
+}
+
+/// The fly-out after Zoom Window: Zoom Window (drag a box to zoom into) and Fit.
+pub fn zoom_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(150.0);
-  if ui.button("Fit").clicked() {
-    app.fit_view();
-    ui.close();
-  }
-  if ui.selectable_label(app.nav_mode == Some(NavMode::ZoomWindow), "Zoom Window").clicked() {
-    app.nav_mode = Some(NavMode::ZoomWindow);
-    ui.close();
+  for (icon, label, key) in ZOOM_MENU {
+    if crate::panels::menu_item(ui, icon, label, key).clicked() {
+      if icon == Icon::Fit {
+        app.fit_view();
+      } else {
+        app.nav_mode = Some(NavMode::ZoomWindow);
+      }
+      ui.close();
+    }
   }
 }
 
@@ -492,6 +521,17 @@ mod tests {
     ctx.run_ui(input, |ui| ground_offset_window(&mut app, ui.ctx())).drop_without_applying_deltas();
     assert_eq!(app.display.ground_offset_form, Some(12.5), "open until OK");
     assert_eq!(app.display.ground_offset, 0.0);
+  }
+
+  #[test]
+  fn the_bar_and_the_zoom_fly_out_read_as_fusions() {
+    assert_eq!(
+      BUTTONS,
+      ["Orbit", "Look At", "Pan", "Zoom", "Zoom Window", "Display Settings", "Grid and Snaps", "Viewports"]
+    );
+    let rows: Vec<(&str, Option<&str>)> = ZOOM_MENU.iter().map(|(_, l, k)| (*l, *k)).collect();
+    assert_eq!(rows, [("Zoom Window", None), ("Fit", Some("F6"))]);
+    assert_eq!(ZOOM_MENU.map(|r| r.0), [Icon::ZoomWindow, Icon::Fit], "each row has its icon");
   }
 
   #[test]

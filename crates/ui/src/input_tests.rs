@@ -1125,6 +1125,32 @@ fn escape_cancels_the_preferences_and_drops_the_edits() {
   assert!(h.app.dialog.is_none());
 }
 
+fn escape_key() -> Event {
+  Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }
+}
+
+#[test]
+fn escape_on_an_open_preferences_drop_down_closes_only_the_drop_down() {
+  let mut h = Harness::new();
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let id = crate::preferences::combo_rect_id("prefs-nav-preset");
+  let combo = h.ctx.data(|d| d.get_temp::<Rect>(id)).expect("the Mouse setup drop-down is drawn");
+  h.move_then_click(combo.center());
+  assert!(egui::Popup::is_any_open(&h.ctx), "the Mouse setup list opens");
+  h.app.preferences.draft.space_repeats = false;
+  h.frame(vec![escape_key()]);
+  h.frame(vec![]);
+  assert!(!egui::Popup::is_any_open(&h.ctx), "Esc closes the list");
+  assert!(h.app.preferences.open, "the Preferences window stays");
+  assert!(!h.app.preferences.draft.space_repeats, "with its edits");
+  h.frame(vec![escape_key()]);
+  h.frame(vec![]);
+  assert!(!h.app.preferences.open, "a second Esc cancels the window");
+}
+
 #[test]
 fn cancel_and_ok_sit_at_the_bottom_right_of_the_preferences() {
   let mut h = Harness::new();
@@ -1886,4 +1912,31 @@ fn the_expanded_comments_panel_shrinks_the_browser() {
   h.app.comments.open = true;
   h.frame(vec![]);
   assert_eq!(crate::panels::browser_max_height(&h.app), before - crate::comments::BODY_H);
+}
+
+// ---------------------------------------------------------------- navigation bar
+
+/// The centre of the navigation bar's fifth button (after Orbit, its caret, Look At, Pan, Zoom).
+fn zoom_window_button(h: &Harness) -> Pos2 {
+  let bar = h.ctx.memory(|m| m.area_rect(egui::Id::new("navbar"))).expect("the navigation bar is drawn");
+  Pos2::new(bar.left() + 28.0 + 10.0 + 28.0 * 3.0 + 14.0, bar.center().y)
+}
+
+#[test]
+fn the_fifth_navigation_button_is_zoom_window_with_a_one_word_tooltip() {
+  use crate::NavMode;
+  let mut h = Harness::new();
+  let at = zoom_window_button(&h);
+  let shown = h.rest(at, 1.5);
+  assert!(shown.iter().any(|t| t == "Zoom Window"), "its tooltip: {shown:?}");
+  assert!(!shown.iter().any(|t| t.contains("Fit") || t.contains("drag")), "no long hint: {shown:?}");
+  h.move_then_click(at);
+  assert_eq!(h.app.nav_mode, Some(NavMode::ZoomWindow), "the click starts Zoom Window");
+  let canvas = h.app.canvas;
+  let label = h.find(vec![Event::PointerMoved(canvas.center())], "Zoom Window").expect("the tool's label shows");
+  assert!(label.left() < canvas.left() + 40.0 && label.bottom() > canvas.bottom() - 120.0, "at the bottom: {label:?}");
+  h.frame(vec![escape_key()]);
+  h.frame(vec![]);
+  assert_eq!(h.app.nav_mode, None, "Esc ends it");
+  assert!(h.find(vec![], "Zoom Window").is_none(), "and its label goes");
 }
