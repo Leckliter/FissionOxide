@@ -723,7 +723,9 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
   } else if !sketching {
     let (filter, priority) = (app.sel_filter, app.sel_priority);
     let locked = &app.ctx_menu.unselectable;
-    let ok = |p: &Pick| filter.allows(p, priority) && !crate::select::pick_body(p).is_some_and(|b| locked.contains(&b));
+    let s = &app.s;
+    let ok =
+      |p: &Pick| filter.allows_on(s, p, priority) && !crate::select::pick_body(p).is_some_and(|b| locked.contains(&b));
     if !app.hover.as_ref().is_some_and(ok) {
       // the front-most pick is filtered out: the nearest allowed one around the cursor wins
       app.hover = picks.get(frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| ok(&p)))).filter(ok);

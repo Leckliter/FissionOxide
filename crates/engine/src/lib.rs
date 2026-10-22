@@ -650,6 +650,8 @@ mod tests_include;
 #[cfg(test)]
 mod tests_mechanism;
 #[cfg(test)]
+mod tests_mesh_body;
+#[cfg(test)]
 mod tests_more;
 #[cfg(test)]
 mod tests_newcomp;

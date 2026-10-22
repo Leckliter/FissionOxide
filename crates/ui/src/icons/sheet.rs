@@ -159,6 +159,8 @@ const ALL: &[Icon] = &[
   Icon::InsertSvg,
   Icon::InsertDxf,
   Icon::InsertMesh,
+  Icon::MeshBody,
+  Icon::MeshFeature,
   Icon::InsertComponent,
   Icon::Fastener,
   Icon::DuplicateJoints,

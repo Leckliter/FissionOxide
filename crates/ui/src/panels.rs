@@ -1766,7 +1766,7 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
         let name = app.s.body_name(b);
         let sel = app.s.selection.contains(&Sel::Body { body: b });
         let brow = row.with(b.0);
-        let ev = tree_row(ui, brow, 3 + depth, None, None, Icon::Body, &name, sel, theme::TEXT);
+        let ev = tree_row(ui, brow, 3 + depth, None, None, body_icon(app, b), &name, sel, theme::TEXT);
         body_row_edits(app, ui, &ev, brow, 3 + depth, b, &name, sel);
         if ev.clicked {
           toggle_sel(&mut app.s, Sel::Body { body: b }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
@@ -1992,7 +1992,7 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
     let isolated = app.ctx_menu.isolate.as_ref().map(|only| only.contains(&bid));
     let color = if visible && isolated != Some(false) { theme::TEXT } else { theme::MUTED };
     let row = id.with(bid.0);
-    let ev = tree_row(ui, row, 2, None, Some(visible), Icon::Body, &name, selected, color);
+    let ev = tree_row(ui, row, 2, None, Some(visible), body_icon(app, bid), &name, selected, color);
     if isolated == Some(true)
       && let Some(r) = &ev.response
     {
@@ -2015,6 +2015,12 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
       r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
     }
   }
+}
+
+/// A body row's icon: Fusion's yellow triangulated block for a mesh body, the grey block for a
+/// B-rep one.
+pub(crate) fn body_icon(app: &App, body: BodyId) -> Icon {
+  if crate::select::is_mesh(&app.s, body) { Icon::MeshBody } else { Icon::Body }
 }
 
 /// A body row's in-place rename (double-click or slow-click) and dragging it onto a component.

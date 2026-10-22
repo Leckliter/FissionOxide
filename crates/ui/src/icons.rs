@@ -222,6 +222,10 @@ pub enum Icon {
   Separate,
   ScaleMesh,
   ConvertMesh,
+  /// A mesh body's browser row: a yellow triangulated block.
+  MeshBody,
+  /// A mesh feature in the timeline (Insert Mesh's "Base Mesh Feature").
+  MeshFeature,
   Flange,
   Hem,
   LoftedFlange,
@@ -489,6 +493,7 @@ fn family(icon: Icon) -> Tint {
     | Accessibility | CenterOfMass | MinRadius | Navigator | ComponentColors | FaceGroups | History
     | Sustainability | Select | WindowSel | FreeformSel | PaintSel => Tint::Green,
     Sketch | SketchSmall | Construction => Tint::Teal,
+    MeshBody | MeshFeature => Tint::Gold,
     _ => Tint::Blue,
   }
 }
@@ -1086,6 +1091,15 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.38, 0.64), 0.1, Some(Blue), None);
     }
     Icon::Body => k.block(0.1, 0.38, 0.66, 0.9, 0.26, Light, Fill, Dark),
+    Icon::MeshBody | Icon::MeshFeature => {
+      // a yellow block cut into triangles on every face
+      let (x0, y0, x1, y1, d) =
+        if icon == Icon::MeshBody { (0.1, 0.38, 0.66, 0.9, 0.26) } else { (0.06, 0.4, 0.6, 0.94, 0.3) };
+      k.block(x0, y0, x1, y1, d, BlueLight, Blue, BlueDark);
+      k.line((x0, y1), (x1, y0), BlueDark);
+      k.line((x0, y0), (x1 + d, y0 - d * 0.7), BlueDark);
+      k.line((x1, y1), (x1 + d, y0 - d * 0.7), BlueDark);
+    }
     Icon::SketchSmall => {
       k.solid(&[(0.08, 0.2), (0.92, 0.2), (0.92, 0.84), (0.08, 0.84)], White);
       k.path(&[(0.22, 0.7), (0.22, 0.36), (0.54, 0.36)], Teal);

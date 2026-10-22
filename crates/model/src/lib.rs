@@ -977,7 +977,7 @@ pub enum FeatureKind {
     keep_tools: bool,
   },
   /// Bodies imported from a file: exact geometry (STEP, IGES, BRep) stored losslessly as OCCT
-  /// BRep text, and/or triangle meshes (STL, OBJ, 3MF, PLY) that become faceted bodies.
+  /// BRep text, and/or triangle meshes (STL, OBJ, 3MF, PLY) that stay mesh bodies named after the file.
   Import {
     file_name: String,
     #[serde(default)]

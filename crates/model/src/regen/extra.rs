@@ -507,6 +507,9 @@ impl Ctx<'_> {
           let pos32: Vec<[f32; 3]> = pos.iter().map(|p| p.as_vec3().to_array()).collect();
           let shape = Shape::from_mesh(&pos32, &tris, *op == MeshOp::Convert).map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
+          if *op == MeshOp::Convert {
+            self.state.bodies[bi].kind = super::BodyKind::Brep;
+          }
         }
         Ok(None)
       }

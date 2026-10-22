@@ -45,6 +45,8 @@ mod manipulators;
 mod marking;
 mod material_ui;
 mod menus;
+#[cfg(test)]
+mod mesh_body_tests;
 mod navbar;
 mod notifications;
 mod origin;

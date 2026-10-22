@@ -426,7 +426,8 @@ impl SceneBuilder {
           }
         }
       }
-      if !opts.hide_edges {
+      // mesh bodies draw smooth, with no face edges to pick, as Fusion's
+      if !opts.hide_edges && !body.is_mesh() {
         let edges = self.edges.entry(body.id).or_insert_with(|| {
           let tol = (body.diagonal() * 0.001).clamp(0.002, 0.5);
           body.shape.edge_lines(tol).unwrap_or_default()
@@ -1845,7 +1846,7 @@ fn vertex_markers(scene: &mut Scene, picks: &mut PickTable, s: &Session, opts: &
       Some(only) => only.contains(&body.id),
       None => s.body_visible(body.id),
     };
-    if !shown {
+    if !shown || body.is_mesh() {
       continue;
     }
     for (edge, end, p) in body_vertices(body) {
