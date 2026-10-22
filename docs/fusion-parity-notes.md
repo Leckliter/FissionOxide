@@ -373,3 +373,14 @@ icon, and every text differs (Fusion's 20 texts are in the batch). Fusion's row 
 checkboxes and a dialog entry; its shortcut dialog is a modal with hints and Reset to default.
 6 rows in two batches (`parity/batches/map-wave14.json`), five match rows, two verified
 (`row-options-glyph`, `tooltip-style`).
+
+## 2026-10-21, prober 7 (continued): Data Panel
+
+Fusion's Data Panel against FissionOxide's local hub (report
+`parity/reports/2026-10-21-data-panel.md`). Fusion opens on a project list with filters, a New
+Project button, described cards and a LIBRARIES section; a project has Data | People tabs, a blue
+Upload, inline New Folder, a Settings gear, "Open on the Web" and a 12-entry design menu, and its
+Upload is a window with Select Files and Drag and Drop. FissionOxide has a project dropdown, four
+Files / Recent / Activity / Trash tabs Fusion lacks, text buttons, floating prompts that ignore
+Escape, a 6-entry card menu and a native upload dialog. 8 rows in one batch
+(`parity/batches/map-wave15.json`), four match rows.

@@ -1,0 +1,10 @@
+{
+  "ui:chrome:data-panel-header": "ui-data-panel-2",
+  "ui:chrome:data-panel-project-list": "ui-data-panel-2",
+  "ui:chrome:data-panel-project-view": "ui-data-panel-2",
+  "ui:chrome:data-panel-tabs": "ui-data-panel-2",
+  "ui:chrome:data-panel-file-row": "ui-data-panel-2",
+  "ui:chrome:data-panel-file-menu": "ui-data-panel-2",
+  "ui:chrome:data-panel-upload-dialog": "ui-data-panel-2",
+  "ui:chrome:data-panel-button-tooltip": "ui-data-panel-2"
+}
