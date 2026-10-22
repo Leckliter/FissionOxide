@@ -70,7 +70,7 @@
 {"name": "ui-rib-emboss-thread", "items": 6, "status": "done", "pr": "c12d36c", "fixer": "cloud session_01TVQaTUzwYTy9sQ6Qv2ywhd (requested 2026-10-22)"}
 {"name": "ui-pattern-mirror-misc", "items": 6, "status": "done", "pr": "a5ac71d", "fixer": "cloud session_019ittuH1iJEcjum9vWapYVJ (requested 2026-10-22)"}
 {"name": "ui-modify-menu-tooltips", "items": 5, "status": "done", "pr": "c0c37ea", "fixer": "cloud task_09b73edb (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-draft-scale-dialogs", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_fbb41230 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-draft-scale-dialogs", "items": 4, "status": "done", "pr": "2e7c2d7", "fixer": "cloud task_fbb41230 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-combine-split-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_9635415e (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-align-remove-simplify", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_10b85414 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-material-appearance", "items": 3, "status": "done", "pr": "351dceb", "fixer": "cloud task_4e643365 (requested 2026-10-22 by the coordinator)"}
