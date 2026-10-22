@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
 mod analyses;
+mod anim_ui;
 mod asm_component;
 mod assembly_forms;
 mod bom_ui;
@@ -351,6 +352,8 @@ pub struct App {
   pub(crate) render_components: explode_ui::RenderComponents,
   /// The Render workspace.
   pub render: render_ui::RenderUi,
+  /// The Animation workspace.
+  pub anim: anim_ui::AnimUi,
   /// The sketch Fillet, Chamfer and Blend Curve tools' last values (they have no dialog).
   pub modify: sketch_modify::Prefs,
   /// File ▸ View ▸ Hide / Show Command Toolbar.
@@ -636,6 +639,7 @@ impl App {
       library_ui: library_ui::LibraryUi::default(),
       render_components: explode_ui::RenderComponents::default(),
       render: render_ui::RenderUi::default(),
+      anim: anim_ui::AnimUi::default(),
       modify: sketch_modify::Prefs::default(),
       show_toolbar: true,
       show_perf: false,
@@ -1445,6 +1449,8 @@ impl App {
     } else if self.doc_dialog.is_some() {
       // Change Active Units or Convert Design Type closes, changing nothing
       doc_dialogs::close(self);
+    } else if anim_ui::close(self) {
+      // New Storyboard or Transform Components closed
     } else if asm_component::close(self) || insert_window::escape(self) {
       // New Component (an assembly's) or INSERT DXF closed
     } else if self.other.is_some() {
@@ -2036,6 +2042,7 @@ impl App {
     notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
     doc_dialogs::show(self, &ctx);
+    anim_ui::show_dialog(self, &ctx);
     asm_component::show(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);

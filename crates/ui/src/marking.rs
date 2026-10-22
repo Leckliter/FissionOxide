@@ -714,7 +714,7 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
       "Manufacture" => app.manufacture,
       "Generative Design" => app.generative,
       "Render" => app.render.active,
-      _ => w == "Design" && !app.manufacture && !app.generative && !app.render.active,
+      _ => w == "Design" && !app.manufacture && !app.generative && !app.render.active && !app.anim.active,
     };
     let label = if current { format!("{w}  ✔") } else { w.to_string() };
     ws.children.push(Item::new(Action::Workspace(w), icon, &label));

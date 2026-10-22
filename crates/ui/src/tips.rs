@@ -11,6 +11,8 @@ pub(crate) enum Scope {
   Manufacture,
   /// The Form workspace's FORM tab.
   Form,
+  /// The Animation workspace's ANIMATION tab.
+  Animation,
 }
 
 /// A command's tooltip text.
@@ -40,6 +42,62 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     return Some(Tip { line, more });
   }
   let (line, more) = match (scope, label) {
+    // ANIMATION
+    (Animation, "New Storyboard") => (
+      "Creates a new storyboard.",
+      "A storyboard is one animation of the design: its own timeline of actions. Choose Clean to start \
+       from the assembled design, or Start from end of previous to carry on from where the last \
+       storyboard ends.",
+    ),
+    (Animation, "Transform Components") => (
+      "Moves or rotates components over time.",
+      "Select components, then drag the manipulator to move or rotate them. The change is recorded as an \
+       action from the playhead, and plays back with the storyboard.",
+    ),
+    (Animation, "Restore Home") => (
+      "Puts components back where they are in the design.",
+      "Records actions that return the selected components (or all of them) to their assembled \
+       positions from the playhead.",
+    ),
+    (Animation, "Auto Explode: One Level") => (
+      "Explodes the selected components one level down.",
+      "Spreads the components of the first level apart along their assembly directions, recording an \
+       action for each. Adjust the spacing on the slider that appears.",
+    ),
+    (Animation, "Auto Explode: All Levels") => (
+      "Explodes all levels of the selected components.",
+      "Spreads every component, down through the sub-assemblies, apart along their assembly directions, \
+       recording an action for each. Adjust the spacing on the slider that appears.",
+    ),
+    (Animation, "Manual Explode") => (
+      "Explodes the selected components along a direction you pick.",
+      "Select components, then drag the arrow along the direction to explode them. Each component \
+       moves by its share of the distance.",
+    ),
+    (Animation, "Show/Hide") => (
+      "Shows or hides components from the playhead.",
+      "Select components to record an action that hides the shown ones and shows the hidden ones as \
+       the storyboard plays.",
+    ),
+    (Animation, "Appearance") => (
+      "Changes the opacity of components over time.",
+      "Select components and set their opacity; the change fades in over the action's length.",
+    ),
+    (Animation, "Create Callout") => (
+      "Adds a text callout attached to the model.",
+      "Click a point on the model, then type the text. The callout shows in the storyboard from the \
+       playhead.",
+    ),
+    (Animation, "View") => (
+      "Records the current camera position as a view action.",
+      "Orbit, pan or zoom, then run View to record the camera's move from the playhead, so the \
+       storyboard plays it back.",
+    ),
+    (Animation, "Publish Video") => (
+      "Publishes the storyboards as a video.",
+      "Choose the storyboards, the video resolution and where to save it. The video is rendered from \
+       the storyboards' views.",
+    ),
     // SKETCH CREATE
     (_, "Line") => (
       "Draws a chain of connected straight lines.",

@@ -460,6 +460,25 @@ pub enum Icon {
   InCanvasSettings,
   /// Capture Image: a camera.
   Camera,
+  // the Animation workspace's commands
+  /// New Storyboard: a strip of film frames.
+  Storyboard,
+  /// Transform Components: a component with move arrows.
+  TransformComponents,
+  /// Restore Home: a house.
+  RestoreHome,
+  /// Auto Explode: blocks flying apart.
+  Explode,
+  /// Manual Explode: one block pulled out along an arrow.
+  ManualExplode,
+  /// Create Callout: a speech bubble.
+  Callout,
+  /// The Animation workspace's View: a camera.
+  AnimView,
+  /// Publish Video: a film clapper with a play mark.
+  Video,
+  /// An assembly (the Animation browser's root): two components side by side.
+  Assembly,
 }
 
 #[derive(Clone, Copy)]
@@ -3010,6 +3029,64 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.34, 0.18), (0.62, 0.18), (0.68, 0.3), (0.28, 0.3)], Fill);
       k.circle((0.5, 0.58), 0.2, Some(Blue), Some(Ink));
       k.circle((0.5, 0.58), 0.08, Some(BlueLight), None);
+    }
+    Icon::Storyboard => {
+      // a film strip: three frames between sprocket rows
+      k.solid(&[(0.04, 0.22), (0.96, 0.22), (0.96, 0.78), (0.04, 0.78)], Dark);
+      for x in [0.1, 0.4, 0.7] {
+        k.solid(&[(x, 0.34), (x + 0.22, 0.34), (x + 0.22, 0.66), (x, 0.66)], BlueLight);
+      }
+      k.thick((0.82, 0.02), (0.82, 0.22), Blue, 1.2);
+      k.thick((0.72, 0.12), (0.92, 0.12), Blue, 1.2);
+    }
+    Icon::TransformComponents => {
+      k.block(0.22, 0.42, 0.62, 0.86, 0.18, BlueLight, Blue, BlueDark);
+      k.thick((0.42, 0.3), (0.42, 0.08), Ink, 1.0);
+      k.arrow_head((0.42, 0.04), (0.0, -1.0), 0.12, Ink);
+      k.thick((0.66, 0.64), (0.9, 0.64), Ink, 1.0);
+      k.arrow_head((0.96, 0.64), (1.0, 0.0), 0.12, Ink);
+    }
+    Icon::RestoreHome => {
+      k.solid(&[(0.2, 0.5), (0.8, 0.5), (0.8, 0.9), (0.2, 0.9)], White);
+      k.fill(&[(0.06, 0.52), (0.5, 0.12), (0.94, 0.52)], Blue);
+      k.solid(&[(0.42, 0.64), (0.58, 0.64), (0.58, 0.9), (0.42, 0.9)], Fill);
+    }
+    Icon::Explode => {
+      k.block(0.34, 0.4, 0.62, 0.66, 0.12, BlueLight, Blue, BlueDark);
+      k.block(0.04, 0.08, 0.26, 0.28, 0.08, BlueLight, Blue, BlueDark);
+      k.block(0.72, 0.76, 0.92, 0.96, 0.06, BlueLight, Blue, BlueDark);
+      k.dashed((0.28, 0.3), (0.38, 0.38), Ink);
+      k.dashed((0.66, 0.68), (0.74, 0.76), Ink);
+    }
+    Icon::ManualExplode => {
+      k.block(0.08, 0.5, 0.42, 0.9, 0.12, BlueLight, Blue, BlueDark);
+      k.block(0.6, 0.18, 0.86, 0.46, 0.1, BlueLight, Blue, BlueDark);
+      k.thick((0.36, 0.42), (0.56, 0.3), Ink, 1.0);
+      k.arrow_head((0.6, 0.27), (0.85, -0.5), 0.12, Ink);
+    }
+    Icon::Callout => {
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.62), (0.08, 0.62)], White);
+      k.fill(&[(0.22, 0.62), (0.42, 0.62), (0.18, 0.9)], Ink);
+      for y in [0.26, 0.38, 0.5] {
+        k.line((0.2, y), (0.8, y), Blue);
+      }
+    }
+    Icon::AnimView => {
+      // a camera body with its lens
+      k.solid(&[(0.06, 0.3), (0.94, 0.3), (0.94, 0.84), (0.06, 0.84)], Dark);
+      k.solid(&[(0.3, 0.18), (0.56, 0.18), (0.56, 0.3), (0.3, 0.3)], Dark);
+      k.circle((0.5, 0.57), 0.18, Some(BlueLight), Some(White));
+    }
+    Icon::Assembly => {
+      k.block(0.04, 0.5, 0.42, 0.9, 0.16, White, White, Light);
+      k.block(0.5, 0.34, 0.8, 0.66, 0.14, White, White, Light);
+      k.circle((0.23, 0.7), 0.07, Some(Blue), None);
+      k.circle((0.65, 0.5), 0.07, Some(Blue), None);
+    }
+    Icon::Video => {
+      k.solid(&[(0.06, 0.36), (0.94, 0.36), (0.94, 0.92), (0.06, 0.92)], Dark);
+      k.solid(&[(0.06, 0.14), (0.9, 0.04), (0.92, 0.2), (0.08, 0.3)], Light);
+      k.fill(&[(0.4, 0.48), (0.66, 0.64), (0.4, 0.8)], White);
     }
   }
 }

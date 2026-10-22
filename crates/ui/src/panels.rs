@@ -45,6 +45,8 @@ pub enum Tab {
   Assembly,
   /// The DIRECT MESH EDITING contextual tab (MESH > Direct Edit, Create Base Mesh Feature).
   MeshEdit,
+  /// The Animation workspace's tab.
+  Animation,
 }
 
 impl Tab {
@@ -70,6 +72,7 @@ impl Tab {
       Tab::Turning => "TURNING",
       Tab::Assembly => "ASSEMBLY",
       Tab::MeshEdit => "DIRECT MESH EDITING",
+      Tab::Animation => "ANIMATION",
     }
   }
 }
@@ -426,6 +429,8 @@ pub(crate) enum Cmd {
   SketchLibrary,
   /// The Render workspace's commands.
   Render(crate::render_ui::RenderCmd),
+  /// The Animation workspace's commands.
+  Anim(crate::anim_ui::AnimCmd),
   /// Fabrication: check a cut file for a cutting service, with the cut estimate.
   CutCheck,
   /// SELECT > Selection Tools: Select By Name, Select By Boundary, Select By Size, Seed And
@@ -645,6 +650,7 @@ impl Cmd {
         (Icon::SketchLibrary, "Sketch Library...", "Place DXF, SVG or .fox library parts where you click in the sketch")
       }
       Cmd::Render(r) => r.info(),
+      Cmd::Anim(a) => a.info(),
       Cmd::Insert(t) => crate::insert_window::info(t),
       Cmd::InsertDxf => (Icon::InsertDxf, "Insert DXF", "Insert a 2D DXF file into a sketch"),
       Cmd::CutCheck => (
@@ -689,6 +695,7 @@ impl Cmd {
       Cmd::SelectMode(m) => app.sel_mode == m,
       Cmd::Properties => crate::props_ui::is_open(),
       Cmd::Render(r) => r.active(app),
+      Cmd::Anim(a) => a.active(app),
       _ => false,
     }
   }
@@ -806,6 +813,7 @@ impl Cmd {
       Cmd::Properties => crate::props_ui::toggle(),
       Cmd::SketchLibrary => crate::library_ui::open(app),
       Cmd::Render(r) => r.run(app),
+      Cmd::Anim(a) => a.run(app),
       Cmd::CutCheck => crate::service_ui::open(app),
       Cmd::SelTool(t) => crate::select::open_tool(app, t),
       Cmd::BaseFeature(start) => crate::config_ui::base_mode(app, start),
@@ -930,6 +938,8 @@ pub(crate) fn workspace_label(app: &App) -> &'static str {
     "GENERATIVE"
   } else if app.render.active {
     "RENDER"
+  } else if app.anim.active {
+    "ANIMATION"
   } else if app.manufacture {
     "MANUFACTURE"
   } else if app.simulation.is_some() {
@@ -1022,11 +1032,7 @@ fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
       let r = workspace_tip(r, w);
       if r.clicked() {
         ui.close();
-        if w == "Animation" {
-          app.status = Some(("Animation isn't in FissionOxide yet".into(), false));
-        } else {
-          switch_workspace(app, w);
-        }
+        switch_workspace(app, w);
       }
       continue;
     }
@@ -1184,6 +1190,11 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
     crate::render_ui::enter(app);
   }
   app.render.active = w == "Render";
+  app.anim.active = w == "Animation";
+  if !app.anim.active {
+    app.anim.dialog = None;
+    app.anim.playing = None;
+  }
   if w == "Electronics" {
     if drawing {
       app.close_drawing();
@@ -1206,7 +1217,7 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
   }
   app.simulation = None;
   match w {
-    "Render" => {
+    "Render" | "Animation" => {
       app.manufacture = false;
       app.generative = false;
       if drawing {
@@ -1266,6 +1277,9 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     } else if app.render.active {
       tabs = vec![Tab::Render];
       app.tab = Tab::Render;
+    } else if app.anim.active {
+      tabs = vec![Tab::Animation];
+      app.tab = Tab::Animation;
     } else if app.generative {
       tabs = vec![Tab::Generative];
       app.tab = Tab::Generative;
@@ -1274,7 +1288,10 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       if !matches!(app.tab, Tab::Milling | Tab::Turning) {
         app.tab = Tab::Milling;
       }
-    } else if matches!(app.tab, Tab::Drawing | Tab::Milling | Tab::Turning | Tab::Generative | Tab::Render) {
+    } else if matches!(
+      app.tab,
+      Tab::Drawing | Tab::Milling | Tab::Turning | Tab::Generative | Tab::Render | Tab::Animation
+    ) {
       app.tab = Tab::Solid;
     }
     // an Assembly Design has the ASSEMBLY tab in place of the modelling tabs, as in Fusion
@@ -1287,7 +1304,7 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     } else if !assembly && app.tab == Tab::Assembly {
       app.tab = Tab::Solid;
     }
-    if app.drawing.is_none() && !app.manufacture && !app.render.active {
+    if app.drawing.is_none() && !app.manufacture && !app.render.active && !app.anim.active {
       tabs.extend((0..app.plugins.tabs.len().min(usize::from(u8::MAX))).map(|i| Tab::Plugin(i as u8)));
     }
     if let Tab::Plugin(i) = app.tab
@@ -1558,6 +1575,10 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     browser_flat::env_tree(app, ui);
     return;
   }
+  if app.anim.active {
+    animation_tree(app, ui);
+    return;
+  }
   let root = egui::Id::new("tree-root");
   // Find in Browser: open the folders down to the node (its row scrolls to itself)
   if let Some(sel) = app.ctx_menu.reveal {
@@ -1715,6 +1736,35 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   browser_assembly::sections(app, ui);
   drawings_section(app, ui);
   browser_config::section(app, ui);
+}
+
+/// The Animation workspace's browser, as Fusion's: the design as an assembly root holding one
+/// Components folder with the components; bodies, sketches and construction are not listed.
+fn animation_tree(app: &mut App, ui: &mut egui::Ui) {
+  let root = egui::Id::new("anim-tree-root");
+  let label = if browser_rows::unsaved(app) { doc_name(app) } else { root_label(app) };
+  let visible = browser_rows::root_visible(app);
+  let ev = tree_row(ui, root, 0, Some(true), Some(visible), Icon::Assembly, &label, false, theme::TEXT);
+  if ev.eye {
+    browser_rows::root_show_hide(app);
+  }
+  if !is_open(ui, root, true) {
+    return;
+  }
+  let folder = egui::Id::new("anim-tree-components");
+  tree_row(ui, folder, 1, Some(false), None, Icon::Folder, "Components", false, theme::TEXT);
+  if !is_open(ui, folder, false) {
+    return;
+  }
+  for (cid, depth) in browser_assembly::component_tree(app) {
+    let Some(c) = app.s.design.component(fox_engine::model::ComponentId(cid)) else { continue };
+    let (name, bodies) = (c.name.clone(), c.bodies.clone());
+    let selected = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
+    let ev = tree_row(ui, folder.with(cid), 2 + depth, None, None, Icon::Component, &name, selected, theme::TEXT);
+    if ev.clicked {
+      app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
+    }
+  }
 }
 
 /// The tag on an isolated body's browser row.
@@ -3598,6 +3648,11 @@ pub fn error_toast(app: &mut App, ctx: &egui::Context) {
 // ---------------------------------------------------------------- timeline
 
 pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
+  if app.anim.active {
+    // the Animation workspace's ANIMATION TIMELINE takes its place
+    crate::anim_ui::timeline(app, ui);
+    return;
+  }
   // playback
   if app.playing.is_some() {
     timeline_bar::step(app, ui.input(|i| i.time));

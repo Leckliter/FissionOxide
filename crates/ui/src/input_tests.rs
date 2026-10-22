@@ -1284,6 +1284,65 @@ fn the_workspace_button_keeps_designs_label_size() {
   assert_eq!(crate::panels::switcher_layout(design.width()).0, 92.0);
 }
 
+/// DESIGN ▸ ANIMATION, as Fusion's: one ANIMATION tab with its five panels, the browser as an
+/// assembly root holding only Components, the ANIMATION TIMELINE with Storyboard1 in place of the
+/// design timeline, and the docked TRANSFORM COMPONENTS (M) and NEW STORYBOARD dialogs.
+#[test]
+fn the_animation_workspace_is_fusions() {
+  let mut h = Harness::with_width(908.0);
+  h.app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
+  h.app.s.selection.clear();
+  let switcher = h.find(vec![], "DESIGN").expect("the switcher");
+  h.move_then_click(switcher.center());
+  let row = h.find(vec![], "ANIMATION").expect("ANIMATION is in the menu");
+  h.move_then_click(row.center());
+  assert!(h.app.anim.active, "{:?}", h.app.status);
+  assert_eq!(h.app.tab, crate::panels::Tab::Animation);
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  for name in ["STORYBOARD", "TRANSFORM", "ANNOTATION", "VIEW", "PUBLISH"] {
+    assert!(panel_label(&all, name).is_some(), "the {name} panel: {all:?}");
+  }
+  let names: Vec<&str> = all.iter().map(|(_, t)| t.as_str()).collect();
+  // the switcher and the one tab, each drawn twice for its weight
+  assert_eq!(names.iter().filter(|t| **t == "ANIMATION").count(), 4, "{names:?}");
+  for t in ["SOLID", "Document Settings", "Origin", "Bodies", "Sketches"] {
+    assert!(!names.contains(&t), "{t} is not shown: {names:?}");
+  }
+  for t in ["Untitled", "Components", "ANIMATION TIMELINE", "Storyboard1", "0", "24", "1.0"] {
+    assert!(names.contains(&t), "{t} is shown: {names:?}");
+  }
+  // M: TRANSFORM COMPONENTS, docked, Components at Select and OK greyed; Escape closes it
+  h.frame(vec![key(egui::Key::M)]);
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  let names: Vec<&str> = all.iter().map(|(_, t)| t.as_str()).collect();
+  for t in ["TRANSFORM COMPONENTS", "Components", "Select", "OK", "Cancel"] {
+    assert!(names.contains(&t), "{t}: {names:?}");
+  }
+  assert!(!crate::anim_ui::can_ok(&h.app), "OK is greyed");
+  h.frame(vec![key(egui::Key::Escape)]);
+  assert!(h.app.anim.dialog.is_none(), "Escape closes it");
+  // the timeline's +: NEW STORYBOARD with Storyboard Type Clean; OK adds Storyboard2
+  let plus = h.app.canvas.left_bottom();
+  let story = all.iter().find(|(_, t)| t == "Storyboard1").map(|(r, _)| *r).expect("the storyboard tab");
+  assert!(story.top() > plus.y, "the storyboard tabs are under the canvas");
+  h.move_then_click(egui::pos2(story.right() + 10.0 + 10.0, story.center().y));
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  let names: Vec<&str> = all.iter().map(|(_, t)| t.as_str()).collect();
+  for t in ["NEW STORYBOARD", "Storyboard Type", "Clean", "OK", "Cancel"] {
+    assert!(names.contains(&t), "{t}: {names:?}");
+  }
+  let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("anim-dialog"))).expect("docked");
+  assert!((area.right() - h.dock().x).abs() < 1.0 && (area.top() - h.dock().y).abs() < 1.0, "{area:?}");
+  let ok = all.iter().find(|(r, t)| t == "OK" && area.contains(r.center())).map(|(r, _)| *r).unwrap();
+  h.move_then_click(ok.center());
+  assert!(h.app.anim.dialog.is_none());
+  assert!(h.find(vec![], "Storyboard2").is_some(), "the new storyboard's tab");
+  // back to DESIGN: the design timeline and the full browser return
+  crate::panels::switch_workspace(&mut h.app, "Design");
+  let names: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
+  assert!(names.iter().any(|t| t == "Document Settings") && !names.iter().any(|t| t == "ANIMATION TIMELINE"));
+}
+
 /// The browser's root row and Origin folder have eye toggles, Document Settings starts expanded
 /// (its Units and Part Design rows push Origin down), and hovering a row names it in the status
 /// readout.

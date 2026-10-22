@@ -111,6 +111,7 @@ fn park(app: &mut App) -> Doc {
   app.manufacture = false;
   app.generative = false;
   app.render.active = false;
+  app.anim = crate::anim_ui::AnimUi::default();
   app.form.active = false;
   app.drawing = None;
   let mut blank = Session::default();

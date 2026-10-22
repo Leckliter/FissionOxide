@@ -42,6 +42,9 @@ pub(crate) fn workspace_tabs(app: &App) -> Vec<Tab> {
   if app.render.active {
     return vec![Tab::Render];
   }
+  if app.anim.active {
+    return vec![Tab::Animation];
+  }
   if app.manufacture {
     return vec![Tab::Milling, Tab::Turning];
   }

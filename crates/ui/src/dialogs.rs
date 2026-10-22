@@ -5788,7 +5788,13 @@ pub(crate) fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has
 }
 
 /// A selection chip, lit (the accent's tint) when `lit`, with the clear x after it when `has`.
-fn sel_chip_lit(ui: &mut egui::Ui, accent: egui::Color32, text: &str, lit: bool, has: bool) -> egui::Response {
+pub(crate) fn sel_chip_lit(
+  ui: &mut egui::Ui,
+  accent: egui::Color32,
+  text: &str,
+  lit: bool,
+  has: bool,
+) -> egui::Response {
   let font = egui::FontId::proportional(12.0);
   let tw = ui.painter().layout_no_wrap(text.to_string(), font.clone(), theme::TEXT).size().x;
   let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 52.0, 22.0), egui::Sense::hover());

@@ -245,7 +245,7 @@ fn convert_fields(ui: &mut egui::Ui, kind: &mut DesignType) {
 }
 
 /// The dialog's OK (or Convert) button: blue when enabled, greyed until something changed.
-fn ok_button(ui: &mut egui::Ui, label: &str, accent: Color32, enabled: bool) -> egui::Response {
+pub(crate) fn ok_button(ui: &mut egui::Ui, label: &str, accent: Color32, enabled: bool) -> egui::Response {
   if enabled {
     return panels::primary_button(ui, label, accent);
   }

@@ -8,6 +8,7 @@
 
 use egui::{Color32, Rect, RichText, Stroke, Vec2, pos2, vec2};
 
+use crate::anim_ui::AnimCmd;
 use crate::customize::{self, Action, Binding, Prefs};
 use crate::dialogs::Kind;
 use crate::flat_ui::FlatAct;
@@ -1141,6 +1142,34 @@ const RENDER: [Group; 4] = [
   Group { label: "RENDER", quick: &["Render"], menu: RENDER_RENDER },
 ];
 
+const ANIM_STORYBOARD: &[E] = &[c("New Storyboard", Icon::Storyboard, Cmd::Anim(AnimCmd::NewStoryboard))];
+const ANIM_TRANSFORM: &[E] = &[
+  c("Transform Components", Icon::TransformComponents, Cmd::Anim(AnimCmd::TransformComponents)).k("M"),
+  x("Restore Home", Icon::RestoreHome),
+  x("Auto Explode: One Level", Icon::Explode),
+  x("Auto Explode: All Levels", Icon::Explode).k("U"),
+  x("Manual Explode", Icon::ManualExplode).k("E"),
+  c("Show/Hide", Icon::Eye, Cmd::Anim(AnimCmd::ShowHide)),
+  x("Appearance", Icon::Appearance),
+];
+const ANIM_ANNOTATION: &[E] = &[x("Create Callout", Icon::Callout)];
+const ANIM_VIEW: &[E] = &[x("View", Icon::AnimView).k("Ctrl+R")];
+const ANIM_PUBLISH: &[E] = &[x("Publish Video", Icon::Video).k("P")];
+
+/// The Animation workspace's ANIMATION tab. FissionOxide runs New Storyboard, Transform
+/// Components (its dialog) and Show/Hide; the rest are listed as Fusion lists them.
+const ANIMATION: [Group; 5] = [
+  Group { label: "STORYBOARD", quick: &["New Storyboard"], menu: ANIM_STORYBOARD },
+  Group {
+    label: "TRANSFORM",
+    quick: &["Transform Components", "Auto Explode: All Levels", "Show/Hide"],
+    menu: ANIM_TRANSFORM,
+  },
+  Group { label: "ANNOTATION", quick: &["Create Callout"], menu: ANIM_ANNOTATION },
+  Group { label: "VIEW", quick: &["View"], menu: ANIM_VIEW },
+  Group { label: "PUBLISH", quick: &["Publish Video"], menu: ANIM_PUBLISH },
+];
+
 /// The Manufacture workspace's MILLING tab.
 const MILLING: [Group; 6] = [
   Group { label: "SETUP", quick: &["New Setup", "Tool Library"], menu: CAM_SETUP },
@@ -1443,6 +1472,7 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Form => (&FORM, &[]),
     Tab::Generative => (&GENERATIVE, &[]),
     Tab::Render => (&RENDER, &[]),
+    Tab::Animation => (&ANIMATION, &[]),
     Tab::Turning => (&TURNING, &[]),
     Tab::Assembly => (&ASSEMBLY, &ASSEMBLY_SHARED),
     Tab::MeshEdit => (&MESH_EDIT, &MESH_EDIT_END),
@@ -1476,7 +1506,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 16] = [
+const ALL_TABS: [Tab; 17] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
@@ -1493,6 +1523,7 @@ const ALL_TABS: [Tab; 16] = [
   Tab::Turning,
   Tab::Assembly,
   Tab::MeshEdit,
+  Tab::Animation,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that
