@@ -54,6 +54,11 @@ impl Rows {
   pub(super) fn set_taper(&mut self, text: String) {
     self.taper = text;
   }
+
+  /// The taper angle's text, for the floating value box Tab moves to the taper handle.
+  pub(super) fn taper_mut(&mut self) -> &mut String {
+    &mut self.taper
+  }
 }
 
 impl Dialog {
@@ -75,7 +80,7 @@ impl Dialog {
 
   /// Rows of the Extrude dialog.
   pub(super) fn extrude_rows(&mut self, ui: &mut egui::Ui) {
-    let creating = self.editing.is_none();
+    let creating = !self.picks_fixed();
     let mut dirty = false;
     let ext = &mut self.solid.ext;
     // Type: Fusion's pair of icon toggles
@@ -252,8 +257,11 @@ impl Dialog {
   }
 
   /// "N Profiles | Area : …" for the status bar while an extrude has profiles picked, in the
-  /// design's unit as Fusion shows it ("1 Profile | Area : 1.24 in^2").
+  /// design's unit as Fusion shows it ("1 Profile | Area : 1.24 in^2"); Thread's face radius.
   pub fn profile_status(&self, s: &Session) -> Option<String> {
+    if let Some(t) = self.thread_status(s) {
+      return Some(t);
+    }
     if !matches!(self.kind, super::Kind::Extrude | super::Kind::Revolve) || self.profiles.is_empty() {
       return None;
     }

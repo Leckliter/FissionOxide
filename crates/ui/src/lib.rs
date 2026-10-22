@@ -5,6 +5,7 @@
 //! ViewCube, sketch palette and command dialogs floating over it; the timeline at the bottom. The UI is thin: every action goes through [`Session::execute`] commands.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod asm_component;
 mod assembly_forms;
 mod cam_ui;
 mod canvas_ui;
@@ -14,13 +15,20 @@ mod comments;
 mod comp_drag;
 mod config_ui;
 mod constrain;
+mod construction;
 mod customize;
 mod cut_ui;
 mod data_panel;
 mod dialogs;
 mod doc_dialogs;
+mod documents;
+#[cfg(test)]
+mod documents_tests;
 mod ecad_ui;
+mod error_dialog;
 mod explode_ui;
+#[cfg(test)]
+mod failed_items_tests;
 mod file_dialogs;
 #[cfg(test)]
 mod file_dialogs_tests;
@@ -36,11 +44,16 @@ mod help;
 mod icons;
 #[cfg(test)]
 mod input_tests;
+mod insert_window;
 mod library_ui;
 mod logo;
+mod manip_arrow;
 mod manipulators;
 mod marking;
+mod material_ui;
 mod menus;
+#[cfg(test)]
+mod mesh_body_tests;
 mod navbar;
 mod notifications;
 mod origin;
@@ -61,6 +74,7 @@ mod sheet;
 mod sim_ui;
 mod sketch_modify;
 mod theme;
+mod thread_form;
 mod tips;
 mod toolbox;
 mod trace;
@@ -110,6 +124,8 @@ pub struct App {
   /// Trim, Break): shown at the canvas's lower right, with a warning icon at the right end of the
   /// status readout until the next command.
   pub(crate) warning_toast: Option<panels::WarningToast>,
+  /// The error toast and status-bar badge for failed features (see [`panels::error_toast`]).
+  pub(crate) error_toast: panels::ErrorToast,
   /// The red message of the last command [`App::run`] refused: it goes when the next command
   /// succeeds (Fusion leaves nothing behind a refused command).
   run_error: Option<String>,
@@ -193,6 +209,9 @@ pub struct App {
   /// The 3D view before the open sketch turned the camera to its plane; finishing the sketch
   /// goes back to it, as in Fusion.
   pre_sketch_cam: Option<Camera>,
+  /// The ribbon tab the open sketch was started from; finishing it comes back to that tab
+  /// (SURFACE stays SURFACE), as in Fusion.
+  pub(crate) pre_sketch_tab: Option<panels::Tab>,
   /// The ViewCube's orientation, Home view and projection mode.
   cube: viewcube::CubeState,
   /// An origin or construction plane selected in the browser (a `sketch.create` plane: "xy" or
@@ -205,6 +224,19 @@ pub struct App {
   pub(crate) picked_origin: Option<origin::OriginItem>,
   /// The origin item under the pointer in the canvas this frame.
   pub(crate) hover_origin: Option<origin::OriginItem>,
+  /// The status readout's last least distance (mm) between two selected items, kept until the
+  /// model or the pair changes so the kernel isn't asked every frame.
+  pub(crate) readout_distance: std::cell::Cell<Option<panels::PairDistance>>,
+  /// The origin or construction row under the pointer in the browser, lit in the canvas too.
+  pub(crate) row_hover: Option<origin::RowHover>,
+  /// The plane whose sketch grid Create Sketch previews: the one under the pointer while it
+  /// waits for a plane.
+  pub(crate) grid_preview: Option<fox_engine::kernel::Plane>,
+  /// The construction plane under the pointer in the canvas this frame (see [`construction`]).
+  pub(crate) hover_cplane: Option<fox_engine::model::FeatureId>,
+  /// The browser's Construction folder is shown (its eye): its planes whose own eyes are on draw
+  /// in the canvas. On by default, as in Fusion.
+  pub(crate) construction_shown: bool,
   /// The Origin folder's children's own eyes (O, X, Y, Z, XY, XZ, YZ), on by default; a child
   /// shows only when the folder's eye is on too.
   pub(crate) origin_eyes: [bool; 7],
@@ -297,6 +329,8 @@ pub struct App {
   pub(crate) clipboard: Option<clipboard::Clip>,
   /// Installed plugins: the Plugins window, their toolbar tabs and command dialogs.
   pub(crate) plugins: plugins_ui::PluginsUi,
+  /// Manage Materials' Material Browser, while open.
+  pub(crate) material_browser: Option<material_ui::Browser>,
   /// Insert > Sketch Library: the part picker and placing parts with clicks.
   pub(crate) library_ui: library_ui::LibraryUi,
   /// View ▸ Render Components….
@@ -313,6 +347,19 @@ pub struct App {
   pub files: file_dialogs::Files,
   /// Change Active Units or Convert Design Type, docked at the right (see `doc_dialogs`).
   pub(crate) doc_dialog: Option<doc_dialogs::DocDialog>,
+  /// Create Base Feature's mode: the ribbon shows BASE FEATURE SOLID / SURFACE and a green
+  /// FINISH BASE FEATURE button until it is finished (see [`config_ui::start_base`]).
+  pub base_mode: bool,
+  /// The Section Analyses OK kept, in the browser's Analysis folder.
+  pub(crate) sections: Vec<dialogs::KeptSection>,
+  /// The Analysis folder's eye is off: no kept analysis shows.
+  pub(crate) analysis_hidden: bool,
+  /// The document tabs: the designs open besides the shown one, and the "+"'s chooser.
+  pub docs: documents::Documents,
+  /// Fusion's Insert window and the INSERT DXF dialog.
+  pub(crate) inserts: insert_window::Inserts,
+  /// New Component in an Assembly Design (an external design), while open.
+  pub(crate) asm_component: Option<asm_component::AsmComponent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -353,6 +400,10 @@ struct RenderKey {
   peek: Vec<u32>,
   isolate: Option<Vec<u32>>,
   opacity: Vec<(u32, u8)>,
+  /// A Mirror's or pattern's previewed copies, drawn as ghosts.
+  ghosts: Vec<u32>,
+  /// Mesh bodies drawn flat-shaded.
+  flat: Vec<u32>,
   /// Faces and sketches highlighted from the timeline.
   peek_faces: Vec<(u32, u32)>,
   peek_sketches: Vec<u32>,
@@ -360,6 +411,11 @@ struct RenderKey {
   glyph_hover: Vec<Pick>,
   /// The Sketch Palette's display options (Slice, Profile, Points, ...).
   palette: palette::SketchPalette,
+  /// The plane Create Sketch previews the grid on.
+  grid_plane: Option<fox_engine::kernel::Plane>,
+  /// The see-through squares drawn over the scene (the origin planes): on the GPU they are
+  /// handed over apart from the scene, so the GPU's scene key leaves them out.
+  quads: Vec<fox_engine::render::Quad>,
 }
 
 impl App {
@@ -449,6 +505,7 @@ impl App {
       status: None,
       hint: None,
       warning_toast: None,
+      error_toast: panels::ErrorToast::default(),
       run_error: None,
       show_params: false,
       params_ui: params_ui::Panel::default(),
@@ -457,7 +514,7 @@ impl App {
       sheet_view: (1.0, egui::Vec2::ZERO),
       visual_style: Default::default(),
       objects: Default::default(),
-      effects: Default::default(),
+      effects: navbar::default_effects(),
       show_grid: true,
       grid: Default::default(),
       increments: Default::default(),
@@ -498,11 +555,17 @@ impl App {
       last_sketch: None,
       cam_move: None,
       pre_sketch_cam: None,
+      pre_sketch_tab: None,
       cube: viewcube::CubeState::default(),
       picked_plane: None,
       export_dxf: None,
       picked_origin: None,
       hover_origin: None,
+      readout_distance: std::cell::Cell::new(None),
+      row_hover: None,
+      grid_preview: None,
+      hover_cplane: None,
+      construction_shown: true,
       origin_eyes: [true; 7],
       origin_shown: false,
       browser_sketches: None,
@@ -544,6 +607,7 @@ impl App {
       close_menus: false,
       clipboard: None,
       plugins: plugins_ui::PluginsUi::default(),
+      material_browser: None,
       library_ui: library_ui::LibraryUi::default(),
       render_components: explode_ui::RenderComponents::default(),
       render: render_ui::RenderUi::default(),
@@ -552,6 +616,12 @@ impl App {
       show_perf: false,
       files: file_dialogs::Files::default(),
       doc_dialog: None,
+      base_mode: false,
+      sections: Vec::new(),
+      analysis_hidden: false,
+      docs: documents::Documents::default(),
+      inserts: insert_window::Inserts::default(),
+      asm_component: None,
     }
   }
 
@@ -573,14 +643,13 @@ impl App {
   /// Takes a finished background regeneration back. Returns whether one is still running.
   fn poll_rebuild(&mut self) -> bool {
     if self.rebuild.as_ref().is_some_and(|(job, _)| job.is_finished())
-      && let Some((job, start)) = self.rebuild.take()
+      && let Some((job, _)) = self.rebuild.take()
     {
       self.s.finish_rebuild(job);
-      let errors = self.s.model.errors();
-      self.status = Some(match errors.first() {
-        Some(e) => (e.clone(), true),
-        None => (format!("Computed in {:.1} s", now() - start), false),
-      });
+      // as Fusion, a clean recompute says nothing; only a failure leaves a message
+      if let Some(e) = self.s.model.errors().first() {
+        self.status = Some((e.clone(), true));
+      }
     }
     self.rebuild.is_some()
   }
@@ -675,6 +744,8 @@ impl App {
 
   /// Switches to another session, keeping the hub location.
   fn replace_session(&mut self, mut s: Session) {
+    // an open design with unsaved changes keeps its tab; this one opens in a new tab
+    documents::keep_unsaved(self);
     s.store_root = self.s.store_root.clone();
     let revision = self.s.revision;
     self.s = s;
@@ -701,13 +772,23 @@ impl App {
     self.data.save = None;
     // the Export window was for the old design
     self.files.export = None;
+    // and the kept analyses
+    self.sections.clear();
+    self.analysis_hidden = false;
   }
 
   /// Opens a design (latest or a given version) from the data panel.
   pub fn open_hub_item(&mut self, item: &str, version: Option<u32>) {
     self.cancel_dialog();
+    let kept = documents::keep_unsaved(self);
     let revision = self.s.revision;
-    if let Some(r) = self.run("hub.open", json!({"item": item, "version": version})) {
+    let opened = self.run("hub.open", json!({"item": item, "version": version}));
+    if opened.is_none()
+      && let Some(back) = kept
+    {
+      documents::drop_new_tab(self, back);
+    }
+    if let Some(r) = opened {
       self.swapped_session(revision);
       self.dialog = None;
       self.tool = Tool::Select;
@@ -795,19 +876,34 @@ impl App {
 
   // ---- file actions ----
 
+  /// Replaces the shown document with a new empty Part Design (closing the last tab). The "+"
+  /// and Create New add a tab instead ([`documents::new_document`]).
   pub fn new_design(&mut self) {
+    self.new_design_of(fox_engine::model::DesignType::Part, None);
+  }
+
+  /// Replaces the shown document with a new empty design of type `ty`, in `unit` (default: the
+  /// Preferences' default units).
+  pub(crate) fn new_design_of(
+    &mut self,
+    ty: fox_engine::model::DesignType,
+    unit: Option<fox_engine::model::LengthUnit>,
+  ) {
     let root = self.s.store_root.clone();
     let revision = self.s.revision;
     self.s = Session::default();
     // Preferences: new designs in the default units (General) and without a timeline (Design),
     // in a fresh session so the settings aren't undo steps
-    let units = self.preferences.values.units;
+    let units = unit.map(|u| u.symbol()).unwrap_or(self.preferences.values.units.key());
     let mut set = false;
-    if units != preferences::Units::Mm {
-      set |= self.s.execute("design.units", &json!({"unit": units.key()})).is_ok();
+    if units != "mm" {
+      set |= self.s.execute("design.units", &json!({"unit": units})).is_ok();
     }
     if !self.preferences.values.capture_history {
       set |= self.s.execute("design.history", &json!({"capture": false})).is_ok();
+    }
+    if !ty.is_part() {
+      set |= self.s.execute("design.type", &json!({"type": ty.key()})).is_ok();
     }
     if set {
       self.s = Session::new(self.s.design.clone());
@@ -820,6 +916,7 @@ impl App {
     self.nav_mode = None;
     self.cam = Camera::default();
     self.fitted_once = false;
+    self.tab = if ty == fox_engine::model::DesignType::Assembly { panels::Tab::Assembly } else { panels::Tab::Solid };
   }
 
   /// File ▸ Open... (Ctrl+O): Fusion's Open window, with the projects and "Open from my
@@ -952,6 +1049,10 @@ impl App {
   }
 
   pub fn import_path(&mut self, p: &std::path::Path) {
+    if fox_engine::exchange::format_for_path(p).is_some_and(|f| f.kind == fox_engine::exchange::FormatKind::Mesh) {
+      self.insert_mesh(p);
+      return;
+    }
     if let Some(r) = self.run("import", json!({"path": p})) {
       if r.get("warning").is_none() {
         self.status = Some((format!("Inserted {}", p.display()), false));
@@ -1050,6 +1151,8 @@ impl App {
     if pressed(Key::F, Modifiers::COMMAND | Modifiers::SHIFT) {
       navbar::toggle_full_screen(ctx);
     }
+    // Display Settings ▸ Visual Style: Ctrl+4 to Ctrl+9
+    navbar::visual_style_keys(self, ctx);
     if pressed(Key::S, Modifiers::COMMAND) {
       self.save(false);
     }
@@ -1057,7 +1160,7 @@ impl App {
       self.open_dialog();
     }
     if pressed(Key::N, Modifiers::COMMAND) {
-      self.new_design();
+      documents::new_document(self, fox_engine::model::DesignType::Part, None);
     }
     if pressed(Key::Escape, Modifiers::NONE) {
       self.escape();
@@ -1290,9 +1393,14 @@ impl App {
   /// Escape over the canvas: ends whatever is open, innermost first (a pop-up list, a tool's
   /// unfinished shape, the tool, the dialog, the selection).
   pub(crate) fn escape(&mut self) {
-    if self.doc_dialog.is_some() {
+    if self.display.ground_offset_form.is_some() {
+      // the GROUND PLANE OFFSET dialog closes, changing nothing
+      self.display.ground_offset_form = None;
+    } else if self.doc_dialog.is_some() {
       // Change Active Units or Convert Design Type closes, changing nothing
       doc_dialogs::close(self);
+    } else if asm_component::close(self) || insert_window::escape(self) {
+      // New Component (an assembly's) or INSERT DXF closed
     } else if self.other.is_some() {
       // the Select Other list closes, keeping the selection
       self.other = None;
@@ -1330,9 +1438,11 @@ impl App {
       self.cancel_dialog();
       self.s.selection.clear();
     } else {
-      // a picked origin plane, axis or point clears too; the item stays visible
+      // a picked origin plane, axis or point clears too; the item stays visible; the timeline or
+      // browser row still under the pointer stops lighting its feature's body
       self.s.selection.clear();
       origin::clear(self);
+      marking::hold_peek(self);
     }
     self.dim_edit = None;
   }
@@ -1347,19 +1457,43 @@ impl App {
     c.run(self);
   }
 
-  /// Shows or hides the bodies of the selection (bodies, or the bodies of selected faces and
-  /// edges), as V does in Fusion.
+  /// Show/Hide (V), as Fusion's: shows or hides what is selected: bodies (or the bodies of
+  /// selected faces and edges), sketches, construction planes, axes and points, and a picked
+  /// origin point, axis or plane. A picked plane or origin item stays picked, drawn selected,
+  /// until it is deselected.
   pub fn toggle_visibility(&mut self) {
+    if let Some(id) = construction::picked(self) {
+      construction::toggle_eye(self, id);
+      return;
+    }
+    if let Some(item) = origin::picked(self) {
+      origin::toggle_eye(self, item);
+      return;
+    }
     let mut bodies: Vec<fox_engine::model::BodyId> = Vec::new();
+    let mut features = Vec::new();
     for s in &self.s.selection {
-      if let Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } = s
-        && !bodies.contains(body)
-      {
-        bodies.push(*body);
+      match s {
+        Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if !bodies.contains(body) => {
+          bodies.push(*body)
+        }
+        Sel::Feature { feature } => features.push(*feature),
+        _ => {}
+      }
+    }
+    if bodies.is_empty() && features.is_empty() {
+      self.hint("Show/Hide: select bodies, faces or edges first");
+      return;
+    }
+    for f in features {
+      if construction::is_construction(self, f) {
+        construction::toggle_eye(self, f);
+      } else if self.s.design.sketch(f).is_ok() {
+        let visible = fox_engine::scene::sketch_visible(&self.s, f);
+        self.run("sketch.visible", json!({"sketch": f.0, "visible": !visible}));
       }
     }
     if bodies.is_empty() {
-      self.hint("Show/Hide: select bodies, faces or edges first");
       return;
     }
     for b in bodies {
@@ -1369,8 +1503,26 @@ impl App {
     self.s.selection.clear();
   }
 
+  /// Puts the dialog back after its frame while it stays open; a construction dialog's Type or
+  /// Method switches to that command's dialog instead.
+  pub(crate) fn after_dialog_frame(&mut self, mut d: Dialog, keep: bool) {
+    if let Some(kind) = d.switch_to.take() {
+      d.cancel(&mut self.s);
+      d.leave(self);
+      self.start(kind);
+    } else if keep && self.dialog.is_none() {
+      self.dialog = Some(d);
+    } else {
+      d.leave(self);
+    }
+  }
+
   pub fn start(&mut self, kind: dialogs::Kind) {
     self.end_hint();
+    // the last command's lower-left message makes way for this one's, as in Fusion
+    if self.status.as_ref().is_some_and(|(_, err)| !err) {
+      self.status = None;
+    }
     self.note_cmd(panels::Cmd::Dialog(kind));
     self.cancel_dialog();
     self.tool = Tool::Select;
@@ -1380,6 +1532,18 @@ impl App {
       d.refresh_manip(&self.s);
       d.preview(&mut self.s);
     }
+  }
+
+  /// Opens the INSERT MESH dialog on the mesh file `path`: the mesh previews where the file puts
+  /// it, and is inserted on OK, as in Fusion.
+  pub fn insert_mesh(&mut self, path: &std::path::Path) {
+    self.end_hint();
+    self.cancel_dialog();
+    self.tool = Tool::Select;
+    let mut d = Dialog::open(self, dialogs::Kind::InsertMesh);
+    d.insert_mesh_begin(&self.s, path);
+    d.preview(&mut self.s);
+    self.dialog = Some(d);
   }
 
   /// Opens Trace Image on `path` (an opened or dropped image) in the sketch being edited, or in
@@ -1490,6 +1654,7 @@ impl App {
     if self.run("sketch.create", json!({"plane": plane})).is_some() {
       if !was_sketching {
         self.pre_sketch_cam = Some(before);
+        self.pre_sketch_tab = Some(self.tab);
       }
       self.s.selection.clear();
       origin::clear(self);
@@ -1511,6 +1676,7 @@ impl App {
     if self.run("sketch.edit", json!({"sketch": id.0})).is_some() {
       if !was_sketching {
         self.pre_sketch_cam = Some(before);
+        self.pre_sketch_tab = Some(self.tab);
       }
       self.auto_look_at_sketch();
       self.tab = panels::Tab::Sketch;
@@ -1808,18 +1974,18 @@ impl App {
     toolbox::show(self, &ctx);
     panels::canvas_status(self, &ctx);
     panels::unsaved_banner(self, &ctx);
+    panels::error_toast(self, &ctx);
     panels::selection_info(self, &ctx);
     panels::warning_toast(self, &ctx);
+    error_dialog::badge(self, &ctx);
+    error_dialog::window(self, &ctx);
     notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
     doc_dialogs::show(self, &ctx);
+    asm_component::show(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
-      if keep && self.dialog.is_none() {
-        self.dialog = Some(d);
-      } else {
-        d.leave(self);
-      }
+      self.after_dialog_frame(d, keep);
     }
     if self.show_params {
       params_ui::window(self, &ctx);
@@ -1827,6 +1993,8 @@ impl App {
     data_panel::save_window(self, &ctx);
     file_dialogs::windows(self, &ctx);
     dialogs::save_window(self, &ctx);
+    documents::windows(self, &ctx);
+    insert_window::windows(self, &ctx);
     updates::window(self, &ctx);
     capture::windows(self, &ctx);
     navbar::ground_offset_window(self, &ctx);
@@ -1842,6 +2010,7 @@ impl App {
     library_ui::window(self, &ctx);
     help::window(self, &ctx);
     plugins_ui::window(self, &ctx);
+    material_ui::browser_window(self, &ctx);
     explode_ui::window(self, &ctx);
     service_ui::window(self, &ctx);
     if std::mem::take(&mut self.close_menus) {
@@ -2307,6 +2476,13 @@ mod tests {
     }
     let v = app.s.model.bodies[0].shape.mass().unwrap().volume;
     assert!((v - 3000.0).abs() < 1e-6, "{v}");
+    // `ui:dialogs:compute-all-message`: like Fusion, Compute All leaves no message when it succeeds
+    app.status = None;
+    app.run_background("compute_all", json!({}));
+    while app.poll_rebuild() {
+      std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(app.status, None);
     app.run_background("param.set", json!({"name": "h", "expr": "1 +"}));
     assert!(app.rebuild.is_none() && app.status.as_ref().is_some_and(|s| s.1));
   }

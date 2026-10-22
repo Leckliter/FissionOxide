@@ -192,6 +192,13 @@ fn object_visibility_and_grid_spacing() {
   let bad = lines(&mut b, &ViewOptions { grid_step: Some(0.0), ..Default::default() });
   assert_eq!(grid(&bad), grid(&plain), "a zero step adapts");
 
+  // Create Sketch's preview: the grid on another plane (every grid line lies in it)
+  let yz = fox_kernel::Plane::YZ;
+  let preview = lines(&mut b, &ViewOptions { grid_plane: Some(yz), hide_origin: true, ..Default::default() });
+  let preview: Vec<_> = preview.iter().filter(|l| l.behind).collect();
+  assert_eq!(preview.len(), grid(&plain) - 3, "the same grid, without the origin stubs");
+  assert!(preview.iter().all(|l| l.points.iter().all(|p| p[0].abs() < 1e-6)), "the grid lies in YZ");
+
   // hidden sketches stay shown while one is edited
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [5, 5]}));
@@ -596,4 +603,32 @@ fn layout_grid_axes_cross_the_grid_in_red_and_green() {
   assert!(
     axis_lines(&ViewOptions { hide_grid: true, hide_origin: true, grid_axes: true, ..Default::default() }).is_empty()
   );
+}
+
+#[test]
+fn construction_visibility_hides_planes_axes_and_points() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 30}));
+  let plane = run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 30}))["feature"].as_u64().unwrap();
+  let dashed =
+    |s: &Session, o: &ViewOptions| SceneBuilder::default().build(s, o).0.lines.iter().filter(|l| l.dashed).count();
+  assert_eq!(dashed(&s, &ViewOptions::default()), 1, "the offset plane is drawn");
+  // the app fills construction planes itself
+  assert_eq!(dashed(&s, &ViewOptions { planes_drawn_by_caller: true, ..Default::default() }), 0);
+
+  // the row's eye (V) hides it; undo shows it again
+  run(&mut s, "construction.visible", json!({"feature": plane, "visible": false}));
+  assert_eq!(s.design.feature(fox_model::FeatureId(plane as u32)).unwrap().visible, Some(false));
+  assert_eq!(dashed(&s, &ViewOptions::default()), 0);
+  assert!(s.undo());
+  assert_eq!(dashed(&s, &ViewOptions::default()), 1);
+  run(&mut s, "construction.visible", json!({"feature": plane, "visible": false}));
+  run(&mut s, "construction.visible", json!({"feature": plane, "visible": true}));
+  assert_eq!(s.design.feature(fox_model::FeatureId(plane as u32)).unwrap().visible, None);
+
+  // only construction geometry takes it
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let sketch = s.edit_sketch.unwrap().0;
+  run(&mut s, "sketch.finish", json!({}));
+  assert!(s.execute("construction.visible", &json!({"feature": sketch, "visible": false})).is_err());
 }

@@ -10,6 +10,14 @@ const MOTIONS: &[(&str, &str)] =
 const CAM_MOTIONS: &[(&str, &str)] =
   &[("slide", "Slide (straight)"), ("rotation", "Rotation (rocker arm)"), ("slide2", "Slide 2")];
 
+/// Joint Origin's Origin Mode row, Fusion's three icon toggles (only Simple is in the engine: the
+/// other two are greyed, see `forms::greyed_option`).
+pub(crate) const ORIGIN_MODES: &[(&str, Icon, &str)] = &[
+  ("simple", Icon::OriginSimple, "Simple"),
+  ("between", Icon::OriginBetween, "Between Two Faces"),
+  ("two_edge", Icon::OriginTwoEdge, "Two Edge Intersection"),
+];
+
 pub static JOINT_ORIGIN: Form = Form {
   title: "JOINT ORIGIN",
   name: "Joint Origin",
@@ -17,8 +25,10 @@ pub static JOINT_ORIGIN: Form = Form {
   icon: Icon::JointOrigin,
   cmd: "joint_origin",
   fixed: &[],
+  // Fusion: Origin Mode and Snap; the angle, offset and flip rows show once the snap is picked
   inputs: &[
-    Input::Face { key: "face", label: "Face", near: None },
+    Input::Icons { key: "mode", label: "Origin Mode", options: ORIGIN_MODES },
+    Input::Face { key: "face", label: "Snap", near: None },
     Input::Expr { key: "angle", label: "Angle", default: "0 deg" },
     Input::Expr { key: "offset_x", label: "Offset X", default: "0 mm" },
     Input::Expr { key: "offset_y", label: "Offset Y", default: "0 mm" },
@@ -147,6 +157,27 @@ mod tests {
     .unwrap();
     let x = s.model.bodies.iter().find(|b| b.id.0 == bodies[2]).unwrap().shape.mass().unwrap().bbox_min.x;
     assert!((x - 100.0).abs() < 1e-6, "{x}");
+  }
+
+  /// Fusion's JOINT ORIGIN: Origin Mode (Simple; the other two greyed) and Snap, OK waiting
+  /// for the snap; the angle, offset and flip rows only once it is picked, and no Name row.
+  #[test]
+  fn joint_origin_opens_with_origin_mode_and_snap() {
+    use crate::forms::greyed_option;
+    let f = &JOINT_ORIGIN;
+    let mut st = State::new(f);
+    let keys = |st: &State| -> Vec<&str> {
+      (0..f.inputs.len()).filter(|&i| st.shown(f, i) && !State::hidden(f, i)).map(|i| f.inputs[i].key()).collect()
+    };
+    assert_eq!(keys(&st), ["mode", "face"]);
+    assert_eq!(f.inputs[1], Input::Face { key: "face", label: "Snap", near: None });
+    assert_eq!(st.missing(f), Some("Snap"), "OK waits for the snap");
+    assert_eq!(st.values[0], json!("simple"));
+    assert!(greyed_option(f, "mode", "simple").is_none());
+    assert!(greyed_option(f, "mode", "between").is_some() && greyed_option(f, "mode", "two_edge").is_some());
+    st.values[1] = json!({"body": 1, "face": 2});
+    assert_eq!(keys(&st), ["mode", "face", "angle", "offset_x", "offset_y", "offset", "flip"]);
+    assert_eq!(st.missing(f), None);
   }
 
   #[test]

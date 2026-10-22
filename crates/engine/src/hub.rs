@@ -618,6 +618,13 @@ fn download(st: &Store, s: &Session, p: &Value) -> CmdResult {
     std::fs::write(&target, st.read_version(&item, version)?)?;
     return Ok(json!({"path": target}));
   }
+  // a translated upload hands back the file it came from in that file's own format
+  if let Some((name, bytes)) = st.read_original(&item, version)?
+    && Path::new(&name).extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case(&ext))
+  {
+    std::fs::write(&target, bytes)?;
+    return Ok(json!({"path": target, "original": true}));
+  }
   if ext == "foxz" && it.kind == ItemKind::Design {
     let upto = version.or(it.latest().map(|v| v.number)).unwrap_or(0);
     let mut history = Vec::new();

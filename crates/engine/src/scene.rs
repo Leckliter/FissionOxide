@@ -31,6 +31,9 @@ pub const EDGE_SELECT_HALO: [u8; 4] = [214, 235, 255, 255];
 /// Body edges: a 1 px light grey silhouette on the body, a 2 px black line under the pointer.
 pub const EDGE_COLOR: [u8; 4] = [179, 178, 173, 255];
 pub const EDGE_HOVER_COLOR: [u8; 4] = [10, 10, 10, 255];
+/// A Mirror's or pattern's previewed copy: Fusion's see-through grey ghost with dark edges.
+pub const GHOST_COLOR: [u8; 4] = [150, 150, 150, 90];
+pub const GHOST_EDGE_COLOR: [u8; 4] = [60, 60, 60, 255];
 /// A visible sketch's closed profiles, seen from outside the sketch and in it alike: Fusion's
 /// pale blue, drawn unlit so it reads the same from every angle.
 pub const PROFILE_COLOR: [u8; 4] = [230, 245, 250, 255];
@@ -219,19 +222,34 @@ pub struct ViewOptions {
   pub show_vertices: bool,
   /// Draw no construction planes, axes or points (Object Visibility).
   pub hide_construction: bool,
+  /// Draw no construction planes (Object Visibility ▸ Construction Planes).
+  pub hide_construction_planes: bool,
+  /// Draw no construction axes (Object Visibility ▸ Construction Axes).
+  pub hide_construction_axes: bool,
+  /// Draw no construction points (Object Visibility ▸ Construction Points).
+  pub hide_construction_points: bool,
   /// Draw the grid without the origin axes (Object Visibility ▸ Origins).
   pub hide_origin: bool,
   /// The grid's spacing; `None` adapts it to the model's size (see [`grid_step`]).
   pub grid_step: Option<f64>,
+  /// Draw the grid on this plane, as a sketch on it would (Create Sketch's preview of the plane
+  /// under the pointer); `None` = the sketch being edited, else the XY plane.
+  pub grid_plane: Option<Plane>,
   /// How far the origin axes reach from the origin (short stubs, as Fusion draws them when the
   /// Origin folder is shown); `None` = twice the grid step. The UI sizes them from the camera so
   /// they match the origin planes it draws.
   pub origin_axis_len: Option<f64>,
   /// Bodies drawn see-through: (body, alpha), as Fusion's Opacity Control.
   pub opacity: Vec<(BodyId, u8)>,
+  /// Mesh bodies drawn flat-shaded (a mesh body's Flat Shaded); the rest draw smooth, as Fusion
+  /// draws mesh bodies.
+  pub flat_meshes: Vec<BodyId>,
   /// Construction planes left out (the one an Offset Plane dialog previews, which the UI fills
   /// itself).
   pub hide_planes: Vec<FeatureId>,
+  /// Draw no construction planes: the caller draws them itself (the app fills them over the
+  /// image at a fixed size on screen, as Fusion does).
+  pub planes_drawn_by_caller: bool,
   /// Bodies' exploded-view offsets; `None` = the design's exploded view (`view.explode`).
   pub explode: Option<HashMap<BodyId, DVec3>>,
   /// Sketch curves and points also drawn in the hover colour: what a hovered constraint glyph
@@ -246,6 +264,14 @@ pub struct ViewOptions {
   /// Draw the X (red) and Y (green) axis lines across the grid, as Fusion's Layout Grid in the
   /// 3D view has them.
   pub grid_axes: bool,
+  /// Bodies drawn as ghosts ([`GHOST_COLOR`], dark edges): a Mirror's or pattern's previewed
+  /// copies.
+  pub ghosts: Vec<BodyId>,
+  /// Section Analysis's Show Hatch: dark diagonal lines across the cut faces.
+  pub section_hatch: bool,
+  /// Section Analysis's Section Color: `None` colours each cut face from its body (Fusion's
+  /// "From Component"), else this one colour.
+  pub section_color: Option<[u8; 4]>,
 }
 
 /// What the Sketch Palette shows of the sketch being edited (every option on by default, as
@@ -277,6 +303,8 @@ pub struct SceneBuilder {
   /// Section caps per body, for the plane they were cut with.
   caps: HashMap<BodyId, (Plane, Option<TriMesh>)>,
   curvature: HashMap<BodyId, Vec<[u8; 4]>>,
+  /// Mesh bodies' tessellations with smooth (averaged) normals.
+  smooth: HashMap<BodyId, TriMesh>,
   /// The design's exploded view and its offsets, for the revision they were worked out at.
   explode: Option<(u64, fox_model::explode::ExplodedView, HashMap<BodyId, DVec3>)>,
 }
@@ -285,6 +313,7 @@ impl SceneBuilder {
   pub fn build(&mut self, s: &Session, opts: &ViewOptions) -> (Scene, PickTable) {
     if self.revision != s.revision {
       self.edges.clear();
+      self.smooth.clear();
       self.profiles.clear();
       self.caps.clear();
       self.curvature.clear();
@@ -323,12 +352,17 @@ impl SceneBuilder {
         continue;
       }
       let Some(m) = body.mesh() else { continue };
+      let smooth = (body.is_mesh() && !opts.flat_meshes.contains(&body.id))
+        .then(|| self.smooth.entry(body.id).or_insert_with(|| smooth_shaded(m)).clone());
+      let m = smooth.as_ref().unwrap_or(m);
       let tint = |c: [u8; 4]| {
         let c = if selected_bodies.contains(&body.id) { SELECT_COLOR } else { c };
         let c = if opts.peek.contains(&body.id) { mix(c, HOVER_COLOR, 0.6) } else { c };
         if editing { mix(c, [255, 255, 255, 255], 0.35) } else { c }
       };
+      let ghost = opts.ghosts.contains(&body.id);
       let base = tint(s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR));
+      let base = if ghost { GHOST_COLOR } else { base };
       let tri_ids: Vec<u32> = m.tri_face.iter().map(|f| picks.id(Pick::Face { body: body.id, face: *f })).collect();
       // per-face highlight: hover one face; selected faces get their own meshes' colour via split
       let hover = match opts.hover {
@@ -344,7 +378,7 @@ impl SceneBuilder {
       let first = scene.meshes.len();
       let face_cols = crate::views::body_face_colors(s, body.id);
       let peek_faces: Vec<u32> = opts.peek_faces.iter().filter(|(b, _)| *b == body.id).map(|(_, f)| *f).collect();
-      if !face_cols.is_empty() || !peek_faces.is_empty() {
+      if !ghost && (!face_cols.is_empty() || !peek_faces.is_empty()) {
         // faces with an appearance of their own (and selected or peeked faces) draw as meshes of
         // their colour
         let color_of = |t: usize, id: u32| {
@@ -370,7 +404,7 @@ impl SceneBuilder {
         scene.meshes.push(mesh_of(&a.0, a.1, base, hover));
         scene.meshes.push(mesh_of(&b.0, b.1, SELECT_COLOR, hover));
       }
-      let alpha = opts.opacity.iter().find(|o| o.0 == body.id).map(|o| o.1);
+      let alpha = opts.opacity.iter().find(|o| o.0 == body.id).map(|o| o.1).or(ghost.then_some(GHOST_COLOR[3]));
       for mesh in &mut scene.meshes[first..] {
         mesh.analyze = true;
         if let Some(a) = alpha {
@@ -392,9 +426,15 @@ impl SceneBuilder {
         if let Some(c) = cap {
           if opts.slice {
             slice_cap_lines(&mut scene, &c, &pl, grid_step(s) * SLICE_HATCH_STEP);
+          } else if opts.section_hatch {
+            section_hatch_lines(&mut scene, &c, &pl, grid_step(s) * SLICE_HATCH_STEP);
           }
           let n = vec![(-pl.normal()).as_vec3().to_array(); c.positions.len()];
-          let cap_color = if opts.slice { SLICE_FILL } else { mix(base, [120, 60, 50, 255], 0.35) };
+          let cap_color = match (opts.slice, opts.section_color) {
+            (true, _) => SLICE_FILL,
+            (false, Some(c)) => c,
+            (false, None) => mix(base, [120, 60, 50, 255], 0.35),
+          };
           let mut mesh = mesh_of(&TriMesh { normals: n, ..c }, Vec::new(), cap_color, None);
           mesh.analyze = false;
           scene.meshes.push(mesh);
@@ -409,7 +449,8 @@ impl SceneBuilder {
           }
         }
       }
-      if !opts.hide_edges {
+      // mesh bodies draw smooth, with no face edges to pick, as Fusion's
+      if !opts.hide_edges && !body.is_mesh() {
         let edges = self.edges.entry(body.id).or_insert_with(|| {
           let tol = (body.diagonal() * 0.001).clamp(0.002, 0.5);
           body.shape.edge_lines(tol).unwrap_or_default()
@@ -434,6 +475,8 @@ impl SceneBuilder {
             (EDGE_SELECT_COLOR, 1.0)
           } else if opts.hover == Some(pick) {
             (EDGE_HOVER_COLOR, 2.0)
+          } else if ghost {
+            (GHOST_EDGE_COLOR, 1.0)
           } else {
             (EDGE_COLOR, 1.0)
           };
@@ -568,8 +611,14 @@ impl SceneBuilder {
     }
 
     // construction planes
+    // hidden ones (the browser row's eye, V) are left out
+    let hidden = |id: &FeatureId| s.design.feature(*id).is_some_and(|f| f.suppressed || f.visible == Some(false));
     for (id, pl) in &s.model.planes {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) || opts.hide_planes.contains(id)
+      if opts.hide_construction
+        || opts.hide_construction_planes
+        || opts.planes_drawn_by_caller
+        || hidden(id)
+        || opts.hide_planes.contains(id)
       {
         continue;
       }
@@ -595,7 +644,7 @@ impl SceneBuilder {
     // construction axes (dashed, through the model), points and cosmetic threads
     let reach = scene_size(s) * 0.4;
     for (id, (o, d)) in &s.model.axes {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || opts.hide_construction_axes || hidden(id) {
         continue;
       }
       scene.lines.push(Polyline {
@@ -610,7 +659,7 @@ impl SceneBuilder {
       });
     }
     for (id, p) in &s.model.points {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || opts.hide_construction_points || hidden(id) {
         continue;
       }
       scene.markers.push(Marker {
@@ -660,6 +709,7 @@ impl SceneBuilder {
         s,
         opts.grid_step.filter(|g| g.is_finite() && *g > 0.0),
         (!opts.hide_origin).then_some(axis_len),
+        opts.grid_plane,
       );
       if opts.grid_axes {
         grid_axis_lines(&mut scene, s, opts.grid_step.filter(|g| g.is_finite() && *g > 0.0));
@@ -730,20 +780,22 @@ pub fn grid_step(s: &Session) -> f64 {
   nice_step(scene_size(s) / 10.0)
 }
 
-/// The ground grid on the sketch plane (the XY plane outside a sketch), and with `origin`
-/// (`Some(stub length)`) the origin axes as short coloured stubs at the origin: Fusion draws no
-/// axis lines across the grid, and none at all while the Origin folder is hidden.
-fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Option<f64>>) {
-  let plane = match s.edit_sketch.and_then(|e| s.model.sketches.get(&e)) {
-    Some(r) => r.plane,
-    None => Plane::XY,
+/// The ground grid on the sketch plane (the XY plane outside a sketch, `on` when given), and
+/// with `origin` (`Some(stub length)`) the origin axes as short coloured stubs at the origin:
+/// Fusion draws no axis lines across the grid, and none at all while the Origin folder is hidden.
+fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Option<f64>>, on: Option<Plane>) {
+  let plane = match (on, s.edit_sketch.and_then(|e| s.model.sketches.get(&e))) {
+    (Some(p), _) => p,
+    (None, Some(r)) => r.plane,
+    (None, None) => Plane::XY,
   };
   let size = scene_size(s);
   let step = fixed.unwrap_or_else(|| grid_step(s));
   let n = ((size / step).ceil() as i64).clamp(2, 60);
   let ext = n as f64 * step;
-  // in a sketch the major lines (every fifth, the labelled ones) stand out more, as Fusion's do
-  let editing = s.edit_sketch.is_some();
+  // in a sketch (and its preview) the major lines (every fifth, the labelled ones) stand out
+  // more, as Fusion's do
+  let editing = s.edit_sketch.is_some() || on.is_some();
   let (major_col, minor_col) =
     if editing { ([168, 172, 178, 255], [222, 224, 228, 255]) } else { ([190, 193, 198, 255], [218, 220, 224, 255]) };
   for i in -n..=n {
@@ -1137,6 +1189,29 @@ pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
   }
 }
 
+/// A mesh with each vertex's normal averaged over the triangles meeting at its point (area
+/// weighted), so a mesh body draws smooth across its facets.
+fn smooth_shaded(m: &TriMesh) -> TriMesh {
+  let key = |p: &[f32; 3]| p.map(|c| (c * 1e4).round() as i64);
+  let mut sums: HashMap<[i64; 3], fox_kernel::glam::Vec3> = HashMap::new();
+  for t in m.indices.chunks_exact(3) {
+    let [a, b, c] = [t[0], t[1], t[2]].map(|i| m.positions.get(i as usize).copied().unwrap_or_default());
+    let (va, vb, vc) =
+      (fox_kernel::glam::Vec3::from(a), fox_kernel::glam::Vec3::from(b), fox_kernel::glam::Vec3::from(c));
+    let n = (vb - va).cross(vc - va);
+    for p in [a, b, c] {
+      *sums.entry(key(&p)).or_default() += n;
+    }
+  }
+  let normals = m
+    .positions
+    .iter()
+    .zip(&m.normals)
+    .map(|(p, n)| sums.get(&key(p)).and_then(|s| s.try_normalize()).map_or(*n, |s| s.to_array()))
+    .collect();
+  TriMesh { normals, ..m.clone() }
+}
+
 fn mesh_of(m: &TriMesh, tri_ids: Vec<u32>, color: [u8; 4], hover: Option<u32>) -> Mesh {
   Mesh {
     positions: m.positions.clone(),
@@ -1253,6 +1328,8 @@ pub const SLICE_HATCH: [u8; 4] = [214, 46, 170, 255];
 pub const SLICE_OUTLINE: [u8; 4] = [20, 20, 20, 255];
 /// Hatch spacing as a fraction of the grid step.
 const SLICE_HATCH_STEP: f64 = 0.25;
+/// Section Analysis's hatch lines.
+pub const SECTION_HATCH: [u8; 4] = [45, 45, 45, 255];
 
 /// The Slice cap's hatch and outline: 45° lines `step` apart clipped to the cap's triangles, and
 /// the cap's boundary (the edges one triangle uses), both lifted a hair off the cut so they draw
@@ -1276,6 +1353,24 @@ fn slice_cap_lines(scene: &mut Scene, cap: &TriMesh, pl: &Plane, step: f64) {
   }
   for (a, b) in hatch_segments(cap, pl, step) {
     scene.lines.push(line(vec![world(a), world(b)], SLICE_HATCH, 1.0));
+  }
+}
+
+/// Section Analysis's hatch: dark diagonal lines across a cut face, just in front of it.
+fn section_hatch_lines(scene: &mut Scene, cap: &TriMesh, pl: &Plane, step: f64) {
+  let lift = pl.normal() * (step * 0.01).max(1e-3);
+  let world = |p: [f64; 2]| (pl.to_world(p) + lift).as_vec3().to_array();
+  for (a, b) in hatch_segments(cap, pl, step) {
+    scene.lines.push(Polyline {
+      points: vec![world(a), world(b)],
+      color: SECTION_HATCH,
+      width: 1.0,
+      id: 0,
+      on_top: false,
+      dashed: false,
+      dash_dot: false,
+      behind: false,
+    });
   }
 }
 
@@ -1625,7 +1720,24 @@ pub fn view_plane(s: &Session, v: &serde_json::Value, offset: f64, flip: bool) -
   Ok(if flip { Plane { origin: pl.origin, x: pl.x, y: -pl.y } } else { pl })
 }
 
-/// View options from render parameters: `section: {plane, offset?, flip?}` and
+/// Section Analysis's single Section Color.
+pub const SECTION_SINGLE: [u8; 4] = [226, 120, 80, 255];
+
+/// A section plane turned about its own x axis by `angle1` and its y axis by `angle2` (degrees),
+/// about its origin: Fusion's Angle 1 and Angle 2.
+pub fn tilt_plane(pl: Plane, angle1: f64, angle2: f64) -> Plane {
+  use fox_kernel::glam::DQuat;
+  if angle1.abs() < 1e-12 && angle2.abs() < 1e-12 {
+    return pl;
+  }
+  let q1 = DQuat::from_axis_angle(pl.x, angle1.to_radians());
+  let y1 = q1 * pl.y;
+  let q2 = DQuat::from_axis_angle(y1, angle2.to_radians());
+  Plane { origin: pl.origin, x: q2 * pl.x, y: q2 * y1 }
+}
+
+/// View options from render parameters: `section: {plane, offset?, flip?, angle1?, angle2?
+/// (degrees, about `center` when given), hatch?, color?: "component" | "single"}` and
 /// `analysis: zebra | draft | accessibility | curvature` (with `pull`: "x" | "y" | "z" | [x,y,z]
 /// and `angle` in degrees for draft).
 pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, String> {
@@ -1634,7 +1746,23 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
     let plane = sec.get("plane").cloned().unwrap_or(serde_json::json!("xz"));
     let offset = sec.get("offset").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
     let flip = sec.get("flip").and_then(serde_json::Value::as_bool).unwrap_or(false);
-    o.section = Some(view_plane(s, &plane, offset, flip)?);
+    let deg = |k: &str| sec.get(k).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+    let mut pl = view_plane(s, &plane, offset, false)?;
+    // the angles turn the plane about `center` (put on the plane), else about its origin
+    if let Some(c) = sec
+      .get("center")
+      .and_then(serde_json::Value::as_array)
+      .and_then(|a| Some(DVec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?)))
+    {
+      pl.origin = c - pl.normal() * pl.normal().dot(c - pl.origin);
+    }
+    let pl = tilt_plane(pl, deg("angle1"), deg("angle2"));
+    o.section = Some(if flip { Plane { origin: pl.origin, x: pl.x, y: -pl.y } } else { pl });
+    o.section_hatch = sec.get("hatch").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    o.section_color = match sec.get("color").and_then(serde_json::Value::as_str) {
+      Some("single") => Some(SECTION_SINGLE),
+      _ => None,
+    };
   }
   // the Sketch Palette's Slice: the open sketch's plane, turned to face the camera (`flip`
   // when the eye is behind it), so the part of each body in front of the plane is cut away
@@ -1819,7 +1947,7 @@ fn vertex_markers(scene: &mut Scene, picks: &mut PickTable, s: &Session, opts: &
       Some(only) => only.contains(&body.id),
       None => s.body_visible(body.id),
     };
-    if !shown {
+    if !shown || body.is_mesh() {
       continue;
     }
     for (edge, end, p) in body_vertices(body) {

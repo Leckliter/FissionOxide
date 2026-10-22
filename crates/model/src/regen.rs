@@ -35,6 +35,8 @@ pub struct Body {
   pub shape: Shape,
   /// Feature that last changed this body.
   pub feature: FeatureId,
+  /// A B-rep body or a mesh body (an inserted STL, OBJ, PLY or 3MF, until Convert Mesh).
+  pub kind: BodyKind,
   /// Set on sheet metal bodies.
   pub sheet: Option<SheetInfo>,
   /// Set on unfolded sheets (for Refold).
@@ -45,6 +47,20 @@ pub struct Body {
   faces: OnceCell<Vec<FaceInfo>>,
   edges: OnceCell<Vec<EdgeInfo>>,
 }
+
+/// What a body is made of, as Fusion tells its bodies apart: B-rep solids and surfaces, or
+/// triangle meshes (picked whole, drawn without face edges, taken by the mesh commands only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BodyKind {
+  #[default]
+  Brep,
+  Mesh,
+}
+
+/// The hover lines of an open mesh body's warning, as Fusion's.
+pub const MESH_NOT_CLOSED: &str = "Mesh is not closed.";
+pub const MESH_NOT_POSITIVE: &str = "Mesh does not have positive volume.";
 
 impl std::fmt::Debug for Body {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -58,9 +74,10 @@ impl Body {
     Body::named(id, name, shape, feature, None)
   }
 
-  /// A surface body: faces with no solid inside (a surface Extrude, a Patch, an open import).
+  /// A surface body: B-rep faces with no solid inside (a surface Extrude, a Patch, an open
+  /// import); never a mesh body.
   pub fn is_surface(&self) -> bool {
-    self.shape.solid_count() == 0
+    !self.is_mesh() && self.shape.solid_count() == 0
   }
 
   /// [`Body::new`]; faces the history can't name take the names of the faces of `before` they are.
@@ -74,6 +91,7 @@ impl Body {
       name,
       shape,
       feature,
+      kind: BodyKind::Brep,
       sheet: None,
       unfolded: None,
       names: std::sync::Arc::new(names),
@@ -85,9 +103,31 @@ impl Body {
 
   fn with_shape(&self, shape: Shape, feature: FeatureId) -> Body {
     Body {
+      kind: self.kind,
       sheet: self.sheet.clone(),
       unfolded: self.unfolded.clone(),
       ..Body::named(self.id, self.name.clone(), shape, feature, Some(self))
+    }
+  }
+
+  /// A mesh body (see [`BodyKind`]).
+  pub fn is_mesh(&self) -> bool {
+    self.kind == BodyKind::Mesh
+  }
+
+  /// What is wrong with a mesh body, one hover line each, as Fusion's warning on its browser row:
+  /// an open mesh is not closed and has no positive volume; a closed one turned inside out has
+  /// no positive volume. Empty for a sound mesh and for every B-rep body.
+  pub fn mesh_problems(&self) -> Vec<&'static str> {
+    if !self.is_mesh() {
+      return Vec::new();
+    }
+    if self.shape.solid_count() == 0 {
+      return vec![MESH_NOT_CLOSED, MESH_NOT_POSITIVE];
+    }
+    match self.shape.mass() {
+      Ok(m) if m.volume > 0.0 => Vec::new(),
+      _ => vec![MESH_NOT_POSITIVE],
     }
   }
 
@@ -1168,26 +1208,42 @@ impl Ctx<'_> {
             shape = shape.boolean(&self.state.bodies[i].shape, op).map_err(ke)?;
           }
         }
+        let was = self.state.bodies[ti].shape.clone();
         let new_target = self.state.bodies[ti].with_shape(shape, id);
         self.state.bodies[ti] = new_target;
         if !*keep_tools {
           self.state.bodies.retain(|b| b.id == *target || !tools.contains(&b.id));
         }
-        self.split_multi(id, *target);
+        if op == BoolOp::Union && self.behaviours.has(fox_sketch::behaviour::COMBINE_KEEPS_TARGET) {
+          self.split_keeping_target(id, *target, &was);
+        } else {
+          self.split_multi(id, *target);
+        }
         Ok(None)
       }
-      FeatureKind::Import { breps, meshes, .. } => {
+      FeatureKind::Import { file_name, breps, meshes } => {
         let mut shapes = Vec::new();
         for b in breps.iter() {
           shapes.push(Shape::from_brep(b).map_err(ke)?);
         }
-        for m in meshes.iter() {
-          let pos: Vec<[f32; 3]> = m.positions.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
-          shapes.push(Shape::from_mesh(&pos, &m.indices, m.merge_coplanar).map_err(ke)?);
-        }
         for s in shapes {
           for body in s.bodies().map_err(ke)? {
             self.new_body(id, body);
+          }
+        }
+        // meshes stay mesh bodies named after the file, as Fusion's Insert Mesh leaves them
+        let stem = file_name.rsplit_once('.').map_or(file_name.as_str(), |(s, _)| s);
+        for (k, m) in meshes.iter().enumerate() {
+          let pos: Vec<[f32; 3]> = m.positions.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+          let shape = Shape::from_mesh(&pos, &m.indices, m.merge_coplanar).map_err(ke)?;
+          let name = match meshes.len() {
+            1 => stem.to_string(),
+            _ if !m.name.trim().is_empty() => m.name.trim().to_string(),
+            _ => format!("{stem} ({})", k + 1),
+          };
+          for (j, body) in shape.bodies().map_err(ke)?.into_iter().enumerate() {
+            let name = if j == 0 { name.clone() } else { format!("{name} ({})", j + 1) };
+            self.new_mesh_body(id, body, name);
           }
         }
         Ok(None)
@@ -1466,11 +1522,18 @@ impl Ctx<'_> {
         })
       }
       FeatureKind::Hem { edges, length, gap, flip } => {
-        let (l, g) = (self.len(length)?, self.len(gap)?);
-        if !(g >= 0.01) {
-          return Err("the hem gap must be at least 0.01 mm (a closed hem would fuse to the sheet)".into());
-        }
+        // the values may name the sheet's thickness, as Fusion's default length "Thickness * 4"
+        // does (a parameter of that name wins)
+        let (length, gap) = (length.clone(), gap.clone());
+        let base = self.params.clone();
         self.edge_flanges(id, edges, *flip, (0.0, 0.0), CornerMode::Miter, |info| {
+          let mut params = base.clone();
+          params.entry("Thickness".into()).or_insert(info.thickness);
+          let len = |e: &str| fox_expr::eval(e, fox_expr::Kind::Length, &params).map_err(|err| format!("'{e}': {err}"));
+          let (l, g) = (len(&length)?, len(&gap)?);
+          if !(g >= 0.01) {
+            return Err("the hem gap must be at least 0.01 mm (a closed hem would fuse to the sheet)".into());
+          }
           let (t, r) = (info.thickness, g / 2.0);
           let straight = l - (r + t);
           if straight < -1e-9 {
@@ -2268,6 +2331,17 @@ impl Ctx<'_> {
     id
   }
 
+  /// A mesh body named `name` (mesh bodies take their file's name, not a body number).
+  fn new_mesh_body(&mut self, feature: FeatureId, shape: Shape, name: String) -> BodyId {
+    let id = self.new_body(feature, shape);
+    self.state.body_counter -= 1;
+    if let Some(b) = self.state.bodies.iter_mut().find(|b| b.id == id) {
+      b.name = name;
+      b.kind = BodyKind::Mesh;
+    }
+    id
+  }
+
   /// Splits a body whose shape holds several solids into one body per solid.
   fn split_multi(&mut self, feature: FeatureId, id: BodyId) {
     let Some(i) = self.state.bodies.iter().position(|b| b.id == id) else { return };
@@ -2280,9 +2354,13 @@ impl Ctx<'_> {
       self.state.bodies[i] = self.state.bodies[i].with_shape(first, feature);
     }
     let sheet = self.state.bodies[i].sheet.clone();
+    let kind = self.state.bodies[i].kind;
     for s in it {
       let nid = self.new_body(feature, s);
       self.set_sheet(nid, sheet.clone());
+      if let Some(b) = self.state.bodies.iter_mut().find(|b| b.id == nid) {
+        b.kind = kind;
+      }
     }
   }
 

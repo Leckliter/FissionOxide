@@ -1,0 +1,12 @@
+{
+  "ui:manage:bom-palette": "ui-manage-bom-palette",
+  "ui:manage:bom-toolbar-menus": "ui-manage-bom-palette",
+  "ui:utilities:scripts-addins-window": "ui-utilities-addins-make",
+  "ui:utilities:scripts-addins-shortcut": "ui-utilities-addins-make",
+  "ui:utilities:make-3d-print": "ui-utilities-addins-make",
+  "ui:utilities:plugin-details-glyphs": "ui-utilities-addins-make",
+  "ui:plastic:tooltip-texts": "ui-utilities-tips-status",
+  "ui:utilities:tooltip-texts": "ui-utilities-tips-status",
+  "ui:dialogs:manage-materials": "ui-utilities-tips-status",
+  "ui:chrome:status-dev-messages": "ui-utilities-tips-status"
+}

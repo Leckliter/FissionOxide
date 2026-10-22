@@ -77,6 +77,13 @@ pub(super) struct MoveForm {
   /// Set Pivot is picking: the selection as it was when it started (the next point picked is
   /// the pivot).
   pub(super) picking_pivot: Option<Vec<Sel>>,
+  /// Edit Move: the boxes add a move to the stored one, as Fusion's do (false for a move about
+  /// an edge or sketch line, whose stored values the boxes edit instead).
+  pub(super) adds: bool,
+  /// Edit Move: the bodies the feature stored, and the `feature.edit` fields worked out for the
+  /// preview (see [`Dialog::prepare_move_edit`]).
+  pub(super) edit_bodies: Vec<u32>,
+  pub(super) edit_set: Option<Value>,
 }
 
 impl Default for MoveForm {
@@ -94,6 +101,9 @@ impl Default for MoveForm {
       paste: None,
       pivot_at: None,
       picking_pivot: None,
+      adds: false,
+      edit_bodies: Vec::new(),
+      edit_set: None,
     }
   }
 }
@@ -170,24 +180,138 @@ impl Dialog {
     }
   }
 
-  /// Edit Feature on a Move: its type follows what it stores.
-  pub(super) fn load_move(&mut self, kind: &FeatureKind) {
+  /// Edit Feature on a Move, as Fusion's Edit Move: the moved bodies picked, Free Move with all
+  /// six boxes at zero, and what the boxes then say is added to the stored move. A move about an
+  /// edge or sketch line (which can't be composed here) keeps its type and stored values.
+  pub(super) fn load_move(&mut self, s: &Session, kind: &FeatureKind) {
     let FeatureKind::Move { bodies, translate, angle, rotate, copy, axis, .. } = kind else { return };
-    self.translate = translate.clone();
-    self.angle = angle.clone();
-    if let Some(a) = axis {
-      self.axis = super::axis_key(a);
-    }
     self.mv.copy = *copy;
-    self.mv.object = if matches!(bodies, BodySel::Component { .. }) { "components" } else { "bodies" };
-    self.mv.mtype = match rotate {
-      Some(r) => {
-        self.mv.rotate = r.clone();
-        "free"
+    match bodies {
+      BodySel::Component { id } => {
+        self.mv.object = "components";
+        self.comps = vec![Some(id.0)];
       }
-      None if axis.is_some() && !is_zero(angle) => "rotate",
-      None => "translate",
+      BodySel::Bodies { ids } => self.bodies = ids.iter().map(|b| b.0).collect(),
+      BodySel::All => self.bodies = s.model.bodies.iter().map(|b| b.id.0).collect(),
+    }
+    if self.mv.object == "bodies" {
+      self.comps = self.bodies.iter().map(|x| s.design.component_of(BodyId(*x)).map(|c| c.id.0)).collect();
+    }
+    self.mv.edit_bodies = self.bodies.clone();
+    let about_edge = axis.as_ref().is_some_and(|a| axis_line(s, &super::axis_key(a)).is_none());
+    if about_edge && !is_zero(angle) {
+      self.translate = translate.clone();
+      self.angle = angle.clone();
+      if let Some(a) = axis {
+        self.axis = super::axis_key(a);
+      }
+      self.mv.mtype = match rotate {
+        Some(r) => {
+          self.mv.rotate = r.clone();
+          "free"
+        }
+        None => "rotate",
+      };
+      return;
+    }
+    self.mv.adds = true;
+    self.mv.mtype = "free";
+    self.translate = [0, 1, 2].map(|_| mm(self.unit, 0.0));
+    self.angle = "0 deg".into();
+  }
+
+  /// Edit Move: the stored move as one turn about a point and a shift after it,
+  /// p → q (p - c) + c + t, with the fields `feature.edit` keeps when nothing is added.
+  fn stored_move(&self, s: &Session) -> Option<(DQuat, DVec3, DVec3, Value)> {
+    let f = s.design.feature(self.editing?)?;
+    let FeatureKind::Move { translate, axis, angle, rotate, pivot, copy, .. } = &f.kind else { return None };
+    let set =
+      json!({"translate": translate, "axis": axis, "angle": angle, "rotate": rotate, "pivot": pivot, "copy": copy});
+    let v = DVec3::new(self.len(s, &translate[0])?, self.len(s, &translate[1])?, self.len(s, &translate[2])?);
+    let turns = match rotate {
+      Some(r) => [self.ang(s, &r[0])?, self.ang(s, &r[1])?, self.ang(s, &r[2])?],
+      None => [0.0; 3],
     };
+    let c = pivot.map(DVec3::from).unwrap_or(DVec3::ZERO);
+    // as regeneration applies it: the X, Y and Z turns about the pivot, the shift, then the axis turn
+    let (qa, o) = match axis {
+      Some(a) => {
+        let (o, d) = axis_line(s, &super::axis_key(a))?;
+        (DQuat::from_axis_angle(d, self.ang(s, angle)?), o)
+      }
+      None => (DQuat::IDENTITY, DVec3::ZERO),
+    };
+    Some((qa * from_xyz(turns), c, qa * (c + v - o) + o - c, set))
+  }
+
+  /// Edit Move: what the boxes add, as a turn about a point and a shift after it,
+  /// x → r (x - c) + c + t.
+  fn move_delta(&self, s: &Session) -> Option<(DQuat, DVec3, DVec3)> {
+    match self.mv.mtype {
+      "free" => {
+        let a = &self.mv.rotate;
+        let r = from_xyz([self.ang(s, &a[0])?, self.ang(s, &a[1])?, self.ang(s, &a[2])?]);
+        let c = self.mv.pivot.as_ref().map_or(DVec3::ZERO, |p| p.1);
+        Some((r, c, self.move_vector(s)?))
+      }
+      "rotate" => {
+        let (o, d) = self.move_axis(s)?;
+        Some((DQuat::from_axis_angle(d, self.ang(s, &self.angle)?), o, DVec3::ZERO))
+      }
+      _ => Some((DQuat::IDENTITY, DVec3::ZERO, self.move_vector(s)?)),
+    }
+  }
+
+  /// Edit Move: works out the `feature.edit` fields for the preview (the preview calls it once
+  /// its previous one is withdrawn, so the feature holds what was stored). Nothing added keeps
+  /// the stored fields as they are; anything added makes one move of the two, as numbers.
+  pub(super) fn prepare_move_edit(&mut self, s: &Session) {
+    if self.editing.is_none() || !self.mv.adds {
+      return;
+    }
+    self.mv.edit_set = self.compose_move_edit(s);
+  }
+
+  fn compose_move_edit(&self, s: &Session) -> Option<Value> {
+    let (q, c, t, mut set) = self.stored_move(s)?;
+    if self.mv.object == "bodies" && self.bodies != self.mv.edit_bodies {
+      set["bodies"] = json!({"type": "bodies", "ids": self.bodies});
+    }
+    let (r, c2, t2) = self.move_delta(s)?;
+    if r.angle_between(DQuat::IDENTITY) < 1e-12 && t2.length() < 1e-12 {
+      return Some(set);
+    }
+    let turn = r * q;
+    let shift = r * (c + t - c2) + c2 + t2 - c;
+    let exact = |v: f64| {
+      let n = format!("{v:.6}");
+      let n = n.trim_end_matches('0').trim_end_matches('.');
+      format!("{} mm", if n == "-0" { "0" } else { n })
+    };
+    set["translate"] = json!(shift.to_array().map(exact));
+    set["axis"] = Value::Null;
+    set["angle"] = json!("0 deg");
+    if turn.angle_between(DQuat::IDENTITY) < 1e-12 {
+      set["rotate"] = Value::Null;
+    } else {
+      set["rotate"] = json!(xyz_of(turn).map(deg));
+      set["pivot"] = json!(c.to_array());
+    }
+    Some(set)
+  }
+
+  /// Edit Move: where the stored move puts the picks, which centred at `now` before it. The
+  /// triad sits there while the design is rolled back to before the move (Edit Feature) and on
+  /// copies, which leave the picks where they were.
+  fn edit_centre(&self, s: &Session, now: DVec3) -> DVec3 {
+    let before_move = !self.applied && self.rolled.is_some();
+    if self.editing.is_none() || !self.mv.adds || !(before_move || self.mv.copy) {
+      return now;
+    }
+    match self.stored_move(s) {
+      Some((q, c, t, _)) => q * (now - c) + c + t,
+      None => now,
+    }
   }
 
   /// The picked objects, to tell when the triad's centre must be found again.
@@ -448,7 +572,7 @@ impl Dialog {
         _ => self.move_vector(s).map_or(now, |v| now - v),
       }
     } else {
-      now
+      self.edit_centre(s, now)
     };
     self.mv.pivot = Some((key, before));
   }
@@ -619,12 +743,15 @@ impl Dialog {
   }
 
   /// Fields for `feature.edit` on a Move.
-  pub(super) fn move_edit_set(&self) -> Value {
+  pub(super) fn move_edit_set(&self) -> Option<Value> {
+    if self.mv.adds {
+      return self.mv.edit_set.clone();
+    }
     let mut set = json!({"translate": self.translate, "angle": self.angle, "copy": self.mv.copy});
     if self.mv.mtype == "free" {
       set["rotate"] = json!(self.mv.rotate);
     }
-    set
+    Some(set)
   }
 
   /// Fusion's Set Pivot row: the pivot button starts a pick (the next vertex or sketch point
@@ -710,6 +837,14 @@ impl Dialog {
       // in a sketch the only thing to move is its geometry: Fusion shows one icon, not a drop-down
       let mut one: &'static str = "sketch";
       icon_row(ui, &mut one, &[ic("sketch", Icon::Sketch, "Sketch Objects")], "");
+    } else if self.editing.is_some() {
+      // Edit Move shows what it moves as one icon, as Fusion's does
+      let mut one = self.mv.object;
+      let only = match one {
+        "components" => ic("components", Icon::Component, "Components"),
+        _ => ic("bodies", Icon::Body, "Bodies"),
+      };
+      icon_row(ui, &mut one, &[only], "");
     } else {
       self.move_combo(ui, "move-object", &OBJECTS, false);
     }
@@ -723,19 +858,20 @@ impl Dialog {
       }
       _ => ("Bodies", format!("{} selected", self.bodies.len()), !self.bodies.is_empty()),
     };
+    let name = if self.editing.is_some() { "Selection" } else { name };
     ui.label(name);
     sel_chip(ui, self.accent(), if has { &text } else { "Select" }, has);
     ui.end_row();
     ui.label("Move Type");
     let mut mtype = self.mv.mtype;
-    ui.add_enabled_ui(self.editing.is_none(), |ui| icon_row(ui, &mut mtype, &TYPES, ""));
+    ui.add_enabled_ui(self.editing.is_none() || self.mv.adds, |ui| icon_row(ui, &mut mtype, &TYPES, ""));
     if mtype != self.mv.mtype {
       self.mv.mtype = mtype;
       self.mv.points.clear();
       self.dirty = true;
     }
     ui.end_row();
-    if self.editing.is_none() {
+    if self.editing.is_none() || self.mv.adds {
       self.set_pivot_row(app, ui);
     }
     // in a sketch the distances, angles and Create Copy wait for a pick, as in Fusion
@@ -802,7 +938,8 @@ impl Dialog {
         }
       }
     }
-    if self.mv.object != "faces" && self.mv.paste.is_none() {
+    // Edit Move has no Create Copy row, as in Fusion
+    if self.mv.object != "faces" && self.mv.paste.is_none() && self.editing.is_none() {
       ui.label("");
       if ui.checkbox(&mut self.mv.copy, "Create Copy").changed() {
         // copies leave the picks where they are: the centre is found afresh
@@ -899,7 +1036,7 @@ mod tests {
     assert_eq!(r, &["90 deg".to_string(), "0 deg".into(), "90 deg".into()]);
     assert!(close(DVec3::from(*pv), c));
     let mut e = Dialog::blank(Kind::Move);
-    e.load_move(&f.kind);
+    e.load_move(&s, &f.kind);
     assert_eq!((e.mv.mtype, e.mv.object), ("free", "bodies"));
   }
 

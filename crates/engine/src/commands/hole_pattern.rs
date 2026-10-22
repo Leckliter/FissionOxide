@@ -20,6 +20,7 @@ const HOLE_KEYS: [&str; 6] = ["face", "at", "offsets", "tap", "drill_point", "pi
 pub(super) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
   match name {
     "hole" if HOLE_KEYS.iter().any(|k| p.get(k).is_some()) => Some(grouped(s, |s| hole(s, p))),
+    "feature.edit" if p.get("set").and_then(|v| v.get("offsets")).is_some() => Some(grouped(s, |s| edit_hole(s, p))),
     "pattern.rectangular"
       if p.get("components").is_some()
         || p.get("suppress").is_some()
@@ -104,6 +105,31 @@ fn hole(s: &mut Session, p: &Value) -> CmdResult {
     let t = dispatch(s, "thread", &t)?;
     r["thread"] = t.get("feature").cloned().unwrap_or(t);
   }
+  Ok(r)
+}
+
+/// Edit Feature on a single hole: `set.offsets` ([{constraint, value}]) are the dimensions
+/// holding its point in its placement sketch, set there; the rest of `set` goes to the hole as
+/// `feature.edit` takes it. One undo step.
+fn edit_hole(s: &mut Session, p: &Value) -> CmdResult {
+  let id = FeatureId(p.get("feature").and_then(Value::as_u64).ok_or(CmdError::new("missing 'feature'"))? as u32);
+  let Some(FeatureKind::Hole { sketch, placed: true, .. }) = s.design.feature(id).map(|f| &f.kind) else {
+    return Err(CmdError::new("only a single hole has offsets"));
+  };
+  let (sk, start) = (sketch.0, s.undo.len());
+  for o in p["set"]["offsets"].as_array().ok_or(CmdError::new("'offsets' is a list"))? {
+    let (Some(c), Some(v)) = (o.get("constraint"), o.get("value")) else {
+      return Err(CmdError::new("each offset needs a 'constraint' and a 'value'"));
+    };
+    dispatch(s, "sketch.set_dimension", &json!({"sketch": sk, "constraint": c, "value": v}))?;
+  }
+  let mut q = p.clone();
+  if let Some(set) = q.get_mut("set").and_then(Value::as_object_mut) {
+    set.remove("offsets");
+  }
+  let r = dispatch(s, "feature.edit", &q)?;
+  // one undo step even inside a caller's transaction (Edit Feature's preview takes it back)
+  s.undo.truncate(start + 1);
   Ok(r)
 }
 
@@ -352,7 +378,8 @@ fn component_pattern(s: &mut Session, p: &Value) -> CmdResult {
 mod tests {
   use std::f64::consts::PI;
 
-  use fox_model::FeatureKind;
+  use fox_model::{FeatureId, FeatureKind};
+  use fox_sketch::ConstraintKind;
   use serde_json::{Value, json};
 
   use crate::Session;
@@ -426,6 +453,53 @@ mod tests {
     assert!(s.undo());
     assert_eq!(s.design.features.len(), before.1);
     assert!((volume(&s) - before.0).abs() < 1e-6);
+  }
+
+  #[test]
+  fn editing_a_single_hole_sets_its_offsets_and_values_in_one_step() {
+    let mut s = Session::default();
+    let (body, top) = block(&mut s);
+    let (front, left) = (top_edge(&s, 0, 0.0), top_edge(&s, 1, 0.0));
+    let r = run(
+      &mut s,
+      "hole",
+      json!({
+        "face": {"body": body, "face": top}, "at": [20, 20, 10],
+        "offsets": [{"edge": {"body": body, "edge": front}, "distance": 15},
+                    {"edge": {"body": body, "edge": left}, "distance": 25}],
+        "diameter": 6, "through_all": true,
+      }),
+    );
+    let sk = FeatureId(r["sketch"].as_u64().unwrap() as u32);
+    let hole = s.design.features.last().unwrap().id;
+    let dims: Vec<u32> = s
+      .design
+      .sketch(sk)
+      .unwrap()
+      .constraints
+      .iter()
+      .filter(|c| matches!(c.kind, ConstraintKind::PointLineDistance { .. }))
+      .map(|c| c.id.0)
+      .collect();
+    assert_eq!(dims.len(), 2);
+    let undo = s.undo.len();
+    run(
+      &mut s,
+      "feature.edit",
+      json!({"feature": hole.0, "set": {
+        "diameter": "8 mm",
+        "offsets": [{"constraint": dims[0], "value": "30 mm"}, {"constraint": dims[1], "value": "40 mm"}],
+      }}),
+    );
+    let c = wall_at(&s, 4.0).expect("the wider hole");
+    assert!((c[0] - 40.0).abs() < 1e-6 && (c[1] - 30.0).abs() < 1e-6, "{c:?}");
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    assert!(s.undo());
+    let c = wall_at(&s, 3.0).expect("the hole as it was");
+    assert!((c[0] - 25.0).abs() < 1e-6 && (c[1] - 15.0).abs() < 1e-6, "{c:?}");
+    // a hole at sketch points has no offsets to set
+    let other = s.execute("feature.edit", &json!({"feature": 1, "set": {"offsets": []}}));
+    assert!(other.is_err());
   }
 
   #[test]

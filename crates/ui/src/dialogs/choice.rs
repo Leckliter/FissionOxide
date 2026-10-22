@@ -36,6 +36,15 @@ pub(super) fn extrude_icon(key: &str) -> Option<Icon> {
   })
 }
 
+/// The icon of a form drop-down's value (Rib's Extent Type, Thicken's Direction, Operation).
+pub(super) fn form_icon(key: &str) -> Option<Icon> {
+  match key {
+    "to_next" => Some(Icon::ToNext),
+    "depth" => Some(Icon::ExtentDistance),
+    k => extrude_icon(k),
+  }
+}
+
 /// Room left before a value's text for its icon.
 const ICON_PAD: &str = "      ";
 const ICON_SIZE: f32 = 16.0;

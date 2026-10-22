@@ -346,8 +346,7 @@ pub(crate) fn manipulator(
   let tip = origin + dir * a.value.max(0.0);
   let (Some(pa), Some(pb)) = (view.to_screen(&app.cam, origin), view.to_screen(&app.cam, tip)) else { return false };
   let hot = resp.hover_pos().is_some_and(|p| (p - pb).length() < 12.0);
-  let active = matches!(app.drag, Some(Drag::ToolManip));
-  let label_at = viewport::paint_arrow(painter, pa, pb, hot || active);
+  let label_at = viewport::paint_arrow(painter, pa, pb);
   let params = value_box::params_of(&app.s);
   let mut done = false;
   let mut typed: Option<String> = None;

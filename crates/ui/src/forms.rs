@@ -153,6 +153,43 @@ pub enum Input {
     key: &'static str,
     label: &'static str,
   },
+  /// A yes/no drawn as Fusion's Flip icon button, lit while flipped (Rib's Flip Direction).
+  Flip {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// Selected construction planes (left out when none); counted on the form's `Bodies` chip,
+  /// as Boundary Fill's Select Tools takes bodies and planes alike.
+  Planes {
+    key: &'static str,
+  },
+  /// A selection row that takes picks only while it is the active row (Fusion's blue chip); a
+  /// form with one routes every pick to its active row (see [`State::sync_rows`]). `fits` says
+  /// which picks it takes, `multi` whether it holds more than one (a single row hands the active
+  /// row on to the next once picked), `prompt` is Fusion's cursor prompt while it is empty.
+  Pick {
+    key: &'static str,
+    label: &'static str,
+    fits: Fits,
+    multi: bool,
+    prompt: &'static str,
+  },
+}
+
+/// What a [`Input::Pick`] row takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fits {
+  /// Faces, as `{body, face}`.
+  Faces,
+  /// A planar face or a construction plane (`{body, face}` or `{feature}`), or an origin plane.
+  Plane,
+  /// A plane (as [`Fits::Plane`]), a straight edge (`{body, edge}`), a construction axis
+  /// (`{axis}`) or an origin axis: a direction.
+  Direction,
+  /// Whole bodies, by id (the dialog picks bodies while the row is active).
+  Body,
+  /// A face, flat or curved, or a plane (as [`Fits::Plane`]): a surface to replace faces with.
+  Surface,
 }
 
 impl Input {
@@ -181,7 +218,10 @@ impl Input {
       | Input::Cells { key, .. }
       | Input::Pieces { key, .. }
       | Input::Icons { key, .. }
-      | Input::CheckOn { key, .. } => key,
+      | Input::CheckOn { key, .. }
+      | Input::Flip { key, .. }
+      | Input::Planes { key }
+      | Input::Pick { key, .. } => key,
     }
   }
 }
@@ -206,6 +246,11 @@ pub struct State {
   pub picking_pieces: bool,
   /// Text: the frame's first corner has been clicked (in `x`, `y`); the second is awaited.
   pub text_corner: bool,
+  /// Editing a feature from the timeline: its picks stay as they are, so the rows that follow
+  /// the picks show.
+  pub edit: bool,
+  /// The [`Input::Pick`] row the next picks go to (an index into the form's inputs).
+  pub row: usize,
 }
 
 impl State {
@@ -215,9 +260,12 @@ impl State {
       .iter()
       .map(|i| match i {
         Input::Expr { default, .. } | Input::Text { default, .. } => json!(default),
-        Input::Check { .. } => json!(false),
+        Input::Check { .. } | Input::Flip { .. } => json!(false),
         Input::CheckOn { .. } => json!(true),
+        Input::Pick { multi: true, .. } => json!([]),
         Input::Choice { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
+        // (Pattern on Path is the pattern dialog's last Type)
+        Input::Icons { key: "pattern_type", .. } => json!("path"),
         Input::Icons { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         Input::Vec3 { default, .. } => json!(default),
         Input::Faces { .. }
@@ -227,7 +275,8 @@ impl State {
         | Input::Curves { .. }
         | Input::Profiles { .. }
         | Input::Cells { .. }
-        | Input::Pieces { .. } => {
+        | Input::Pieces { .. }
+        | Input::Planes { .. } => {
           json!([])
         }
         Input::Plane { .. } => json!("xy"),
@@ -245,6 +294,8 @@ impl State {
       picks: 0,
       picking_pieces: false,
       text_corner: false,
+      edit: false,
+      row: form.inputs.iter().position(|i| matches!(i, Input::Pick { .. })).unwrap_or(0),
     }
   }
 
@@ -277,6 +328,9 @@ impl State {
 
   /// Refills the pick inputs from the selection. Returns whether anything changed.
   pub fn sync(&mut self, form: &Form, s: &Session, last_sketch: Option<FeatureId>) -> bool {
+    if routed(form) {
+      return self.sync_rows(form, s);
+    }
     let before = self.values.clone();
     let faces: Vec<Value> = s
       .selection
@@ -303,6 +357,20 @@ impl State {
       .collect();
     let profile_sketch =
       s.selection.iter().find_map(|x| if let Sel::Profile { sketch, .. } = x { Some(*sketch) } else { None });
+    // construction planes alone (Boundary Fill's tools)
+    let construction: Vec<Value> = s
+      .selection
+      .iter()
+      .filter_map(|x| match x {
+        Sel::Feature { feature } => match s.design.feature(*feature).map(|f| &f.kind) {
+          Some(FeatureKind::ConstructionPlane { .. } | FeatureKind::PlaneBy { .. }) => {
+            Some(json!({"feature": feature.0}))
+          }
+          _ => None,
+        },
+        _ => None,
+      })
+      .collect();
     // planes: planar faces and construction plane features, in pick order
     let mut planes: Vec<Value> = Vec::new();
     let mut axes: Vec<Value> = Vec::new();
@@ -358,6 +426,7 @@ impl State {
     for (i, input) in form.inputs.iter().enumerate() {
       let v = match input {
         Input::Profiles { .. } => json!(profiles),
+        Input::Planes { .. } => json!(construction),
         Input::FaceOther { .. } => other.clone(),
         Input::Faces { .. } | Input::FacesOpt { .. } => json!(faces),
         Input::Face { .. } => {
@@ -396,6 +465,19 @@ impl State {
         _ => continue,
       };
       self.values[i] = v;
+    }
+    match form.cmd {
+      "thread" => crate::thread_form::sync(form, self, &before, s),
+      // Emboss wraps the profiles around a curved face, as Fusion does: no row for it
+      "emboss" => {
+        let face = form.inputs.iter().position(|x| x.key() == "face").map(|j| self.values[j].clone());
+        let curved =
+          face.is_some_and(|f| face_kind(s, &f).is_some_and(|k| k != fox_engine::kernel::SurfaceKind::Plane));
+        if let Some(j) = form.inputs.iter().position(|x| x.key() == "wrap") {
+          self.values[j] = json!(curved);
+        }
+      }
+      _ => {}
     }
     self.values != before
   }
@@ -436,6 +518,89 @@ impl State {
       }
     }
     self.values[ci] = json!(chain);
+  }
+
+  /// Have the form's model or sketch picks been made (or is a feature being edited)? Rows that
+  /// Fusion adds after the picks wait for them.
+  fn picked(&self, form: &Form, keys: &[&str]) -> bool {
+    self.edit
+      || keys.iter().all(|k| {
+        form
+          .inputs
+          .iter()
+          .position(|x| x.key() == *k)
+          .and_then(|j| self.values.get(j))
+          .is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty()))
+      })
+  }
+
+  /// A routed form's picks (see [`routed`]): each row keeps the picks still selected, and what
+  /// was picked since goes to the active row when it fits there (a face picked for a body row
+  /// names its body). A single row takes the newest pick and hands the active row on to the
+  /// next row, as Fusion's selection rows do.
+  pub fn sync_rows(&mut self, form: &Form, s: &Session) -> bool {
+    let before = self.values.clone();
+    // (an origin plane or axis is picked outside the model's selection: it stays)
+    let selected = |v: &Value| pick_sel(v).is_none_or(|sel| s.selection.contains(&sel));
+    for (input, v) in form.inputs.iter().zip(self.values.iter_mut()) {
+      let Input::Pick { multi, .. } = input else { continue };
+      if *multi {
+        if let Some(a) = v.as_array_mut() {
+          a.retain(|x| selected(x));
+        }
+      } else if !v.is_null() && !selected(v) {
+        *v = Value::Null;
+      }
+    }
+    let row = self.row;
+    let Some(&Input::Pick { fits, multi, .. }) = form.inputs.get(row) else { return self.values != before };
+    let held = self.selection(form);
+    for sel in s.selection.iter().filter(|x| !held.contains(x)) {
+      let Some(v) = fit_value(fits, sel, s) else { continue };
+      if !multi {
+        self.values[row] = v;
+      } else if let Some(a) = self.values[row].as_array_mut()
+        && !a.contains(&v)
+      {
+        a.push(v);
+      }
+    }
+    if !multi && !self.values[row].is_null() && self.values[row] != before[row] {
+      self.row = (row + 1..form.inputs.len()).find(|&j| matches!(form.inputs[j], Input::Pick { .. })).unwrap_or(row);
+    }
+    self.values != before
+  }
+
+  /// What a click on the model picks while the form is open: whole bodies for a body row,
+  /// faces and edges otherwise (None: the form leaves the priority alone).
+  pub fn row_priority(&self, form: &Form) -> Option<crate::select::Priority> {
+    match form.inputs.get(self.row) {
+      Some(Input::Pick { fits: Fits::Body, .. }) => Some(crate::select::Priority::Body),
+      Some(Input::Pick { .. }) => Some(crate::select::Priority::Face),
+      _ => None,
+    }
+  }
+
+  /// Fusion's cursor prompt for the active [`Input::Pick`] row.
+  pub fn row_prompt(&self, form: &Form) -> Option<&'static str> {
+    match form.inputs.get(self.row) {
+      Some(Input::Pick { prompt, .. }) => Some(prompt),
+      _ => None,
+    }
+  }
+
+  /// An origin plane or axis picked in the canvas: the active row takes it if it fits.
+  pub fn origin_pick(&mut self, form: &Form, plane: Option<&'static str>, axis: Option<&'static str>) -> bool {
+    let row = self.row;
+    let v = match form.inputs.get(row) {
+      Some(Input::Pick { fits: Fits::Plane | Fits::Surface, .. }) => plane,
+      Some(Input::Pick { fits: Fits::Direction, .. }) => plane.or(axis),
+      _ => None,
+    };
+    let Some(v) = v.map(|v| json!(v)).filter(|v| *v != self.values[row]) else { return false };
+    self.values[row] = v;
+    self.row = (row + 1..form.inputs.len()).find(|&j| matches!(form.inputs[j], Input::Pick { .. })).unwrap_or(row);
+    true
   }
 
   /// Does input `i` count? Some only do when another is set: a composite frame's lower tier,
@@ -479,6 +644,30 @@ impl State {
         "wall" => get("hollow").and_then(Value::as_bool).unwrap_or(false),
         _ => true,
       },
+      "rib" | "web" => match key {
+        "thickness" => self.picked(form, &["curves"]),
+        "depth" => self.picked(form, &["curves"]) && get("extent").and_then(Value::as_str) == Some("depth"),
+        _ => true,
+      },
+      "emboss" => match key {
+        "depth" | "horizontal" | "vertical" | "rotation" => self.picked(form, &["profiles", "face"]),
+        _ => true,
+      },
+      "thicken" if key == "thickness" => self.picked(form, &["bodies"]),
+      // the thread's span: Full Length off
+      "thread" if matches!(key, "length" | "offset" | "flip") => {
+        get("full_length").and_then(Value::as_bool) == Some(false)
+      }
+      // Pattern on Path: Type, Object Type, Objects and Path until both are picked
+      "pattern.path" => {
+        let picked = |k: &str| get(k).and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+        matches!(key, "pattern_type" | "object_type" | "bodies" | "path_curves" | "path")
+          || picked("bodies") && picked("path_curves")
+      }
+      // Corner Closure: Edges until they are picked, as in Fusion
+      "sheet.corner_closure" => key == "edges" || self.picked(form, &["edges"]),
+      // Joint Origin: Origin Mode and Snap until the snap is picked, as in Fusion
+      "joint_origin" => matches!(key, "mode" | "face") || get("face").is_some_and(|v| !v.is_null()),
       "drawing.feature_control" if key.starts_with("lower_") => {
         get("composite").and_then(Value::as_bool).unwrap_or(false)
       }
@@ -510,6 +699,13 @@ impl State {
       // the coil's centre is where its circle was drawn; the pipe's sketch is its path's
       "coil.form" => key == "at",
       "pipe.form" => key == "path",
+      // the picked lines' and profiles' own sketch, and Emboss's wrap (the face decides it)
+      "rib" | "web" => key == "sketch",
+      "emboss" => matches!(key, "sketch" | "wrap"),
+      "boundary_fill" => key == "planes",
+      // (Fusion names joint origins itself; the browser renames them)
+      "joint_origin" => key == "name",
+      "pattern.path" => matches!(key, "path" | "start" | "join"),
       _ => false,
     }
   }
@@ -626,9 +822,19 @@ impl State {
             }
           }
         }
+        Input::Pick { .. } => {
+          for x in picks {
+            if let Some(sel) = pick_sel(x).filter(|sel| !out.contains(sel)) {
+              out.push(sel);
+            }
+          }
+        }
         Input::Bodies { .. } => bodies.extend(picks.iter().filter_map(|x| x.as_u64()).map(|b| b as u32)),
         Input::Curves { .. } => curves.extend(picks.iter().filter_map(|x| x.as_u64()).map(|c| c as u32)),
         Input::Sketch { .. } if sketch.is_none() => sketch = v.as_u64().map(|f| FeatureId(f as u32)),
+        Input::Planes { .. } => {
+          out.extend(picks.iter().filter_map(|x| get(x, "feature")).map(|f| Sel::Feature { feature: FeatureId(f) }))
+        }
         _ => {}
       }
     }
@@ -672,8 +878,23 @@ impl State {
         });
       }
     }
-    for (input, v) in form.inputs.iter().zip(&self.values) {
+    // Pattern on Path: the path is picked, not every curve of a sketch
+    if form.cmd == "pattern.path" {
+      let at = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
+      let empty = |k: &str| at(k).and_then(Value::as_array).is_none_or(Vec::is_empty);
+      if empty("bodies") {
+        return Some("Objects");
+      }
+      if empty("path_curves") {
+        return Some("Path");
+      }
+    }
+    for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
       let empty = v.is_null() || v.as_array().is_some_and(Vec::is_empty);
+      // a hidden sketch is the picks' own: the picks are what's missing
+      if matches!(input, Input::Sketch { .. }) && State::hidden(form, i) {
+        continue;
+      }
       match input {
         Input::Faces { label, .. }
         | Input::Edges { label, .. }
@@ -684,6 +905,11 @@ impl State {
           return Some(label);
         }
         Input::Bodies { label, required: true, .. } | Input::Sketch { label, .. } if empty => return Some(label),
+        // Rib's and Web's Profile, Emboss's Sketch Profiles: OK waits for a pick, as in Fusion
+        Input::Curves { label, key } | Input::Profiles { label, key } if empty && required(form, key) => {
+          return Some(label);
+        }
+        Input::Pick { prompt, .. } if empty => return Some(prompt),
         Input::DrawingView { label, .. } | Input::Component { label, .. } if empty => return Some(label),
         // picking pieces: nothing to preview until one is clicked
         Input::Pieces { label, .. } if self.picking_pieces && empty => return Some(label),
@@ -710,7 +936,11 @@ impl State {
         continue;
       }
       match input {
-        Input::Curves { .. } | Input::FacesOpt { .. } | Input::Profiles { .. } | Input::Cells { .. }
+        Input::Curves { .. }
+        | Input::FacesOpt { .. }
+        | Input::Profiles { .. }
+        | Input::Cells { .. }
+        | Input::Planes { .. }
           if v.as_array().is_some_and(Vec::is_empty) =>
         {
           continue;
@@ -762,6 +992,57 @@ impl State {
   }
 }
 
+/// Does the form route its picks by an active row (it has [`Input::Pick`] rows)?
+pub fn routed(form: &Form) -> bool {
+  form.inputs.iter().any(|i| matches!(i, Input::Pick { .. }))
+}
+
+/// The selection a [`Input::Pick`] value stands for (None for an origin plane or axis).
+fn pick_sel(v: &Value) -> Option<Sel> {
+  let get = |k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
+  if let Some(b) = v.as_u64() {
+    return Some(Sel::Body { body: BodyId(b as u32) });
+  }
+  if let Some(f) = get("feature").or(get("axis")) {
+    return Some(Sel::Feature { feature: FeatureId(f) });
+  }
+  let body = BodyId(get("body")?);
+  match (get("face"), get("edge")) {
+    (Some(face), _) => Some(Sel::Face { body, face }),
+    (_, Some(edge)) => Some(Sel::Edge { body, edge }),
+    _ => None,
+  }
+}
+
+/// The value a pick gives a row that takes `fits`, if it fits.
+fn fit_value(fits: Fits, sel: &Sel, s: &Session) -> Option<Value> {
+  let plane = || match *sel {
+    Sel::Face { body, face } if planar(s, body, face) => Some(json!({"body": body.0, "face": face})),
+    Sel::Feature { feature } if s.model.planes.contains_key(&feature) => Some(json!({"feature": feature.0})),
+    _ => None,
+  };
+  match fits {
+    Fits::Faces => match *sel {
+      Sel::Face { body, face } => Some(json!({"body": body.0, "face": face})),
+      _ => None,
+    },
+    Fits::Plane => plane(),
+    Fits::Surface => plane().or_else(|| fit_value(Fits::Faces, sel, s)),
+    Fits::Direction => plane().or_else(|| match *sel {
+      Sel::Edge { body, edge } => {
+        let e = s.model.body(body)?.edges().iter().find(|e| e.id == edge)?;
+        (e.kind == fox_engine::kernel::CurveKind::Line).then(|| json!({"body": body.0, "edge": edge}))
+      }
+      Sel::Feature { feature } if s.model.axes.contains_key(&feature) => Some(json!({"axis": feature.0})),
+      _ => None,
+    }),
+    Fits::Body => match *sel {
+      Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } => Some(json!(body.0)),
+      _ => None,
+    },
+  }
+}
+
 /// Does a drawing form take model points picked on the sheet?
 pub fn takes_sheet_points(form: &Form) -> bool {
   form.inputs.iter().any(|x| matches!(x, Input::DrawingView { .. }))
@@ -782,6 +1063,12 @@ fn planar(s: &Session, body: BodyId, face: u32) -> bool {
     .unwrap_or(false)
 }
 
+fn face_kind(s: &Session, v: &Value) -> Option<fox_engine::kernel::SurfaceKind> {
+  let body = BodyId(v.get("body")?.as_u64()? as u32);
+  let face = v.get("face")?.as_u64()? as u32;
+  s.model.body(body)?.faces().iter().find(|f| f.id == face).map(|f| f.kind)
+}
+
 fn face_center(s: &Session, v: &Value) -> Option<[f64; 3]> {
   let body = BodyId(v.get("body")?.as_u64()? as u32);
   let face = v.get("face")?.as_u64()? as u32;
@@ -793,20 +1080,25 @@ const OPS: &[(&str, &str)] = &[("new_body", "New Body"), ("join", "Join"), ("cut
 pub static THREAD: Form = Form {
   title: "THREAD",
   name: "Thread",
-  hint: "Thread cylindrical faces (an ISO metric size resizes the face; ISO coarse unless you give a pitch)",
+  hint: "Thread cylindrical faces with a standard size: cosmetic, or modeled (cut the helix)",
   icon: Icon::Thread,
   cmd: "thread",
   fixed: &[],
   inputs: &[
     Input::Faces { key: "faces", label: "Faces" },
-    Input::Check { key: "modeled", label: "Modeled (cut the helix)" },
-    Input::Expr { key: "pitch", label: "Pitch (empty = ISO)", default: "" },
-    Input::Expr { key: "length", label: "Length (empty = full)", default: "" },
-    Input::Expr { key: "offset", label: "Offset", default: "0 mm" },
-    Input::Check { key: "left", label: "Left-handed" },
-    Input::Check { key: "flip", label: "Start from the other end" },
-    Input::Text { key: "designation", label: "Size (M10x1.5; empty = as drawn)", default: "" },
-    Input::Text { key: "class", label: "Class (empty = 6g / 6H)", default: "" },
+    Input::Check { key: "modeled", label: "Modeled" },
+    Input::CheckOn { key: "full_length", label: "Full Length" },
+    Input::Flip { key: "flip", label: "Thread Location" },
+    Input::Expr { key: "offset", label: "Thread Offset", default: "0 mm" },
+    Input::Expr { key: "length", label: "Thread Length", default: "" },
+    // Thread Type, Size, Designation and Class are drop-downs fed by the thread tables (drawn
+    // by `dialogs::thread`), Threads Library's row above them
+    Input::Text { key: "thread_type", label: "Thread Type", default: "" },
+    Input::Text { key: "size", label: "Size", default: "" },
+    Input::Text { key: "designation", label: "Designation", default: "" },
+    Input::Text { key: "class", label: "Class", default: "" },
+    Input::Choice { key: "direction", label: "Direction", options: &[("right", "Right hand"), ("left", "Left hand")] },
+    Input::CheckOn { key: "remember", label: "Remember Size" },
   ],
   picks_model: true,
 };
@@ -892,6 +1184,14 @@ pub static PIPE: Form = Form {
   picks_model: false,
 };
 
+/// Rib's and Web's Thickness Direction: half the thickness each side of the lines, or all of
+/// it on one side.
+const THICKNESS_DIRECTIONS: &[(&str, Icon, &str)] =
+  &[("symmetric", Icon::SymmetricExtent, "Symmetric"), ("one_side", Icon::OneSide, "One Side")];
+
+/// Rib's and Web's Extent Type: grow until the body is met, or by a depth.
+const RIB_EXTENTS: &[(&str, &str)] = &[("to_next", "To Next"), ("depth", "Depth")];
+
 pub static RIB: Form = Form {
   title: "RIB",
   name: "Rib",
@@ -900,11 +1200,13 @@ pub static RIB: Form = Form {
   cmd: "rib",
   fixed: &[],
   inputs: &[
+    Input::Curves { key: "curves", label: "Profile" },
     Input::Sketch { key: "sketch", label: "Sketch" },
-    Input::Curves { key: "curves", label: "Lines (default all)" },
+    Input::Icons { key: "thickness_dir", label: "Thickness Direction", options: THICKNESS_DIRECTIONS },
+    Input::Choice { key: "extent", label: "Extent Type", options: RIB_EXTENTS },
+    Input::Flip { key: "flip", label: "Flip Direction" },
     Input::Expr { key: "thickness", label: "Thickness", default: "2 mm" },
-    Input::Expr { key: "depth", label: "Depth (empty = to next)", default: "" },
-    Input::Check { key: "flip", label: "Flip direction" },
+    Input::Expr { key: "depth", label: "Depth", default: "10 mm" },
   ],
   picks_model: false,
 };
@@ -917,26 +1219,14 @@ pub static WEB: Form = Form {
   cmd: "web",
   fixed: &[],
   inputs: &[
+    Input::Curves { key: "curves", label: "Profile" },
     Input::Sketch { key: "sketch", label: "Sketch" },
-    Input::Curves { key: "curves", label: "Lines (default all)" },
+    Input::Icons { key: "thickness_dir", label: "Thickness Direction", options: THICKNESS_DIRECTIONS },
+    Input::Choice { key: "extent", label: "Extent Type", options: RIB_EXTENTS },
+    Input::CheckOn { key: "extend", label: "Extend Curves" },
+    Input::Flip { key: "flip", label: "Flip Direction" },
     Input::Expr { key: "thickness", label: "Thickness", default: "2 mm" },
-    Input::Expr { key: "depth", label: "Depth (empty = to next)", default: "" },
-    Input::Check { key: "flip", label: "Flip direction" },
-  ],
-  picks_model: false,
-};
-
-pub static SCALE: Form = Form {
-  title: "SCALE",
-  name: "Scale",
-  hint: "Scale bodies about a point",
-  icon: Icon::Scale,
-  cmd: "scale",
-  fixed: &[],
-  inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies (default all)", required: false },
-    Input::Vec3 { key: "center", label: "Point", default: ["0", "0", "0"] },
-    Input::Expr { key: "factor", label: "Scale factor", default: "2" },
+    Input::Expr { key: "depth", label: "Depth", default: "10 mm" },
   ],
   picks_model: false,
 };
@@ -949,11 +1239,55 @@ pub static SPLIT_FACE: Form = Form {
   cmd: "split_face",
   fixed: &[],
   inputs: &[
-    Input::Faces { key: "faces", label: "Faces to split" },
-    Input::Plane { key: "tool", label: "Splitting tool" },
+    Input::Pick {
+      key: "faces",
+      label: "Faces to Split",
+      fits: Fits::Faces,
+      multi: true,
+      prompt: "Select Face to split",
+    },
+    Input::Pick {
+      key: "tool",
+      label: "Splitting Tool(s)",
+      fits: Fits::Plane,
+      multi: false,
+      prompt: "Select splitting tool(s)",
+    },
+    Input::CheckOn { key: "chain", label: "Chain Selection" },
+    Input::Choice { key: "split_type", label: "Split Type", options: SPLIT_TYPES },
+    Input::CheckOn { key: "extend", label: "Extend Splitting Tool" },
   ],
   picks_model: true,
 };
+
+pub static SILHOUETTE_SPLIT: Form = Form {
+  title: "SILHOUETTE SPLIT",
+  name: "Silhouette Split",
+  hint: "Split a body where its outline lies, seen along a direction",
+  icon: Icon::SilhouetteSplit,
+  cmd: "silhouette_split",
+  fixed: &[],
+  inputs: &[
+    Input::Pick {
+      key: "direction",
+      label: "View Direction",
+      fits: Fits::Direction,
+      multi: false,
+      prompt: "Select plane or axis for the pull direction",
+    },
+    Input::Pick { key: "body", label: "Target Body", fits: Fits::Body, multi: false, prompt: "Select target body" },
+    Input::Choice {
+      key: "operation",
+      label: "Operation",
+      options: &[("shelled", "Split Shelled Body"), ("face", "Split Face"), ("solid", "Split Solid Body")],
+    },
+  ],
+  picks_model: true,
+};
+
+/// Split Face's Split Type, as Fusion lists it (the engine splits with the surface).
+const SPLIT_TYPES: &[(&str, &str)] =
+  &[("surface", "Split with Surface"), ("vector", "Along Vector"), ("closest", "Closest Point")];
 
 pub static REMOVE_FACES: Form = Form {
   title: "REMOVE FACES",
@@ -966,20 +1300,6 @@ pub static REMOVE_FACES: Form = Form {
   picks_model: true,
 };
 
-pub static OFFSET_FACE: Form = Form {
-  title: "OFFSET FACE",
-  name: "Offset Face",
-  hint: "Offset faces, flat or curved, along their normals",
-  icon: Icon::OffsetFace,
-  cmd: "press_pull",
-  fixed: &[],
-  inputs: &[
-    Input::Faces { key: "faces", label: "Faces" },
-    Input::Expr { key: "distance", label: "Distance", default: "1 mm" },
-  ],
-  picks_model: true,
-};
-
 pub static THICKEN: Form = Form {
   title: "THICKEN",
   name: "Thicken",
@@ -988,12 +1308,20 @@ pub static THICKEN: Form = Form {
   cmd: "thicken",
   fixed: &[],
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Surface bodies", required: true },
+    Input::Bodies { key: "bodies", label: "Faces / Surface Bodies", required: true },
+    Input::CheckOn { key: "chain", label: "Chain Selection" },
     Input::Expr { key: "thickness", label: "Thickness", default: "1 mm" },
-    Input::Check { key: "symmetric", label: "Symmetric" },
-    Input::Check { key: "flip", label: "Flip" },
+    Input::Choice {
+      key: "direction",
+      label: "Direction",
+      options: &[("one_side", "One Side"), ("symmetric", "Symmetric")],
+    },
+    Input::Icons {
+      key: "corners",
+      label: "Thicken Type",
+      options: &[("sharp", Icon::ShellSharp, "Sharp"), ("round", Icon::ShellRound, "Rounded")],
+    },
     Input::Choice { key: "operation", label: "Operation", options: OPS },
-    Input::Choice { key: "corners", label: "Thicken type", options: &[("sharp", "Sharp"), ("round", "Rounded")] },
   ],
   picks_model: true,
 };
@@ -1002,7 +1330,7 @@ pub static PLANE_ANGLE: Form = Form {
   title: "PLANE AT ANGLE",
   name: "Plane at Angle",
   hint: "A plane through an edge or axis, turned by an angle",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneAngle,
   cmd: "plane",
   fixed: &[("method", "angle")],
   inputs: &[
@@ -1017,7 +1345,7 @@ pub static MIDPLANE: Form = Form {
   title: "MIDPLANE",
   name: "Midplane",
   hint: "A plane halfway between two planes or faces",
-  icon: Icon::Plane,
+  icon: Icon::Midplane,
   cmd: "plane",
   fixed: &[("method", "midplane")],
   inputs: &[Input::Plane { key: "a", label: "First plane" }, Input::Plane { key: "b", label: "Second plane" }],
@@ -1028,7 +1356,7 @@ pub static TANGENT_PLANE: Form = Form {
   title: "TANGENT PLANE",
   name: "Tangent Plane",
   hint: "A plane tangent to a cylinder, cone or sphere at the picked point",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneTangent,
   cmd: "plane",
   fixed: &[("method", "tangent")],
   inputs: &[Input::Face { key: "face", label: "Face", near: Some("near") }],
@@ -1039,7 +1367,7 @@ pub static PLANE_TWO_EDGES: Form = Form {
   title: "PLANE THROUGH TWO EDGES",
   name: "Plane Through Two Edges",
   hint: "A plane through two coplanar straight edges",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneTwoEdges,
   cmd: "plane",
   fixed: &[("method", "two_edges")],
   inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
@@ -1050,7 +1378,7 @@ pub static PLANE_THREE_POINTS: Form = Form {
   title: "PLANE THROUGH THREE POINTS",
   name: "Plane Through Three Points",
   hint: "A plane through three points",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneThreePoints,
   cmd: "plane.points",
   fixed: &[],
   inputs: &[
@@ -1065,7 +1393,7 @@ pub static PLANE_ALONG_PATH: Form = Form {
   title: "PLANE ALONG PATH",
   name: "Plane Along Path",
   hint: "A plane across an edge, a fraction of the way along it",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneAlongPath,
   cmd: "plane",
   fixed: &[("method", "along_path")],
   inputs: &[
@@ -1079,7 +1407,7 @@ pub static AXIS_FACE: Form = Form {
   title: "AXIS THROUGH CYLINDER/CONE/TORUS",
   name: "Axis Through Cylinder/Cone/Torus",
   hint: "The axis of a round face",
-  icon: Icon::Axis,
+  icon: Icon::AxisCylinder,
   cmd: "axis",
   fixed: &[("method", "face")],
   inputs: &[Input::Face { key: "face", label: "Face", near: None }],
@@ -1090,7 +1418,7 @@ pub static AXIS_NORMAL: Form = Form {
   title: "AXIS PERPENDICULAR TO FACE",
   name: "Axis Perpendicular to Face",
   hint: "An axis normal to a face through the picked point",
-  icon: Icon::Axis,
+  icon: Icon::AxisNormal,
   cmd: "axis",
   fixed: &[("method", "normal")],
   inputs: &[Input::Face { key: "face", label: "Face", near: Some("near") }],
@@ -1101,7 +1429,7 @@ pub static AXIS_TWO_PLANES: Form = Form {
   title: "AXIS THROUGH TWO PLANES",
   name: "Axis Through Two Planes",
   hint: "The line where two planes meet",
-  icon: Icon::Axis,
+  icon: Icon::AxisTwoPlanes,
   cmd: "axis",
   fixed: &[("method", "two_planes")],
   inputs: &[Input::Plane { key: "a", label: "First plane" }, Input::Plane { key: "b", label: "Second plane" }],
@@ -1112,7 +1440,7 @@ pub static AXIS_EDGE: Form = Form {
   title: "AXIS THROUGH EDGE",
   name: "Axis Through Edge",
   hint: "An axis along a straight edge (or a circle's axis)",
-  icon: Icon::Axis,
+  icon: Icon::AxisEdge,
   cmd: "axis",
   fixed: &[("method", "edge")],
   inputs: &[Input::Edge { key: "edge", label: "Edge" }],
@@ -1123,7 +1451,7 @@ pub static AXIS_TWO_POINTS: Form = Form {
   title: "AXIS THROUGH TWO POINTS",
   name: "Axis Through Two Points",
   hint: "An axis through two points",
-  icon: Icon::Axis,
+  icon: Icon::AxisTwoPoints,
   cmd: "axis.points",
   fixed: &[],
   inputs: &[
@@ -1137,7 +1465,7 @@ pub static POINT_VERTEX: Form = Form {
   title: "POINT AT VERTEX",
   name: "Point at Vertex",
   hint: "A point at an end of an edge",
-  icon: Icon::CPoint,
+  icon: Icon::PointVertex,
   cmd: "point.vertex",
   fixed: &[],
   inputs: &[
@@ -1151,7 +1479,7 @@ pub static POINT_TWO_EDGES: Form = Form {
   title: "POINT THROUGH TWO EDGES",
   name: "Point Through Two Edges",
   hint: "Where two edges meet",
-  icon: Icon::CPoint,
+  icon: Icon::PointTwoEdges,
   cmd: "point",
   fixed: &[("method", "two_edges")],
   inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
@@ -1162,7 +1490,7 @@ pub static POINT_THREE_PLANES: Form = Form {
   title: "POINT THROUGH THREE PLANES",
   name: "Point Through Three Planes",
   hint: "Where three planes meet",
-  icon: Icon::CPoint,
+  icon: Icon::PointThreePlanes,
   cmd: "point",
   fixed: &[("method", "three_planes")],
   inputs: &[
@@ -1177,7 +1505,7 @@ pub static POINT_CENTER: Form = Form {
   title: "POINT AT CENTER",
   name: "Point at Center of Circle/Sphere/Torus",
   hint: "The centre of a round face",
-  icon: Icon::CPoint,
+  icon: Icon::PointCenter,
   cmd: "point",
   fixed: &[("method", "center")],
   inputs: &[Input::Face { key: "face", label: "Face", near: None }],
@@ -1188,7 +1516,7 @@ pub static POINT_EDGE_PLANE: Form = Form {
   title: "POINT AT EDGE AND PLANE",
   name: "Point at Edge and Plane",
   hint: "Where an edge crosses a plane",
-  icon: Icon::CPoint,
+  icon: Icon::PointEdgePlane,
   cmd: "point",
   fixed: &[("method", "edge_plane")],
   inputs: &[Input::Edge { key: "edge", label: "Edge" }, Input::Plane { key: "plane", label: "Plane" }],
@@ -1199,7 +1527,7 @@ pub static POINT_ALONG_PATH: Form = Form {
   title: "POINT ALONG PATH",
   name: "Point Along Path",
   hint: "A point a fraction of the way along an edge",
-  icon: Icon::CPoint,
+  icon: Icon::PointAlongPath,
   cmd: "point",
   fixed: &[("method", "along_path")],
   inputs: &[
@@ -1253,6 +1581,9 @@ pub static PATCH: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Patch's boundary pick
+// (batch ui-surface-create-dialogs)
+#[allow(dead_code)]
 pub static PATCH_SKETCH: Form = Form {
   title: "PATCH",
   name: "Patch (Sketch)",
@@ -1545,6 +1876,14 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       }
       (form.cmd, q)
     }
+    "rib" | "web" | "emboss" | "thicken" | "sheet.corner_closure" => {
+      let mut q = p.clone();
+      if let Some(m) = q.as_object_mut() {
+        engine_keys(form.cmd, m);
+      }
+      (form.cmd, q)
+    }
+    "thread" => ("thread", crate::thread_form::engine_params(&p)),
     "surface.trim.body" => {
       // the tool is the body of the picked face; it doesn't trim itself
       let tool = p.pointer("/tool/body").cloned().unwrap_or(Value::Null);
@@ -2266,14 +2605,19 @@ pub static EMBOSS: Form = Form {
   fixed: &[],
   inputs: &[
     Input::Sketch { key: "sketch", label: "Sketch" },
-    Input::Profiles { key: "profiles", label: "Profiles" },
-    Input::Face { key: "face", label: "Face", near: None },
+    Input::Profiles { key: "profiles", label: "Sketch Profiles" },
+    Input::Face { key: "face", label: "Faces", near: None },
+    Input::CheckOn { key: "tangent_chain", label: "Tangent Chain" },
+    Input::Icons {
+      key: "effect",
+      label: "Effect",
+      options: &[("emboss", Icon::EmbossRaise, "Emboss"), ("deboss", Icon::EmbossSink, "Deboss")],
+    },
     Input::Expr { key: "depth", label: "Depth", default: "1 mm" },
-    Input::Check { key: "deboss", label: "Deboss (sink into the face)" },
-    Input::Check { key: "wrap", label: "Wrap around a cylinder" },
-    Input::Expr { key: "horizontal", label: "Horizontal distance", default: "0 mm" },
-    Input::Expr { key: "vertical", label: "Vertical distance", default: "0 mm" },
-    Input::Expr { key: "rotation", label: "Rotation", default: "0 deg" },
+    Input::Expr { key: "horizontal", label: "Horizontal Distance", default: "0 mm" },
+    Input::Expr { key: "vertical", label: "Vertical Distance", default: "0 mm" },
+    Input::Expr { key: "rotation", label: "Rotation Angle", default: "0 deg" },
+    Input::Check { key: "wrap", label: "Wrap" },
   ],
   picks_model: true,
 };
@@ -2317,6 +2661,9 @@ pub static UNTRIM: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Trim's Trim Tool pick
+// (batch ui-surface-modify-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static TRIM_BODY: Form = Form {
   title: "TRIM",
   name: "Trim with Body",
@@ -2333,6 +2680,9 @@ pub static TRIM_BODY: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Trim's Trim Tool pick
+// (batch ui-surface-modify-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static TRIM_SKETCH: Form = Form {
   title: "TRIM",
   name: "Trim with Sketch",
@@ -2353,16 +2703,16 @@ pub static TRIM_SKETCH: Form = Form {
 pub static BOUNDARY_FILL: Form = Form {
   title: "BOUNDARY FILL",
   name: "Boundary Fill",
-  hint: "Solids from the closed cells that bodies and a plane bound",
+  hint: "Solids from the closed cells that bodies and planes bound",
   icon: Icon::BoundaryFill,
   cmd: "boundary_fill",
   fixed: &[],
   inputs: &[
-    Input::Bodies { key: "tools", label: "Tools", required: true },
-    Input::PlaneOpt { key: "planes", label: "Plane" },
-    Input::Cells { key: "cells", label: "Cells", tools: "tools" },
+    Input::Bodies { key: "tools", label: "Select Tools", required: true },
+    Input::Planes { key: "planes" },
+    Input::Cells { key: "cells", label: "Select Cells", tools: "tools" },
     Input::Choice { key: "operation", label: "Operation", options: OPS },
-    Input::Check { key: "remove_tools", label: "Remove tools" },
+    Input::Check { key: "remove_tools", label: "Remove Tools" },
   ],
   picks_model: true,
 };
@@ -2375,13 +2725,29 @@ pub static REPLACE_FACE: Form = Form {
   cmd: "replace_face",
   fixed: &[],
   inputs: &[
-    Input::Faces { key: "faces", label: "Source faces" },
-    Input::FaceOther { key: "target", label: "Target face" },
-    Input::PlaneOpt { key: "plane", label: "Or a plane" },
+    Input::Pick {
+      key: "faces",
+      label: "Source Faces",
+      fits: Fits::Faces,
+      multi: true,
+      prompt: "Select faces to replace",
+    },
+    Input::Check { key: "tangent_chain", label: "Tangent Chain" },
+    // (a face, or a plane: the engine takes one target)
+    Input::Pick {
+      key: "target",
+      label: "Target Faces",
+      fits: Fits::Surface,
+      multi: false,
+      prompt: "Select target faces",
+    },
   ],
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Offset's Offset Type
+// (batch ui-surface-create-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static VARIABLE_OFFSET: Form = Form {
   title: "OFFSET",
   name: "Variable Offset",
@@ -2422,6 +2788,8 @@ pub static CORNER_CLOSURE: Form = Form {
   cmd: "sheet.corner_closure",
   fixed: &[],
   inputs: &[
+    // Fusion opens with Edges alone (lit) and OK greyed; the corner's rows come with the pick
+    Input::Edges { key: "edges", label: "Edges" },
     Input::Choice { key: "corners", label: "Corners", options: CORNERS },
     Input::Choice {
       key: "relief",
@@ -2430,7 +2798,7 @@ pub static CORNER_CLOSURE: Form = Form {
     },
     Input::Expr { key: "relief_size", label: "Relief size (empty = default)", default: "" },
   ],
-  picks_model: false,
+  picks_model: true,
 };
 
 pub static JOIN_BY_BEND: Form = Form {
@@ -2705,6 +3073,13 @@ pub static FORM_BOX: Form = Form {
   picks_model: false,
 };
 
+/// The solid patterns' Type row (the pattern dialog switches kind on it; see `dialogs::copies`).
+const PATTERN_TYPES: &[(&str, Icon, &str)] = &[
+  ("rectangular", Icon::Pattern, "Rectangular Pattern"),
+  ("circular", Icon::CircPattern, "Circular Pattern"),
+  ("path", Icon::PathPattern, "Pattern on Path"),
+];
+
 pub static PATH_PATTERN: Form = Form {
   title: "PATTERN ON PATH",
   name: "Pattern on Path",
@@ -2712,25 +3087,30 @@ pub static PATH_PATTERN: Form = Form {
   icon: Icon::Pattern,
   cmd: "pattern.path",
   fixed: &[],
+  // Fusion: the pattern dialog with Type on path: Type, Object Type, Objects and Path, then
+  // Distribution, Quantity, Distance and Orientation once both are picked (the path's sketch,
+  // start point and join are passed but not rows; see `State::hidden`)
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies", required: true },
+    Input::Icons { key: "pattern_type", label: "Type", options: PATTERN_TYPES },
+    Input::Choice { key: "object_type", label: "Object Type", options: &[("bodies", "Bodies")] },
+    Input::Bodies { key: "bodies", label: "Objects", required: true },
+    Input::Curves { key: "path_curves", label: "Path" },
     Input::Sketch { key: "path", label: "Path sketch" },
-    Input::Curves { key: "path_curves", label: "Path curves (default all)" },
-    Input::Expr { key: "count", label: "Quantity", default: "3" },
     Input::Choice {
       key: "distance_type",
-      label: "Distance type",
-      options: &[("spacing", "Spacing"), ("extent", "Extent")],
+      label: "Distribution",
+      options: &[("extent", "Extent"), ("spacing", "Spacing")],
     },
+    Input::Expr { key: "count", label: "Quantity", default: "3" },
     Input::Expr { key: "distance", label: "Distance", default: "10 mm" },
-    Input::Expr { key: "start", label: "Start point (0 to 1)", default: "0" },
-    Input::Check { key: "flip", label: "Flip" },
-    Input::Check { key: "symmetric", label: "Symmetric" },
     Input::Choice {
       key: "orientation",
       label: "Orientation",
-      options: &[("identical", "Identical"), ("along_path", "Path direction")],
+      options: &[("identical", "Identical"), ("along_path", "Path Direction")],
     },
+    Input::Check { key: "flip", label: "Flip" },
+    Input::Check { key: "symmetric", label: "Symmetric" },
+    Input::Expr { key: "start", label: "Start point (0 to 1)", default: "0" },
     Input::Check { key: "join", label: "Join to the original" },
   ],
   picks_model: true,
@@ -2832,9 +3212,101 @@ pub static SK_ISOPARAMETRIC: Form = Form {
   picks_model: true,
 };
 
+/// Why one option of a form's icon row is drawn greyed (not pickable): what FissionOxide can't
+/// do yet.
+pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static str> {
+  match (form.cmd, key, option) {
+    ("joint_origin", "mode", "between" | "two_edge") => {
+      Some("Only the Simple mode is in FissionOxide yet: a joint origin sits on one picked face")
+    }
+    _ => None,
+  }
+}
+
 /// Why a form's input is drawn greyed: what FissionOxide can't act on yet, or always does.
+/// The command's parameters from the values of Fusion's rows: Rib's Thickness Direction and
+/// Extent Type, Emboss's Effect, Thicken's Direction (a thickness typed negative thickens the
+/// other way, as Fusion's has no Flip row). Rows FissionOxide can't act on (greyed) go.
+pub fn engine_keys(cmd: &str, m: &mut Map<String, Value>) {
+  match cmd {
+    "rib" | "web" => {
+      if m.remove("thickness_dir") == Some(json!("one_side")) {
+        m.insert("one_side".into(), json!(true));
+      }
+      if m.remove("extent").is_some_and(|e| e != "depth") {
+        m.remove("depth");
+      }
+      m.remove("extend");
+    }
+    // the picked edges open the dialog's rows; the closure goes on the last edge or miter flange
+    "sheet.corner_closure" => {
+      m.remove("edges");
+    }
+    "emboss" => {
+      if let Some(e) = m.remove("effect") {
+        m.insert("deboss".into(), json!(e == "deboss"));
+      }
+      m.remove("tangent_chain");
+    }
+    "thicken" => {
+      if let Some(d) = m.remove("direction") {
+        m.insert("symmetric".into(), json!(d == "symmetric"));
+      }
+      let t = m.get("thickness").and_then(Value::as_str).unwrap_or("").trim().to_string();
+      if let Some(rest) = t.strip_prefix('-') {
+        m.insert("thickness".into(), json!(rest.trim_start()));
+        m.insert("flip".into(), json!(true));
+      }
+      m.remove("chain");
+    }
+    _ => {}
+  }
+}
+
+/// Does the form wait for a pick of this (otherwise optional) input before OK? Rib's and Web's
+/// Profile and Emboss's Sketch Profiles, as in Fusion.
+fn required(form: &Form, key: &str) -> bool {
+  matches!((form.cmd, key), ("rib" | "web", "curves") | ("emboss", "profiles"))
+}
+
+/// Fusion's cursor prompt while a form waits for its picks, where it isn't the missing row's
+/// name.
+pub fn pick_prompt(form: &Form) -> Option<&'static str> {
+  Some(match form.cmd {
+    "rib" => "Select open sketch profile to create rib",
+    "web" => "Select open sketch profile to create web",
+    "thicken" => "Select Surfaces to Thicken",
+    "boundary_fill" => "Select bodies & planes",
+    "sheet.corner_closure" => "Select edges",
+    _ => return None,
+  })
+}
+
+/// Fusion's cursor prompt once the form has its picks.
+pub fn specify_prompt(form: &Form) -> Option<&'static str> {
+  match form.cmd {
+    "thread" => Some("Specify size, or hold Ctrl/CMD to modify selections"),
+    _ => None,
+  }
+}
+
+/// Forms whose Fusion dialog has no Preview check box: they always preview.
+pub fn always_previews(form: &Form) -> bool {
+  matches!(form.cmd, "thread" | "emboss" | "thicken" | "boundary_fill" | "rib" | "web")
+}
+
+/// Forms whose drop-downs show an icon before each value, as Fusion's Extent Type, Direction
+/// and Operation do.
+pub fn icon_dropdowns(form: &Form) -> bool {
+  matches!(form.cmd, "rib" | "web" | "thicken" | "boundary_fill")
+}
+
 pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
   match (form.cmd, key) {
+    ("web", "extend") => Some("A web's lines aren't extended to the body in FissionOxide yet"),
+    ("emboss", "tangent_chain") => Some("Emboss goes on one face in FissionOxide: a tangent chain isn't picked yet"),
+    ("thicken", "chain") => Some("Thicken picks whole surface bodies in FissionOxide: chains of faces aren't yet"),
+    ("thread", "remember") => Some("Each Thread starts from the picked face's size in FissionOxide"),
     ("sketch.project_to_surface" | "sketch.intersection_curve", "associative") => {
       Some("These curves always follow the model in FissionOxide")
     }
@@ -2845,6 +3317,8 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
     }
     ("coil.form", "angle") => Some("Tapered coils aren't in FissionOxide yet"),
     ("pipe.form", "distance2") => Some("A pipe runs from its path's start in FissionOxide"),
+    ("split_face", "split_type") => Some("FissionOxide splits faces with the surface only"),
+    ("split_face", "extend") => Some("A splitting plane always extends across the faces in FissionOxide"),
     ("sketch.isoparametric_curve", "curve" | "associative") => {
       Some("Isoparametric curves aren't in FissionOxide yet: the kernel can't evaluate a face's iso-curves")
     }

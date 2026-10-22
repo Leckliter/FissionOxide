@@ -9,22 +9,90 @@ use crate::icons::Icon;
 use crate::viewcube::Projection;
 use crate::{App, NavMode, theme};
 
-/// Display Settings ▸ Object Visibility: which kinds of things the viewport draws.
+/// Display Settings ▸ Object Visibility: which kinds of things the viewport draws, Fusion's rows
+/// (all on to begin with).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectVisibility {
-  /// The origin axes on the grid.
-  pub origins: bool,
+  pub origin_planes: bool,
+  /// Kept: the canvas draws no origin plane names.
+  pub origin_plane_names: bool,
+  pub origin_axes: bool,
+  /// The origin point.
+  pub origin_points: bool,
+  pub construction_planes: bool,
+  /// Kept: the canvas draws no construction plane names.
+  pub construction_plane_names: bool,
+  pub construction_axes: bool,
+  pub construction_points: bool,
   pub sketches: bool,
-  /// Construction planes, axes and points.
-  pub construction: bool,
-  /// Joint glyphs and joint origins.
+  /// Kept: FissionOxide has no user coordinate systems.
+  pub user_coordinate_systems: bool,
+  /// The saved joint origins' glyphs.
+  pub joint_origins: bool,
+  /// The X, Y, Z stubs on the joint origins' glyphs.
+  pub joint_origin_axes: bool,
+  /// The joints' glyphs.
   pub joints: bool,
-  pub bodies: bool,
 }
 
 impl Default for ObjectVisibility {
   fn default() -> Self {
-    ObjectVisibility { origins: true, sketches: true, construction: true, joints: true, bodies: true }
+    ObjectVisibility {
+      origin_planes: true,
+      origin_plane_names: true,
+      origin_axes: true,
+      origin_points: true,
+      construction_planes: true,
+      construction_plane_names: true,
+      construction_axes: true,
+      construction_points: true,
+      sketches: true,
+      user_coordinate_systems: true,
+      joint_origins: true,
+      joint_origin_axes: true,
+      joints: true,
+    }
+  }
+}
+
+impl ObjectVisibility {
+  /// The rows under All Work Features, in Fusion's order: (label, flag, drawn here). A row whose
+  /// things FissionOxide doesn't draw is greyed.
+  pub fn rows(&mut self) -> [(&'static str, &mut bool, bool); 13] {
+    [
+      ("Origin Planes", &mut self.origin_planes, true),
+      ("Origin Plane Names", &mut self.origin_plane_names, false),
+      ("Origin Axes", &mut self.origin_axes, true),
+      ("Origin Points", &mut self.origin_points, true),
+      ("Construction Planes", &mut self.construction_planes, true),
+      ("Construction Plane Names", &mut self.construction_plane_names, false),
+      ("Construction Axes", &mut self.construction_axes, true),
+      ("Construction Points", &mut self.construction_points, true),
+      ("Sketches", &mut self.sketches, true),
+      ("User Coordinate Systems", &mut self.user_coordinate_systems, false),
+      ("Joint Origins", &mut self.joint_origins, true),
+      ("Joint Origin Axes", &mut self.joint_origin_axes, true),
+      ("Joints", &mut self.joints, true),
+    ]
+  }
+
+  /// All Work Features: every row on.
+  pub fn all(&mut self) -> bool {
+    self.rows().iter().all(|(_, on, _)| **on)
+  }
+
+  /// All Work Features ticked or cleared: every row follows.
+  pub fn set_all(&mut self, on: bool) {
+    for (_, flag, _) in self.rows() {
+      *flag = on;
+    }
+  }
+
+  /// Turns the origin planes, axes and point on (the browser's Show All on the Origin folder).
+  pub fn show_origin(&mut self) {
+    self.origin_planes = true;
+    self.origin_axes = true;
+    self.origin_points = true;
   }
 }
 
@@ -153,61 +221,36 @@ pub fn zoom_menu(app: &mut App, ui: &mut egui::Ui) {
   }
 }
 
-/// Display Settings ▸ Environment: Fusion's environment library, as the Design workspace lists
-/// it. The choice is kept for the Render workspace; the modelling view's lighting is fixed.
+/// Display Settings ▸ Environment, as Fusion's Design workspace lists it: the theme's own
+/// environment (the default), three theme environments and three legacy ones. The choice is kept
+/// for the Render workspace; the modelling view's lighting is fixed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Environment {
   #[default]
-  Photobooth,
-  SharpHighlights,
-  SoftLight,
-  DryLakeBed,
-  DimField,
-  Field,
-  GreyRoom,
+  Theme,
+  PhotoBooth,
+  RiverRubicon,
+  DarkSky,
   InfinityPool,
-  Plaza,
-  RimHighlights,
-  SnowField,
+  GreyRoom,
   TranquilityBlue,
-  WarmLight,
-  CoolLight,
 }
 
 impl Environment {
-  pub const ALL: [Environment; 14] = [
-    Environment::Photobooth,
-    Environment::SharpHighlights,
-    Environment::SoftLight,
-    Environment::DryLakeBed,
-    Environment::DimField,
-    Environment::Field,
-    Environment::GreyRoom,
-    Environment::InfinityPool,
-    Environment::Plaza,
-    Environment::RimHighlights,
-    Environment::SnowField,
-    Environment::TranquilityBlue,
-    Environment::WarmLight,
-    Environment::CoolLight,
-  ];
+  /// The rows under the "Theme Environments" header.
+  pub const THEME: [Environment; 3] = [Environment::PhotoBooth, Environment::RiverRubicon, Environment::DarkSky];
+  /// The rows under the "Legacy Environments" header.
+  pub const LEGACY: [Environment; 3] = [Environment::InfinityPool, Environment::GreyRoom, Environment::TranquilityBlue];
 
   pub fn label(self) -> &'static str {
     match self {
-      Environment::Photobooth => "Photobooth",
-      Environment::SharpHighlights => "Sharp Highlights",
-      Environment::SoftLight => "Soft Light",
-      Environment::DryLakeBed => "Dry Lake Bed",
-      Environment::DimField => "Dim Field",
-      Environment::Field => "Field",
-      Environment::GreyRoom => "Grey Room",
+      Environment::Theme => "Theme (default)",
+      Environment::PhotoBooth => "Photo Booth",
+      Environment::RiverRubicon => "River Rubicon",
+      Environment::DarkSky => "Dark Sky",
       Environment::InfinityPool => "Infinity Pool",
-      Environment::Plaza => "Plaza",
-      Environment::RimHighlights => "Rim Highlights",
-      Environment::SnowField => "Snow Field",
+      Environment::GreyRoom => "Grey Room",
       Environment::TranquilityBlue => "Tranquility Blue",
-      Environment::WarmLight => "Warm Light",
-      Environment::CoolLight => "Cool Light",
     }
   }
 }
@@ -235,12 +278,57 @@ impl GraphicsPreset {
 
   /// The effects a preset sets (`None`: Custom leaves them as they are).
   pub fn effects(self) -> Option<Effects> {
+    let all = |on: bool| Effects {
+      environment_dome: on,
+      ground_plane: on,
+      ground_shadow: on,
+      reflections: on,
+      object_shadow: on,
+      ambient_occlusion: on,
+      anti_aliasing: on,
+    };
     match self {
-      GraphicsPreset::Performance => Some(Effects { ground_shadow: false, reflections: false, ground_plane: false }),
-      GraphicsPreset::Quality => Some(Effects { ground_shadow: true, reflections: true, ground_plane: true }),
+      GraphicsPreset::Performance => Some(all(false)),
+      GraphicsPreset::Quality => Some(all(true)),
       GraphicsPreset::Custom => None,
     }
   }
+}
+
+/// The effects a new session starts with, Fusion's: Ground Plane, Ground Shadow, Ambient Occlusion
+/// and Anti-Aliasing on, the rest off (so the preset reads Custom).
+pub fn default_effects() -> Effects {
+  Effects {
+    environment_dome: false,
+    ground_plane: true,
+    ground_shadow: true,
+    reflections: false,
+    object_shadow: false,
+    ambient_occlusion: true,
+    anti_aliasing: true,
+  }
+}
+
+/// Display Settings ▸ Visual Style: Fusion's six rows in its order, with their shortcuts
+/// (Ctrl+4 to Ctrl+9, which work from the canvas too).
+pub const VISUAL_STYLES: [(VisualStyle, egui::Key, &str); 6] = [
+  (VisualStyle::Shaded, egui::Key::Num4, "Ctrl+4"),
+  (VisualStyle::ShadedHiddenEdges, egui::Key::Num5, "Ctrl+5"),
+  (VisualStyle::ShadedVisibleEdges, egui::Key::Num6, "Ctrl+6"),
+  (VisualStyle::Wireframe, egui::Key::Num7, "Ctrl+7"),
+  (VisualStyle::WireframeHiddenEdges, egui::Key::Num8, "Ctrl+8"),
+  (VisualStyle::WireframeVisibleEdges, egui::Key::Num9, "Ctrl+9"),
+];
+
+/// Ctrl+4 to Ctrl+9 from the canvas: picks that visual style. True when one was pressed.
+pub fn visual_style_keys(app: &mut App, ctx: &egui::Context) -> bool {
+  for (style, key, _) in VISUAL_STYLES {
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key)) {
+      app.visual_style = style;
+      return true;
+    }
+  }
+  false
 }
 
 /// Display Settings' own settings.
@@ -248,10 +336,21 @@ impl GraphicsPreset {
 pub struct DisplaySettings {
   pub environment: Environment,
   pub preset: GraphicsPreset,
+  /// Ground Plane Offset ▸ Adaptive: the ground sits at the model's lowest point (else
+  /// `ground_offset` below it).
+  pub ground_adaptive: bool,
   /// Ground Plane Offset: how far below the model's lowest point the ground sits (mm).
   pub ground_offset: f64,
-  /// The Ground Plane Offset dialog, with the value being edited.
-  pub ground_offset_form: Option<f64>,
+  /// The GROUND PLANE OFFSET dialog, with the values being edited.
+  pub ground_offset_form: Option<GroundOffsetForm>,
+}
+
+/// What the GROUND PLANE OFFSET dialog edits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundOffsetForm {
+  pub adaptive: bool,
+  /// mm; its field shows only with Adaptive off.
+  pub offset: f64,
 }
 
 impl Default for DisplaySettings {
@@ -259,6 +358,7 @@ impl Default for DisplaySettings {
     DisplaySettings {
       environment: Environment::default(),
       preset: GraphicsPreset::default(),
+      ground_adaptive: true,
       ground_offset: 0.0,
       ground_offset_form: None,
     }
@@ -278,6 +378,11 @@ impl DisplaySettings {
   pub fn preset_for(effects: Effects) -> GraphicsPreset {
     GraphicsPreset::ALL.into_iter().find(|p| p.effects() == Some(effects)).unwrap_or(GraphicsPreset::Custom)
   }
+
+  /// Opens the GROUND PLANE OFFSET dialog on the current values.
+  pub fn open_ground_offset(&mut self) {
+    self.ground_offset_form = Some(GroundOffsetForm { adaptive: self.ground_adaptive, offset: self.ground_offset });
+  }
 }
 
 /// Display Settings ▸ Enter Full Screen / Exit Full Screen (Ctrl+Shift+F).
@@ -290,18 +395,30 @@ pub fn toggle_full_screen(ctx: &egui::Context) {
 pub fn display_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(220.0);
   ui.menu_button("Visual Style", |ui| {
-    ui.set_min_width(250.0);
-    for s in VisualStyle::ALL {
-      if ui.radio(app.visual_style == s, s.label()).clicked() {
-        app.visual_style = s;
-      }
+    ui.set_min_width(300.0);
+    for (s, _, keys) in VISUAL_STYLES {
+      ui.horizontal(|ui| {
+        if ui.radio(app.visual_style == s, s.label()).clicked() {
+          app.visual_style = s;
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+          ui.label(RichText::new(keys).weak());
+        });
+      });
     }
   });
   ui.menu_button("Environment", |ui| {
     ui.set_min_width(180.0);
-    for e in Environment::ALL {
+    let mut row = |ui: &mut egui::Ui, e: Environment| {
       if ui.radio(app.display.environment == e, e.label()).clicked() {
         app.display.environment = e;
+      }
+    };
+    row(ui, Environment::Theme);
+    for (header, list) in [("Theme Environments", Environment::THEME), ("Legacy Environments", Environment::LEGACY)] {
+      ui.label(RichText::new(header).weak());
+      for e in list {
+        row(ui, e);
       }
     }
   });
@@ -315,20 +432,36 @@ pub fn display_menu(app: &mut App, ui: &mut egui::Ui) {
     }
   });
   ui.menu_button("Effects", |ui| {
-    ui.set_min_width(160.0);
+    ui.set_min_width(200.0);
+    // the preset in force, greyed and ticked, as Fusion heads the list
+    let preset = DisplaySettings::preset_for(app.effects);
+    ui.add_enabled(false, egui::Checkbox::new(&mut true, format!("Graphics Preset: {}", preset.label())));
+    ui.separator();
     let e: &mut Effects = &mut app.effects;
-    ui.checkbox(&mut e.ground_shadow, "Ground Shadow");
-    ui.checkbox(&mut e.reflections, "Reflections");
-    ui.checkbox(&mut e.ground_plane, "Ground Plane");
+    // (label, flag, drawn here): the effects the viewport can't draw yet are greyed
+    for (label, flag, drawn) in [
+      ("Environment Dome", &mut e.environment_dome, false),
+      ("Ground Plane", &mut e.ground_plane, true),
+      ("Ground Shadow", &mut e.ground_shadow, true),
+      ("Ground Reflection", &mut e.reflections, true),
+      ("Object Shadow", &mut e.object_shadow, false),
+      ("Ambient Occlusion", &mut e.ambient_occlusion, false),
+      ("Anti-Aliasing", &mut e.anti_aliasing, false),
+    ] {
+      ui.add_enabled(drawn, egui::Checkbox::new(flag, label));
+    }
   });
   ui.menu_button("Object Visibility", |ui| {
-    ui.set_min_width(180.0);
+    ui.set_min_width(200.0);
     let v = &mut app.objects;
-    ui.checkbox(&mut v.origins, "Origins");
-    ui.checkbox(&mut v.sketches, "Sketches");
-    ui.checkbox(&mut v.construction, "Construction Geometry");
-    ui.checkbox(&mut v.joints, "Joints");
-    ui.checkbox(&mut v.bodies, "Bodies");
+    let mut all = v.all();
+    if ui.checkbox(&mut all, "All Work Features").changed() {
+      v.set_all(all);
+    }
+    ui.separator();
+    for (label, flag, drawn) in v.rows() {
+      ui.add_enabled(drawn, egui::Checkbox::new(flag, label));
+    }
   });
   ui.menu_button("Camera", |ui| {
     ui.set_min_width(220.0);
@@ -344,7 +477,7 @@ pub fn display_menu(app: &mut App, ui: &mut egui::Ui) {
     }
   });
   if ui.button("Ground Plane Offset").clicked() {
-    app.display.ground_offset_form = Some(app.display.ground_offset);
+    app.display.open_ground_offset();
     ui.close();
   }
   let full = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -362,40 +495,67 @@ pub(crate) fn set_projection(app: &mut App, mode: Projection) {
   crate::viewcube::keep_projection(app);
 }
 
-/// The Ground Plane Offset dialog, while open.
+/// The GROUND PLANE OFFSET dialog, while open: docked like a command dialog, with Adaptive
+/// (and the offset field when Adaptive is off) and OK / Cancel. Escape closes it (`App::escape`).
 pub fn ground_offset_window(app: &mut App, ctx: &egui::Context) {
-  let Some(mut value) = app.display.ground_offset_form else { return };
-  let mut open = true;
+  let Some(mut form) = app.display.ground_offset_form else { return };
   let mut done = false;
   let mut cancel = false;
-  egui::Window::new("Ground Plane Offset")
-    .open(&mut open)
-    .collapsible(false)
-    .resizable(false)
-    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+  let width = 300.0;
+  let dock = crate::panels::dialog_dock(app.canvas, app.s.edit_sketch.is_some());
+  egui::Area::new(egui::Id::new("ground-plane-offset"))
+    .pivot(egui::Align2::RIGHT_TOP)
+    .default_pos(dock)
+    .constrain(true)
+    .order(egui::Order::Foreground)
     .show(ctx, |ui| {
-      ui.horizontal(|ui| {
-        ui.label("Offset");
-        ui.add(egui::DragValue::new(&mut value).speed(0.5).suffix(" mm"));
-      });
-      ui.label(RichText::new("How far below the model the ground plane sits.").small().weak());
-      ui.separator();
-      ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if ui.button("Cancel").clicked() {
-          cancel = true;
-        }
-        if ui.button("OK").clicked() {
-          done = true;
-        }
+      crate::panels::dialog_frame().show(ui, |ui| {
+        ui.set_width(width);
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+        crate::panels::dialog_header(ui, crate::icons::Icon::Display, "GROUND PLANE OFFSET", width);
+        egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 10, bottom: 8 }).show(ui, |ui| {
+          ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+          egui::Grid::new("ground-offset").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
+            ui.label("Adaptive");
+            ui.checkbox(&mut form.adaptive, "");
+            ui.end_row();
+            if !form.adaptive {
+              ui.label("Offset");
+              ui.add(egui::DragValue::new(&mut form.offset).range(0.0..=1e5).speed(0.5).suffix(" mm"));
+              ui.end_row();
+            }
+          });
+        });
+        let sep = ui.allocate_exact_size(egui::vec2(width, 1.0), egui::Sense::hover()).0;
+        ui.painter().rect_filled(sep, 0.0, crate::theme::SEPARATOR);
+        egui::Frame::new().fill(crate::theme::DIALOG_BODY).inner_margin(egui::Margin::symmetric(10, 7)).show(
+          ui,
+          |ui| {
+            ui.horizontal(|ui| {
+              ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
+              ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if crate::panels::secondary_button(ui, "Cancel").clicked() {
+                  cancel = true;
+                }
+                if crate::panels::primary_button(ui, "OK", crate::icons::accent_of(crate::icons::Icon::Display))
+                  .clicked()
+                {
+                  done = true;
+                }
+              });
+            });
+          },
+        );
       });
     });
   if done {
-    app.display.ground_offset = value;
+    app.display.ground_adaptive = form.adaptive;
+    app.display.ground_offset = form.offset;
     app.display.ground_offset_form = None;
-  } else if !open || cancel {
+  } else if cancel {
     app.display.ground_offset_form = None;
   } else {
-    app.display.ground_offset_form = Some(value);
+    app.display.ground_offset_form = Some(form);
   }
 }
 
@@ -485,19 +645,138 @@ mod tests {
   #[test]
   fn graphics_presets_set_the_effects_and_a_change_makes_custom() {
     let mut d = DisplaySettings::default();
-    let mut e = Effects::default();
+    // Fusion's defaults: plane, shadow, ambient occlusion and anti-aliasing on, so Custom
+    let mut e = default_effects();
+    assert!(e.ground_plane && e.ground_shadow && e.ambient_occlusion && e.anti_aliasing);
+    assert!(!e.environment_dome && !e.reflections && !e.object_shadow);
+    assert_eq!(DisplaySettings::preset_for(e), GraphicsPreset::Custom);
+    assert_eq!(App::with_session(fox_engine::Session::default()).effects, e, "a new session starts with them");
     d.set_preset(GraphicsPreset::Performance, &mut e);
-    assert_eq!(e, Effects { ground_shadow: false, reflections: false, ground_plane: false });
+    assert_eq!(e, Effects::default());
     assert_eq!(DisplaySettings::preset_for(e), GraphicsPreset::Performance);
     d.set_preset(GraphicsPreset::Quality, &mut e);
-    assert!(e.ground_shadow && e.reflections && e.ground_plane);
+    assert!(e.ground_shadow && e.reflections && e.ground_plane && e.ambient_occlusion && e.environment_dome);
     assert_eq!(DisplaySettings::preset_for(e), GraphicsPreset::Quality);
     e.reflections = false;
     assert_eq!(DisplaySettings::preset_for(e), GraphicsPreset::Custom);
     d.set_preset(GraphicsPreset::Custom, &mut e);
     assert!(!e.reflections, "Custom leaves the effects alone");
-    assert_eq!(Environment::ALL.len(), 14);
-    assert_eq!(Environment::default().label(), "Photobooth");
+  }
+
+  #[test]
+  fn the_environment_list_is_fusions() {
+    assert_eq!(Environment::default(), Environment::Theme);
+    assert_eq!(Environment::Theme.label(), "Theme (default)");
+    assert_eq!(Environment::THEME.map(|e| e.label()), ["Photo Booth", "River Rubicon", "Dark Sky"]);
+    assert_eq!(Environment::LEGACY.map(|e| e.label()), ["Infinity Pool", "Grey Room", "Tranquility Blue"]);
+  }
+
+  #[test]
+  fn visual_styles_are_fusions_six_with_ctrl_digit_keys() {
+    let rows: Vec<(&str, &str)> = VISUAL_STYLES.iter().map(|(s, _, k)| (s.label(), *k)).collect();
+    assert_eq!(
+      rows,
+      [
+        ("Shaded", "Ctrl+4"),
+        ("Shaded with Hidden Edges", "Ctrl+5"),
+        ("Shaded with Visible Edges Only", "Ctrl+6"),
+        ("Wireframe", "Ctrl+7"),
+        ("Wireframe with Hidden Edges", "Ctrl+8"),
+        ("Wireframe with Visible Edges Only", "Ctrl+9"),
+      ]
+    );
+    let mut app = App::with_session(fox_engine::Session::default());
+    assert_eq!(app.visual_style, VisualStyle::Shaded, "Shaded is the default");
+    assert!(app.visual_style.edges(), "and draws the edges, as Fusion's does");
+    // Ctrl+7, Ctrl+5 and Ctrl+4 pressed over the canvas
+    let ctx = egui::Context::default();
+    for (key, want) in [
+      (egui::Key::Num7, VisualStyle::Wireframe),
+      (egui::Key::Num5, VisualStyle::ShadedHiddenEdges),
+      (egui::Key::Num4, VisualStyle::Shaded),
+    ] {
+      let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+        events: vec![egui::Event::Key {
+          key,
+          physical_key: None,
+          pressed: true,
+          repeat: false,
+          modifiers: egui::Modifiers::COMMAND,
+        }],
+        ..Default::default()
+      };
+      ctx.run_ui(input, |ui| app.draw(ui)).drop_without_applying_deltas();
+      assert_eq!(app.visual_style, want, "{key:?}");
+    }
+  }
+
+  #[test]
+  fn object_visibility_has_fusions_rows_and_all_work_features() {
+    let mut v = ObjectVisibility::default();
+    let labels: Vec<&str> = v.rows().iter().map(|(l, ..)| *l).collect();
+    assert_eq!(
+      labels,
+      [
+        "Origin Planes",
+        "Origin Plane Names",
+        "Origin Axes",
+        "Origin Points",
+        "Construction Planes",
+        "Construction Plane Names",
+        "Construction Axes",
+        "Construction Points",
+        "Sketches",
+        "User Coordinate Systems",
+        "Joint Origins",
+        "Joint Origin Axes",
+        "Joints",
+      ]
+    );
+    assert!(v.all(), "all on");
+    v.sketches = false;
+    assert!(!v.all());
+    v.set_all(true);
+    assert!(v.sketches && v.all());
+    v.set_all(false);
+    assert!(v.rows().iter().all(|(_, on, _)| !**on));
+    // the rows reach the scene
+    let mut app = App::with_session(fox_engine::Session::default());
+    app.objects.construction_axes = false;
+    let o = crate::viewport::scene_options(&mut app);
+    assert!(o.hide_construction_axes && !o.hide_construction_planes && !o.hide_construction_points);
+  }
+
+  #[test]
+  fn the_ground_plane_offset_dialog_is_docked_with_adaptive() {
+    let mut app = App::with_session(fox_engine::Session::default());
+    app.canvas = egui::Rect::from_min_max(egui::pos2(0.0, 80.0), egui::pos2(1200.0, 760.0));
+    app.display.open_ground_offset();
+    assert_eq!(app.display.ground_offset_form, Some(GroundOffsetForm { adaptive: true, offset: 0.0 }));
+    let ctx = egui::Context::default();
+    let frame = |app: &mut App, events: Vec<egui::Event>| {
+      let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+        events,
+        ..Default::default()
+      };
+      ctx.run_ui(input, |ui| ground_offset_window(app, ui.ctx())).drop_without_applying_deltas();
+    };
+    frame(&mut app, vec![]);
+    // docked at the canvas's top right, as a command dialog, and only as tall as its rows
+    let r = ctx.memory(|m| m.area_rect(egui::Id::new("ground-plane-offset"))).expect("drawn");
+    let dock = crate::panels::dialog_dock(app.canvas, false);
+    assert!((r.right() - dock.x).abs() < 1.0 && (r.top() - dock.y).abs() < 1.0, "{r:?} {dock:?}");
+    assert!(r.width() <= 302.0 && r.height() < 130.0, "{r:?}");
+    // Adaptive off keeps its value through the dialog; OK is needed to apply it
+    app.display.ground_offset_form = Some(GroundOffsetForm { adaptive: false, offset: 12.5 });
+    frame(&mut app, vec![]);
+    assert_eq!(app.display.ground_offset_form, Some(GroundOffsetForm { adaptive: false, offset: 12.5 }));
+    assert!(app.display.ground_adaptive && app.display.ground_offset == 0.0, "open until OK");
+    // Escape closes it, changing nothing
+    app.escape();
+    assert_eq!(app.display.ground_offset_form, None);
+    assert!(app.display.ground_adaptive);
   }
 
   #[test]
@@ -511,16 +790,6 @@ mod tests {
     set_projection(&mut app, Projection::OrthoFaces);
     assert!(app.cube.ortho_faces);
     assert_eq!(app.cube.projection(&app.cam), Projection::OrthoFaces);
-    // Ground Plane Offset keeps its value through its dialog
-    app.display.ground_offset_form = Some(12.5);
-    let ctx = egui::Context::default();
-    let input = egui::RawInput {
-      screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
-      ..Default::default()
-    };
-    ctx.run_ui(input, |ui| ground_offset_window(&mut app, ui.ctx())).drop_without_applying_deltas();
-    assert_eq!(app.display.ground_offset_form, Some(12.5), "open until OK");
-    assert_eq!(app.display.ground_offset, 0.0);
   }
 
   #[test]

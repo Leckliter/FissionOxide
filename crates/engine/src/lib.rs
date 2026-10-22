@@ -40,6 +40,7 @@ pub mod properties;
 pub mod rendering;
 pub mod scene;
 mod sheet2;
+mod silhouette;
 pub mod sim;
 mod solid;
 mod step;
@@ -55,6 +56,7 @@ use fox_model::{BodyId, Design, FeatureId};
 use serde_json::Value;
 
 pub use commands::{COMMANDS, CONSTRAINTS_REMOVED, CommandSpec};
+pub use features::APPEARANCE_FOLDERS;
 pub use fillet::tangent_neighbours;
 pub use fox_ecad as electronics;
 pub use fox_exchange as exchange;
@@ -624,6 +626,8 @@ mod tests_cam_checks;
 #[cfg(test)]
 mod tests_canvas;
 #[cfg(test)]
+mod tests_combine;
+#[cfg(test)]
 mod tests_config;
 #[cfg(test)]
 mod tests_config2;
@@ -651,6 +655,8 @@ mod tests_hub_server;
 mod tests_include;
 #[cfg(test)]
 mod tests_mechanism;
+#[cfg(test)]
+mod tests_mesh_body;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]

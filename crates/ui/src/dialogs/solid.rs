@@ -19,18 +19,19 @@ pub(super) struct Extra {
   setback: String,
   /// Fillet radius given as the chord length (the round's width).
   chord: bool,
-  rail: Option<FeatureId>,
+  pub(super) rail: Option<FeatureId>,
   /// Sweep: a second guide rail (with `rail`), how the profile follows the rails ("" = the
   /// default: stretch between two rails, else scale) and a guide surface (`{body, face}`).
   pub(super) rail2: Option<FeatureId>,
   pub(super) scaling: &'static str,
   pub(super) guide_surface: Value,
-  twist: String,
+  pub(super) twist: String,
   /// Sweep taper angle, and whether the profile keeps its orientation (parallel).
-  taper: String,
-  parallel: bool,
-  rails: Vec<FeatureId>,
-  centerline: Option<FeatureId>,
+  pub(super) taper: String,
+  pub(super) parallel: bool,
+  /// Loft rails and centre line: each a sketch with its curves (empty = all of them).
+  pub(super) rails: Vec<(FeatureId, Vec<u32>)>,
+  pub(super) centerline: Option<(FeatureId, Vec<u32>)>,
   /// Extrude to object: the picked face or body (`{body, face}` or `{body}`).
   to: Value,
   /// When editing an extrude to an object: its extent kind and stored reference.
@@ -75,6 +76,12 @@ pub(super) struct Extra {
   pub(super) shell_no_chain: bool,
   /// Hole placement and rectangular pattern options (see [`super::hole_pattern`]).
   pub(super) hp: super::hole_pattern::State,
+  /// Press Pull on a primitive's top face: the primitive it edits (see [`super::press_owner`]).
+  pub(super) owner: super::press_owner::Owner,
+  /// Revolve, Sweep and Loft rows (see [`super::rsl`]).
+  pub(super) rsl: super::rsl::State,
+  /// The operation's automatic Cut (see [`super::auto_cut`]).
+  pub(super) cut: super::auto_cut::Cut,
 }
 
 /// Fusion's Fillet Type; Rule Fillet has no engine support and is greyed.
@@ -130,7 +137,7 @@ impl FilletRow {
   }
 
   /// "1 Face", "2 Edges", "1 Face, 2 Edges" or "Select".
-  fn label(&self) -> String {
+  pub(super) fn label(&self) -> String {
     let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
     match (self.faces.len(), self.edges.len()) {
       (0, 0) => "Select".into(),
@@ -163,7 +170,7 @@ impl Dialog {
       }
     });
     ui.end_row();
-    if let Some(k) = switch_type.filter(|_| creating) {
+    if let Some(k) = switch_type.filter(|_| self.editing.is_none()) {
       self.set_fillet_type(&mut app.s, k);
     }
     if self.solid.fillet_type == "full_round" {
@@ -504,25 +511,6 @@ impl Dialog {
 
   // ---- revolve ----
 
-  /// Fusion's Type (Angle or Full) and, for Angle, the angle.
-  pub(super) fn revolve_type_rows(&mut self, ui: &mut egui::Ui) {
-    ui.label("Type");
-    let mut changed = false;
-    ui.horizontal(|ui| {
-      changed |= ui.radio_value(&mut self.solid.rev_full, false, "Angle").changed();
-      changed |= ui.radio_value(&mut self.solid.rev_full, true, "Full").changed();
-    });
-    ui.end_row();
-    if !self.solid.rev_full {
-      ui.label("Angle");
-      changed |= super::value_edit(ui, &mut self.angle).changed();
-      ui.end_row();
-    }
-    if changed {
-      self.dirty = true;
-    }
-  }
-
   /// The revolve angle: a whole turn for Type Full.
   pub(super) fn revolve_angle(&self) -> String {
     if self.solid.rev_full { "360 deg".into() } else { self.angle.clone() }
@@ -534,6 +522,8 @@ impl Dialog {
       (Some(n), _) => json!({"line": n.parse::<u32>().ok()?}),
       (_, Some(n)) => json!({"axis": n.parse::<u32>().ok()?}),
       _ if self.axis == "edge" => Some(self.solid.axis_edge.clone()).filter(|v| !v.is_null())?,
+      // none picked yet
+      _ if self.axis.is_empty() => return None,
       _ => json!(self.axis),
     })
   }
@@ -558,7 +548,7 @@ impl Dialog {
       }
       _ => None,
     });
-    // only a new pick changes the axis (the dropdown may have chosen another since)
+    // only a new pick changes the axis (an origin axis may have been clicked since)
     let key = json!(picked);
     if key == self.solid.axis_pick {
       return;
@@ -834,87 +824,13 @@ impl Dialog {
 
   // ---- sweep and loft ----
 
-  pub(super) fn sweep_rows(&mut self, app: &App, ui: &mut egui::Ui, dirty: &mut bool) {
-    let list = Self::sketches(app, self.sketch);
-    sketch_combo(ui, "Guide rail", "sweep-rail", &list, &mut self.solid.rail, dirty);
-    if self.solid.rail.is_some() {
-      // Path + two rails: each section spans from the first rail to the second
-      let others: Vec<(FeatureId, String)> =
-        list.iter().filter(|(id, _)| Some(*id) != self.solid.rail).cloned().collect();
-      sketch_combo(ui, "Second rail", "sweep-rail2", &others, &mut self.solid.rail2, dirty);
-      let two = self.solid.rail2.is_some();
-      if self.solid.scaling.is_empty() || (!two && self.solid.scaling == "stretch") {
-        self.solid.scaling = if two { "stretch" } else { "scale" };
-      }
-      let options: &[(&'static str, &str)] = if two {
-        &[("stretch", "Stretch"), ("scale", "Scale"), ("none", "None")]
-      } else {
-        &[("scale", "Scale"), ("none", "None")]
-      };
-      ui.label("Profile scaling");
-      *dirty |= choice(ui, "sweep-scaling", &mut self.solid.scaling, options);
-      ui.end_row();
-      return;
-    }
-    // Path + guide surface: the profile keeps its angle to the surface normal
-    ui.label("Guide surface");
-    let accent = self.accent();
-    ui.horizontal(|ui| {
-      let has = !self.solid.guide_surface.is_null();
-      sel_chip(ui, accent, if has { "1 face" } else { "None (select a face)" }, has);
-      if has && ui.small_button("✕").on_hover_text("Sweep without a guide surface").clicked() {
-        self.solid.guide_surface = Value::Null;
-        *dirty = true;
-      }
-    });
-    ui.end_row();
-    if self.solid.guide_surface.is_null() {
-      if !self.solid.parallel {
-        Self::field(ui, "Twist angle", &mut self.solid.twist, dirty);
-      }
-      Self::field(ui, "Taper angle", &mut self.solid.taper, dirty);
-      ui.label("Orientation");
-      if ui.checkbox(&mut self.solid.parallel, "Parallel").changed() {
-        *dirty = true;
-      }
-      ui.end_row();
-    }
-  }
-
-  pub(super) fn loft_rows(&mut self, app: &App, ui: &mut egui::Ui, dirty: &mut bool) {
-    let list: Vec<(FeatureId, String)> = Self::sketches(app, None)
-      .into_iter()
-      .filter(|(id, _)| !self.sections.iter().any(|(sk, _)| *sk == id.0))
-      .collect();
-    if self.solid.rails.is_empty() {
-      sketch_combo(ui, "Centre line", "loft-center", &list, &mut self.solid.centerline, dirty);
-    }
-    if self.solid.centerline.is_none() {
-      ui.label("Rails");
-      ui.vertical(|ui| {
-        if list.is_empty() {
-          ui.label("(no other sketches)");
-        }
-        for (id, name) in &list {
-          let mut on = self.solid.rails.contains(id);
-          if ui.checkbox(&mut on, name).changed() {
-            if on {
-              self.solid.rails.push(*id);
-            } else {
-              self.solid.rails.retain(|r| r != id);
-            }
-            *dirty = true;
-          }
-        }
-      });
-      ui.end_row();
-    }
-  }
-
   /// Sweep / loft parameters with the guide rail, twist, rails and centre line.
   pub(super) fn with_guides(&self, mut p: Value) -> Value {
     match self.kind {
       Kind::Sweep => {
+        if !self.solid.rsl.path_curves.is_empty() {
+          p["path_curves"] = json!(self.solid.rsl.path_curves);
+        }
         if let Some(r) = self.solid.rail {
           p["rail"] = json!(r.0);
           if let Some(r2) = self.solid.rail2.filter(|r2| *r2 != r) {
@@ -928,19 +844,22 @@ impl Dialog {
         } else {
           if self.solid.parallel {
             p["orientation"] = json!("parallel");
-          } else if !self.solid.twist.trim().is_empty() {
+          } else if super::rsl::angle_set(&self.solid.twist) {
             p["twist"] = json!(self.solid.twist.trim());
           }
-          if !self.solid.taper.trim().is_empty() {
+          if super::rsl::angle_set(&self.solid.taper) {
             p["taper"] = json!(self.solid.taper.trim());
           }
         }
       }
       Kind::Loft => {
-        if let Some(c) = self.solid.centerline {
-          p["centerline"] = json!(c.0);
+        let guide = |(sk, c): &(FeatureId, Vec<u32>)| {
+          if c.is_empty() { json!({"sketch": sk.0}) } else { json!({"sketch": sk.0, "curves": c}) }
+        };
+        if let Some(c) = &self.solid.centerline {
+          p["centerline"] = guide(c);
         } else if !self.solid.rails.is_empty() {
-          p["rails"] = json!(self.solid.rails.iter().map(|r| r.0).collect::<Vec<_>>());
+          p["rails"] = json!(self.solid.rails.iter().map(guide).collect::<Vec<_>>());
         }
       }
       _ => {}
@@ -1076,7 +995,9 @@ impl Dialog {
       Input::Profiles { label, .. } => {
         ui.label(*label);
         let n = v.as_array().map(Vec::len).unwrap_or(0);
-        sel_chip(ui, accent, &if n == 0 { "All".to_string() } else { format!("{n} selected") }, n > 0);
+        // Emboss waits for its picks (Select); elsewhere none picked means every profile
+        let none = if f.cmd == "emboss" { "Select" } else { "All" };
+        sel_chip(ui, accent, &if n == 0 { none.to_string() } else { format!("{n} selected") }, n > 0);
         ui.end_row();
       }
       Input::FaceOther { label, .. } => {
@@ -1105,13 +1026,18 @@ impl Dialog {
         ui.end_row();
       }
       Input::Cells { label, tools, .. } => {
+        // Fusion's Select Cells: a chip, and the cells the tools bound to tick below it
         self.refresh_cells(f, i, tools, s);
         ui.label(*label);
+        let picked: Vec<Value> = v.as_array().cloned().unwrap_or_default();
+        let n = picked.len();
+        sel_chip(ui, accent, &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
+        ui.end_row();
+        if self.form.cells.is_empty() {
+          return;
+        }
+        ui.label("");
         ui.vertical(|ui| {
-          if self.form.cells.is_empty() {
-            ui.label("(no closed cells)");
-          }
-          let picked: Vec<Value> = v.as_array().cloned().unwrap_or_default();
           for (k, (p, vol)) in self.form.cells.clone().into_iter().enumerate() {
             let pv = json!(p);
             let mut on = picked.contains(&pv);
@@ -1126,9 +1052,6 @@ impl Dialog {
               *dirty = true;
             }
           }
-          if picked.is_empty() && !self.form.cells.is_empty() {
-            ui.label("None ticked: every cell");
-          }
         });
         ui.end_row();
       }
@@ -1136,15 +1059,15 @@ impl Dialog {
     }
   }
 
-  /// Recomputes the boundary fill cells when the tools (or the plane) changed.
+  /// Recomputes the boundary fill cells when the tools (bodies or planes) changed.
   fn refresh_cells(&mut self, f: &'static Form, i: usize, tools: &str, s: &Session) {
     let tool_v = f.inputs.iter().position(|x| x.key() == tools).map(|k| self.form.values[k].clone());
     let planes: Vec<Value> = f
       .inputs
       .iter()
       .zip(&self.form.values)
-      .filter(|(x, v)| matches!(x, Input::PlaneOpt { .. }) && !v.is_null())
-      .map(|(_, v)| v.clone())
+      .filter(|(x, _)| matches!(x, Input::Planes { .. }))
+      .flat_map(|(_, v)| v.as_array().cloned().unwrap_or_default())
       .collect();
     let key = json!([tool_v, planes]);
     if key == self.form.cells_for {
@@ -1177,31 +1100,6 @@ impl Dialog {
       self.form.values[i] = json!(kept);
     }
   }
-}
-
-fn sketch_combo(
-  ui: &mut egui::Ui,
-  label: &str,
-  id: &str,
-  list: &[(FeatureId, String)],
-  cur: &mut Option<FeatureId>,
-  dirty: &mut bool,
-) {
-  ui.label(label);
-  let shown = cur.and_then(|c| list.iter().find(|(id, _)| *id == c)).map(|(_, n)| n.clone());
-  egui::ComboBox::from_id_salt(id).selected_text(shown.unwrap_or("None".into())).width(140.0).show_ui(ui, |ui| {
-    if ui.selectable_label(cur.is_none(), "None").clicked() {
-      *cur = None;
-      *dirty = true;
-    }
-    for (fid, n) in list {
-      if ui.selectable_label(*cur == Some(*fid), n).clicked() {
-        *cur = Some(*fid);
-        *dirty = true;
-      }
-    }
-  });
-  ui.end_row();
 }
 
 fn plane_ref(v: &Value) -> Option<PlaneRef> {
@@ -1251,6 +1149,7 @@ pub(super) fn edit_form(kind: &FeatureKind) -> Option<Dialog> {
     _ => return None,
   };
   let mut d = Dialog::blank(Kind::Form(f));
+  d.form.edit = true;
   let v = serde_json::to_value(kind).ok()?;
   for (i, input) in f.inputs.iter().enumerate() {
     let editable = matches!(
@@ -1259,6 +1158,11 @@ pub(super) fn edit_form(kind: &FeatureKind) -> Option<Dialog> {
     ) || matches!(input, Input::Cells { .. });
     if let Some(x) = v.get(input.key()).filter(|_| editable) {
       d.form.values[i] = x.clone();
+    }
+    // Emboss's Effect toggles are its deboss flag
+    if input.key() == "effect" {
+      let deboss = v.get("deboss").and_then(Value::as_bool).unwrap_or(false);
+      d.form.values[i] = json!(if deboss { "deboss" } else { "emboss" });
     }
   }
   Some(d)
@@ -1270,11 +1174,18 @@ pub(super) fn form_edit_set(f: &Form, values: &[Value]) -> Value {
   for (input, v) in f.inputs.iter().zip(values) {
     if matches!(
       input,
-      Input::Expr { .. } | Input::Text { .. } | Input::Check { .. } | Input::Choice { .. } | Input::Cells { .. }
+      Input::Expr { .. }
+        | Input::Text { .. }
+        | Input::Check { .. }
+        | Input::Choice { .. }
+        | Input::Cells { .. }
+        | Input::Icons { .. }
     ) {
       set.insert(input.key().to_string(), v.clone());
     }
   }
+  // the rows' values as the feature's fields (Emboss's Effect is its deboss flag)
+  crate::forms::engine_keys(f.cmd, &mut set);
   Value::Object(set)
 }
 
@@ -1290,7 +1201,7 @@ mod tests {
   use serde_json::{Value, json};
 
   use super::*;
-  use crate::forms::{BOUNDARY_FILL, EMBOSS, REPLACE_FACE};
+  use crate::forms::{BOUNDARY_FILL, EMBOSS, REPLACE_FACE, RIB, THICKEN, THREAD, WEB};
 
   fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
     s.execute(cmd, &p).unwrap_or_else(|e| panic!("{cmd} {p}: {}", e.0))
@@ -1584,20 +1495,200 @@ mod tests {
     let b = s.model.bodies[0].id;
     let side = s.model.bodies[0].faces().iter().find(|f| f.kind == SurfaceKind::Cylinder).unwrap().id;
     let v0 = volume(&s);
+    // Fusion's rows: Sketch Profiles and Faces chips, Tangent Chain, Effect; OK waits for the
+    // picks and Depth and the placement rows come after them
+    let d = form(&mut s, &EMBOSS, vec![]);
+    assert_eq!(d.form.missing(&EMBOSS), Some("Sketch Profiles"));
+    assert!(!d.ready());
+    let shown = |d: &Dialog, k: &str| d.form.shown(&EMBOSS, EMBOSS.inputs.iter().position(|x| x.key() == k).unwrap());
+    assert!(!shown(&d, "depth") && !shown(&d, "rotation") && shown(&d, "effect"));
+    assert!(crate::forms::always_previews(&EMBOSS));
     let sel = vec![Sel::Profile { sketch: sk, index: 0 }, Sel::Face { body: b, face: side }];
     let mut d = form(&mut s, &EMBOSS, sel);
-    set(&mut d, &EMBOSS, "wrap", json!(true));
+    assert!(shown(&d, "depth") && shown(&d, "horizontal"));
+    // a curved face: the profiles wrap around it, with no row for that
+    let wrap = EMBOSS.inputs.iter().position(|x| x.key() == "wrap").unwrap();
+    assert_eq!(d.form.values[wrap], json!(true));
+    assert!(crate::forms::State::hidden(&EMBOSS, wrap));
     set(&mut d, &EMBOSS, "depth", json!("2 mm"));
+    let (_, p) = d.command().unwrap();
+    assert_eq!((p["deboss"].clone(), p.get("effect"), p.get("tangent_chain")), (json!(false), None, None));
     apply(&mut s, &mut d);
     assert!(((volume(&s) - v0) - 210.0).abs() < 2.0, "{}", volume(&s) - v0);
     // edit from the timeline: deboss instead
     let id = s.design.features.last().unwrap().id;
     let mut e = edit_form(&s.design.feature(id).unwrap().kind).unwrap();
     e.editing = Some(id);
-    assert_eq!(e.form.values[3], json!("2 mm"));
-    set(&mut e, &EMBOSS, "deboss", json!(true));
+    let depth = EMBOSS.inputs.iter().position(|x| x.key() == "depth").unwrap();
+    assert_eq!(e.form.values[depth], json!("2 mm"));
+    assert!(e.form.shown(&EMBOSS, depth), "an edit shows the rows after the picks");
+    set(&mut e, &EMBOSS, "effect", json!("deboss"));
     apply(&mut s, &mut e);
     assert!(((v0 - volume(&s)) - 190.0).abs() < 2.0, "{}", v0 - volume(&s));
+  }
+
+  /// A U channel (40 × 20, walls 20 tall) with a line across its top on a plane through its
+  /// middle: the line a rib grows down from. Returns the line's pick.
+  fn channel_and_rib_line(s: &mut Session) -> Sel {
+    run(s, "sketch.create", json!({"plane": "xy"}));
+    run(s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 20]}));
+    run(s, "extrude", json!({"distance": 4}));
+    run(s, "sketch.create", json!({"plane": {"point": [20, 10, 4], "normal": [0, 0, 1]}}));
+    run(s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [4, 20]}));
+    run(s, "sketch.rect", json!({"corner1": [36, 0], "corner2": [40, 20]}));
+    run(s, "extrude", json!({"distance": 20, "operation": "join"}));
+    run(s, "plane.offset", json!({"plane": "xz", "offset": 10}));
+    let pl = s.design.features.last().unwrap().id.0;
+    run(s, "sketch.create", json!({"plane": {"feature": pl}}));
+    run(s, "sketch.line", json!({"points": [[4, -20], [36, -20]]}));
+    let sk = s.edit_sketch.unwrap();
+    run(s, "sketch.finish", json!({}));
+    let curve = s.design.sketch(sk).unwrap().curves.iter().find(|c| !c.reference()).unwrap().id;
+    Sel::SketchCurve { sketch: sk, curve }
+  }
+
+  #[test]
+  fn rib_and_web_rows_wait_for_a_profile() {
+    let mut s = Session::default();
+    let line = channel_and_rib_line(&mut s);
+    let shown = |d: &Dialog, f: &Form, k: &str| d.form.shown(f, f.inputs.iter().position(|x| x.key() == k).unwrap());
+    // Profile chip, Thickness Direction, Extent Type (To Next), Flip Direction; OK greyed
+    let d = form(&mut s, &RIB, vec![]);
+    assert_eq!(d.form.missing(&RIB), Some("Profile"));
+    assert!(!d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select open sketch profile to create rib"));
+    assert!(!shown(&d, &RIB, "thickness") && !shown(&d, &RIB, "depth") && shown(&d, &RIB, "extent"));
+    let sketch = RIB.inputs.iter().position(|x| x.key() == "sketch").unwrap();
+    assert!(crate::forms::State::hidden(&RIB, sketch), "no Sketch drop-down");
+    // the line picked: Thickness shows; Depth only with the Depth extent
+    let mut d = form(&mut s, &RIB, vec![line]);
+    assert!(d.ok_enabled() && shown(&d, &RIB, "thickness") && !shown(&d, &RIB, "depth"));
+    let (_, p) = d.command().unwrap();
+    assert!(p.get("depth").is_none() && p.get("extent").is_none() && p.get("one_side").is_none(), "{p}");
+    let v0 = volume(&s);
+    apply(&mut s, &mut d);
+    assert!(((volume(&s) - v0) - 32.0 * 16.0 * 2.0).abs() < 1.0, "{}", volume(&s) - v0);
+    d.withdraw(&mut s);
+    // one side, to a depth of 5
+    let mut d = form(&mut s, &RIB, vec![line]);
+    set(&mut d, &RIB, "thickness_dir", json!("one_side"));
+    set(&mut d, &RIB, "extent", json!("depth"));
+    set(&mut d, &RIB, "depth", json!("5 mm"));
+    assert!(shown(&d, &RIB, "depth"));
+    let (_, p) = d.command().unwrap();
+    assert_eq!((p["one_side"].clone(), p["depth"].clone()), (json!(true), json!("5 mm")));
+    apply(&mut s, &mut d);
+    assert!(((volume(&s) - v0) - 32.0 * 5.0 * 2.0).abs() < 1.0, "{}", volume(&s) - v0);
+    d.withdraw(&mut s);
+
+    // Web: Rib's rows and Extend Curves (ticked, greyed: the engine doesn't extend them)
+    let d = form(&mut s, &WEB, vec![]);
+    assert_eq!(d.prompt(false).as_deref(), Some("Select open sketch profile to create web"));
+    let extend = WEB.inputs.iter().position(|x| x.key() == "extend").unwrap();
+    assert_eq!(d.form.values[extend], json!(true));
+    assert!(crate::forms::greyed(&WEB, "extend").is_some());
+    let d = form(&mut s, &WEB, vec![line]);
+    let (cmd, p) = d.command().unwrap();
+    assert!(cmd == "web" && p.get("extend").is_none(), "{p}");
+  }
+
+  #[test]
+  fn thread_rows_from_the_thread_tables() {
+    use fox_engine::model::LengthUnit;
+    // a 1 in rod in an inch design: ANSI Unified, 1.0 in, 1-8 UNC, 3A, as Fusion picks
+    let mut s = Session::default();
+    run(&mut s, "cylinder", json!({"radius": 12.7, "height": 50}));
+    s.design.units = LengthUnit::In;
+    let b = s.model.bodies[0].id;
+    let side = s.model.bodies[0].faces().iter().find(|f| f.kind == SurfaceKind::Cylinder).unwrap().id;
+    let get = |d: &Dialog, k: &str| d.form.values[THREAD.inputs.iter().position(|x| x.key() == k).unwrap()].clone();
+    let mut d = form(&mut s, &THREAD, vec![Sel::Face { body: b, face: side }]);
+    let picked = ["thread_type", "size", "designation", "class", "direction"].map(|k| get(&d, k));
+    assert_eq!(picked, [json!("ansi"), json!("1.0"), json!("1-8 UNC"), json!("3A"), json!("right")]);
+    assert_eq!((get(&d, "modeled"), get(&d, "full_length")), (json!(false), json!(true)));
+    assert_eq!(d.thread_status(&s).as_deref(), Some("1 Face | Radius: 0.500 in"));
+    assert_eq!(d.prompt(false).as_deref(), Some("Specify size, or hold Ctrl/CMD to modify selections"));
+    // Full Length hides the span's rows
+    let length = THREAD.inputs.iter().position(|x| x.key() == "length").unwrap();
+    assert!(!d.form.shown(&THREAD, length));
+    set(&mut d, &THREAD, "full_length", json!(false));
+    assert!(d.form.shown(&THREAD, length));
+    assert_eq!(get(&d, "length"), json!("50 mm"));
+    set(&mut d, &THREAD, "full_length", json!(true));
+    let (_, p) = d.command().unwrap();
+    assert_eq!(p["pitch"], json!("3.175000 mm"));
+    assert!(p.get("designation").is_none() && p.get("class").is_none() && p.get("length").is_none(), "{p}");
+    apply(&mut s, &mut d);
+    d.withdraw(&mut s);
+
+    // a Ø8.5 bore in a mm design: ISO Metric, M10x1.5, an inside class
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 30, "depth": 30, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": {"point": [0, 0, 10], "normal": [0, 0, 1]}}));
+    run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 4.25}));
+    run(&mut s, "extrude", json!({"extent": "through_all", "flip": true, "operation": "cut"}));
+    let b = s.model.bodies[0].id;
+    let bore = s.model.bodies[0].faces().iter().find(|f| f.kind == SurfaceKind::Cylinder).unwrap().id;
+    let mut d = form(&mut s, &THREAD, vec![Sel::Face { body: b, face: bore }]);
+    let picked = ["thread_type", "size", "designation", "class"].map(|k| get(&d, k));
+    assert_eq!(picked, [json!("iso"), json!("10"), json!("M10x1.5"), json!("6H")]);
+    set(&mut d, &THREAD, "direction", json!("left"));
+    let (_, p) = d.command().unwrap();
+    assert_eq!(
+      (p["designation"].clone(), p["class"].clone(), p["left"].clone()),
+      (json!("M10x1.5"), json!("6H"), json!(true))
+    );
+    apply(&mut s, &mut d);
+  }
+
+  #[test]
+  fn thicken_rows() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]}));
+    run(&mut s, "surface.extrude", json!({"distance": 5}));
+    let b = s.model.bodies[0].id;
+    let thickness = THICKEN.inputs.iter().position(|x| x.key() == "thickness").unwrap();
+    let d = form(&mut s, &THICKEN, vec![]);
+    assert_eq!(d.prompt(false).as_deref(), Some("Select Surfaces to Thicken"));
+    assert!(!d.form.shown(&THICKEN, thickness), "the thickness row comes after the pick");
+    let mut d = form(&mut s, &THICKEN, vec![Sel::Body { body: b }]);
+    assert!(d.form.shown(&THICKEN, thickness));
+    // Direction Symmetric; a negative thickness thickens the other way
+    set(&mut d, &THICKEN, "direction", json!("symmetric"));
+    set(&mut d, &THICKEN, "thickness", json!("-2 mm"));
+    let (_, p) = d.command().unwrap();
+    assert_eq!(
+      (p["symmetric"].clone(), p["flip"].clone(), p["thickness"].clone()),
+      (json!(true), json!(true), json!("2 mm"))
+    );
+    assert!(p.get("direction").is_none() && p.get("chain").is_none(), "{p}");
+    apply(&mut s, &mut d);
+    // (Symmetric: the thickness on each side)
+    assert!((volume(&s) - 20.0 * 5.0 * 4.0).abs() < 1e-3, "{}", volume(&s));
+  }
+
+  #[test]
+  fn boundary_fill_tools_are_bodies_and_planes() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+    run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 10}));
+    let plane = s.design.features.last().unwrap().id;
+    let d = form(&mut s, &BOUNDARY_FILL, vec![]);
+    assert_eq!(d.prompt(false).as_deref(), Some("Select bodies & planes"));
+    let b = s.model.bodies[0].id;
+    let mut d = form(&mut s, &BOUNDARY_FILL, vec![Sel::Body { body: b }, Sel::Feature { feature: plane }]);
+    let pi = BOUNDARY_FILL.inputs.iter().position(|x| x.key() == "planes").unwrap();
+    assert_eq!(d.form.values[pi], json!([{"feature": plane.0}]));
+    assert!(crate::forms::State::hidden(&BOUNDARY_FILL, pi), "no Plane drop-down");
+    let ci = BOUNDARY_FILL.inputs.iter().position(|x| x.key() == "cells").unwrap();
+    d.refresh_cells(&BOUNDARY_FILL, ci, "tools", &s);
+    assert_eq!(d.form.cells.len(), 2, "{:?}", d.form.cells);
+    let upper = d.form.cells.iter().max_by(|a, b| a.0[2].total_cmp(&b.0[2])).unwrap().0;
+    set(&mut d, &BOUNDARY_FILL, "cells", json!([upper]));
+    set(&mut d, &BOUNDARY_FILL, "remove_tools", json!(true));
+    apply(&mut s, &mut d);
+    assert!((volume(&s) - 4000.0).abs() < 1e-3, "{}", volume(&s));
   }
 
   #[test]
@@ -1625,10 +1716,29 @@ mod tests {
       let b = &s.model.bodies[i];
       Sel::Face { body: b.id, face: b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id }
     };
-    let sel = vec![top(&s, 0), top(&s, 1)];
-    let mut d = form(&mut s, &REPLACE_FACE, sel);
+    // Fusion's rows: Source Faces stays active after a pick and OK waits for a target (no
+    // error line); the target is picked once its chip is clicked
+    let source = top(&s, 0);
+    let mut d = form(&mut s, &REPLACE_FACE, vec![source]);
+    let labels: Vec<&str> = REPLACE_FACE
+      .inputs
+      .iter()
+      .map(|x| match x {
+        Input::Pick { label, .. } | Input::Check { label, .. } => *label,
+        _ => "",
+      })
+      .collect();
+    assert_eq!(labels, ["Source Faces", "Tangent Chain", "Target Faces"]);
+    assert_eq!((d.form.row, d.form.values[1].clone()), (0, json!(false)), "Tangent Chain starts off");
+    assert_eq!(d.prompt(false).as_deref(), Some("Select faces to replace"));
+    assert!(!d.ok_enabled() && d.error.is_none());
+    d.form.row = 2;
+    let target = top(&s, 1);
+    s.selection.push(target);
+    d.form.sync(&REPLACE_FACE, &s, None);
     assert_eq!(d.form.values[0].as_array().unwrap().len(), 1, "the target is not a source face");
-    assert!(!d.form.values[1].is_null());
+    assert!(!d.form.values[2].is_null());
+    assert!(d.ok_enabled());
     apply(&mut s, &mut d);
     assert!((s.model.bodies[0].shape.mass().unwrap().volume - 6000.0).abs() < 1e-3);
   }
@@ -1664,6 +1774,7 @@ mod tests {
     run(&mut s, "sketch.rect", json!({"corner1": [-4, -2], "corner2": [4, 2]}));
     let mut d = Dialog::blank(Kind::Sweep);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     d.path = Some(path);
     d.solid.twist = "90 deg".into();
     apply(&mut s, &mut d);
@@ -1687,7 +1798,7 @@ mod tests {
     let mut d = Dialog::blank(Kind::Loft);
     let interior = |s: &Session, sk: FeatureId| s.model.sketches[&sk].profiles[0].interior_point();
     d.sections = vec![(a.0, interior(&s, a)), (b.0, interior(&s, b))];
-    d.solid.rails = vec![rail];
+    d.solid.rails = vec![(rail, Vec::new())];
     apply(&mut s, &mut d);
     let m = s.model.bodies[0].shape.mass().unwrap();
     assert!((m.bbox_max.x - 15.0).abs() < 0.3 && (m.bbox_min.x + 10.0).abs() < 0.3, "{m:?}");
@@ -1731,6 +1842,7 @@ mod tests {
     run(&mut s, "sketch.rect", json!({"corner1": [0, -2], "corner2": [10, 2]}));
     let mut d = Dialog::blank(Kind::Sweep);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     d.path = Some(path);
     d.solid.rail = Some(rail);
     d.solid.rail2 = Some(rail2);
@@ -1753,6 +1865,7 @@ mod tests {
     run(&mut s, "sketch.rect", json!({"corner1": [20, 9], "corner2": [22, 11]}));
     let mut d = Dialog::blank(Kind::Sweep);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     run(&mut s, "sketch.finish", json!({}));
     d.path = Some(path);
     d.op = "new_body";

@@ -57,15 +57,22 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       cells(s, &tools, &planes)
     })(),
     "replace_face" => (|| {
+      let mut picked = p.get("faces").and_then(Value::as_array).cloned().ok_or(CmdError::new("missing 'faces'"))?;
+      // Fusion's Tangent Chain: the faces that continue the picked ones smoothly are replaced too
+      if p.get("tangent_chain").and_then(Value::as_bool).unwrap_or(false) {
+        picked = tangent_faces(s, picked);
+      }
       let mut faces = Vec::new();
-      for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
+      for f in &picked {
         faces.push(face_ref(s, f)?);
       }
       if faces.is_empty() {
         return Err(CmdError::new("no faces given"));
       }
-      let target = p.get("target").map(|v| face_ref(s, v)).transpose()?;
-      let plane = p.get("plane").map(|v| plane_ref(s, v)).transpose()?;
+      // a target that names a plane (an origin or construction plane) is the plane
+      let target_plane = p.get("target").filter(|v| v.is_string() || v.get("feature").is_some());
+      let target = p.get("target").filter(|_| target_plane.is_none()).map(|v| face_ref(s, v)).transpose()?;
+      let plane = p.get("plane").or(target_plane).map(|v| plane_ref(s, v)).transpose()?;
       if target.is_none() && plane.is_none() {
         return Err(CmdError::new("missing 'target' (a face) or 'plane'"));
       }
@@ -247,7 +254,7 @@ pub(crate) fn shell(s: &mut Session, p: &Value) -> CmdResult {
 
 /// The picked `{body, face}` faces and every face joined to them across a smooth edge (Fusion's
 /// tangent chain), e.g. a box's side faces and the rounds between them. Other picks pass through.
-fn tangent_faces(s: &Session, picked: Vec<Value>) -> Vec<Value> {
+pub(crate) fn tangent_faces(s: &Session, picked: Vec<Value>) -> Vec<Value> {
   let mut out = picked.clone();
   for v in &picked {
     let (Some(b), Some(f)) = (v.get("body").and_then(Value::as_u64), v.get("face").and_then(Value::as_u64)) else {

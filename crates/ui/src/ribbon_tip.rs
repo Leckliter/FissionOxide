@@ -23,19 +23,22 @@ pub(crate) fn title(label: &str, key: &str) -> String {
   if key.is_empty() { label.to_string() } else { format!("{label} ({key})") }
 }
 
-/// Shows the tooltip of the ribbon button `resp` for the command `label` on the `scope` toolbar;
-/// `missing` adds "Not in FissionOxide yet", `key` is its shortcut (empty for none).
+/// Shows the tooltip of the ribbon button `resp` for the command `label` on the `scope` toolbar,
+/// its texts looked up under `lookup` (the label, or a tab's own version of it such as
+/// [`tips::SURFACE_EXTRUDE`]); `missing` adds "Not in FissionOxide yet", `key` is its shortcut
+/// (empty for none).
 pub(crate) fn show(
   resp: egui::Response,
   scope: Scope,
   label: &'static str,
+  lookup: &str,
   icon: Icon,
   tint: Tint,
   missing: bool,
   key: &str,
 ) -> egui::Response {
-  let tip = tips::tip(scope, label);
-  let illustrated = tips::illustrated(scope, label);
+  let tip = tips::tip(scope, lookup);
+  let illustrated = tips::illustrated(scope, lookup);
   let ctx = resp.ctx.clone();
   let now = ctx.input(|i| i.time);
   // (hovered since, last seen hovered): a gap means the pointer left and came back

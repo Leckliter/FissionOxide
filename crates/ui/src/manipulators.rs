@@ -210,6 +210,9 @@ pub struct State {
   pub handle: Option<crate::handles::HandleDrag>,
   /// The floating value box beside the drag arrow (see [`crate::value_box`]).
   pub value_box: crate::value_box::State,
+  /// While the dialog's drag arrow is dragged: its value and the axis parameter where the
+  /// pointer grabbed it.
+  pub arrow_grab: Option<(f64, f64)>,
 }
 
 /// The value box of a handle: its text while it is being typed.

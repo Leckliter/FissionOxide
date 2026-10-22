@@ -839,6 +839,22 @@ impl Store {
     }
   }
 
+  /// The file a translated upload came from (`None` = latest version): its stored name and bytes,
+  /// or `None` when the version wasn't translated from a file.
+  pub fn read_original(&self, item: &str, version: Option<u32>) -> Result<Option<(String, Vec<u8>)>> {
+    let it = self.item(item)?;
+    let v = match version {
+      Some(n) => it.version(n).ok_or_else(|| StoreError::NotFound(format!("{} has no version {n}", it.name)))?,
+      None => it.latest().ok_or_else(|| StoreError::NotFound(format!("{} has no versions", it.name)))?,
+    };
+    let Some(name) = v.original.clone() else { return Ok(None) };
+    let path = match &self.remote {
+      Some(conn) => conn.cached_file(item, &name)?,
+      None => self.item_dir(item).join(&name),
+    };
+    Ok(Some((name, std::fs::read(path)?)))
+  }
+
   pub fn read_version(&self, item: &str, version: Option<u32>) -> Result<Vec<u8>> {
     let path = self.version_path(item, version)?;
     if self.remote.is_some() {

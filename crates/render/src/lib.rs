@@ -297,9 +297,36 @@ pub struct Mesh {
 
 impl Mesh {
   /// Drawn see-through (colour alpha below 255): after the opaque geometry, blended, without
-  /// writing depth.
+  /// writing depth. One without a pick id ([`NO_ID`]) leaves the ids behind it alone too.
   pub fn transparent(&self) -> bool {
     self.color[3] < 255
+  }
+}
+
+/// A flat see-through quad drawn with the scene's transparent meshes: hidden by what is in front
+/// of it, blended over what is behind, unlit, writing neither depth nor pick ids. The viewport's
+/// origin planes are these: they keep their size on screen, so they change with the camera and
+/// are handed to the renderer apart from the scene.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Quad {
+  pub corners: [[f32; 3]; 4],
+  pub color: [u8; 4],
+}
+
+impl Quad {
+  /// The quad as a mesh of two triangles.
+  pub fn mesh(&self) -> Mesh {
+    let [a, b, c, _] = self.corners.map(Vec3::from);
+    let n = (b - a).cross(c - a).normalize_or_zero().to_array();
+    Mesh {
+      positions: self.corners.to_vec(),
+      normals: vec![n; 4],
+      indices: vec![0, 1, 2, 0, 2, 3],
+      id: NO_ID,
+      color: self.color,
+      unlit: true,
+      ..Default::default()
+    }
   }
 }
 
@@ -347,7 +374,10 @@ pub struct Marker {
 }
 
 /// Fusion's visual styles (Display Settings ▸ Visual Style): how body surfaces and their edges
-/// are drawn, plus two line-drawing styles.
+/// are drawn, plus two line-drawing styles (`view.render` only; Fusion's menu has six rows).
+///
+/// Fusion's default, Shaded, draws the bodies' edges in light grey and lets them be picked, so
+/// [`VisualStyle::Shaded`] draws them too; Shaded with Visible Edges Only looks the same here.
 ///
 /// Body surfaces are the meshes marked [`Mesh::analyze`]; their edges are the depth-tested lines
 /// with a pick id (sketch profiles, the grid and construction geometry draw as they always do).
@@ -356,8 +386,8 @@ pub struct Marker {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VisualStyle {
-  Shaded,
   #[default]
+  Shaded,
   ShadedVisibleEdges,
   ShadedHiddenEdges,
   /// Every edge, nothing hidden: the surfaces aren't drawn at all.
@@ -424,9 +454,9 @@ impl VisualStyle {
     matches!(self, VisualStyle::HiddenLine | VisualStyle::VisibleLine)
   }
 
-  /// Body edges are drawn.
+  /// Body edges are drawn (in every style, as Fusion's Shaded draws them too).
   pub fn edges(self) -> bool {
-    self != VisualStyle::Shaded
+    true
   }
 
   /// Body silhouettes are drawn as edges: in every style that doesn't shade the surfaces.
@@ -679,16 +709,28 @@ impl Frame {
 pub struct Effects {
   /// The bodies' outline cast onto the ground by a light high above, darkened.
   pub ground_shadow: bool,
-  /// The bodies mirrored under a glossy ground.
+  /// The bodies mirrored under a glossy ground (Fusion's Ground Reflection).
   pub reflections: bool,
   /// A see-through ground plane.
   pub ground_plane: bool,
+  /// The environment's image behind the model. Kept, not drawn yet.
+  #[serde(default)]
+  pub environment_dome: bool,
+  /// Bodies casting shadows onto each other. Kept, not drawn yet.
+  #[serde(default)]
+  pub object_shadow: bool,
+  /// Ambient occlusion. Kept, not drawn yet.
+  #[serde(default)]
+  pub ambient_occlusion: bool,
+  /// Anti-aliasing. Kept, not drawn yet.
+  #[serde(default)]
+  pub anti_aliasing: bool,
 }
 
 impl Effects {
   /// Adds the ground, shadow and reflections to a built scene. They have no pick id.
   pub fn apply(self, scene: &mut Scene) {
-    if self == Effects::default() {
+    if !(self.ground_shadow || self.reflections || self.ground_plane) {
       return;
     }
     let bodies: Vec<&Mesh> = scene.meshes.iter().filter(|m| m.analyze).collect();
@@ -1180,7 +1222,9 @@ fn raster_tri(
         }
         p[3] = 255;
       }
-      if let Some(slot) = f.ids.get_mut(i) {
+      if (color[3] == 255 || id != NO_ID)
+        && let Some(slot) = f.ids.get_mut(i)
+      {
         *slot = id;
       }
     }
@@ -1405,6 +1449,40 @@ mod tests {
     assert!(f.rgba[(row * 200 + 100) * 4 + 2] > 60);
   }
 
+  /// A [`Quad`] (an origin plane) is hidden by a body in front of it, blends over one behind it,
+  /// and leaves that body's pick id alone.
+  #[test]
+  fn quads_hide_behind_bodies_and_pick_nothing() {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Top);
+    cam.distance = 100.0;
+    let q = |z: f32| Quad {
+      corners: [[-10.0, -10.0, z], [10.0, -10.0, z], [10.0, 10.0, z], [-10.0, 10.0, z]],
+      color: [0, 0, 255, 128],
+    };
+    let px = |f: &Frame| f.rgba[(50 * 200 + 100) * 4..(50 * 200 + 100) * 4 + 3].to_vec();
+    // behind the body: hidden
+    let f = render(
+      &Scene { meshes: vec![quad(5.0, [255, 0, 0, 255], 1), q(0.0).mesh()], ..Default::default() },
+      &cam,
+      200,
+      100,
+    );
+    let body =
+      px(&render(&Scene { meshes: vec![quad(5.0, [255, 0, 0, 255], 1)], ..Default::default() }, &cam, 200, 100));
+    assert_eq!(px(&f), body, "the body covers it");
+    // in front: blended over the body, which still picks
+    let f = render(
+      &Scene { meshes: vec![quad(0.0, [255, 0, 0, 255], 1), q(5.0).mesh()], ..Default::default() },
+      &cam,
+      200,
+      100,
+    );
+    let c = px(&f);
+    assert!(c[0] > 90 && c[2] > 90, "blended: {c:?}");
+    assert_eq!(f.pick(100.0, 50.0, 0, |_| true), 1, "the body behind it still picks");
+  }
+
   /// A body face at z = 5 over an edge at z = 0, from the top.
   fn styled(style: VisualStyle) -> Frame {
     let mut cam = Camera::default();
@@ -1622,8 +1700,8 @@ mod tests {
       assert_eq!(s.label().starts_with("Shaded"), s.shaded());
       assert_eq!(s.label().contains("Hidden"), s.hidden_edges());
     }
-    assert!(!VisualStyle::Shaded.edges() && !VisualStyle::Wireframe.occludes());
-    assert_eq!(VisualStyle::default(), VisualStyle::ShadedVisibleEdges);
+    assert!(VisualStyle::Shaded.edges() && !VisualStyle::Wireframe.occludes());
+    assert_eq!(VisualStyle::default(), VisualStyle::Shaded);
     for s in VisualStyle::ALL {
       assert_eq!(VisualStyle::parse(s.name()), Some(s));
       assert_eq!(s.silhouettes(), !s.shaded());
@@ -1672,7 +1750,7 @@ mod tests {
     assert_eq!(scene.meshes.len(), 2, "no effects, nothing added");
 
     let mut scene = base.clone();
-    Effects { ground_shadow: true, reflections: true, ground_plane: true }.apply(&mut scene);
+    Effects { ground_shadow: true, reflections: true, ground_plane: true, ..Default::default() }.apply(&mut scene);
     let added = &scene.meshes[2..];
     assert_eq!(added.len(), 3, "reflection, ground, shadow");
     let (refl, ground, shadow) = (&added[0], &added[1], &added[2]);

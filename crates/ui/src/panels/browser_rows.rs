@@ -25,19 +25,13 @@ pub(crate) fn user_name() -> String {
 
 /// Whether the design has never been saved (no hub version, no file).
 pub(crate) fn unsaved(app: &App) -> bool {
-  app.s.hub.is_none() && app.s.path.is_none()
+  crate::documents::unsaved(&app.s)
 }
 
 /// The design's name as the tab and title show it: the file's stem, else the design name.
 /// The document's name: its file's stem once saved, else the design's name.
 pub(crate) fn doc_name(app: &App) -> String {
-  app
-    .s
-    .path
-    .as_ref()
-    .and_then(|p| p.file_stem())
-    .map(|n| n.to_string_lossy().to_string())
-    .unwrap_or_else(|| app.s.design.name.clone())
+  crate::documents::doc_name(&app.s)
 }
 
 /// The design's version: the hub's, else v1 for a file.
@@ -48,16 +42,6 @@ fn version(app: &App) -> u32 {
 /// The root browser row: "(Unsaved)" until the design is saved, then "Name v1", as in Fusion.
 pub(crate) fn root_label(app: &App) -> String {
   if unsaved(app) { "(Unsaved)".into() } else { format!("{} v{}", doc_name(app), version(app)) }
-}
-
-/// The document tab: "Untitled" (with a lock) until saved, then "Name v1", starred when dirty.
-pub(crate) fn tab_label(app: &App) -> String {
-  if unsaved(app) {
-    doc_name(app)
-  } else {
-    let star = if app.s.dirty { "*" } else { "" };
-    format!("{} v{}{star}", doc_name(app), version(app))
-  }
 }
 
 /// The window title, as Fusion's "Untitled* (user) - Autodesk Fusion".
@@ -501,7 +485,7 @@ pub(crate) fn run_origin_folder_cmd(app: &mut App, cmd: RowCmd) {
     RowCmd::ShowHide => origin_show_hide(app),
     RowCmd::ShowAll => {
       app.origin_shown = true;
-      app.objects.origins = true;
+      app.objects.show_origin();
       for item in OriginItem::ALL {
         origin::set_eye(app, item, true);
       }
@@ -524,7 +508,8 @@ pub(crate) fn run_origin_folder_cmd(app: &mut App, cmd: RowCmd) {
 
 /// The Origin folder's children, as Fusion's: O, X, Y, Z, XY, XZ, YZ, each with its own eye
 /// (greyed while the folder is hidden). A click selects the item (status "XZ Plane") whether or
-/// not it shows; a double-click on a plane sketches on it. Hovering a row highlights nothing.
+/// not it shows; a double-click on a plane sketches on it. Hovering a row lights its item in
+/// the canvas as hovering the item there does.
 pub(crate) fn origin_children(app: &mut App, ui: &mut egui::Ui, folder: egui::Id) {
   for item in OriginItem::ALL {
     let picked = origin::picked(app) == Some(item);
@@ -542,6 +527,9 @@ pub(crate) fn origin_children(app: &mut App, ui: &mut egui::Ui, folder: egui::Id
     );
     if ev.eye {
       origin::toggle_eye(app, item);
+    }
+    if ev.response.as_ref().is_some_and(|r| r.hovered()) {
+      app.row_hover = Some(origin::RowHover::Origin(item));
     }
     if let Some(r) = &ev.response
       && !app.origin_shown
@@ -595,6 +583,80 @@ pub(crate) fn run_origin_item_cmd(app: &mut App, item: OriginItem, cmd: RowCmd) 
   }
 }
 
+// ---------------------------------------------------------------- construction planes
+
+/// A construction plane row's menu, as Fusion's.
+pub(crate) fn construction_plane_menu(app: &App, fid: fox_engine::model::FeatureId) -> Vec<Option<RowItem>> {
+  let shown = crate::construction::eye(app, fid);
+  vec![
+    row_item(Icon::Folder, "Move to Group", RowCmd::NotYet),
+    row_item(Icon::Select, "Create Selection Set", RowCmd::NotYet),
+    None,
+    row_item(Icon::Sketch, "Create Sketch", RowCmd::CreateSketch),
+    row_item(Icon::Plane, "Offset Plane", RowCmd::OffsetPlane),
+    None,
+    row_item(Icon::Plane, "Edit Construction Plane", RowCmd::EditFeature),
+    row_item(Icon::Configure, "Configure", RowCmd::Configure),
+    None,
+    row_key(Icon::Remove, "Delete", "Del", RowCmd::Delete),
+    row_item(Icon::Params, "Rename", RowCmd::Rename),
+    None,
+    row_item(Icon::LookAt, "Look At", RowCmd::LookAt),
+    row_key(if shown { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", "V", RowCmd::ShowHide),
+    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
+    row_item(Icon::History, "Find in Timeline", RowCmd::FindInTimeline),
+  ]
+}
+
+/// Runs a construction plane row's menu command (Rename is begun in the row itself).
+pub(crate) fn run_construction_plane_cmd(app: &mut App, fid: fox_engine::model::FeatureId, cmd: RowCmd) {
+  let plane = json!({"feature": fid.0});
+  let pl = app.s.model.planes.get(&fid).copied();
+  match cmd {
+    RowCmd::CreateSketch => app.create_sketch(plane),
+    RowCmd::OffsetPlane => {
+      app.s.selection.clear();
+      origin::clear(app);
+      app.start(Kind::OffsetPlane);
+      let label = app.s.design.feature(fid).map(|f| f.name.clone()).unwrap_or_default();
+      if let Some(d) = app.dialog.as_mut() {
+        d.use_plane(&mut app.s, plane, label);
+      }
+    }
+    RowCmd::EditFeature => super::edit_feature(app, fid),
+    RowCmd::Configure => {
+      // the plane's suppression becomes a column of the configuration table
+      if let Some(first) = app.s.design.configurations.list.first().map(|c| c.name.clone()) {
+        let suppressed = app.s.design.feature(fid).is_some_and(|f| f.suppressed);
+        app.run("config.set", json!({"configuration": first, "feature": fid.0, "suppressed": suppressed}));
+      }
+      crate::config_ui::open_table();
+    }
+    RowCmd::Delete => {
+      if crate::construction::picked(app) == Some(fid) {
+        origin::clear(app);
+      }
+      app.run("feature.delete", json!({"feature": fid.0}));
+    }
+    RowCmd::LookAt => {
+      if let Some(pl) = pl {
+        app.look_at_plane(&pl);
+      }
+    }
+    RowCmd::ShowHide => crate::construction::toggle_eye(app, fid),
+    RowCmd::FindInWindow => {
+      if let Some(pl) = pl {
+        marking::find_plane_in_window(app, &pl);
+      }
+    }
+    RowCmd::FindInTimeline => {
+      origin::clear(app);
+      app.s.selection = vec![fox_engine::Sel::Feature { feature: fid }];
+    }
+    _ => {}
+  }
+}
+
 // ---------------------------------------------------------------- the Units row
 
 /// The Units row's menu: Change Active Units, as Fusion's.
@@ -641,24 +703,116 @@ mod tests {
     app
   }
 
+  /// The Construction folder lists a plane once its Offset Plane is OK'd (not while previewed);
+  /// the plane row's menu is Fusion's, and its commands act on the plane.
+  #[test]
+  fn construction_plane_rows_follow_fusion() {
+    let mut app = App::with_session(Session::default());
+    app.start(Kind::OffsetPlane);
+    assert_eq!(app.s.model.planes.len(), 1, "previewed");
+    assert!(crate::construction::planes(&app).is_empty(), "not in the browser before OK");
+    app.dialog = None;
+    let planes = crate::construction::planes(&app);
+    assert_eq!(planes.len(), 1);
+    let fid = planes[0].0;
+    assert!(app.construction_shown, "the folder's eye is on");
+    assert_eq!(
+      labels(&construction_plane_menu(&app, fid)),
+      [
+        "Move to Group",
+        "Create Selection Set",
+        "-",
+        "Create Sketch",
+        "Offset Plane",
+        "-",
+        "Edit Construction Plane",
+        "Configure",
+        "-",
+        "Delete",
+        "Rename",
+        "-",
+        "Look At",
+        "Show/Hide",
+        "Find in Window",
+        "Find in Timeline",
+      ]
+    );
+    let keys: Vec<Option<&str>> = construction_plane_menu(&app, fid).iter().flatten().map(|i| i.key).collect();
+    assert_eq!(keys.iter().flatten().collect::<Vec<_>>(), [&"Del", &"V"]);
+    // Show/Hide is the row's eye
+    run_construction_plane_cmd(&mut app, fid, RowCmd::ShowHide);
+    assert!(!crate::construction::eye(&app, fid));
+    run_construction_plane_cmd(&mut app, fid, RowCmd::ShowHide);
+    assert!(crate::construction::eye(&app, fid));
+    run_construction_plane_cmd(&mut app, fid, RowCmd::LookAt);
+    run_construction_plane_cmd(&mut app, fid, RowCmd::FindInWindow);
+    run_construction_plane_cmd(&mut app, fid, RowCmd::FindInTimeline);
+    assert_eq!(app.s.selection, vec![Sel::Feature { feature: fid }]);
+    // Offset Plane starts from this plane: a second plane 10 mm past the first
+    run_construction_plane_cmd(&mut app, fid, RowCmd::OffsetPlane);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::OffsetPlane));
+    let made = app.dialog.as_ref().and_then(|d| d.previewed_plane()).expect("previewed");
+    assert!((app.s.model.planes[&made].origin.z - 20.0).abs() < 1e-9, "{:?}", app.s.model.planes[&made]);
+    app.cancel_dialog();
+    run_construction_plane_cmd(&mut app, fid, RowCmd::EditFeature);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.editing == Some(fid)));
+    app.cancel_dialog();
+    run_construction_plane_cmd(&mut app, fid, RowCmd::CreateSketch);
+    assert!(app.s.edit_sketch.is_some());
+    app.finish_sketch();
+    run_construction_plane_cmd(&mut app, fid, RowCmd::Delete);
+    assert!(app.s.design.feature(fid).is_none());
+  }
+
+  /// V shows or hides what is picked: a construction plane (it stays picked), an origin item, a
+  /// selected sketch; with nothing to show or hide it says what to select.
+  #[test]
+  fn v_toggles_the_picked_items_visibility() {
+    let mut app = App::with_session(Session::default());
+    let v = app.run("plane.offset", json!({"plane": "xy", "offset": 5})).unwrap();
+    let fid = fox_engine::model::FeatureId(v["feature"].as_u64().unwrap() as u32);
+    super::super::pick_plane(&mut app, json!({"feature": fid.0}));
+    app.toggle_visibility();
+    assert!(!crate::construction::eye(&app, fid));
+    assert_eq!(crate::construction::picked(&app), Some(fid), "still selected");
+    app.toggle_visibility();
+    assert!(crate::construction::eye(&app, fid));
+    origin::pick(&mut app, OriginItem::Y);
+    app.toggle_visibility();
+    assert!(!origin::eye(&app, OriginItem::Y));
+    origin::clear(&mut app);
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.unwrap();
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [5, 5]}));
+    app.finish_sketch();
+    app.s.selection = vec![Sel::Feature { feature: sk }];
+    let shown = fox_engine::scene::sketch_visible(&app.s, sk);
+    app.toggle_visibility();
+    assert_ne!(fox_engine::scene::sketch_visible(&app.s, sk), shown);
+    app.s.selection.clear();
+    app.status = None;
+    app.toggle_visibility();
+    assert_eq!(app.hint.as_deref(), Some("Show/Hide: select bodies, faces or edges first"));
+  }
+
   #[test]
   fn root_labels_follow_fusion() {
     let mut app = App::with_session(Session::default());
     assert_eq!(root_label(&app), "(Unsaved)");
-    assert_eq!(tab_label(&app), "Untitled");
+    assert_eq!(crate::documents::tab_label(&app.s), "Untitled");
     let user = user_name();
     assert_eq!(window_title(&app), format!("Untitled ({user}) - FissionOxide"));
     app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
     assert!(app.s.dirty);
     assert_eq!(window_title(&app), format!("Untitled* ({user}) - FissionOxide"));
-    assert_eq!(tab_label(&app), "Untitled", "the tab shows the lock, not a star, until saved");
+    assert_eq!(crate::documents::tab_label(&app.s), "Untitled", "the tab shows the lock, not a star, until saved");
     // saved to a file: the name and version show, the tab stars its unsaved changes
     app.s.path = Some(std::path::PathBuf::from("/tmp/Bracket.fox"));
     assert_eq!(root_label(&app), "Bracket v1");
-    assert_eq!(tab_label(&app), "Bracket v1*");
+    assert_eq!(crate::documents::tab_label(&app.s), "Bracket v1*");
     assert_eq!(window_title(&app), format!("Bracket v1* ({user}) - FissionOxide"));
     app.s.dirty = false;
-    assert_eq!(tab_label(&app), "Bracket v1");
+    assert_eq!(crate::documents::tab_label(&app.s), "Bracket v1");
   }
 
   #[test]
@@ -904,9 +1058,15 @@ mod tests {
     assert_eq!(labels(&origin_item_menu(&app, OriginItem::Z)), ["Show/Hide"]);
     run_origin_item_cmd(&mut app, OriginItem::Z, RowCmd::ShowHide);
     assert!(origin::eye(&app, OriginItem::Z) && !origin::eye(&app, OriginItem::X));
-    app.objects.origins = false;
+    app.objects.origin_planes = false;
+    app.objects.origin_points = false;
     run_origin_folder_cmd(&mut app, RowCmd::ShowAll);
-    assert!(app.origin_shown && app.objects.origins && OriginItem::ALL.iter().all(|i| origin::visible(&app, *i)));
+    assert!(
+      app.origin_shown
+        && app.objects.origin_planes
+        && app.objects.origin_points
+        && OriginItem::ALL.iter().all(|i| origin::visible(&app, *i))
+    );
     run_origin_folder_cmd(&mut app, RowCmd::FindInWindow);
     assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "{:?}", app.status);
   }

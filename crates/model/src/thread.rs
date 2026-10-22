@@ -62,31 +62,13 @@ pub struct ThreadDims {
   pub root: f64,
 }
 
-/// ISO coarse pitches by nominal diameter (mm).
-const ISO_COARSE: [(f64, f64); 18] = [
-  (1.0, 0.25),
-  (1.6, 0.35),
-  (2.0, 0.4),
-  (2.5, 0.45),
-  (3.0, 0.5),
-  (4.0, 0.7),
-  (5.0, 0.8),
-  (6.0, 1.0),
-  (8.0, 1.25),
-  (10.0, 1.5),
-  (12.0, 1.75),
-  (14.0, 2.0),
-  (16.0, 2.0),
-  (20.0, 2.5),
-  (24.0, 3.0),
-  (30.0, 3.5),
-  (36.0, 4.0),
-  (42.0, 4.5),
-];
-
 /// The ISO coarse pitch for a thread of this major diameter (nearest size).
 pub fn coarse_pitch(diameter: f64) -> f64 {
-  ISO_COARSE.iter().min_by(|a, b| (a.0 - diameter).abs().total_cmp(&(b.0 - diameter).abs())).map(|s| s.1).unwrap_or(1.0)
+  ISO_SIZES
+    .iter()
+    .min_by(|a, b| (a.0 - diameter).abs().total_cmp(&(b.0 - diameter).abs()))
+    .map(|s| s.1[0])
+    .unwrap_or(1.0)
 }
 
 /// Nominal diameter and pitch of a designation such as `M10x1.5`, `M10 x 1.5` or `M10` (coarse).
@@ -101,6 +83,64 @@ pub fn parse_designation(s: &str) -> Option<(f64, f64)> {
     }
   };
   (d > 0.0 && p > 0.0 && p < d).then_some((d, p))
+}
+
+/// ISO metric sizes (ISO 261, first-choice diameters): nominal diameter (mm) and its pitches,
+/// the coarse pitch first.
+pub const ISO_SIZES: [(f64, &[f64]); 18] = [
+  (1.0, &[0.25, 0.2]),
+  (1.6, &[0.35, 0.2]),
+  (2.0, &[0.4, 0.25]),
+  (2.5, &[0.45, 0.35]),
+  (3.0, &[0.5, 0.35]),
+  (4.0, &[0.7, 0.5]),
+  (5.0, &[0.8, 0.5]),
+  (6.0, &[1.0, 0.75]),
+  (8.0, &[1.25, 1.0, 0.75]),
+  (10.0, &[1.5, 1.25, 1.0, 0.75]),
+  (12.0, &[1.75, 1.5, 1.25, 1.0]),
+  (14.0, &[2.0, 1.5, 1.25, 1.0]),
+  (16.0, &[2.0, 1.5, 1.0]),
+  (20.0, &[2.5, 2.0, 1.5, 1.0]),
+  (24.0, &[3.0, 2.0, 1.5, 1.0]),
+  (30.0, &[3.5, 3.0, 2.0, 1.5, 1.0]),
+  (36.0, &[4.0, 3.0, 2.0, 1.5]),
+  (42.0, &[4.5, 4.0, 3.0, 2.0, 1.5]),
+];
+
+/// Unified inch screw threads (ASME B1.1): the size as it is named ("10", "1/4"), its basic
+/// major diameter (in) and its threads per inch with their series, coarse first.
+pub const UNIFIED_SIZES: [(&str, f64, &[(f64, &str)]); 25] = [
+  ("0", 0.06, &[(80.0, "UNF")]),
+  ("1", 0.073, &[(64.0, "UNC"), (72.0, "UNF")]),
+  ("2", 0.086, &[(56.0, "UNC"), (64.0, "UNF")]),
+  ("3", 0.099, &[(48.0, "UNC"), (56.0, "UNF")]),
+  ("4", 0.112, &[(40.0, "UNC"), (48.0, "UNF")]),
+  ("5", 0.125, &[(40.0, "UNC"), (44.0, "UNF")]),
+  ("6", 0.138, &[(32.0, "UNC"), (40.0, "UNF")]),
+  ("8", 0.164, &[(32.0, "UNC"), (36.0, "UNF")]),
+  ("10", 0.19, &[(24.0, "UNC"), (32.0, "UNF")]),
+  ("12", 0.216, &[(24.0, "UNC"), (28.0, "UNF")]),
+  ("1/4", 0.25, &[(20.0, "UNC"), (28.0, "UNF"), (32.0, "UNEF")]),
+  ("5/16", 0.3125, &[(18.0, "UNC"), (24.0, "UNF"), (32.0, "UNEF")]),
+  ("3/8", 0.375, &[(16.0, "UNC"), (24.0, "UNF"), (32.0, "UNEF")]),
+  ("7/16", 0.4375, &[(14.0, "UNC"), (20.0, "UNF"), (28.0, "UNEF")]),
+  ("1/2", 0.5, &[(13.0, "UNC"), (20.0, "UNF"), (28.0, "UNEF")]),
+  ("9/16", 0.5625, &[(12.0, "UNC"), (18.0, "UNF"), (24.0, "UNEF")]),
+  ("5/8", 0.625, &[(11.0, "UNC"), (18.0, "UNF"), (24.0, "UNEF")]),
+  ("3/4", 0.75, &[(10.0, "UNC"), (16.0, "UNF"), (20.0, "UNEF")]),
+  ("7/8", 0.875, &[(9.0, "UNC"), (14.0, "UNF"), (20.0, "UNEF")]),
+  ("1", 1.0, &[(8.0, "UNC"), (12.0, "UNF"), (14.0, "UNS"), (20.0, "UNEF")]),
+  ("1 1/8", 1.125, &[(7.0, "UNC"), (12.0, "UNF"), (18.0, "UNEF")]),
+  ("1 1/4", 1.25, &[(7.0, "UNC"), (12.0, "UNF"), (18.0, "UNEF")]),
+  ("1 1/2", 1.5, &[(6.0, "UNC"), (12.0, "UNF"), (18.0, "UNEF")]),
+  ("1 3/4", 1.75, &[(5.0, "UNC")]),
+  ("2", 2.0, &[(4.5, "UNC")]),
+];
+
+/// The minor diameter of a basic 60° thread: the size a tapped hole is drawn at.
+pub fn basic_minor(d: f64, p: f64) -> f64 {
+  d - 1.25 * h(p)
 }
 
 /// Fundamental triangle height.
@@ -231,7 +271,7 @@ pub fn iso_dims(d: f64, p: f64, class: &str, internal: bool) -> Result<ThreadDim
 /// basic minor diameter. Allows half a pitch or 3% of the nominal size, whichever is larger, so
 /// a designation never silently resizes the face to a different size of thread.
 pub fn check_drawn_size(d: f64, p: f64, drawn: f64, internal: bool) -> Result<(), String> {
-  let (want, what) = if internal { (d - 1.25 * h(p), "minor") } else { (d, "major") };
+  let (want, what) = if internal { (basic_minor(d, p), "minor") } else { (d, "major") };
   let tol = (0.5 * p).max(0.03 * d);
   if (drawn - want).abs() > tol {
     let fmt = |v: f64| format!("{:.3}", v).trim_end_matches('0').trim_end_matches('.').to_string();

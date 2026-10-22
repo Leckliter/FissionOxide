@@ -46,10 +46,13 @@ enum Sub {
 /// Context-menu state kept between frames.
 #[derive(Default)]
 pub(crate) struct MenuState {
-  /// Bodies drawn highlighted (the browser or timeline row under the pointer) and the name the
-  /// status bar shows for it.
+  /// Bodies drawn highlighted (the browser or timeline row under the pointer) and that row's
+  /// name (the status bar doesn't show it: Fusion reads out only what is selected).
   pub(crate) peek: Vec<BodyId>,
   pub(crate) peek_label: Option<String>,
+  /// Escape dropped the highlight: it stays off until the pointer moves from where it was
+  /// (`Some(None)` until the pointer's place is noted at the end of the frame).
+  peek_held: Option<Option<egui::Pos2>>,
   next_peek: Vec<BodyId>,
   next_label: Option<String>,
   /// Faces and sketches drawn highlighted: what the timeline feature under the pointer made.
@@ -65,6 +68,8 @@ pub(crate) struct MenuState {
   pub(crate) opacity: Vec<(BodyId, u8)>,
   /// Bodies the canvas can't pick (Selectable/Unselectable); the browser still selects them.
   pub(crate) unselectable: Vec<BodyId>,
+  /// Mesh bodies drawn flat-shaded (a mesh body's Flat Shaded; mesh bodies draw smooth).
+  pub(crate) flat_shaded: Vec<BodyId>,
 }
 
 #[derive(Clone)]
@@ -92,6 +97,8 @@ enum Action {
   /// Selectable/Unselectable: stop the canvas picking the body (or let it again).
   ToggleSelectable(BodyId),
   Workspace(&'static str),
+  /// A row of a mesh body's list (see `panels::mesh_body_menu`).
+  Mesh(BodyId, panels::MeshCmd),
   /// A row that only opens its sub-list.
   Open,
 }
@@ -158,7 +165,11 @@ const APPEARANCE: Cmd = Cmd::Dialog(Kind::Form(&crate::forms::APPEARANCE));
 /// menu offers commands for what was clicked.
 pub fn open(app: &mut App, pos: Pos2) {
   if let Some(h) = app.hover {
-    let sel = h.to_sel();
+    // a mesh body is picked whole
+    let sel = match crate::select::pick_body(&h) {
+      Some(body) if crate::select::is_mesh(&app.s, body) => Sel::Body { body },
+      _ => h.to_sel(),
+    };
     if !app.s.selection.contains(&sel) {
       app.s.selection = vec![sel];
     }
@@ -171,6 +182,8 @@ pub fn open(app: &mut App, pos: Pos2) {
 
 /// What the selection is, for the context-aware ring and list.
 struct Context {
+  /// One mesh body is selected, and nothing else: Fusion's mesh body ring and list.
+  mesh: Option<BodyId>,
   face: Option<(BodyId, u32)>,
   planar_face: bool,
   edge: bool,
@@ -193,7 +206,12 @@ fn context(app: &App) -> Context {
   let feature = sel.iter().find_map(|s| if let Sel::Feature { feature } = s { Some(*feature) } else { None });
   let sketch =
     feature.filter(|f| app.s.design.feature(*f).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })));
+  let mesh = match sel.as_slice() {
+    [Sel::Body { body }] if crate::select::is_mesh(&app.s, *body) => Some(*body),
+    _ => None,
+  };
   Context {
+    mesh,
     face,
     planar_face,
     edge: sel.iter().any(|s| matches!(s, Sel::Edge { .. })),
@@ -362,8 +380,14 @@ fn set_all_visible(app: &mut App, visible: bool) {
   }
 }
 
-/// Highlights bodies in the viewport, and names them in the status bar, while the pointer is
-/// over a browser or timeline row (call it every frame the row is hovered).
+/// Escape after a pick: the browser or timeline row under the pointer stops highlighting what it
+/// made until the pointer moves, so nothing stays lit, as in Fusion.
+pub(crate) fn hold_peek(app: &mut App) {
+  app.ctx_menu.peek_held = Some(None);
+}
+
+/// Highlights bodies in the viewport while the pointer is over a browser or timeline row (call it
+/// every frame the row is hovered).
 pub(crate) fn peek(app: &mut App, bodies: Vec<BodyId>, label: String) {
   app.ctx_menu.next_peek = bodies;
   app.ctx_menu.next_label = Some(label);
@@ -399,10 +423,19 @@ pub(crate) fn peek_sketch(app: &mut App, f: FeatureId) {
 /// After the panels: takes this frame's hover highlight and notes the last command run.
 pub fn end_frame(app: &mut App, ctx: &egui::Context) {
   let m = &mut app.ctx_menu;
-  let bodies = std::mem::take(&mut m.next_peek);
-  let faces = std::mem::take(&mut m.next_faces);
-  let sketches = std::mem::take(&mut m.next_sketches);
-  let label = m.next_label.take();
+  let mut bodies = std::mem::take(&mut m.next_peek);
+  let mut faces = std::mem::take(&mut m.next_faces);
+  let mut sketches = std::mem::take(&mut m.next_sketches);
+  let mut label = m.next_label.take();
+  if let Some(at) = m.peek_held {
+    let now = ctx.pointer_latest_pos();
+    let at = *m.peek_held.insert(at.or(now));
+    if now.is_some() && now == at {
+      (bodies, faces, sketches, label) = (Vec::new(), Vec::new(), Vec::new(), None);
+    } else {
+      m.peek_held = None;
+    }
+  }
   if m.peek != bodies || m.peek_faces != faces || m.peek_sketches != sketches || m.peek_label != label {
     m.peek = bodies;
     m.peek_faces = faces;
@@ -451,7 +484,10 @@ fn ring_items(app: &App, cx: &Context) -> [Option<Item>; 8] {
   }
   // Fusion's ring: Repeat, Delete, Press Pull, Redo, Hole, Sketch ▾, Move/Copy, Undo; the east
   // and south slots follow the selection
-  let (east, south) = if cx.edge {
+  // a mesh body keeps the plain ring (Press Pull and Hole), as Fusion's does
+  let (east, south) = if cx.mesh.is_some() {
+    (Item::cmd(Cmd::Dialog(Kind::PressPull)), Item::cmd(Cmd::Dialog(Kind::Hole)))
+  } else if cx.edge {
     (Item::cmd(Cmd::Dialog(Kind::Fillet)), Item::cmd(Cmd::Dialog(Kind::Chamfer)))
   } else if cx.body_sel {
     (Item::cmd(Cmd::Dialog(Kind::Combine)), Item::cmd(APPEARANCE))
@@ -534,6 +570,28 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
   };
   let properties = || Item::with_label(Cmd::Dialog(Kind::Inspect), "Properties");
   let show_hide = || Item::new(Action::ShowHide, Icon::Eye, "Show/Hide");
+  if let Some(body) = cx.mesh {
+    // Fusion's mesh body list, and only it, as the browser row's with Find in Browser
+    for it in panels::mesh_body_menu(app, body, true) {
+      v.push(it.map(|it| {
+        Item {
+          action: Action::Mesh(body, it.cmd),
+          icon: it.icon,
+          label: it.label,
+          hint: it.key.map(str::to_string),
+          children: match it.cmd {
+            panels::MeshCmd::Opacity => panels::OPACITY_LEVELS
+              .iter()
+              .map(|p| Item::new(Action::Mesh(body, panels::MeshCmd::OpacityTo(*p)), Icon::Body, &format!("{p}%")))
+              .collect(),
+            _ => Vec::new(),
+          },
+          enabled: it.enabled,
+        }
+      }));
+    }
+    return v;
+  }
   if let Some((body, _)) = cx.face {
     // Fusion's face list, and only it: no navigation section and no recent commands
     v.push(Some(Item::greyed(Icon::Select, "Create Selection Set")));
@@ -728,6 +786,10 @@ fn run(app: &mut App, action: Action) {
       }
     }
     Action::Workspace(w) => panels::switch_workspace(app, w),
+    Action::Mesh(body, panels::MeshCmd::Rename) => {
+      app.rename = Some((crate::RenameTarget::Body(body.0), app.s.body_name(body)));
+    }
+    Action::Mesh(body, cmd) => panels::run_mesh_cmd(app, body, cmd),
     Action::Open => {}
   }
 }
@@ -1107,10 +1169,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
     return;
   }
-  let action = picked.map(|it| it.action.clone());
+  let action = picked.filter(|it| it.enabled).map(|it| it.action.clone());
   app.marking = None;
-  if let Some(a) = action {
-    run(app, a);
+  match action {
+    // Copy puts a note on the system clipboard too, which needs the window
+    Some(Action::Mesh(body, panels::MeshCmd::Copy)) => {
+      app.s.selection = vec![Sel::Body { body }];
+      crate::clipboard::copy(app, ctx);
+    }
+    Some(a) => run(app, a),
+    None => {}
   }
 }
 
@@ -1300,7 +1368,7 @@ mod tests {
     assert!(app.ctx_menu.peek.is_empty(), "the fillet doesn't tint the whole body");
     assert_eq!(app.ctx_menu.peek_faces.len(), 1, "{:?}", app.ctx_menu.peek_faces);
     assert_eq!(app.ctx_menu.peek_faces[0].0, body);
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("Fillet1"));
+    assert_eq!(panels::selection_text(&app), None, "a hovered icon reads nothing in the status bar");
     // the scene draws that face in the hover colour and the rest in the body's
     let opts = ViewOptions { peek_faces: app.ctx_menu.peek_faces.clone(), ..Default::default() };
     let (sc, _) = SceneBuilder::default().build(&app.s, &opts);
@@ -1384,13 +1452,70 @@ mod tests {
     app.s.design.units = fox_engine::model::LengthUnit::Mm;
     app.s.selection = vec![Sel::Body { body }];
     assert_eq!(panels::selection_text(&app), Some(app.s.body_name(body)));
-    // a hovered timeline or browser row names itself
+    // a hovered timeline or browser row lights its body but reads nothing (ui-status-readouts)
+    app.s.selection.clear();
     peek(&mut app, vec![body], "Box1".into());
     end_frame(&mut app, &egui::Context::default());
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("Box1"));
+    assert_eq!(panels::selection_text(&app), None);
     assert_eq!(app.ctx_menu.peek, vec![body]);
     end_frame(&mut app, &egui::Context::default());
     assert!(app.ctx_menu.peek.is_empty(), "the highlight goes when the pointer leaves");
+  }
+
+  /// ui-status-readouts: two planar faces read their angle, or their distance when parallel; a
+  /// face and an edge (or a vertex) are each counted, face first, with their least distance.
+  #[test]
+  fn status_bar_reads_out_face_pairs_and_mixed_kinds() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let faces: Vec<_> = app.s.model.bodies[0].faces().iter().map(|f| (f.id, f.normal)).collect();
+    let face = |n: [f64; 3]| {
+      let n = fox_engine::kernel::glam::DVec3::from(n);
+      Sel::Face { body, face: faces.iter().find(|f| f.1.dot(n) > 0.99).unwrap().0 }
+    };
+    let (top, bottom, side) = (face([0.0, 0.0, 1.0]), face([0.0, 0.0, -1.0]), face([1.0, 0.0, 0.0]));
+    app.s.selection = vec![top, side];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Faces | Angle : 90.0 deg"));
+    app.s.selection = vec![top, bottom];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Faces | Min Distance : 10.00 mm"));
+    // an edge of the bottom, then Ctrl+click the top: the face is listed first
+    let b = &app.s.model.bodies[0];
+    let low = b.edges().iter().find(|e| e.start.z.abs() < 1e-6 && e.end.z.abs() < 1e-6).unwrap().id;
+    app.s.selection = vec![Sel::Edge { body, edge: low }, top];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face 1 Edge | Min Distance : 10.00 mm"));
+    app.run("design.units", json!({"unit": "in"}));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face 1 Edge | Min Distance : 0.39 in"));
+    app.run("design.units", json!({"unit": "mm"}));
+    // the reading is kept until the model changes
+    assert!(app.readout_distance.get().is_some());
+    // a vertex and a face
+    let corner = Sel::Vertex { body, edge: low, end: false };
+    app.s.selection = vec![top, corner];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face 1 Vertex | Min Distance : 10.00 mm"));
+    // three items read only their number
+    app.s.selection = vec![top, side, Sel::Edge { body, edge: low }];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("Multiple selections | 3"));
+  }
+
+  /// A sketch point and a sketch curve read both kinds, the point first, and how close they come
+  /// at the document precision ("1 Sketch Point 1 Sketch Circle | Min Distance : 0.683 in").
+  #[test]
+  fn status_bar_reads_out_a_sketch_point_and_a_curve() {
+    let mut app = App::with_session(Session::default());
+    app.run("design.units", json!({"unit": "in"}));
+    let sk = app.run("sketch.create", json!({"plane": "xy"})).unwrap()["sketch"].as_u64().unwrap();
+    let sketch = fox_engine::model::FeatureId(sk as u32);
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 20]}));
+    let circle = app.run("sketch.circle", json!({"center": [60, 10], "radius": 5})).unwrap()["curves"][0].clone();
+    let circle = fox_engine::sketch::CurveId(circle.as_u64().unwrap() as u32);
+    let s = app.s.design.sketch(sketch).unwrap();
+    let corner = s.points.iter().find(|p| (p.x - 40.0).abs() < 1e-9 && (p.y - 20.0).abs() < 1e-9).unwrap().id;
+    app.s.selection = vec![Sel::SketchCurve { sketch, curve: circle }, Sel::SketchPoint { sketch, point: corner }];
+    // √(20² + 10²) − 5 = 17.36 mm
+    assert_eq!(
+      panels::selection_text(&app).as_deref(),
+      Some("1 Sketch Point 1 Sketch Circle | Min Distance : 0.683 in")
+    );
   }
 
   /// In a sketch the readout names the curve's kind with its length as Fusion spaces it
@@ -1431,9 +1556,11 @@ mod tests {
     let corner = s.points.iter().find(|p| (p.x - 40.0).abs() < 1e-9 && (p.y - 20.0).abs() < 1e-9).unwrap().id;
     app.s.selection = vec![Sel::SketchPoint { sketch, point: corner }];
     assert_eq!(panels::selection_text(&app).as_deref(), Some("Sketch Point | X: 1.575 Y: 0.787 Z: 0.00 in"));
-    // hovering reads out the same
+    // hovering reads nothing: only the selection reads out, as in Fusion
     app.s.selection.clear();
     app.hover = Some(fox_engine::scene::Pick::SketchCurve { sketch, curve: short });
+    assert_eq!(panels::selection_text(&app), None);
+    app.s.selection = vec![Sel::SketchCurve { sketch, curve: short }];
     assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Sketch Line | Length : 0.787 in"));
   }
 
@@ -1535,5 +1662,62 @@ mod tests {
     assert_eq!(app.key_for(Cmd::SketchTool(Tool::Arc3)), None);
     assert_eq!(app.key_for(Cmd::Dialog(Kind::Project)).as_deref(), Some("P"));
     assert_eq!(app.key_for(Cmd::Construction).as_deref(), Some("X"));
+  }
+
+  /// A right-click on a mesh body selects it whole and shows Fusion's mesh ring and list: the
+  /// browser row's entries plus Find in Browser, and nothing else.
+  #[test]
+  fn mesh_body_ring_and_list_are_fusions() {
+    let mut app = crate::mesh_body_tests::mesh_and_box();
+    let mesh = app.s.model.bodies.iter().find(|b| b.is_mesh()).unwrap().id;
+    app.hover = Some(fox_engine::scene::Pick::Face { body: mesh, face: 1 });
+    open(&mut app, Pos2::ZERO);
+    assert_eq!(app.s.selection, [Sel::Body { body: mesh }]);
+    let cx = context(&app);
+    let ring = ring_items(&app, &cx);
+    let names: Vec<String> = ring.iter().flatten().map(|i| i.label.clone()).collect();
+    for want in ["Delete", "Undo", "Move/Copy", "Press Pull", "Redo", "Hole", "Sketch"] {
+      assert!(names.iter().any(|n| n == want), "{want} in {names:?}");
+    }
+    let list = overflow_items(&app, &cx);
+    assert_eq!(
+      labels(&list),
+      [
+        "Move/Copy",
+        "Move to Group",
+        "Create Selection Set",
+        "Edit Feature",
+        "Configure",
+        "Physical Material",
+        "Appearance",
+        "Texture Map Controls",
+        "Properties",
+        "Save As Mesh",
+        "Copy",
+        "Cut",
+        "Delete",
+        "Remove",
+        "Rename",
+        "Show/Hide",
+        "Selectable/Unselectable",
+        "Opacity Control",
+        "Find in Browser",
+        "Find in Window",
+        "Flat Shaded",
+        "Direct Edit",
+      ]
+    );
+    let greyed: Vec<&str> = list.iter().flatten().filter(|i| !i.enabled).map(|i| i.label.as_str()).collect();
+    assert_eq!(
+      greyed,
+      ["Move to Group", "Create Selection Set", "Physical Material", "Texture Map Controls", "Cut", "Direct Edit"]
+    );
+    // Flat Shaded toggles the body's shading; Opacity Control's levels set its opacity
+    run(&mut app, Action::Mesh(mesh, panels::MeshCmd::FlatShaded));
+    assert_eq!(app.ctx_menu.flat_shaded, [mesh]);
+    run(&mut app, Action::Mesh(mesh, panels::MeshCmd::OpacityTo(50)));
+    assert_eq!(app.ctx_menu.opacity, [(mesh, 128)]);
+    run(&mut app, Action::Mesh(mesh, panels::MeshCmd::Rename));
+    assert_eq!(app.rename.as_ref().map(|r| r.1.as_str()), Some("lprism"));
   }
 }

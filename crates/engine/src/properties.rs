@@ -233,7 +233,9 @@ fn describe(s: &Session, item: &Item) -> CmdResult {
 fn body_props(s: &Session, body: BodyId) -> CmdResult {
   let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
   let m = b.shape.mass()?;
-  let kind = if b.sheet.is_some() {
+  let kind = if b.is_mesh() {
+    "mesh"
+  } else if b.sheet.is_some() {
     "sheet_metal"
   } else if b.shape.solid_count() > 0 {
     "solid"
