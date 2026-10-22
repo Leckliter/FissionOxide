@@ -1785,7 +1785,7 @@ impl Dialog {
         let need = self.saved.iter().filter(|n| n.is_empty()).count();
         self.origins.len() >= need && (!self.saved[0].is_empty() || self.comps.first().is_some_and(Option::is_some))
       }
-      Kind::Material => !self.bodies.is_empty(),
+      Kind::Material => !self.bodies.is_empty() || self.comps.iter().any(Option::is_some),
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
       Kind::SkCircPattern | Kind::SkScale => !self.curves.is_empty() && self.center.is_some(),
