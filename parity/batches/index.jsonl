@@ -48,7 +48,7 @@
 {"name": "ui-sketch-constraint-solver", "items": 5, "status": "done", "pr": "39c2622", "fixer": "cloud task_729babcb (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-line-heads-up", "items": 2, "status": "done", "pr": "6c6afa8", "fixer": "cloud task_24111eda (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-palette-options", "items": 4, "status": "done", "pr": "53259d5", "fixer": "cloud session (requested 2026-10-21)"}
-{"name": "ui-sketch-hud-expressions", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_f95677bd (requested 2026-10-21 by the coordinator)"}
+{"name": "ui-sketch-hud-expressions", "items": 8, "status": "done", "pr": "d4ef905", "fixer": "cloud task_f95677bd (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-linetype-and-colors", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_bcee3b90 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-palette-look-slice-3d", "items": 5, "status": "done", "pr": "aeafc3d", "fixer": "cloud task_0872a0e8 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-browser-sketch-rows", "items": 7, "status": "ready", "pr": null}
