@@ -1919,13 +1919,8 @@ impl Dialog {
   /// Puts the dialog on an origin plane ("xy", "xz" or "yz"), as its plane chooser would, and
   /// re-previews (the browser's Offset Plane on an origin plane).
   pub(crate) fn use_origin_plane(&mut self, s: &mut Session, plane: &str) {
-    self.use_plane(s, json!(plane), format!("{} plane", plane.to_uppercase()));
-  }
-
-  /// Offset Plane from `plane` (a `sketch.create` plane: an origin plane, `{feature}`, a face).
-  pub(crate) fn use_plane(&mut self, s: &mut Session, plane: Value, label: String) {
-    self.plane = plane;
-    self.plane_label = label;
+    self.plane = json!(plane);
+    self.plane_label = format!("{} plane", plane.to_uppercase());
     self.refresh_manip(s);
     self.preview(s);
   }
