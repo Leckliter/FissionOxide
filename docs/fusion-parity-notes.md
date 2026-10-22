@@ -548,3 +548,16 @@ edit any sheet metal feature. Create Flat Pattern is a face pick and an environm
 panel in FissionOxide; Fusion's Unfold opens a REFOLD ribbon panel. 17 rows in four batches
 (`parity/batches/map-wave30.json`), one match row, one blocked row (subscription commands), five
 fixing-merged keys verified. The area is done; PLASTIC is next.
+
+## 2026-10-22, prober 16: PLASTIC, MANAGE and UTILITIES tabs
+
+The three tabs side by side at 908 px (report `parity/reports/2026-10-22-plastic-manage-utilities.md`).
+On this Personal licence Fusion's PLASTIC tab is SOLID's menus with Web, Rib and Create Form up front;
+the plastic commands (rules, Boss, Snap Fit, Rest, Lip/Groove, Rule Fillet) are not offered, so they are
+recorded blocked. FissionOxide's PLASTIC panels, quick icons and lists match; only tooltip texts differ.
+MANAGE's Bill of Materials is a full palette in Fusion (view and version dropdowns, column settings, empty
+state) and a small dialog in FissionOxide. UTILITIES: Fusion's three-pane Scripts and Add-Ins window
+(Shift+S) against FissionOxide's Plugins window, MAKE's 3D Print skipping the 3D PRINT dialog, the
+Material Browser's tree drawn on one line, and Compute All's "Computed in" message. 10 rows in three
+batches (`parity/batches/map-wave31.json`, two of them reopened keys), six match rows, two blocked rows,
+six fixing-merged keys verified. Both areas are done; the Timeline is next.

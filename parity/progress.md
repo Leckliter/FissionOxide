@@ -1,38 +1,48 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 12:20, session "Parity prober 15"
+## Last stop: 2026-10-22, 12:40, session "Parity prober 16"
 
-Finished this session: "SHEET METAL tab: rules, flange, bend, unfold, flat pattern" (done, with a
-not-exercised list in `coverage.md`). Report `parity/reports/2026-10-22-sheet-metal-tab.md`,
-`map-wave30.json`, batches `ui-sheet-rules-library` (4), `ui-sheet-flange-dialog` (4),
-`ui-sheet-flat-pattern-env` (4) and `ui-sheet-menus-dialogs` (5), all `ready` in `index.jsonl` with no
-fixer yet. `ui-sheet-rules-library` and `ui-sheet-flange-dialog` both touch the Flange dialog's Rule row
-(`crates/ui/src/dialogs.rs:3237`); start them one after the other or tell the second to rebase.
-Re-verified: `ui:dialogs:coil-rows`, `ui:dialogs:pipe-rows`, `ui:dialogs:edit-feature-title`,
-`ui:browser:redefine-sketch-plane`, `ui:browser:export-dxf-dialog` (all verified). About 180 other
-keys are still `fixing-merged` from earlier waves; re-verify those that fall inside the area you probe.
+Finished this session: "PLASTIC tab" and "MANAGE (BOM) and UTILITIES tabs" (both done, with
+not-exercised lists in `coverage.md`). Report `parity/reports/2026-10-22-plastic-manage-utilities.md`,
+`map-wave31.json`, batches `ui-manage-bom-palette` (2), `ui-utilities-addins-make` (4) and
+`ui-utilities-tips-status` (4, two of them reopened keys), all `ready` in `index.jsonl` with no fixer yet.
+The three batches touch different files (dialogs.rs Kind::Bom; plugins_ui.rs / panels.rs / customize.rs;
+tips.rs / material_ui.rs / lib.rs) and can run in parallel; `ui-utilities-addins-make` and
+`ui-modify-menu-tooltips` (fixing) both touch `menus.rs`, rebase if needed.
+Fusion's plastic commands (Plastic Rules, Boss, Snap Fit, Rest, Lip/Groove, Rule Fillet) are not offered on
+this Personal licence: `ui:plastic:plastic-features` is `blocked`.
+Verified: `ui:toolbar:tooltip-style`, `ui:toolbar:tooltip-expanded-illustration`, `ui:toolbar:tooltip-texts-solid`,
+`ui:dialogs:rib-rows`, `ui:dialogs:web-rows`, `ui:chrome:3d-print-dialog`. Reopened: `ui:dialogs:manage-materials`
+(library tree overlaps on one line), `ui:chrome:status-dev-messages` (Compute All writes "Computed in 0.0 s").
+About 180 other keys are still `fixing-merged` from earlier waves; re-verify those that fall inside the
+area you probe.
 
 ## Next prober: start here
 
-1. Take the next `todo` in `coverage.md` after the ASSEMBLY row (which needs two saved designs):
-   "PLASTIC tab". Compare the tab's panels and dropdowns, Plastic Rules (Fusion's is likely a library
-   palette like Sheet Metal Rules), every CREATE/MODIFY dialog as it opens and after its first pick
-   (Boss, Snap Fit, Rest, Lip/Groove, Rule Fillet, Shell, Draft), and the results' browser rows,
-   timeline icons and menus.
-2. Re-verify any `fixing-merged` key in that area, and any wave-29/30 key a fixer has set to
-   `fixing-merged` since (`python -c` over `ui-features.jsonl`, status `fixing-merged`, history entries
-   dated after 2026-10-22 12:20 local).
-3. Rebuild before probing: the running binary is `main` at `8b29a812`; kill `fissionoxide.exe` first,
+1. Take the next `todo` in `coverage.md` (the ASSEMBLY row still needs two saved designs; leave it):
+   "Timeline: every item type icon, groups, suppress, rollback, play, context menus, drag, errors". Fusion's
+   "Untitled*" document has a timeline of sketches, an extrude and fillets; FissionOxide's design is empty,
+   so build a few features first (sketch, extrude, fillet, a pattern, a construction plane) in both.
+2. Re-verify the `fixing-merged` timeline keys first (`ui:timeline:*`, two of them) and any wave-30/31 key
+   a fixer has set to `fixing-merged` since this stop (history entries dated after 2026-10-22 12:40 local).
+3. Rebuild before probing: the running binary is `main` at `c94d76ac`; kill `fissionoxide.exe` first,
    `cargo build --release -p fissionoxide` took about 2.5 minutes.
 
-Where the documents stand: Fusion has four tabs: "Untitled*", "Untitled*(1)" (the MESH-tab design),
-"Untitled(2)" (an empty Assembly Design) and "Untitled*(3)" (active, Part Design in mm, SHEET METAL tab:
-BaseFlange1, EdgeFlange2, a finished Flat Pattern, Unfold1 and Refold1). FissionOxide holds one design
-(mm, SOLID tab): Sketch1, Flange1, EdgeFlange1, Unfold1 (the sheet is flat) and Box1; its window was
-moved and narrowed to screenshot x 27..990, y 20..725 (Data Panel closed). Fusion's window is at x
-0..907, y 82..733. Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
+Where the documents stand: Fusion has four tabs: "Untitled*" (active, inches, Body1, Sketch1..4, UTILITIES
+tab), "Untitled*(1)" (the MESH-tab design), "Untitled(2)" (an empty Assembly Design) and "Untitled*(3)"
+(sheet metal). Both windows were snapped with Win+Left and sit at screenshot x 0..908: Fusion at y 80..730,
+FissionOxide at y 0..785 (one empty design, mm, UTILITIES tab, Data Panel closed). Fusion's taskbar button
+at (497,803), FissionOxide's at (572,803).
 
 ## Traps
+- Win+Left is the quickest way to place a window left of the overlay; dismiss the snap assist by clicking the
+  app's own canvas. FissionOxide snaps to 728 px wide: drag its right edge (x 727) to 907 with
+  `left_mouse_down` / `mouse_move` / `left_mouse_up` to match Fusion's 908 px. `left_click_drag` on the right
+  edge did nothing twice this session.
+- Double-clicking a snapped window's title bar restores it to its old size rather than maximising it.
+- Fusion's PLASTIC tab on this licence is SOLID's menus; do not hunt for Boss or Snap Fit again.
+- Fusion's Bill of Materials needs a saved design for rows; FissionOxide's "+" is still unsafe
+  (`ui-insert-new-design` is `fixing`), so do not start a new design there to get a clean one.
 - A fresh FissionOxide window can reach past screenshot x 1040, where its right edge is under the
   Claude overlay and cannot be grabbed: drag the title bar left first (part of the window off screen),
   narrow the right edge, then drag it back.
