@@ -30,8 +30,8 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [done (2026-10-21); not exercised: H/V on two points, Symmetry/MidPoint through a pick flow in FissionOxide, Curvature with a spline, Polygon on a polygon, glyph right-click in FissionOxide] Every constraint: coincident, collinear, concentric, midpoint, fix/unfix, parallel, perpendicular, horizontal/vertical, tangent, curvature, equal, symmetry, lock; glyph positions and hover; constraint deletion
 - [done (2026-10-21); not exercised: Look At after a user orbit, Slice and 3D Sketch in FissionOxide (greyed)] Sketch Palette: every option, linetype, look at, slice, 3D sketch; Feature Options per tool
 - [done (2026-10-21); not exercised: Fusion's Fillet box, the Midpoint Line / 3-point rectangle / other arc and slot boxes beyond prober 4's row] Heads-up input: every tool's boxes, Tab order, units, expressions, lock icon, parameter names
-- [in progress (2026-10-21, prober 6 then prober 7: grid labels, profile fill in and out, construction and centerline styles, curve colours, sketch points done; todo: projected geometry colour in FissionOxide (needs a body), fully constrained colour re-run)] Sketch display: grid labels, profile shading colours in and out of sketch, fully constrained colour, construction and centerline styles, projected geometry colour, sketch points
-- [in progress (2026-10-21, prober 7)] Sketch browser rows, context menus, Edit Sketch, Redefine Sketch Plane, Save As DXF
+- [done (2026-10-21); not exercised: hover ring on a sketch point] Sketch display: grid labels, profile shading colours in and out of sketch, fully constrained colour, construction and centerline styles, projected geometry colour, sketch points
+- [done (2026-10-21); not exercised: Move to Group, Configure, Extrude and Offset Plane from the row, Slice Sketch on a cutting plane, Edit Sketch rollback on a non-last sketch] Sketch browser rows, context menus, Edit Sketch, Redefine Sketch Plane, Save As DXF
 
 ## Design workspace: solid
 - [done (2026-10-21)] Extrude, Fillet, Chamfer, Shell, Press Pull, Move, Hole dialogs (first pass)

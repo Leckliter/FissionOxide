@@ -348,3 +348,16 @@ triad to the Line tool. 17 rows in three batches (`parity/batches/map-wave12.jso
 rows, nine verified, three reopened (`profile-color-3d`, `look-at-sketch-up`,
 `point-glyph-style`). Desktop control of fissionoxide.exe was denied twice before the user
 approved it; Fusion's side was recorded meanwhile.
+
+## 2026-10-21, prober 7: sketch display remainder, sketch browser rows and context menus
+
+Projected geometry and the fully constrained colour in FissionOxide, then every sketch browser row
+behaviour in both apps: hover, click, eye, the row menu's twenty Fusion entries one by one,
+Redefine Sketch Plane, Export DXF, the Sketches folder menu, double-click (report
+`parity/reports/2026-10-21-sketch-display-browser-rows.md`). FissionOxide draws projected curves
+black like fully constrained geometry where Fusion draws purple with filled points; its sketch
+rows have no eyes, no folder menu, an 11-entry menu against Fusion's 20, Redefine Sketch Plane is
+greyed, and Save As DXF goes straight to the Windows file dialog where Fusion asks for units and
+visible geometry first. 12 rows in three batches (`parity/batches/map-wave13.json`), eight match
+rows, twelve verified (the wave-9/10 browser rows and the sketch selection feedback colours).
+Desktop control was denied three times before the user approved it.

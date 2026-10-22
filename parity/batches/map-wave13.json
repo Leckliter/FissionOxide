@@ -1,0 +1,14 @@
+{
+  "ui:browser:sketch-row-menu-list": "ui-browser-sketch-rows",
+  "ui:browser:sketch-row-eyes": "ui-browser-sketch-rows",
+  "ui:browser:consumed-sketch-hidden": "ui-browser-sketch-rows",
+  "ui:browser:sketches-folder-menu": "ui-browser-sketch-rows",
+  "ui:browser:sketch-row-hover": "ui-browser-sketch-rows",
+  "ui:browser:sketch-row-selected-canvas": "ui-browser-sketch-rows",
+  "ui:browser:units-row-mass-unit": "ui-browser-sketch-rows",
+  "ui:browser:redefine-sketch-plane": "ui-sketch-redefine-and-dxf",
+  "ui:browser:export-dxf-dialog": "ui-sketch-redefine-and-dxf",
+  "ui:sketch:projected-geometry-color": "ui-sketch-project-colors",
+  "ui:sketch:project-filter-order": "ui-sketch-project-colors",
+  "ui:sketch:project-body-pick-chip": "ui-sketch-project-colors"
+}
