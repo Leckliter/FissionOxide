@@ -412,3 +412,13 @@ Every selection kind reachable on a one-body design read in both apps (report
 timeline feature read alike; FissionOxide prints the face readout already on hover, loses the
 first kind of a mixed selection, and keeps a timeline feature selected after Escape. 4 rows in one
 batch (`parity/batches/map-wave18.json`), four match rows.
+
+## 2026-10-21, prober 7 (continued): camera and navigation bar
+
+Navigation bar tooltips and tools, the wheel, Display Settings > Camera and the Preferences mouse
+rows in both apps (report `parity/reports/2026-10-21-camera-navbar.md`). The wheel, the tool
+drags, the Camera submenu and the orbit-type row match; FissionOxide's navbar tooltips are
+sentences, its fifth button is Fit where Fusion's is Zoom Window, its mouse presets lack
+PowerMill and Tinkercad, its default orientation is Z up, and Escape closes its whole Preferences
+window. 5 rows in one batch (`parity/batches/map-wave19.json`), four match rows, one verified
+(`display-settings-2`).

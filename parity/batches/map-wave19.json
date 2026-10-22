@@ -1,0 +1,7 @@
+{
+  "ui:navbar:tooltips": "ui-camera-navbar",
+  "ui:navbar:zoom-window-button": "ui-camera-navbar",
+  "ui:chrome:preferences-mouse-setup": "ui-camera-navbar",
+  "ui:chrome:preferences-default-orientation": "ui-camera-navbar",
+  "ui:chrome:preferences-escape": "ui-camera-navbar"
+}
