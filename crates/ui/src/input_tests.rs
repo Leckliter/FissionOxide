@@ -2713,6 +2713,8 @@ fn the_construction_folder_lists_planes_axes_and_points() {
   let plane = id(h.app.run("plane", json!({"method": "angle", "axis": "x", "plane": "xy", "angle": "30 deg"})));
   h.app.run("axis", json!({"method": "two_planes", "a": "xz", "b": "yz"})).unwrap();
   let point = id(h.app.run("point", json!({"method": "three_planes", "a": "xy", "b": "xz", "c": "yz"})));
+  // the browser rows only: the canvas's plane name "Plane1" would read as one
+  h.app.objects.construction_plane_names = false;
   // the folder comes collapsed: open it
   h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("tree-construction").with("open"), true));
   h.frame(vec![]);
