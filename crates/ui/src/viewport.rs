@@ -2994,6 +2994,8 @@ pub(crate) const GLYPH_HOVER_INK: Color32 = Color32::from_rgb(68, 69, 69);
 /// A dimension's value as drawn. The font has no ⌀ (U+2300), so a diameter's glyph is painted
 /// the way Fusion draws it, a circle with a slash, in front of the number.
 struct DimText {
+  /// A driven dimension's "fx: " mark, ahead of the glyph.
+  lead: Option<std::sync::Arc<egui::Galley>>,
   glyph: bool,
   galley: std::sync::Arc<egui::Galley>,
   em: f32,
@@ -3001,22 +3003,35 @@ struct DimText {
 
 impl DimText {
   fn new(painter: &egui::Painter, label: &str, font: egui::FontId) -> DimText {
+    let (lead, label) = match label.strip_prefix("fx: ") {
+      Some(rest) => (Some(painter.layout_no_wrap("fx: ".to_string(), font.clone(), Color32::PLACEHOLDER)), rest),
+      None => (None, label),
+    };
     let (glyph, rest) = match label.strip_prefix('⌀') {
       Some(rest) => (true, rest),
       None => (false, label),
     };
-    DimText { glyph, em: font.size, galley: painter.layout_no_wrap(rest.to_string(), font, Color32::PLACEHOLDER) }
+    let galley = painter.layout_no_wrap(rest.to_string(), font.clone(), Color32::PLACEHOLDER);
+    DimText { lead, glyph, em: font.size, galley }
   }
 
   fn glyph_width(&self) -> f32 {
     if self.glyph { self.em * 0.8 } else { 0.0 }
   }
 
+  fn lead_width(&self) -> f32 {
+    self.lead.as_ref().map_or(0.0, |g| g.size().x)
+  }
+
   fn size(&self) -> Vec2 {
-    self.galley.size() + Vec2::new(self.glyph_width(), 0.0)
+    self.galley.size() + Vec2::new(self.lead_width() + self.glyph_width(), 0.0)
   }
 
   fn paint(&self, painter: &egui::Painter, at: Pos2, col: Color32) {
+    if let Some(lead) = &self.lead {
+      painter.galley(at, lead.clone(), col);
+    }
+    let at = at + Vec2::new(self.lead_width(), 0.0);
     if self.glyph {
       let r = self.em * 0.27;
       let c = at + Vec2::new(self.glyph_width() / 2.0 - 1.0, self.galley.size().y / 2.0);
@@ -5740,7 +5755,8 @@ mod tests {
     );
     let angle = s.constraints.iter().find(|k| k.kind.is_angle()).expect("the angle dimension");
     assert!(matches!(angle.kind, ConstraintKind::Angle { a, b, .. } if a == reference.id && b == line.id));
-    assert_eq!(angle.kind.dim().unwrap().expr, "40");
+    // stored as Fusion spells an accepted value, with its unit
+    assert_eq!(angle.kind.dim().unwrap().expr, "40 deg");
     let (_, label) = dim_label(s, &angle.kind, angle.kind.dim().unwrap(), app.s.design.units).unwrap();
     assert_eq!(label, "40.0°", "angles read at one decimal, as Fusion's");
     // the Line tool continues from the new end
@@ -5900,8 +5916,12 @@ mod tests {
       assert!(dia.glyph && !plain.glyph);
       assert!(dia.size().x > plain.size().x + 5.0, "{} {}", dia.size().x, plain.size().x);
       assert_eq!(dia.galley.text(), "12", "the glyph never reaches the font");
-      let r = DimText::new(&painter, "R6", font);
+      let r = DimText::new(&painter, "R6", font.clone());
       assert!(!r.glyph && r.galley.text() == "R6");
+      // a driven diameter keeps its glyph behind the "fx: " mark
+      let fx = DimText::new(&painter, "fx: ⌀12", font);
+      assert!(fx.glyph && fx.lead.is_some() && fx.galley.text() == "12");
+      assert!(fx.size().x > dia.size().x + 5.0);
     });
   }
 
