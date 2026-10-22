@@ -1,44 +1,48 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 11:45, session "Parity prober 14"
+## Last stop: 2026-10-22, 12:20, session "Parity prober 15"
 
-Finished this session: "MESH tab: every command" (done, with a not-exercised list in `coverage.md`).
-Report `parity/reports/2026-10-22-mesh-tab.md`, `map-wave29.json`, batches `ui-mesh-body-and-insert`
-(5), `ui-mesh-modify-dialogs` (5), `ui-mesh-new-modify` (5) and `ui-mesh-prepare-create` (5), all
-`ready` in `index.jsonl` with no fixer yet. `ui-mesh-body-and-insert` (a real mesh body kind) is the
-base of the other three; a coordinator may start it first or tell the others to work on the faceted
-bodies until it lands. Re-verified: `ui:navbar:tooltips`, `ui:navbar:zoom-window-button`,
-`ui:chrome:preferences-mouse-setup`, `ui:chrome:preferences-default-orientation`,
-`ui:chrome:preferences-escape`, `ui:dialogs:primitive-plane-pick-flow`, `ui:dialogs:primitive-rows`,
-`ui:dialogs:primitive-manipulators` (all verified). Still `fixing-merged` and not re-probed:
-`ui:dialogs:coil-rows`, `ui:dialogs:pipe-rows`, `ui:dialogs:edit-feature-title`,
-`ui:browser:redefine-sketch-plane`, `ui:browser:export-dxf-dialog`.
+Finished this session: "SHEET METAL tab: rules, flange, bend, unfold, flat pattern" (done, with a
+not-exercised list in `coverage.md`). Report `parity/reports/2026-10-22-sheet-metal-tab.md`,
+`map-wave30.json`, batches `ui-sheet-rules-library` (4), `ui-sheet-flange-dialog` (4),
+`ui-sheet-flat-pattern-env` (4) and `ui-sheet-menus-dialogs` (5), all `ready` in `index.jsonl` with no
+fixer yet. `ui-sheet-rules-library` and `ui-sheet-flange-dialog` both touch the Flange dialog's Rule row
+(`crates/ui/src/dialogs.rs:3237`); start them one after the other or tell the second to rebase.
+Re-verified: `ui:dialogs:coil-rows`, `ui:dialogs:pipe-rows`, `ui:dialogs:edit-feature-title`,
+`ui:browser:redefine-sketch-plane`, `ui:browser:export-dxf-dialog` (all verified). About 180 other
+keys are still `fixing-merged` from earlier waves; re-verify those that fall inside the area you probe.
 
 ## Next prober: start here
 
 1. Take the next `todo` in `coverage.md` after the ASSEMBLY row (which needs two saved designs):
-   "SHEET METAL tab: rules, flange, bend, unfold, flat pattern". Compare the tab's panels and
-   dropdowns, Sheet Metal Rules, every CREATE/MODIFY dialog as it opens and after its first pick
-   (Fusion needs a sheet metal body: Create Sketch, a rectangle, Flange; or Convert to Sheet Metal on a
-   box), Create Flat Pattern and its environment, and the results' browser rows, timeline icons and
-   menus.
-2. Re-verify the five keys above, and any wave-27/28/29 key a fixer has set to `fixing-merged` since
-   (`python -c` over `ui-features.jsonl`, status `fixing-merged`, history entries dated after
-   2026-10-22 16:45 UTC).
-3. Rebuild before probing: the running binary is `main` at `25d185b8`; kill `fissionoxide.exe`
-   first, `cargo build --release -p fissionoxide` took about 2 minutes.
+   "PLASTIC tab". Compare the tab's panels and dropdowns, Plastic Rules (Fusion's is likely a library
+   palette like Sheet Metal Rules), every CREATE/MODIFY dialog as it opens and after its first pick
+   (Boss, Snap Fit, Rest, Lip/Groove, Rule Fillet, Shell, Draft), and the results' browser rows,
+   timeline icons and menus.
+2. Re-verify any `fixing-merged` key in that area, and any wave-29/30 key a fixer has set to
+   `fixing-merged` since (`python -c` over `ui-features.jsonl`, status `fixing-merged`, history entries
+   dated after 2026-10-22 12:20 local).
+3. Rebuild before probing: the running binary is `main` at `8b29a812`; kill `fissionoxide.exe` first,
+   `cargo build --release -p fissionoxide` took about 2.5 minutes.
 
-Where the documents stand: Fusion has three tabs: "Untitled*" (older), "Untitled*(1)" (Part Design,
-inches, active, on the MESH tab: the earlier plate, cylinder, spheres, coil, torus, Plane1, Point1,
-Analysis folder and Body8, plus the inserted mesh "lprism" (now hidden), "lprism_Edited" (a solid
-from Convert Mesh), two Direct Edit base features and GenerateFaceGroups1) and "Untitled(2)" (an empty
-Assembly Design); window at screenshot x 0..907, y 82..733. FissionOxide (built `25d185b8`) holds one
-design: Body1, the faceted STL (Import1), on the SOLID tab; its window was dragged to x 0..1000,
-y 92..795 (Data Panel closed). Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
-The test meshes are in `tests/reference/464-stl-millimeter/lprism.stl`, `465-obj-inch/lprism.obj`
-and `466-3mf-file/lprism.3mf`; type the full path into the file dialog's File name box.
+Where the documents stand: Fusion has four tabs: "Untitled*", "Untitled*(1)" (the MESH-tab design),
+"Untitled(2)" (an empty Assembly Design) and "Untitled*(3)" (active, Part Design in mm, SHEET METAL tab:
+BaseFlange1, EdgeFlange2, a finished Flat Pattern, Unfold1 and Refold1). FissionOxide holds one design
+(mm, SOLID tab): Sketch1, Flange1, EdgeFlange1, Unfold1 (the sheet is flat) and Box1; its window was
+moved and narrowed to screenshot x 27..990, y 20..725 (Data Panel closed). Fusion's window is at x
+0..907, y 82..733. Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
 
 ## Traps
+- A fresh FissionOxide window can reach past screenshot x 1040, where its right edge is under the
+  Claude overlay and cannot be grabbed: drag the title bar left first (part of the window off screen),
+  narrow the right edge, then drag it back.
+- Fusion's Sheet Metal Rules is a palette (Close button); its Edit Rule window is modal. Fusion's
+  flat pattern environment opened with a canvas that stayed a beige fill at every zoom; Finish Flat
+  Pattern still works from the green button's dropdown.
+- FissionOxide's Flange dialog re-picks the consumed profile, and after that its Type dropdown and the
+  chip's x do nothing: select an edge first, then start Flange, to get an edge flange.
+- Fusion's Join by bend, Sheet Metal Fillet and Sheet Metal Chamfer open a subscription card (close it
+  with its x at the card's top right).
 - Clicking a selected browser row again starts a rename in Fusion; press Escape.
 - FissionOxide's "<name> isn't in FissionOxide yet" stays at the lower left and hides other lower-left
   labels (Zoom Window's).
