@@ -130,6 +130,17 @@ impl LengthUnit {
     if t.parse::<f64>().is_ok() { format!("{t} {}", self.symbol()) } else { format!("({t}) {}", self.symbol()) }
   }
 
+  /// A length typed into a manipulator's value box, as Fusion's box fills it in: a bare number
+  /// gets this unit written out even in millimetres (`"25"` → `"25 mm"`), so the dialog's row and
+  /// the stored feature show it. Anything else is kept as typed.
+  pub fn labelled(self, expr: &str) -> String {
+    if !bare(expr) {
+      return expr.to_string();
+    }
+    let t = expr.trim();
+    if t.parse::<f64>().is_ok() { format!("{t} {}", self.symbol()) } else { format!("({t}) {}", self.symbol()) }
+  }
+
   /// A stored length expression as a field shows it: stored bare numbers are millimetres, so in
   /// a design in another unit they are shown with "mm" to keep their meaning.
   pub fn shown(self, expr: &str) -> String {
@@ -365,6 +376,11 @@ mod tests {
     assert_eq!(u.typed("w / 2"), "w / 2", "parameters carry their own unit");
     assert_eq!(u.typed("2 +"), "2 +", "broken input is left for the field to report");
     assert_eq!(LengthUnit::Mm.typed("2"), "2", "bare numbers already mean mm");
+    assert_eq!(LengthUnit::Mm.labelled("25"), "25 mm", "the box writes millimetres out");
+    assert_eq!(LengthUnit::Mm.labelled("2 * 3"), "(2 * 3) mm");
+    assert_eq!(u.labelled("2"), "2 in");
+    assert_eq!(u.labelled("w / 2"), "w / 2");
+    assert_eq!(u.labelled("-"), "-", "half-typed input is kept");
     let mm = |s: &str| fox_expr::eval(s, ParamKind::Length, &fox_expr::Empty).unwrap();
     assert_eq!(mm(&u.typed("2")), 50.8);
     assert_eq!(mm(&LengthUnit::Cm.typed("1.5")), 15.0);

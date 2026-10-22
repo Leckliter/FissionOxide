@@ -182,6 +182,9 @@ pub struct ToolState {
   /// Where a curve-picking tool's last click made its result: nothing is hovered until the
   /// pointer leaves that spot, so the result draws like any other curve.
   hover_hold: Option<Pos2>,
+  /// The pointer is over a dialog's preview, which doesn't light up but still reads as being over
+  /// the model for the cursor prompt ("Hold Ctrl to modify selection", as in Fusion).
+  pub(crate) over_preview: bool,
   /// Fillet / Chamfer: the one just applied, while its value box and arrow show.
   pub(crate) applied: Option<crate::sketch_modify::Applied>,
   /// Constraint command: how many picks it holds (they live in the selection), and whether
@@ -681,6 +684,7 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
   if app.drag.is_some() {
     return;
   }
+  app.tstate.over_preview = false;
   let Some(pos) = resp.hover_pos() else {
     app.hover = None;
     return;
@@ -730,6 +734,16 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
       // the front-most pick is filtered out: the nearest allowed one around the cursor wins
       app.hover = picks.get(frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| ok(&p)))).filter(ok);
     }
+  }
+  // a dialog's preview isn't model geometry: nothing on it lights up, as in Fusion (the nearest
+  // allowed pick off it does)
+  let previewed = app.dialog.as_ref().map(|d| d.preview_bodies(&app.s)).unwrap_or_default();
+  let on_preview = |p: &Pick| crate::select::pick_body(p).is_some_and(|b| previewed.contains(&b));
+  app.tstate.over_preview = app.hover.as_ref().is_some_and(on_preview);
+  if app.tstate.over_preview {
+    let (filter, priority) = (app.sel_filter, app.sel_priority);
+    let ok = |p: &Pick| !on_preview(p) && (sketching || filter.allows(p, priority));
+    app.hover = picks.get(frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| ok(&p)))).filter(ok);
   }
 }
 
@@ -4637,7 +4651,7 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
 /// panel, and during a drag.
 fn cursor_prompt(app: &App, resp: &egui::Response) {
   let prompt = match &app.dialog {
-    Some(d) => d.prompt(app.hover.is_some()),
+    Some(d) => d.prompt(app.hover.is_some() || app.tstate.over_preview),
     None if app.s.edit_sketch.is_some() => sketch_prompt(app.tool, &app.tstate).map(String::from),
     None => None,
   };
@@ -4955,11 +4969,13 @@ fn arrow_dir(drawn: Vec2, along: Option<Vec2>) -> Vec2 {
 /// and its box near the edge, as in Fusion, rather than reaching off the canvas.
 const RADIUS_ARROW_REACH: f32 = 90.0;
 
-/// The open dialog's drag arrow: drawn from its base along its direction to the current value
-/// (Fillet's no longer than [`RADIUS_ARROW_REACH`]), with the floating value box below and to the
-/// right of its head, clear of the arrow and inside the canvas (see [`crate::value_box`]);
-/// dragging the head changes the value by the pointer's travel along the arrow (snapped to a
-/// tenth of the grid). Returns true while the arrow has the pointer.
+/// The open dialog's drag arrow: Fusion's solid blue arrow at the far end of the value (Fillet's
+/// no further than [`RADIUS_ARROW_REACH`]), pointing along its axis, with the floating value box
+/// beside it, clear of the arrow and inside the canvas (see [`crate::value_box`]) and, for
+/// Extrude, the distance dimension along the axis (see [`crate::manip_arrow`]). Dragging it
+/// changes the value by the pointer's travel along the arrow (snapped to a tenth of the grid), or
+/// to a model vertex or edge the pointer passes, with Fusion's "Snap To" tooltip. Returns true
+/// while the arrow has the pointer.
 fn manipulator(
   app: &mut App,
   resp: &egui::Response,
@@ -4967,9 +4983,10 @@ fn manipulator(
   view: &View,
   ctx: &egui::Context,
 ) -> bool {
+  use crate::manip_arrow::{Arrow, dimension_number, paint_dimension, paint_track, snap_number, snap_point};
   let Some(m) = app.dialog.as_ref().and_then(|d| d.manipulator(&app.s)) else {
     // a dialog without an arrow may show the box at a feature handle instead (see `handles::show`)
-    if !app.dialog.as_mut().is_some_and(|d| d.handle_field(0).is_some()) {
+    if !app.dialog.as_mut().is_some_and(|d| d.handle_field(0).is_some() && !d.handles(&app.s).is_empty()) {
       app.manip.value_box.hide();
     }
     return false;
@@ -4981,18 +4998,22 @@ fn manipulator(
   };
   let reach = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::Fillet).then_some(RADIUS_ARROW_REACH);
   let b = capped(a, b, reach);
-  let hot = resp.hover_pos().is_some_and(|p| (p - b).length() < 12.0);
-  let active = matches!(app.drag, Some(Drag::Manip));
-  let col = if hot || active { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
-  painter.line_segment([a, b], Stroke::new(2.0, col));
   // a zero-length arrow (Sketch Offset's, still on its curve) points along its axis
   let along = view.to_screen(&app.cam, m.origin + m.dir).map(|c| c - a);
-  let dir2 = arrow_dir(b - a, along);
-  let side = Vec2::new(-dir2.y, dir2.x);
-  let head = [b + dir2 * 12.0, b + side * 6.0, b - side * 6.0];
-  painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
-  // the value box beside the head edits the dialog's field; a dialog without one gets a label
-  let head_at = crate::handles::box_beside(a, b, dir2, view.rect);
+  let arrow = Arrow { base: b, dir: arrow_dir(b - a, along) };
+  let active = matches!(app.drag, Some(Drag::Manip));
+  // Tab gave the value box to another value (Extrude's taper): the arrow waits in grey
+  let has_box = app.manip.value_box.at_handle.is_none();
+  if active {
+    paint_track(painter, b, arrow.dir);
+  }
+  if app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::Extrude) {
+    paint_dimension(painter, a, b, &dimension_number(app.s.design.units, m.value));
+  }
+  arrow.paint(painter, has_box || active);
+  let hot = resp.hover_pos().is_some_and(|p| arrow.hit(p));
+  // the value box beside the arrow edits the dialog's field; a dialog without one gets a label
+  let head_at = crate::handles::box_beside(a, arrow.tip(), arrow.dir, view.rect);
   // Sketch Offset's box sits by the pointer while the offset is still on its curve, as Fusion
   // puts it, and moves to the arrow's head once the arrow is dragged or a distance typed
   let label_at = if app.dialog.as_ref().is_some_and(|d| d.box_by_pointer(&app.s)) {
@@ -5004,15 +5025,23 @@ fn manipulator(
   };
   let params = crate::value_box::params_of(&app.s);
   let mut boxed = false;
-  if let Some(dlg) = app.dialog.as_mut()
+  let mut tabbed = false;
+  if has_box
+    && let Some(dlg) = app.dialog.as_mut()
     && let Some(text) = dlg.value_box_field()
   {
-    if crate::value_box::show(ctx, &mut app.manip.value_box, label_at, text, &params).changed {
+    app.manip.value_box.set_dragging(active);
+    let out = crate::value_box::show(ctx, &mut app.manip.value_box, label_at, text, &params);
+    if out.changed {
       dlg.value_box_edited();
     }
+    tabbed = out.tab;
     boxed = true;
   }
-  if !boxed {
+  if tabbed {
+    crate::handles::tab(app);
+  }
+  if !boxed && has_box {
     app.manip.value_box.hide();
     painter.text(
       label_at,
@@ -5024,10 +5053,10 @@ fn manipulator(
   }
   // a drag starts only once the pointer has moved: test where the press began
   let press = ctx.input(|i| i.pointer.press_origin());
-  let pressed_on_head = press.is_some_and(|p| (p - b).length() < 14.0);
+  let pressed_on_head = press.is_some_and(|p| arrow.hit(p));
   if pressed_on_head && resp.drag_started_by(egui::PointerButton::Primary) {
     app.drag = Some(Drag::Manip);
-    // the value moves by the pointer's travel from where it grabbed the head (a capped arrow's
+    // the value moves by the pointer's travel from where it grabbed the arrow (a capped arrow's
     // head is short of its value)
     app.manip.arrow_grab = press.and_then(|p| {
       let (o, d) = view.ray(&app.cam, p);
@@ -5037,13 +5066,30 @@ fn manipulator(
   if matches!(app.drag, Some(Drag::Manip)) {
     if let Some(p) = resp.interact_pointer_pos() {
       let (o, d) = view.ray(&app.cam, p);
-      // closest point on the arrow's axis to the pointer ray
-      if let Some(t) = axis_param(m.origin, m.dir, o, d) {
-        let t = app.manip.arrow_grab.map_or(t, |(start, grab)| start + t - grab);
-        let step = app.increments.linear_step(grid_step(app, view) / 10.0);
-        if let Some(dlg) = app.dialog.as_mut() {
-          dlg.set_manipulator(t, step);
-        }
+      // a model vertex or edge by the pointer, else the pointer's travel along the arrow's axis
+      let snapped = app
+        .dialog
+        .as_ref()
+        .filter(|dlg| dlg.arrow_snaps())
+        .and_then(|dlg| snap_point(&app.s, &dlg.preview_bodies(&app.s), p, &|q| view.to_screen(&app.cam, q)))
+        .map(|q| (q - m.origin).dot(m.dir));
+      let step = app.increments.linear_step(grid_step(app, view) / 10.0);
+      let value = match snapped {
+        Some(v) => Some((v, 0.0)),
+        None => axis_param(m.origin, m.dir, o, d)
+          .map(|t| (app.manip.arrow_grab.map_or(t, |(start, grab)| start + t - grab), step)),
+      };
+      if let Some((v, step)) = value
+        && let Some(dlg) = app.dialog.as_mut()
+      {
+        dlg.set_manipulator(v, step);
+      }
+      if let Some(v) = snapped {
+        crate::manip_arrow::snap_tooltip(
+          ctx,
+          resp.layer_id,
+          format!("Snap To : {}", snap_number(app.s.design.units, v)),
+        );
       }
     }
     ctx.request_repaint();
@@ -5069,17 +5115,15 @@ fn capped(a: Pos2, b: Pos2, reach: Option<f32>) -> Pos2 {
   }
 }
 
-/// Draws a manipulator arrow from `a` to its head at `b` (orange while `hot`, else Fusion's
-/// manipulator blue) and returns where its value box or label goes, beside the head.
-pub(crate) fn paint_arrow(painter: &egui::Painter, a: Pos2, b: Pos2, hot: bool) -> Pos2 {
-  let col = if hot { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
-  painter.line_segment([a, b], Stroke::new(2.0, col));
+/// Draws a manipulator arrow for a value from `a` to `b` (Fusion's solid blue arrow at `b`,
+/// pointing on from `a`; it doesn't light up under the pointer, as Fusion's don't) and returns
+/// where its value box or label goes, beside the head.
+pub(crate) fn paint_arrow(painter: &egui::Painter, a: Pos2, b: Pos2) -> Pos2 {
   let dir2 = (b - a).normalized();
   let dir2 = if dir2.is_finite() && (b - a).length() > 1.0 { dir2 } else { Vec2::new(0.0, -1.0) };
-  let side = Vec2::new(-dir2.y, dir2.x);
-  let head = [b + dir2 * 12.0, b + side * 6.0, b - side * 6.0];
-  painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
-  b + side * 14.0 + dir2 * 4.0
+  let arrow = crate::manip_arrow::Arrow { base: b, dir: dir2 };
+  arrow.paint(painter, true);
+  arrow.label_at()
 }
 
 /// Where along the axis from `origin` along unit `dir` the pointer ray (`o`, `d`) passes

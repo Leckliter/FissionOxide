@@ -448,13 +448,24 @@ impl Dialog {
     (*key == self.anchor_key() && !self.faces.is_empty()).then_some((*o, *n))
   }
 
-  /// Extrude: Fusion's taper handle, a dial at the distance arrow's head turning away from the
-  /// extrude direction about the sketch plane's X axis, for the taper angle.
+  /// Extrude: Fusion's taper handle, a disc on a short arc beside the profile's edge farthest from
+  /// the distance arrow's foot (never on the arrow), turning about that edge from the extrude direction
+  /// inward for a positive taper (which narrows the extrusion), for the taper angle.
   fn taper_handle(&self, s: &Session) -> Option<Vec<Handle>> {
     let m = self.manipulator(s)?;
-    let axis = s.model.sketches.get(&self.sketch?)?.plane.x.try_normalize()?;
+    let r = s.model.sketches.get(&self.sketch?)?;
+    // (an edited extrude without picks keeps its stored profile, as its arrow does)
+    let at = match self.profiles.first() {
+      Some(p) => *p,
+      None => r.profiles.first()?.interior_point(),
+    };
+    let profile = r.profiles.iter().find(|p| p.contains(at))?;
+    let (mid, inward) = taper_edge(&profile.outer.polygon(), at, &|p| profile.contains(p))?;
+    let up = if m.value < 0.0 { -m.dir } else { m.dir };
+    let inward = (r.plane.x * inward[0] + r.plane.y * inward[1]).try_normalize()?;
     let a = self.ang(s, self.solid.ext.taper())?;
-    Some(vec![Handle::dial(m.origin + m.dir * m.value, axis, m.dir, None, a, deg(a))])
+    let center = r.plane.to_world(mid);
+    Some(vec![Handle::dial(center, up.cross(inward), up, None, a, deg(a)).taper()])
   }
 
   /// Shell: an arrow from the first opened face into the wall for an inside thickness, out of it
@@ -547,9 +558,11 @@ impl Dialog {
   }
 
   /// The field feature handle `i`'s floating value box (see [`crate::value_box`]) edits: Shell's
-  /// inside (or only) thickness, and its outside one for Both.
+  /// inside (or only) thickness, and its outside one for Both; Extrude's taper angle once Tab
+  /// moves the box there.
   pub fn handle_field(&mut self, i: usize) -> Option<&mut String> {
     match (self.kind, i) {
+      (Kind::Extrude, 0) => Some(self.solid.ext.taper_mut()),
       (Kind::Shell, 0) => Some(&mut self.radius),
       (Kind::Shell, 1) => Some(&mut self.solid.thickness_out),
       // Draft's angle, once its handle has been dragged
@@ -570,6 +583,12 @@ impl Dialog {
   /// distance and quantity boxes), rather than the first alone?
   pub fn boxes_every_handle(&self) -> bool {
     self.kind == Kind::SkRectPattern
+  }
+
+  /// Does the drag arrow snap to model vertices and edges the pointer passes (Extrude's distance
+  /// and Offset Plane's offset, as in Fusion)?
+  pub(crate) fn arrow_snaps(&self) -> bool {
+    matches!(self.kind, Kind::Extrude | Kind::OffsetPlane)
   }
 
   /// Does Sketch Offset follow the cursor (curves picked, not placed by a click yet)?
@@ -874,6 +893,27 @@ fn pick_frame(s: &Session, body: BodyId, o: &Value) -> Option<DMat4> {
   assembly::frame(at, DVec3::Z, DVec3::X).ok()
 }
 
+/// Where Extrude's taper handle sits on a profile's outline `poly` (sketch coordinates, closed):
+/// the middle of the side farthest from `at` (the distance arrow's foot, so it stays clear of it), with the unit direction
+/// across it into the profile (`inside` tells which way that is).
+fn taper_edge(poly: &[[f64; 2]], at: [f64; 2], inside: &dyn Fn([f64; 2]) -> bool) -> Option<([f64; 2], [f64; 2])> {
+  let n = poly.len();
+  let (a, b) = (0..n)
+    .map(|k| (poly[k], poly[(k + 1) % n]))
+    .filter(|(a, b)| (b[0] - a[0]).hypot(b[1] - a[1]) > 1e-9)
+    .max_by(|x, y| {
+      let d = |(a, b): &([f64; 2], [f64; 2])| ((a[0] + b[0]) / 2.0 - at[0]).hypot((a[1] + b[1]) / 2.0 - at[1]);
+      d(x).total_cmp(&d(y))
+    })?;
+  let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+  let mid = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+  let across = [-(b[1] - a[1]) / len, (b[0] - a[0]) / len];
+  let eps = (len * 1e-3).max(1e-6);
+  let inward =
+    if inside([mid[0] + across[0] * eps, mid[1] + across[1] * eps]) { across } else { [-across[0], -across[1]] };
+  Some((mid, inward))
+}
+
 #[cfg(test)]
 mod tests {
   use fox_engine::Sel;
@@ -965,9 +1005,19 @@ mod tests {
     let m = d.manipulator(&s).unwrap();
     let h = d.handles(&s);
     assert_eq!(h.len(), 1);
+    // `ui:manip:extrude-taper-handle`: a disc on the middle of the profile's side farthest from
+    // the arrow's foot (on the sketch plane, clear of the arrow), turning about that side from the
+    // extrude direction inward (a positive taper narrows)
     let Shape::Dial { center, axis, zero, radius } = h[0].shape else { panic!("{:?}", h[0]) };
-    assert!(close(center, m.origin + m.dir * 5.0) && close(zero, DVec3::Z) && close(axis, DVec3::X), "{:?}", h[0]);
-    assert!(radius.is_none() && h[0].value.abs() < 1e-9 && h[0].label == "0 deg");
+    assert_eq!(h[0].head, crate::handles::Head::Taper);
+    assert!(center.z.abs() < 1e-9 && close(zero, DVec3::Z), "{:?}", h[0]);
+    let (foot, edge_mid) = (m.origin, center);
+    assert!((edge_mid - foot).length() > 4.9, "{edge_mid:?} beside the arrow at {foot:?}");
+    let on_side = [0.0, 10.0].iter().any(|v| (center.x - v).abs() < 1e-9 || (center.y - v).abs() < 1e-9);
+    assert!(on_side, "{center:?}");
+    let inward = axis.cross(zero);
+    assert!(((foot - center).normalize() - inward).length() < 0.3, "{inward:?}");
+    assert!(radius.is_none() && h[0].value.abs() < 1e-9);
     // dragged to 10°: the taper angle box says so; back to nothing: the box is empty again
     d.set_handle(&s, 0, 10f64.to_radians() + 0.001, 1f64.to_radians());
     assert_eq!(d.solid.ext.taper(), "10 deg");

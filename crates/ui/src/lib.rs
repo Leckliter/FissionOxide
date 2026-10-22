@@ -41,6 +41,7 @@ mod icons;
 mod input_tests;
 mod library_ui;
 mod logo;
+mod manip_arrow;
 mod manipulators;
 mod marking;
 mod material_ui;

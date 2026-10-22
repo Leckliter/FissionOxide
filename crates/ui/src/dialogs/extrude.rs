@@ -54,6 +54,11 @@ impl Rows {
   pub(super) fn set_taper(&mut self, text: String) {
     self.taper = text;
   }
+
+  /// The taper angle's text, for the floating value box Tab moves to the taper handle.
+  pub(super) fn taper_mut(&mut self) -> &mut String {
+    &mut self.taper
+  }
 }
 
 impl Dialog {

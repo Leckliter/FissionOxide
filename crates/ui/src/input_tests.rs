@@ -1306,8 +1306,9 @@ fn the_floating_value_box_takes_typing_and_enter_is_ok() {
   // its value is selected: typing replaces it, and the dialog's field says the same
   h.frame(typing("25"));
   h.frame(vec![]);
+  // the row gets the unit written out, as Fusion's does (`ui:manip:typed-value-units`)
   let distance = h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone();
-  assert_eq!(distance, "25");
+  assert_eq!(distance, "25 mm");
   let features = h.app.s.design.features.len();
   h.frame(vec![key(egui::Key::Enter)]);
   h.frame(vec![]);
@@ -1547,7 +1548,7 @@ fn offset_on_a_preselected_line_starts_at_zero_and_takes_a_typed_distance() {
   // typing replaces the value; Enter applies it and the tool ends
   h.frame(typing(".1"));
   h.frame(vec![]);
-  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), ".1");
+  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), ".1 mm");
   h.frame(vec![key(egui::Key::Enter)]);
   h.frame(vec![]);
   assert!(h.app.dialog.is_none(), "Enter is OK");
@@ -2266,4 +2267,84 @@ fn cancel_leaves_nothing_selected() {
   h.move_then_click(cancel_pos(h.dialog_rect()));
   assert!(h.app.dialog.is_none());
   assert!(h.app.s.selection.is_empty(), "{:?}", h.app.s.selection);
+}
+
+/// A 20 mm square sketched on XY with its profile picked and Extrude open on it, its floating
+/// value box shown.
+fn extrude_on_a_square() -> Harness {
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  h.app.run("sketch.rect", json!({"corner1": [-10, -10], "corner2": [10, 10]})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.run("sketch.finish", json!({})).unwrap();
+  h.app.s.selection = vec![fox_engine::Sel::Profile { sketch: sk, index: 0 }];
+  h.app.start(crate::dialogs::Kind::Extrude);
+  h.app.fit_view_now();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  h
+}
+
+/// `ui:manip:tab-cycles-boxes`: Tab in Extrude's floating box applies the typed distance and
+/// moves the box (and the keyboard) to the taper handle with "0.0 deg" selected; typing there
+/// sets the taper, and Tab brings the box back to the distance, as in Fusion.
+#[test]
+fn tab_moves_the_value_box_to_the_taper_handle_and_back() {
+  let mut h = extrude_on_a_square();
+  let field = |h: &mut Harness| h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone();
+  let taper = |h: &mut Harness| h.app.dialog.as_mut().unwrap().handle_field(0).unwrap().clone();
+  h.frame(typing("25"));
+  h.frame(vec![]);
+  assert_eq!(field(&mut h), "25 mm");
+  h.frame(vec![key(egui::Key::Tab)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.manip.value_box.at_handle, Some(0), "the box is at the taper handle");
+  let focused = h.ctx.memory(|m| m.focused()).expect("the box keeps the keyboard");
+  assert_eq!(h.ctx.read_response(focused).map(|r| r.layer_id), Some(crate::value_box::layer()));
+  assert_eq!(taper(&mut h), "0.0 deg");
+  assert_eq!(field(&mut h), "25 mm", "Tab applied the typed distance");
+  // the taper's value is selected: typing replaces it, with its unit written out
+  h.frame(typing("5"));
+  h.frame(vec![]);
+  assert_eq!(taper(&mut h), "5 deg");
+  h.frame(vec![key(egui::Key::Tab)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.manip.value_box.at_handle, None, "back at the distance arrow");
+  assert!(h.ctx.memory(|m| m.focused()).is_some());
+  h.frame(typing("30"));
+  h.frame(vec![]);
+  assert_eq!((field(&mut h), taper(&mut h)), ("30 mm".to_string(), "5 deg".to_string()));
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert!(h.app.dialog.is_none(), "Enter is OK");
+  let f = h.app.s.design.features.last().unwrap();
+  let fox_engine::model::FeatureKind::Extrude { extent, .. } = &f.kind else { panic!("{:?}", f.kind) };
+  // Edit Feature shows the values with their units
+  assert_eq!((extent.distance.as_str(), extent.taper.as_str()), ("30 mm", "5 deg"));
+}
+
+/// `ui:manip:preview-hover-highlight`: the pointer over Extrude's preview body lights nothing up.
+#[test]
+fn the_extrude_preview_is_not_hover_highlighted() {
+  let mut h = extrude_on_a_square();
+  h.frame(typing("20"));
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let preview = h.app.dialog.as_ref().unwrap().preview_bodies(&h.app.s);
+  assert_eq!(preview.len(), 1, "the preview shows");
+  // the canvas's middle is on the preview (the profile is centred on the origin, the view fitted)
+  let c = h.app.canvas.center();
+  for at in [c, c + vec2(4.0, 6.0), c + vec2(-5.0, -3.0)] {
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![]);
+    let on_preview = h.app.hover.as_ref().and_then(crate::select::pick_body).is_some_and(|b| preview.contains(&b));
+    assert!(!on_preview, "{:?} lit up at {at:?}", h.app.hover);
+  }
+  // the pointer still reads as over the model: the prompt is Fusion's "Hold Ctrl to modify
+  // selection"
+  assert!(h.app.tstate.over_preview);
+  let prompt = h.app.dialog.as_ref().unwrap().prompt(h.app.hover.is_some() || h.app.tstate.over_preview);
+  assert_eq!(prompt.as_deref(), Some("Hold Ctrl to modify selection"));
 }
