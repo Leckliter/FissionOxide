@@ -477,6 +477,7 @@ impl State {
           self.values[j] = json!(curved);
         }
       }
+      _ if crate::mesh_ui::is_mesh_form(form) => crate::mesh_ui::sync(form, self, &before, s),
       _ => {}
     }
     self.values != before
@@ -856,6 +857,9 @@ impl State {
 
   /// Is everything the command needs there?
   pub fn missing(&self, form: &Form) -> Option<&'static str> {
+    if crate::mesh_ui::is_mesh_form(form) {
+      return crate::mesh_ui::missing(form, self);
+    }
     let get = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
     if form.cmd == "pipe.form" && get("path_curves").and_then(Value::as_array).is_none_or(Vec::is_empty) {
       return Some("Select a path to sweep the profile along");
@@ -1978,6 +1982,11 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       }
       ("sketch.cleanup", q)
     }
+    "mesh.tessellate" | "mesh.section_sketch" => {
+      let mut q = p;
+      crate::mesh_ui::params(form, &mut q);
+      (form.cmd, q)
+    }
     _ => (form.cmd, p),
   }
 }
@@ -2918,6 +2927,10 @@ pub static SK_TEXT_EXPLODE: Form = Form {
 
 /// Fills a form from what it edits when it opens (Edit Text: the selected text's values).
 pub fn prefill(form: &Form, state: &mut State, s: &Session) {
+  if crate::mesh_ui::is_mesh_form(form) {
+    crate::mesh_ui::prefill(form, state, s);
+    return;
+  }
   if std::ptr::eq(form, &SK_TEXT) {
     // Fusion's new text is in Arial (when the system has it)
     if let Some(i) = form.inputs.iter().position(|x| x.key() == "font")
@@ -3278,6 +3291,7 @@ pub fn pick_prompt(form: &Form) -> Option<&'static str> {
     "thicken" => "Select Surfaces to Thicken",
     "boundary_fill" => "Select bodies & planes",
     "sheet.corner_closure" => "Select edges",
+    "mesh.combine_face_groups" => crate::mesh_ui::COMBINE_PROMPT,
     _ => return None,
   })
 }

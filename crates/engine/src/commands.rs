@@ -518,6 +518,14 @@ cmds! {
   "design.type" => "Fusion's design type: part, assembly or hybrid (which toolbar tabs show); no type reads it", "{type?: part|assembly|hybrid}";
   "construction.visible" => "Show or hide a construction plane, axis or point (the browser row's eye, V)", "{feature, visible: bool}";
   "silhouette_split" => "Silhouette Split: split a body (or its faces) where its outline lies seen along a direction (a plane's normal or an axis)", "{direction: plane | axis | edge, body, operation?: shelled|solid|face}";
+  "mesh.tessellate" => "Tessellate: a solid or surface body becomes a mesh body, triangulated to a refinement (custom takes the values given)", "{body, refinement?: \"high\"|\"medium\"|\"low\"|\"custom\", surface_deviation?, normal_deviation?, max_edge?, aspect_ratio?, quads?}";
+  "mesh.repair" => "Repair mesh bodies: close holes, stitch and remove (the default), wrap, one-touch fix or rebuild", "{bodies, type?: \"close_holes\"|\"stitch_and_remove\"|\"wrap\"|\"one_touch_fix\"|\"rebuild\"}";
+  "mesh.analyze" => "Repair's Quick Analysis of a mesh body: open edges, holes, non-manifold edges, degenerate and flipped triangles, pieces", "{body}";
+  "mesh.face_groups" => "Generate Face Groups on mesh bodies: faces within the angle of their group's first face (fast) or its average (accurate) form a group; groups under min_size of an average group join a neighbour", "{bodies, type?: \"fast\"|\"accurate\", angle?, min_size?}";
+  "mesh.combine_face_groups" => "Combine Face Groups: the groups of the picked faces become one", "{faces: [{body, face}]}";
+  "mesh.section_sketch" => "Create Mesh Section Sketch: a sketch on the plane (moved by offset along its normal) with the lines where it cuts the mesh body", "{body, plane, offset?}";
+  "mesh.edit.start" => "Direct Edit / Create Base Mesh Feature: a base feature for direct mesh edits", "{}";
+  "mesh.edit.finish" => "Finish Direct Editing: the edited mesh body is kept as \"<name>_Edited\" in the base feature, and the marker goes back to the end", "{body?, feature?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -541,6 +549,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::features::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::mesh_prep::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::sim::run(s, name, p) {

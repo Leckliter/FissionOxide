@@ -42,6 +42,7 @@ mod export_dxf;
 mod insert_mesh;
 #[cfg(test)]
 mod insert_mesh_tests;
+mod mesh;
 mod newcomp;
 mod primitive;
 mod redefine;
@@ -53,6 +54,7 @@ mod sketch_row_tests;
 mod solid;
 mod thread;
 pub(crate) use export_dxf::{SaveWindow, save_window};
+pub(crate) use mesh::group_triangle;
 pub(crate) use primitive::overlay as place_overlay;
 
 pub(crate) use section::{KeptSection, shown_section};
@@ -2603,6 +2605,9 @@ impl Dialog {
       self.switch_pattern(app, k);
       return true;
     }
+    if std::mem::take(&mut self.live.withdraw) {
+      self.withdraw(&mut app.s);
+    }
     if self.dirty {
       self.preview(&mut app.s);
     }
@@ -3121,6 +3126,9 @@ impl Dialog {
         continue;
       }
       if f.cmd == "thread" && self.thread_form_field(f, i, s, ui, dirty) {
+        continue;
+      }
+      if self.mesh_form_field(f, i, s, ui, dirty) {
         continue;
       }
       let v = self.form.values[i].clone();

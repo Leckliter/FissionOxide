@@ -13,6 +13,9 @@ pub struct BaseBody {
   pub name: String,
   /// OCCT BRep text.
   pub brep: String,
+  /// A mesh body (see [`crate::regen::BodyKind`]).
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub mesh: bool,
 }
 
 /// A direct edit inside a base feature. Values are millimetres, not expressions.

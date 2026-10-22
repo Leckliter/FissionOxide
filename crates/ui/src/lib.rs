@@ -55,6 +55,7 @@ mod material_ui;
 mod menus;
 #[cfg(test)]
 mod mesh_body_tests;
+mod mesh_ui;
 mod navbar;
 mod notifications;
 mod origin;
@@ -364,6 +365,8 @@ pub struct App {
   pub(crate) inserts: insert_window::Inserts,
   /// New Component in an Assembly Design (an external design), while open.
   pub(crate) asm_component: Option<asm_component::AsmComponent>,
+  /// The DIRECT MESH EDITING tab, while open.
+  pub mesh_edit: mesh_ui::MeshEdit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -627,6 +630,7 @@ impl App {
       docs: documents::Documents::default(),
       inserts: insert_window::Inserts::default(),
       asm_component: None,
+      mesh_edit: mesh_ui::MeshEdit::default(),
     }
   }
 
@@ -1975,6 +1979,7 @@ impl App {
       }
       panels::assistant_tab(self, &ctx);
       panels::sketch_palette(self, &ctx);
+      mesh_ui::palette(self, &ctx);
       marking::show(self, &ctx);
       sim_ui::show(self, &ctx);
       file_menu::perf_overlay(self, &ctx);

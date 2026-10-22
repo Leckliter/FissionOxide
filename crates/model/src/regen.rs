@@ -308,6 +308,8 @@ struct State {
   tools: BTreeMap<FeatureId, Vec<pathpattern::Tool>>,
   /// Intersection curves: their wires (drawn with the 3D curves; pipes follow them).
   intersections: BTreeMap<FeatureId, Vec<Shape>>,
+  /// Mesh face groups: a group per face of each body that has them.
+  face_groups: BTreeMap<BodyId, Vec<u32>>,
 }
 
 /// The regenerated design.
@@ -336,11 +338,19 @@ pub struct Model {
   pub placed: BTreeMap<crate::ComponentId, DMat4>,
   /// 3D curves (Project To Surface), as wires.
   pub curves3d: BTreeMap<FeatureId, Vec<Shape>>,
+  /// Mesh face groups (Generate Face Groups): a group number per face of each body that has
+  /// them, face 1 first.
+  pub face_groups: BTreeMap<BodyId, Vec<u32>>,
 }
 
 impl Model {
   pub fn body(&self, id: BodyId) -> Option<&Body> {
     self.bodies.iter().find(|b| b.id == id)
+  }
+
+  /// The face group a face of a mesh body is in, once Generate Face Groups has run on it.
+  pub fn face_group(&self, body: BodyId, face: u32) -> Option<u32> {
+    self.face_groups.get(&body)?.get((face as usize).checked_sub(1)?).copied()
   }
 
   pub fn status(&self, id: FeatureId) -> Option<&FeatureStatus> {
@@ -486,6 +496,7 @@ impl Regenerator {
       joint_origins: state.joint_origins,
       placed: state.placed,
       curves3d: state.curves3d.into_iter().chain(state.intersections).collect(),
+      face_groups: state.face_groups,
     }
   }
 }
@@ -2712,3 +2723,5 @@ mod tests_offset;
 
 mod made;
 pub use made::Made;
+
+mod mesh_prep;

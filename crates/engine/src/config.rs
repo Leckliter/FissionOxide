@@ -440,7 +440,7 @@ fn history(s: &mut Session, p: &Value) -> CmdResult {
   }
   let mut bodies = Vec::new();
   for b in &s.model.bodies {
-    bodies.push(BaseBody { id: b.id, name: b.name.clone(), brep: b.shape.to_brep()? });
+    bodies.push(BaseBody { id: b.id, name: b.name.clone(), brep: b.shape.to_brep()?, mesh: b.is_mesh() });
   }
   let n = bodies.len();
   let id = s.edit(|d| {

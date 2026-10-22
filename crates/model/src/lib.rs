@@ -26,6 +26,7 @@ pub mod groups;
 pub mod include;
 pub mod mechanism;
 pub mod meshops;
+pub mod meshprep;
 pub mod naming;
 pub mod newcomp;
 pub mod pathpattern;
@@ -1952,6 +1953,61 @@ pub enum FeatureKind {
     #[serde(default = "full_opacity")]
     opacity: f64,
   },
+  /// MESH > Tessellate: a solid or surface body becomes a mesh body, triangulated to a
+  /// refinement (see [`meshprep::refinement`]).
+  Tessellate {
+    body: BodyId,
+    /// "high", "medium", "low" or "custom" (the values below).
+    #[serde(default = "medium")]
+    refinement: String,
+    /// Custom refinement values; an empty one takes the refinement's.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    surface_deviation: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    normal_deviation: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    max_edge: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    aspect_ratio: String,
+    /// Create Quads (kept for the dialog: the mesh is triangles).
+    #[serde(default)]
+    quads: bool,
+  },
+  /// MESH > Repair: fixes holes, stray triangles and flipped triangles of mesh bodies.
+  MeshRepair {
+    bodies: Vec<BodyId>,
+    #[serde(default)]
+    repair: meshprep::RepairType,
+  },
+  /// MESH > Generate Face Groups: divides mesh bodies' faces into groups by the angle between
+  /// them (see [`meshprep::face_groups`]).
+  GenerateFaceGroups {
+    bodies: Vec<BodyId>,
+    /// Type Accurate (the group's average normal) instead of Fast (its first face's).
+    #[serde(default)]
+    accurate: bool,
+    #[serde(default = "face_group_angle")]
+    angle: String,
+    /// Minimum Face Group size, as a fraction of an average group's area.
+    #[serde(default = "face_group_size")]
+    min_size: String,
+  },
+  /// MESH > Combine Face Groups: the groups of the picked faces become one.
+  CombineFaceGroups {
+    faces: Vec<FaceRef>,
+  },
+}
+
+fn medium() -> String {
+  "medium".into()
+}
+
+fn face_group_angle() -> String {
+  "25 deg".into()
+}
+
+fn face_group_size() -> String {
+  "0.2".into()
 }
 
 fn full_opacity() -> f64 {
@@ -2110,6 +2166,10 @@ impl FeatureKind {
       FeatureKind::FullRoundFillet { .. } => "Fillet",
       FeatureKind::IntersectionCurve { .. } => "IntersectionCurve",
       FeatureKind::Canvas { .. } => "Canvas",
+      FeatureKind::Tessellate { .. } => "Tessellate",
+      FeatureKind::MeshRepair { .. } => "MeshRepair",
+      FeatureKind::GenerateFaceGroups { .. } => "GenerateFaceGroups",
+      FeatureKind::CombineFaceGroups { .. } => "CombineFaceGroups",
     }
   }
 
@@ -3082,6 +3142,18 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::IntersectionCurve { .. } => {}
     FeatureKind::Canvas { .. } => {}
     FeatureKind::Pcb { .. } => {}
+    FeatureKind::Tessellate { surface_deviation, normal_deviation, max_edge, aspect_ratio, .. } => {
+      for e in [surface_deviation, normal_deviation, max_edge, aspect_ratio] {
+        if !e.is_empty() {
+          f(e);
+        }
+      }
+    }
+    FeatureKind::MeshRepair { .. } | FeatureKind::CombineFaceGroups { .. } => {}
+    FeatureKind::GenerateFaceGroups { angle, min_size, .. } => {
+      f(angle);
+      f(min_size);
+    }
   }
 }
 

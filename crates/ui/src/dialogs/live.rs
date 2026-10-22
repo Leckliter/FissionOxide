@@ -25,6 +25,8 @@ pub(super) struct Live {
   before_features: Vec<FeatureId>,
   /// The browser's body rows before the preview (id, name): it keeps them until OK.
   before_rows: Vec<(BodyId, String)>,
+  /// Preview was unticked where the session isn't at hand: withdraw it after the frame's rows.
+  pub(super) withdraw: bool,
 }
 
 impl Default for Live {
@@ -36,7 +38,15 @@ impl Default for Live {
       picked: Vec::new(),
       before_features: Vec::new(),
       before_rows: Vec::new(),
+      withdraw: false,
     }
+  }
+}
+
+impl Live {
+  /// Preview ticked again: the command previews even if it is the one tried last.
+  pub(super) fn retry(&mut self) {
+    self.tried = None;
   }
 }
 
@@ -175,7 +185,7 @@ impl Dialog {
   /// open with their one selection row).
   pub(super) fn live_checkbox(&mut self, ui: &mut egui::Ui, s: &mut Session) {
     if matches!(self.kind, Kind::Fillet | Kind::Draft | Kind::OffsetFace | Kind::Hem)
-      || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f))
+      || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f) || crate::mesh_ui::is_mesh_form(f))
     {
       return;
     }

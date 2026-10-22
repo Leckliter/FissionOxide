@@ -200,8 +200,11 @@ fn every_example_design_still_loads() {
 fn frozen_block() -> (Design, BodyId) {
   let (mut d, _) = block();
   let m = regenerate(&mut d);
-  let bodies: Vec<BaseBody> =
-    m.bodies.iter().map(|b| BaseBody { id: b.id, name: b.name.clone(), brep: b.shape.to_brep().unwrap() }).collect();
+  let bodies: Vec<BaseBody> = m
+    .bodies
+    .iter()
+    .map(|b| BaseBody { id: b.id, name: b.name.clone(), brep: b.shape.to_brep().unwrap(), mesh: false })
+    .collect();
   let id = m.bodies[0].id;
   d.collapse_history(bodies);
   (d, id)

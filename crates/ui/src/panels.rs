@@ -43,6 +43,8 @@ pub enum Tab {
   Turning,
   /// An Assembly Design's tab (in place of SOLID, SURFACE, ...).
   Assembly,
+  /// The DIRECT MESH EDITING contextual tab (MESH > Direct Edit, Create Base Mesh Feature).
+  MeshEdit,
 }
 
 impl Tab {
@@ -67,6 +69,7 @@ impl Tab {
       Tab::Render => "RENDER",
       Tab::Turning => "TURNING",
       Tab::Assembly => "ASSEMBLY",
+      Tab::MeshEdit => "DIRECT MESH EDITING",
     }
   }
 }
@@ -435,6 +438,9 @@ pub(crate) enum Cmd {
   Insert(crate::insert_window::Target),
   /// INSERT > Insert DXF: the docked INSERT DXF dialog.
   InsertDxf,
+  /// MESH > Direct Edit, Create Base Mesh Feature and Finish Direct Editing (see
+  /// [`crate::mesh_ui`]).
+  MeshEdit(crate::mesh_ui::Act),
 }
 
 impl Cmd {
@@ -442,6 +448,7 @@ impl Cmd {
     match self {
       Cmd::NewSketch => (Icon::Sketch, "Create Sketch", "Pick a plane or planar face to sketch on"),
       Cmd::Form(a) => crate::form_ui::info(a),
+      Cmd::MeshEdit(a) => crate::mesh_ui::info(a),
       Cmd::Dialog(k) => match k {
         Kind::Extrude => (Icon::Extrude, "Extrude", "Add depth to a sketch profile (E)"),
         Kind::Revolve => (Icon::Revolve, "Revolve", "Revolve a sketch profile around an axis"),
@@ -701,6 +708,7 @@ impl Cmd {
       Cmd::Form(a) => crate::form_ui::run(app, a),
       // an Assembly Design's New Component makes an external design
       Cmd::Dialog(Kind::NewComponent) if crate::asm_component::applies(app) => crate::asm_component::open(app),
+      Cmd::MeshEdit(a) => crate::mesh_ui::run(app, a),
       Cmd::Dialog(k) => app.start(k),
       Cmd::Params => app.show_params = !app.show_params,
       Cmd::Select => {
@@ -854,6 +862,9 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
     app.tab = Tab::Solid;
   }
   crate::config_ui::check_base_mode(app);
+  if !app.mesh_edit.active && app.tab == Tab::MeshEdit {
+    app.tab = Tab::Mesh;
+  }
   egui::Panel::top("toolbar")
     .exact_size(96.0)
     .frame(egui::Frame::NONE.fill(theme::TOOLBAR).inner_margin(egui::Margin { left: 6, right: 6, top: 0, bottom: 0 }))
@@ -1178,6 +1189,9 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       if !matches!(app.tab, Tab::Solid | Tab::Surface | Tab::Sketch) {
         app.tab = Tab::Solid;
       }
+    }
+    if app.mesh_edit.active {
+      tabs.push(Tab::MeshEdit);
     }
     for t in tabs {
       let font = egui::FontId::proportional(12.5);
@@ -4148,6 +4162,10 @@ pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::FullRoundFillet { .. } => Icon::Fillet,
     FeatureKind::IntersectionCurve { .. } => Icon::SplineFit,
     FeatureKind::Canvas { .. } => Icon::Canvas,
+    FeatureKind::Tessellate { .. } => Icon::Tessellate,
+    FeatureKind::MeshRepair { .. } => Icon::Repair,
+    FeatureKind::GenerateFaceGroups { .. } => Icon::GenFaceGroups,
+    FeatureKind::CombineFaceGroups { .. } => Icon::CombineFaceGroups,
   }
 }
 
