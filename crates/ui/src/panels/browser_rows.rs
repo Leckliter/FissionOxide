@@ -410,7 +410,8 @@ pub(crate) fn run_origin_folder_cmd(app: &mut App, cmd: RowCmd) {
 
 /// The Origin folder's children, as Fusion's: O, X, Y, Z, XY, XZ, YZ, each with its own eye
 /// (greyed while the folder is hidden). A click selects the item (status "XZ Plane") whether or
-/// not it shows; a double-click on a plane sketches on it. Hovering a row highlights nothing.
+/// not it shows; a double-click on a plane sketches on it. Hovering a row lights its item in
+/// the canvas as hovering the item there does.
 pub(crate) fn origin_children(app: &mut App, ui: &mut egui::Ui, folder: egui::Id) {
   for item in OriginItem::ALL {
     let picked = origin::picked(app) == Some(item);
@@ -428,6 +429,9 @@ pub(crate) fn origin_children(app: &mut App, ui: &mut egui::Ui, folder: egui::Id
     );
     if ev.eye {
       origin::toggle_eye(app, item);
+    }
+    if ev.response.as_ref().is_some_and(|r| r.hovered()) {
+      app.row_hover = Some(origin::RowHover::Origin(item));
     }
     if let Some(r) = &ev.response
       && !app.origin_shown

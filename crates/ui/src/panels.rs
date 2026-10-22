@@ -1386,6 +1386,16 @@ fn is_open(ui: &egui::Ui, id: egui::Id, default: bool) -> bool {
 
 pub fn browser(app: &mut App, ctx: &egui::Context) {
   let canvas = app.canvas;
+  // the rows set it again while the pointer is on one; the canvas, drawn before the browser,
+  // shows it next frame
+  let row_hover = app.row_hover.take();
+  browser_area(app, ctx, canvas);
+  if app.row_hover != row_hover {
+    ctx.request_repaint();
+  }
+}
+
+fn browser_area(app: &mut App, ctx: &egui::Context, canvas: egui::Rect) {
   egui::Area::new(egui::Id::new("browser")).fixed_pos(canvas.min + vec2(6.0, 6.0)).order(egui::Order::Middle).show(
     ctx,
     |ui| {
@@ -2313,6 +2323,9 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
     browser_edit::slow_click_due(ui, row, app.picked_plane.as_ref() == Some(&plane));
     browser_edit::edit_box(app, ui, &ev, row, 2);
     if let Some(r) = ev.response {
+      if r.hovered() {
+        app.row_hover = Some(crate::origin::RowHover::Plane(fid));
+      }
       reveal_row(app, Sel::Feature { feature: fid }, &r);
       r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
         if ui.button("Create Sketch").clicked() {

@@ -215,6 +215,11 @@ pub struct App {
   /// The status readout's last least distance (mm) between two selected items, kept until the
   /// model or the pair changes so the kernel isn't asked every frame.
   pub(crate) readout_distance: std::cell::Cell<Option<panels::PairDistance>>,
+  /// The origin or construction row under the pointer in the browser, lit in the canvas too.
+  pub(crate) row_hover: Option<origin::RowHover>,
+  /// The plane whose sketch grid Create Sketch previews: the one under the pointer while it
+  /// waits for a plane.
+  pub(crate) grid_preview: Option<fox_engine::kernel::Plane>,
   /// The Origin folder's children's own eyes (O, X, Y, Z, XY, XZ, YZ), on by default; a child
   /// shows only when the folder's eye is on too.
   pub(crate) origin_eyes: [bool; 7],
@@ -377,6 +382,11 @@ struct RenderKey {
   glyph_hover: Vec<Pick>,
   /// The Sketch Palette's display options (Slice, Profile, Points, ...).
   palette: palette::SketchPalette,
+  /// The plane Create Sketch previews the grid on.
+  grid_plane: Option<fox_engine::kernel::Plane>,
+  /// The see-through squares drawn over the scene (the origin planes): on the GPU they are
+  /// handed over apart from the scene, so the GPU's scene key leaves them out.
+  quads: Vec<fox_engine::render::Quad>,
 }
 
 impl App {
@@ -522,6 +532,8 @@ impl App {
       picked_origin: None,
       hover_origin: None,
       readout_distance: std::cell::Cell::new(None),
+      row_hover: None,
+      grid_preview: None,
       origin_eyes: [true; 7],
       origin_shown: false,
       browser_sketches: None,

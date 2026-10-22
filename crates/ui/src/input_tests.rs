@@ -911,25 +911,73 @@ fn escape_discards_a_spline_and_enter_commits_it() {
 }
 
 /// The browser's Origin folder is hidden by default; its bulb shows the three origin planes in
-/// the canvas (and the scene's short axes), each about 120 px wide.
+/// the canvas, each reaching about 60 px from the origin.
 #[test]
 fn the_origin_folder_shows_camera_sized_planes() {
   use fox_engine::kernel::glam::DVec3;
   let mut h = Harness::new();
   assert!(!h.app.origin_shown, "Origin is hidden by default");
+  assert!(crate::origin::plane_quads(&h.app).is_empty());
   h.app.origin_shown = true;
   h.frame(vec![]);
-  let half = crate::viewport::origin_plane_half_size(&h.app);
-  let a = on_screen(&h.app, DVec3::new(-half, 0.0, 0.0));
-  let b = on_screen(&h.app, DVec3::new(half, 0.0, 0.0));
-  // the XY square's width along X, foreshortened by the home view's turn
+  assert_eq!(crate::origin::plane_quads(&h.app).len(), 15, "three squares, each a fill and four edges");
+  let size = crate::viewport::origin_plane_size(&h.app);
+  let a = on_screen(&h.app, DVec3::ZERO);
+  let b = on_screen(&h.app, DVec3::new(size, 0.0, 0.0));
+  // the XY square's reach along X, foreshortened by the home view's turn
   let w = (b - a).length();
-  assert!((60.0..=125.0).contains(&w), "the origin plane spans {w} px");
-  // looked at straight on it is the full 120 px
+  assert!((30.0..=62.0).contains(&w), "the origin plane reaches {w} px");
+  // looked at straight on it is the full 60 px
   h.app.cam.set_view(fox_engine::render::StandardView::Top);
-  let a = on_screen(&h.app, DVec3::new(-half, 0.0, 0.0));
-  let b = on_screen(&h.app, DVec3::new(half, 0.0, 0.0));
-  assert!(((b - a).length() - 120.0).abs() < 1.0, "{}", (b - a).length());
+  let a = on_screen(&h.app, DVec3::ZERO);
+  let b = on_screen(&h.app, DVec3::new(size, 0.0, 0.0));
+  assert!(((b - a).length() - 60.0).abs() < 1.0, "{}", (b - a).length());
+}
+
+/// While Create Sketch waits for a plane, every pointer position away from the bodies hovers an
+/// origin plane, taken as infinite (the one the ray meets first), and its sketch grid is
+/// previewed with its labels; a click there sketches on it.
+#[test]
+fn create_sketch_picks_infinite_planes_and_previews_their_grid() {
+  use fox_engine::kernel::glam::DVec3;
+  use fox_engine::model::OriginPlane;
+  let mut h = Harness::new();
+  h.settle();
+  h.app.new_sketch();
+  h.frame(vec![]);
+  // far from every square (the canvas's lower left): the origin plane the ray meets first
+  let far = h.app.canvas.left_bottom() + vec2(120.0, -80.0);
+  let [w, ht] = h.app.canvas_px;
+  let ppp = w as f32 / h.app.canvas.width();
+  let (o, d) =
+    h.app.cam.ray(((far.x - h.app.canvas.min.x) * ppp) as f64, ((far.y - h.app.canvas.min.y) * ppp) as f64, w, ht);
+  let frames = h.app.s.design.frames();
+  let first = [OriginPlane::Xy, OriginPlane::Xz, OriginPlane::Yz]
+    .map(|p| p.plane(frames))
+    .into_iter()
+    .filter_map(|pl| fox_engine::render::ray_plane(o, d, pl.origin, pl.normal()).map(|hit| ((hit - o).dot(d), pl)))
+    .filter(|(t, _)| *t > 0.0)
+    .min_by(|a, b| a.0.total_cmp(&b.0))
+    .map(|(_, pl)| pl);
+  assert!(first.is_some());
+  h.frame(vec![Event::PointerMoved(far)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.grid_preview, first, "the first plane met is previewed");
+  // a point well up the Z axis: the ray meets an upright plane first
+  let side = h.screen(DVec3::new(0.0, 60.0, 80.0));
+  h.frame(vec![Event::PointerMoved(side)]);
+  h.frame(vec![]);
+  let (yz, xz) = (OriginPlane::Yz.plane(frames), OriginPlane::Xz.plane(frames));
+  assert!(
+    h.app.grid_preview.is_some_and(|p| p == yz || p == xz),
+    "an upright plane under the pointer: {:?}",
+    h.app.grid_preview
+  );
+  let previewed = h.app.grid_preview;
+  h.move_then_click(side);
+  let sk = h.app.s.edit_sketch.expect("the click sketches on the hovered plane");
+  assert_eq!(h.app.s.model.sketches.get(&sk).map(|r| r.plane), previewed);
+  assert_eq!(h.app.grid_preview, None, "no preview once the sketch is open");
 }
 
 /// The File button (after the logo and the data panel button) and the Help (?) button (left of
@@ -1643,7 +1691,7 @@ fn origin_items_are_hovered_and_picked_in_the_canvas() {
   h.frame(vec![]);
   assert_eq!(origin::picked(&h.app), None);
   // an axis: along X, well clear of the origin point
-  let reach = crate::viewport::origin_plane_half_size(&h.app) * crate::viewport::ORIGIN_AXIS_REACH;
+  let reach = crate::viewport::origin_plane_size(&h.app) * crate::viewport::ORIGIN_AXIS_REACH;
   let on_x = h.screen(DVec3::X * reach * 0.6);
   h.frame(vec![Event::PointerMoved(on_x)]);
   h.frame(vec![]);

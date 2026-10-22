@@ -430,16 +430,17 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= crate::cut_ui::lead_clicks(app, &resp, &|p| view.ray(&cam, p));
   consumed |=
     crate::library_ui::place_clicks(app, &resp, &painter, &|p| view.to_screen(&cam, p), &|p| view.ray(&cam, p));
+  // the Origin folder's axes and point, under the sketch's own drawing
+  crate::origin::overlay(app, &painter, &|p| view.to_screen(&cam, p));
+  if (app.s.edit_sketch.is_some() || app.grid_preview.is_some()) && grid_shown(app) && app.grid.reference_numbers {
+    grid_labels(app, &painter, &view);
+  }
   if app.s.edit_sketch.is_some() {
-    if grid_shown(app) && app.grid.reference_numbers {
-      grid_labels(app, &painter, &view);
-    }
     consumed |= sketch_overlay(app, ui, &painter, &view);
   } else {
     app.glyph_hover.clear();
   }
   let hot_plane = sketch_planes_overlay(app, planes, &painter, &view);
-  crate::origin::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   offset_plane_overlay(app, &painter, &view);
   // Preferences → General → Enable camera pivot: the orbit's centre while orbiting
   if app.preferences.values.camera_pivot
@@ -778,13 +779,14 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     // the origin axes (dashed, each with its own eye under the Origin folder's) are drawn over
     // the image by `crate::origin`, so the scene draws none of its own
     hide_origin: true,
-    origin_axis_len: Some(origin_plane_half_size(app) * ORIGIN_AXIS_REACH),
+    origin_axis_len: Some(origin_plane_size(app) * ORIGIN_AXIS_REACH),
     // the Sketches folder's eye off draws no sketch but the one being edited
     hide_sketches: !vis.sketches || analysis.hide_sketches || app.sketch_rows.folder_hidden,
     hide_construction_planes: !vis.construction_planes,
     hide_construction_axes: !vis.construction_axes,
     hide_construction_points: !vis.construction_points,
     grid_step: app.grid.step(),
+    grid_plane: app.grid_preview,
     // the Layout Grid carries Fusion's red X and green Y axis lines across it
     grid_axes: app.s.edit_sketch.is_none() && vis.origin_axes,
     show_profiles_of: profiles_of,
@@ -846,7 +848,12 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     glyph_hover: app.glyph_hover.clone(),
     palette: app.palette,
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies().iter().map(|b| b.0).collect()).unwrap_or_default(),
+    grid_plane: app.grid_preview,
+    quads: crate::origin::plane_quads(app),
   };
+  if crate::gpu::active(app) {
+    crate::gpu::set_quads(app, &key.quads);
+  }
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
   }
@@ -867,6 +874,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     crate::gpu::set_scene(app, scene, picks, key);
     return;
   }
+  scene.meshes.extend(key.quads.iter().map(|q| q.mesh()));
   let frame = render::render(&scene, &app.cam, view.w, view.h);
   let img = egui::ColorImage::from_rgba_unmultiplied([frame.width as usize, frame.height as usize], &frame.rgba);
   match &mut app.tex {
@@ -3109,8 +3117,9 @@ pub(crate) struct GridLabel {
 /// The sketch grid's coordinate labels, as Fusion prints them: one on every major line of the
 /// grid that is on screen, along both axes, a bare number with no unit symbol and none at the
 /// origin. Each label reads along the sketch's Y axis (rotated 90° when the sketch is faced).
+/// Create Sketch's preview of a plane labels its grid the same way.
 pub(crate) fn grid_label_layout(app: &App, view: &View) -> Vec<GridLabel> {
-  let Some((_, plane)) = sketch_plane(app) else { return Vec::new() };
+  let Some(plane) = sketch_plane(app).map(|(_, p)| p).or(app.grid_preview) else { return Vec::new() };
   let step = app.grid.step().unwrap_or_else(|| fox_engine::scene::grid_step(&app.s));
   let size = app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0);
   let unit = app.s.design.units;
@@ -4687,43 +4696,76 @@ pub(crate) fn plane_half_size(app: &App) -> f64 {
   app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0) * 0.35
 }
 
-/// Half the side of an origin plane's square on screen, in points: Fusion keeps them about
-/// 120 px wide (twice the ViewCube) whatever the zoom.
-pub(crate) const ORIGIN_PLANE_HALF_PX: f64 = 60.0;
-/// How far the origin axis stubs reach, as a multiple of the origin planes' half size.
-pub(crate) const ORIGIN_AXIS_REACH: f64 = 1.3;
+/// How far an origin plane's square reaches from the origin on screen, in points: Fusion keeps
+/// it about 60 px whatever the zoom.
+pub(crate) const ORIGIN_PLANE_PX: f64 = 60.0;
+/// How far off each axis an origin plane's square starts, in points.
+pub(crate) const ORIGIN_PLANE_GAP_PX: f64 = 4.0;
+/// How far the origin axes reach, as a multiple of the origin planes' size: past the squares.
+pub(crate) const ORIGIN_AXIS_REACH: f64 = 1.5;
 
-/// Half the side of an origin plane's square, in world units: sized from the camera so the
-/// square stays about 120 px on screen at the origin's depth.
-pub(crate) fn origin_plane_half_size(app: &App) -> f64 {
+/// How far an origin plane's square reaches from the origin, in world units: sized from the
+/// camera so the square stays about 60 px on screen at the origin's depth.
+pub(crate) fn origin_plane_size(app: &App) -> f64 {
   let h = app.canvas.height() as f64;
   let height = if h > 1.0 { h } else { 800.0 };
-  app.cam.view_height() / height * ORIGIN_PLANE_HALF_PX
+  app.cam.view_height() / height * ORIGIN_PLANE_PX
 }
 
-/// The half size a `sketch.create` plane draws at: origin planes follow the camera, construction
-/// planes the model (the size the scene draws them at, so picking matches the picture).
-fn half_of(app: &App, plane: &serde_json::Value) -> f64 {
-  if plane.get("feature").is_none() { origin_plane_half_size(app) } else { plane_half_size(app) }
+/// The corners of the square a `sketch.create` plane draws at: an origin plane's in the positive
+/// quadrant of its axes, sized from the camera (as the Origin folder draws it); a construction
+/// plane's centred on it at the size the scene draws it, so picking matches the picture.
+fn square_of(app: &App, plane: &serde_json::Value, pl: &Plane) -> [DVec3; 4] {
+  match crate::origin::OriginItem::from_sketch_plane(plane).and_then(|i| i.plane()) {
+    Some(o) => crate::origin::plane_corners(o, origin_plane_size(app)),
+    None => plane_square(pl, pl.origin, plane_half_size(app)),
+  }
 }
 
-/// Which of `planes` (index) the ray through `pos` hits first, if nothing nearer (a body face)
-/// is in the way.
-fn plane_under(app: &App, view: &View, pos: Pos2, planes: &[(serde_json::Value, Plane)]) -> Option<usize> {
-  let (o, d) = view.ray(&app.cam, pos);
-  let mut best: Option<(f64, usize)> = None;
-  for (i, (p, pl)) in planes.iter().enumerate() {
-    let half = half_of(app, p);
-    let Some(hit) = ray_plane(o, d, pl.origin, pl.normal()) else { continue };
-    let t = (hit - o).dot(d);
-    let [u, v] = pl.to_local(hit);
-    if t > 0.0 && u.abs() <= half && v.abs() <= half && best.is_none_or(|(bt, _)| t < bt) {
-      best = Some((t, i));
+/// Whether a point of a `sketch.create` plane lies in its square ([`square_of`]).
+fn in_square_of(app: &App, plane: &serde_json::Value, pl: &Plane, p: DVec3) -> bool {
+  match crate::origin::OriginItem::from_sketch_plane(plane).and_then(|i| i.plane()) {
+    Some(o) => crate::origin::in_square(o, p, origin_plane_size(app)),
+    None => {
+      let half = plane_half_size(app);
+      pl.to_local(p).iter().all(|c| c.abs() <= half)
     }
   }
-  let (t, i) = best?;
+}
+
+/// Which of `planes` (index) the pointer at `pos` picks: the square the ray through it hits
+/// first, if nothing nearer (a body face) is in the way; with `infinite` (a sketch's or a
+/// primitive's plane), away from every square and every body, the origin plane the ray meets
+/// first taken as an infinite plane, as Fusion picks them, so some plane is always under the
+/// pointer.
+fn plane_under(
+  app: &App,
+  view: &View,
+  pos: Pos2,
+  planes: &[(serde_json::Value, Plane)],
+  infinite: bool,
+) -> Option<usize> {
+  let (o, d) = view.ray(&app.cam, pos);
+  let first = |squares: bool| {
+    let mut best: Option<(f64, usize)> = None;
+    for (i, (p, pl)) in planes.iter().enumerate() {
+      if !squares && p.get("feature").is_some() {
+        continue;
+      }
+      let Some(hit) = ray_plane(o, d, pl.origin, pl.normal()) else { continue };
+      let t = (hit - o).dot(d);
+      if t > 0.0 && (!squares || in_square_of(app, p, pl, hit)) && best.is_none_or(|(bt, _)| t < bt) {
+        best = Some((t, i));
+      }
+    }
+    best
+  };
   let face = fox_engine::scene::ray_hits(&app.s, o, d).first().map(|h| h.0);
-  face.is_none_or(|f| t <= f).then_some(i)
+  match (first(true), face) {
+    (Some((t, i)), f) if f.is_none_or(|f| t <= f) => Some(i),
+    (_, Some(_)) => None,
+    (_, None) => first(false).filter(|_| infinite).map(|(_, i)| i),
+  }
 }
 
 /// The planes Create Sketch offers this frame.
@@ -4739,11 +4781,10 @@ struct PlanePick {
 /// the cursor is noted here (`App::hover_origin`, winning over the face highlight too).
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
   // Create Sketch, Box, Cylinder, Sphere, Torus and Coil before their base is drawn, and Mirror
-  let picking = app
-    .dialog
-    .as_ref()
-    .is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane() || d.wants_plane());
+  let sketching = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane());
+  let picking = sketching || app.dialog.as_ref().is_some_and(|d| d.wants_plane());
   app.hover_origin = None;
+  app.grid_preview = None;
   if !picking {
     // with Revolve open only the axes it takes light up: the planes stay shown without getting
     // in the way of the profiles on them
@@ -4768,15 +4809,27 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
   if !app.sel_filter.construction {
     planes.retain(|(p, _)| p.get("feature").is_none());
   }
-  let hot = if app.drag.is_none() { resp.hover_pos().and_then(|p| plane_under(app, view, p, &planes)) } else { None };
-  if hot.is_some() {
+  let hot = if app.drag.is_none() {
+    resp.hover_pos().and_then(|p| plane_under(app, view, p, &planes, sketching))
+  } else {
+    None
+  };
+  if let Some(i) = hot {
     app.hover = None;
+    // a sketch's (or primitive's) plane: its sketch grid, labels and all, previewed across the
+    // canvas
+    if sketching {
+      app.grid_preview = Some(planes[i].1);
+    }
   }
   Some(PlanePick { planes, hot })
 }
 
+/// Fusion's blue-grey for the plane Create Sketch has under the pointer.
+const PLANE_HOT_RGB: [u8; 3] = [120, 146, 178];
+
 /// Draws Create Sketch's planes as see-through orange squares, as in Fusion, the hovered one
-/// brighter. Returns the `sketch.create` plane under the cursor.
+/// blue-grey. Returns the `sketch.create` plane under the cursor.
 fn sketch_planes_overlay(
   app: &App,
   pick: Option<PlanePick>,
@@ -4790,19 +4843,20 @@ fn sketch_planes_overlay(
   if !crate::origin::OriginItem::AXES.iter().any(|a| crate::origin::visible(app, *a))
     && planes.iter().any(|(p, _)| p.get("feature").is_none())
   {
-    origin_triad(app, painter, view, origin_plane_half_size(app) * ORIGIN_AXIS_REACH);
+    origin_triad(app, painter, view, origin_plane_size(app) * ORIGIN_AXIS_REACH);
   }
   for (i, (p, pl)) in planes.iter().enumerate() {
-    let half = half_of(app, p);
-    let corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
-    let Some(pts) = corners.iter().map(|c| view.to_screen(&app.cam, pl.to_world(*c))).collect::<Option<Vec<Pos2>>>()
+    let Some(pts) = square_of(app, p, pl).iter().map(|c| view.to_screen(&app.cam, *c)).collect::<Option<Vec<Pos2>>>()
     else {
       continue;
     };
-    let lit = hot == Some(i);
-    let fill = Color32::from_rgba_unmultiplied(r, g, b, if lit { 110 } else { 46 });
-    let edge = Color32::from_rgba_unmultiplied(r, g, b, if lit { 255 } else { 170 });
-    painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(if lit { 2.0 } else { 1.0 }, edge)));
+    let (fill, edge, width) = if hot == Some(i) {
+      let [r, g, b] = PLANE_HOT_RGB;
+      (Color32::from_rgba_unmultiplied(r, g, b, 110), Color32::from_rgb(r, g, b), 2.0)
+    } else {
+      (Color32::from_rgba_unmultiplied(r, g, b, 46), Color32::from_rgba_unmultiplied(r, g, b, 170), 1.0)
+    };
+    painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(width, edge)));
   }
   planes.into_iter().nth(hot?).map(|(p, _)| p)
 }
@@ -5155,17 +5209,17 @@ mod tests {
     assert_eq!(dim_tooltip("d3", true, std::f64::consts::FRAC_PI_4, LengthUnit::Mm), "d3 = 45.0 deg");
   }
 
-  /// The origin planes keep about 120 px on screen whatever the zoom: their half size follows
+  /// The origin planes keep about 60 px on screen whatever the zoom: their size follows
   /// the camera's distance.
   #[test]
   fn origin_planes_are_sized_from_the_camera() {
     let mut app = App::with_session(Session::default());
     app.canvas = Rect::from_min_size(Pos2::ZERO, Vec2::new(1456.0, 800.0));
     let px_per_unit = 800.0 / app.cam.view_height();
-    let half = origin_plane_half_size(&app);
-    assert!((half * px_per_unit - ORIGIN_PLANE_HALF_PX).abs() < 1e-6, "{half}");
+    let half = origin_plane_size(&app);
+    assert!((half * px_per_unit - ORIGIN_PLANE_PX).abs() < 1e-6, "{half}");
     app.cam.distance *= 3.0;
-    let far = origin_plane_half_size(&app);
+    let far = origin_plane_size(&app);
     assert!((far / half - 3.0).abs() < 1e-9, "{far} vs {half}");
     // construction planes keep the model-sized square the scene draws them at
     assert!((plane_half_size(&app) - 100.0 * 0.35).abs() < 1e-9);

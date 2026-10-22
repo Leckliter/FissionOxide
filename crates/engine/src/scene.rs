@@ -232,6 +232,9 @@ pub struct ViewOptions {
   pub hide_origin: bool,
   /// The grid's spacing; `None` adapts it to the model's size (see [`grid_step`]).
   pub grid_step: Option<f64>,
+  /// Draw the grid on this plane, as a sketch on it would (Create Sketch's preview of the plane
+  /// under the pointer); `None` = the sketch being edited, else the XY plane.
+  pub grid_plane: Option<Plane>,
   /// How far the origin axes reach from the origin (short stubs, as Fusion draws them when the
   /// Origin folder is shown); `None` = twice the grid step. The UI sizes them from the camera so
   /// they match the origin planes it draws.
@@ -680,6 +683,7 @@ impl SceneBuilder {
         s,
         opts.grid_step.filter(|g| g.is_finite() && *g > 0.0),
         (!opts.hide_origin).then_some(axis_len),
+        opts.grid_plane,
       );
       if opts.grid_axes {
         grid_axis_lines(&mut scene, s, opts.grid_step.filter(|g| g.is_finite() && *g > 0.0));
@@ -750,20 +754,22 @@ pub fn grid_step(s: &Session) -> f64 {
   nice_step(scene_size(s) / 10.0)
 }
 
-/// The ground grid on the sketch plane (the XY plane outside a sketch), and with `origin`
-/// (`Some(stub length)`) the origin axes as short coloured stubs at the origin: Fusion draws no
-/// axis lines across the grid, and none at all while the Origin folder is hidden.
-fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Option<f64>>) {
-  let plane = match s.edit_sketch.and_then(|e| s.model.sketches.get(&e)) {
-    Some(r) => r.plane,
-    None => Plane::XY,
+/// The ground grid on the sketch plane (the XY plane outside a sketch, `on` when given), and
+/// with `origin` (`Some(stub length)`) the origin axes as short coloured stubs at the origin:
+/// Fusion draws no axis lines across the grid, and none at all while the Origin folder is hidden.
+fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Option<f64>>, on: Option<Plane>) {
+  let plane = match (on, s.edit_sketch.and_then(|e| s.model.sketches.get(&e))) {
+    (Some(p), _) => p,
+    (None, Some(r)) => r.plane,
+    (None, None) => Plane::XY,
   };
   let size = scene_size(s);
   let step = fixed.unwrap_or_else(|| grid_step(s));
   let n = ((size / step).ceil() as i64).clamp(2, 60);
   let ext = n as f64 * step;
-  // in a sketch the major lines (every fifth, the labelled ones) stand out more, as Fusion's do
-  let editing = s.edit_sketch.is_some();
+  // in a sketch (and its preview) the major lines (every fifth, the labelled ones) stand out
+  // more, as Fusion's do
+  let editing = s.edit_sketch.is_some() || on.is_some();
   let (major_col, minor_col) =
     if editing { ([168, 172, 178, 255], [222, 224, 228, 255]) } else { ([190, 193, 198, 255], [218, 220, 224, 255]) };
   for i in -n..=n {
