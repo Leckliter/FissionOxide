@@ -1416,7 +1416,7 @@ mod tests {
     assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Sketch Line | Length : 1.575 in"));
     // two curves read how close they come (ui-sketch-tangent-circles-dims), not their length
     app.s.selection = vec![Sel::SketchCurve { sketch, curve: long }, Sel::SketchCurve { sketch, curve: short }];
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Sketch Lines | Min Distance : 0.000 in"));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Sketch Curves | Min Distance : 0.000 in"));
     app.s.selection = vec![Sel::SketchCurve { sketch, curve: circle }];
     assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Sketch Circle | Length : 1.237 in"));
     app.s.selection = vec![Sel::SketchCurve { sketch, curve: circle }, Sel::SketchCurve { sketch, curve: short }];

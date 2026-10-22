@@ -2990,24 +2990,23 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   })
 }
 
-/// Fusion's name for a sketch curve by its kind ("Sketch Line", "Sketch Circle"), singular
-/// and plural.
+/// Fusion's name for one sketch curve by its kind ("Sketch Line", "Sketch Circle"); several read
+/// "Sketch Curves" whatever their kinds ("2 Sketch Curves | Min Distance : 0.206 in").
 fn sketch_curve_noun(app: &App, sketch: FeatureId, curve: fox_engine::sketch::CurveId) -> (&'static str, &'static str) {
   use fox_engine::sketch::CurveKind;
   let kind = app.s.model.sketches.get(&sketch).and_then(|r| r.sketch.curve(curve)).map(|c| &c.kind);
-  match kind {
-    Some(CurveKind::Line { .. }) => ("Sketch Line", "Sketch Lines"),
-    Some(CurveKind::Circle { .. }) => ("Sketch Circle", "Sketch Circles"),
-    Some(CurveKind::Arc { .. }) => ("Sketch Arc", "Sketch Arcs"),
-    Some(CurveKind::Ellipse { .. }) => ("Sketch Ellipse", "Sketch Ellipses"),
-    Some(CurveKind::EllipticalArc { .. }) => ("Sketch Elliptical Arc", "Sketch Elliptical Arcs"),
-    Some(CurveKind::Spline { .. }) => ("Sketch Fitted Spline", "Sketch Fitted Splines"),
-    Some(CurveKind::ControlSpline { .. } | CurveKind::QuinticSpline { .. }) => {
-      ("Sketch Control Point Spline", "Sketch Control Point Splines")
-    }
-    Some(CurveKind::Conic { .. }) => ("Sketch Conic Curve", "Sketch Conic Curves"),
-    _ => ("Sketch Curve", "Sketch Curves"),
-  }
+  let one = match kind {
+    Some(CurveKind::Line { .. }) => "Sketch Line",
+    Some(CurveKind::Circle { .. }) => "Sketch Circle",
+    Some(CurveKind::Arc { .. }) => "Sketch Arc",
+    Some(CurveKind::Ellipse { .. }) => "Sketch Ellipse",
+    Some(CurveKind::EllipticalArc { .. }) => "Sketch Elliptical Arc",
+    Some(CurveKind::Spline { .. }) => "Sketch Fitted Spline",
+    Some(CurveKind::ControlSpline { .. } | CurveKind::QuinticSpline { .. }) => "Sketch Control Point Spline",
+    Some(CurveKind::Conic { .. }) => "Sketch Conic Curve",
+    _ => "Sketch Curve",
+  };
+  (one, "Sketch Curves")
 }
 
 /// A sketch curve's length (mm): exact for lines, circles and arcs, along the drawn polyline
