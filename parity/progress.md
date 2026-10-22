@@ -16,7 +16,7 @@ and not re-checked: the seven `ui:manip:*` keys (ui-extrude-manipulator; on a bo
 `ui-origin-display` keys, `ui:timeline:error-toast`, `ui:timeline:error-dialog`,
 `ui:timeline:failed-item-menu`, `ui:timeline:suppressed-item-menu`, `ui:timeline:hole-extra-sketch`,
 `ui:browser:convert-design-type`, `ui:browser:new-named-view-inline-name`.
-The wave-31/32 batches are `fixing` or `ready` as `index.jsonl` says.
+The wave-31/32 batches are `fixing` as `index.jsonl` says. While this session ran, `ui-insert-new-design` (4 keys) and `ui-construction-display` (5 keys) landed as `fixing-merged` (commits 05c8b0e7, 0d48ec66; the running binary predates them): re-verify those too; FissionOxide's "+" should now ask before replacing the open design (check before relying on it).
 
 ## Next prober: start here
 
