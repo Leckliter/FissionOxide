@@ -154,7 +154,8 @@ fn coincident_keeps_the_first_picked_line_and_moves_the_second_rigidly() {
   let a1 = sketch.curve_points(sketch::CurveId(l1 as u32))[1].0;
   let b0 = sketch.curve_points(sketch::CurveId(l2 as u32))[0].0;
   let r = run(&mut s, "sketch.constrain", json!({"type": "coincident", "points": [a1, b0]}));
-  assert_eq!(r["dof"], 6, "{r}");
+  // line 1 starts on the (fixed) origin: 8 coordinates, 2 held, 2 taken by the constraint
+  assert_eq!(r["dof"], 4, "{r}");
   let sketch = s.design.sketch(s.edit_sketch.unwrap()).unwrap();
   let ends = |l: u64| {
     let p = sketch.curve_points(sketch::CurveId(l as u32));
