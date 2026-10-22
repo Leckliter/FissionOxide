@@ -16,6 +16,7 @@ mod commands;
 pub mod config;
 mod cut;
 pub use cut::{CutLine, CutLineKind, CutPreview};
+pub mod analysis;
 mod cut_service;
 pub mod diff;
 mod drag;

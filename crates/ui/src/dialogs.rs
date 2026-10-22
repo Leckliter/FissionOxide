@@ -13,6 +13,7 @@ use crate::icons::Icon;
 use crate::theme;
 use crate::{App, panels};
 
+mod analysis;
 mod choice;
 mod construct;
 mod extrude;
@@ -28,6 +29,7 @@ mod move_copy;
 mod pieces;
 mod press_owner;
 mod rows;
+pub(crate) use analysis::center_of_mass;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod auto_cut;
@@ -221,6 +223,10 @@ impl Kind {
       Kind::Analysis("zebra") => "ZEBRA ANALYSIS",
       Kind::Analysis("draft") => "DRAFT ANALYSIS",
       Kind::Analysis("accessibility") => "ACCESSIBILITY ANALYSIS",
+      Kind::Analysis("comb") => "CURVATURE COMB ANALYSIS",
+      Kind::Analysis("environment") => "ENVIRONMENT MAP ANALYSIS",
+      Kind::Analysis("isocurve") => "ISOCURVE ANALYSIS",
+      Kind::Analysis("min_radius") => "MINIMUM RADIUS ANALYSIS",
       Kind::Analysis(_) => "CURVATURE MAP ANALYSIS",
       Kind::DrawingView => "DRAWING VIEW",
       Kind::DrawingMoveView => "MOVE VIEW",
@@ -281,6 +287,10 @@ impl Kind {
       Kind::Analysis("zebra") => Icon::Zebra,
       Kind::Analysis("draft") => Icon::DraftAnalysis,
       Kind::Analysis("accessibility") => Icon::Accessibility,
+      Kind::Analysis("comb") => Icon::CurvComb,
+      Kind::Analysis("environment") => Icon::EnvMap,
+      Kind::Analysis("isocurve") => Icon::Isocurve,
+      Kind::Analysis("min_radius") => Icon::MinRadius,
       Kind::Analysis(_) => Icon::CurvMap,
       Kind::CenterOfMass => Icon::CenterOfMass,
       Kind::SkFillet => Icon::SkFillet,
@@ -339,8 +349,12 @@ impl Kind {
       Kind::Analysis("zebra") => ("Zebra Analysis", "Reflected stripes show how smoothly surfaces join"),
       Kind::Analysis("draft") => ("Draft Analysis", "Which faces have draft for moulding along a pull direction"),
       Kind::Analysis("accessibility") => ("Accessibility Analysis", "Which faces a tool can reach from a direction"),
+      Kind::Analysis("comb") => ("Curvature Comb Analysis", "Combs along edges show how their curvature changes"),
+      Kind::Analysis("environment") => ("Environment Map Analysis", "A reflected environment shows how surfaces flow"),
+      Kind::Analysis("isocurve") => ("Isocurve Analysis", "Curves across faces along their parameter directions"),
+      Kind::Analysis("min_radius") => ("Minimum Radius Analysis", "Where surfaces curve tighter than a tool can reach"),
       Kind::Analysis(_) => ("Curvature Map Analysis", "Colour by how sharply surfaces curve"),
-      Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected (or all) bodies"),
+      Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected bodies"),
       Kind::SkFillet => ("Fillet", "Round the corner where two lines or arcs meet"),
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
       Kind::SkChamfer2 => ("Two Distance Chamfer", "Bevel a corner by two distances"),
@@ -410,14 +424,7 @@ impl Kind {
   pub(crate) fn reports(self) -> bool {
     matches!(
       self,
-      Kind::Inspect
-        | Kind::Appearance
-        | Kind::Material
-        | Kind::FlatPattern
-        | Kind::Bom
-        | Kind::MotionStudy
-        | Kind::CenterOfMass
-        | Kind::Analysis(_)
+      Kind::Inspect | Kind::Appearance | Kind::Material | Kind::FlatPattern | Kind::Bom | Kind::MotionStudy
     )
   }
 
@@ -670,6 +677,8 @@ pub struct Dialog {
   pub(crate) switch_to: Option<Kind>,
   /// INSERT MESH's file, unit and placement (see [`insert_mesh`]).
   pub(crate) mesh: insert_mesh::Options,
+  /// An INSPECT analysis's settings (see [`analysis`]).
+  an: analysis::AnalysisForm,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -805,6 +814,10 @@ impl Dialog {
       point: None,
       switch_to: None,
       mesh: insert_mesh::Options::default(),
+      an: analysis::AnalysisForm::new(match kind {
+        Kind::Analysis(k) => k,
+        _ => "",
+      }),
     }
   }
 
@@ -1187,8 +1200,9 @@ impl Dialog {
     if kind == Kind::Section {
       d.section_open(&app.s);
     }
-    if let Kind::Analysis(a) = kind {
-      app.analysis = Some(json!({"analysis": a, "pull": "z", "angle": 1.0}));
+    if let Kind::Analysis(_) = kind {
+      // nothing is drawn until a pick (see `inspect_analysis_rows`)
+      app.analysis = None;
     }
     d.start_placing(app);
     d.localize(app.s.design.units);
@@ -2086,6 +2100,8 @@ impl Dialog {
       Kind::RedefinePlane => self.sketch.is_some() && self.redefine.picked.is_some(),
       Kind::ExportDxf => self.sketch.is_some(),
       Kind::InsertMesh => self.mesh.path.is_some(),
+      Kind::Analysis(k) => self.analysis_ready(k),
+      Kind::CenterOfMass => !self.bodies.is_empty(),
       _ => true,
     }
   }
@@ -2610,6 +2626,13 @@ impl Dialog {
       }
       ok = false;
     }
+    // an analysis is kept in the browser's Analysis folder
+    if ok && let Some((kind, params)) = self.analysis_ok() {
+      crate::analyses::keep(app, kind, params);
+      app.s.selection.clear();
+      keep = false;
+      ok = false;
+    }
     if ok {
       if !self.applied {
         self.preview(&mut app.s);
@@ -2813,6 +2836,8 @@ impl Dialog {
           | Kind::SkRectPattern
           | Kind::SkScale
           | Kind::Scale
+          | Kind::Analysis(_)
+          | Kind::CenterOfMass
       )
   }
 
@@ -2905,6 +2930,8 @@ impl Dialog {
       Kind::DrawingMoveView | Kind::DrawingDimension => "pick a view",
       Kind::DrawingView if self.choice == "flat" => "select a sheet metal body",
       Kind::RedefinePlane => "select a planar face or a work plane",
+      Kind::Analysis(k) => self.analysis_missing(k),
+      Kind::CenterOfMass => "select bodies and/or components",
       _ => "missing input",
     }
   }
@@ -3043,7 +3070,7 @@ impl Dialog {
       Kind::ExportDxf => self.dxf_rows(app, ui),
       Kind::InsertMesh => self.insert_mesh_rows(app, ui),
       Kind::Section => self.section_fields(app, ui),
-      Kind::Analysis(kind) => analysis_fields(app, ui, kind),
+      Kind::Analysis(kind) => self.inspect_analysis_rows(app, ui, kind),
       Kind::Form(f) => {
         let mut dirty = false;
         let op = self.operation().to_string();
@@ -3742,29 +3769,7 @@ impl Dialog {
         Self::check(ui, "Flip", &mut self.flip, dirty);
       }
       Kind::Interference => self.interference_fields(app, ui),
-      Kind::CenterOfMass => {
-        let r = self.report.clone().unwrap_or(Value::Null);
-        let c: Vec<f64> = r
-          .get("center")
-          .and_then(Value::as_array)
-          .map(|a| a.iter().filter_map(Value::as_f64).collect())
-          .unwrap_or_default();
-        ui.label("Bodies");
-        ui.label(format!("{}", r.get("bodies").and_then(Value::as_array).map(Vec::len).unwrap_or(0)));
-        ui.end_row();
-        if let [x, y, z] = c.as_slice() {
-          ui.label(RichText::new("Centre").strong());
-          let u = self.unit;
-          ui.label(format!("{:.3}, {:.3}, {:.3} {}", u.from_mm(*x), u.from_mm(*y), u.from_mm(*z), u.symbol()));
-          ui.end_row();
-        }
-        ui.label("Mass");
-        ui.label(format!("{:.2} g", r.get("mass_g").and_then(Value::as_f64).unwrap_or(0.0)));
-        ui.end_row();
-        ui.label("Volume");
-        ui.label(format!("{:.3} mm³", r.get("volume_mm3").and_then(Value::as_f64).unwrap_or(0.0)));
-        ui.end_row();
-      }
+      Kind::CenterOfMass => self.center_of_mass_rows(app, ui),
       Kind::Bom => {
         let rows = self.report.as_ref().and_then(Value::as_array).cloned().unwrap_or_default();
         if rows.is_empty() {
@@ -4370,10 +4375,6 @@ impl Dialog {
         s.execute("assembly.interference", &json!({"bodies": self.bodies}))
       }
       Kind::Bom => s.execute("assembly.bom", &json!({})),
-      Kind::CenterOfMass => {
-        let bodies = sel_only_bodies(s);
-        s.execute("inspect.center_of_mass", &json!({"bodies": bodies}))
-      }
       Kind::MotionStudy => match self.target {
         Some(j) => s.execute(
           "motion.study",
@@ -5175,6 +5176,10 @@ impl Dialog {
   pub(crate) fn leave(&mut self, app: &mut App) {
     // an edit closed some other way keeps what it shows and rolls forward
     self.end_edit(&mut app.s, true);
+    if let Kind::Analysis(_) = self.kind {
+      // OK kept it in the Analysis folder; Cancel and Escape leave nothing
+      app.analysis = None;
+    }
     if let Some((priority, vertices)) = self.saved_filter.take() {
       app.sel_priority = priority;
       app.sel_filter.vertices = vertices;
@@ -5264,48 +5269,6 @@ pub(crate) fn apply_appearance(app: &mut App, name: &str, color: [u8; 3], faces:
   }
   p["bodies"] = json!(bodies);
   app.run("body.appearance", p).is_some()
-}
-
-/// Surface analysis settings: the pull direction and draft angle where they apply.
-fn analysis_fields(app: &mut App, ui: &mut egui::Ui, kind: &'static str) {
-  let mut on = app.analysis.as_ref().is_some_and(|a| a["analysis"] == kind);
-  let mut a = app
-    .analysis
-    .clone()
-    .filter(|a| a["analysis"] == kind)
-    .unwrap_or(json!({"analysis": kind, "pull": "z", "angle": 1.0}));
-  ui.label("");
-  ui.checkbox(&mut on, "Show analysis");
-  ui.end_row();
-  if matches!(kind, "draft" | "accessibility") {
-    ui.label(if kind == "draft" { "Pull direction" } else { "Tool direction" });
-    let cur = a["pull"].as_str().unwrap_or("z").to_string();
-    egui::ComboBox::from_id_salt("pull").selected_text(axis_label(&cur)).width(140.0).show_ui(ui, |ui| {
-      for k in ["x", "y", "z"] {
-        if ui.selectable_label(cur == k, axis_label(k)).clicked() {
-          a["pull"] = json!(k);
-        }
-      }
-    });
-    ui.end_row();
-  }
-  if kind == "draft" {
-    ui.label("Draft angle");
-    let mut ang = a["angle"].as_f64().unwrap_or(1.0);
-    ui.add(egui::DragValue::new(&mut ang).speed(0.1).range(0.0..=45.0).suffix("°"));
-    a["angle"] = json!(ang);
-    ui.end_row();
-  }
-  let legend = match kind {
-    "zebra" => "Stripes that kink or jump show where faces meet without tangency or curvature continuity",
-    "draft" => "Green: positive draft · yellow: less than the angle · red: undercut",
-    "accessibility" => "Green: reachable along the direction · red: hidden from it",
-    _ => "Blue: flat · green → yellow → red: curving more tightly",
-  };
-  ui.label("");
-  ui.label(RichText::new(legend).small().color(theme::MUTED));
-  ui.end_row();
-  app.analysis = on.then_some(a);
 }
 
 /// `s` with its first letter capitalised, as a cursor prompt is written.
@@ -5830,7 +5793,9 @@ mod tests {
     // a command without its own wording asks for its missing input as a sentence
     assert_eq!(Dialog::blank(Kind::Hem).prompt(false).as_deref(), Some("Select an edge to hem"));
     // one with nothing to select or specify has no prompt
-    assert_eq!(Dialog::blank(Kind::CenterOfMass).prompt(false), None);
+    assert_eq!(Dialog::blank(Kind::Bom).prompt(false), None);
+    // Center of Mass asks for its pick, as Fusion's does
+    assert_eq!(Dialog::blank(Kind::CenterOfMass).prompt(false).as_deref(), Some("Select bodies and/or components"));
     assert_eq!(Dialog::blank(Kind::Inspect).prompt(false).as_deref(), Some("Select objects to measure."));
   }
 

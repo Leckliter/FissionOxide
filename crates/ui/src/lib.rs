@@ -5,6 +5,7 @@
 //! ViewCube, sketch palette and command dialogs floating over it; the timeline at the bottom. The UI is thin: every action goes through [`Session::execute`] commands.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod analyses;
 mod asm_component;
 mod assembly_forms;
 mod cam_ui;
@@ -279,8 +280,11 @@ pub struct App {
   pub(crate) measure_fmt: dialogs::MeasureFmt,
   /// Section analysis: `{plane, offset, flip}` (see [`fox_engine::scene::view_options`]).
   pub section: Option<Value>,
-  /// Surface analysis: `{analysis, pull?, angle?}`.
+  /// The open analysis dialog's render parameters, once it has its picks (see
+  /// `fox_engine::scene::view_options`).
   pub analysis: Option<Value>,
+  /// The browser's Analysis folder: the analyses kept with OK.
+  pub(crate) analyses: analyses::Analyses,
   /// A regeneration running in the background, and when it started. While it runs the UI shows
   /// the last image and takes no input (nothing may call the kernel; see `Session::begin`).
   pub(crate) rebuild: Option<(fox_engine::Rebuild, f64)>,
@@ -583,6 +587,7 @@ impl App {
       measure_fmt: dialogs::MeasureFmt::default(),
       section: None,
       analysis: None,
+      analyses: analyses::Analyses::default(),
       rebuild: None,
       manufacture: false,
       form: form_ui::FormEdit::default(),
@@ -769,6 +774,8 @@ impl App {
     self.ctx_menu.peek_faces.clear();
     self.ctx_menu.peek_sketches.clear();
     self.ctx_menu.isolate = None;
+    // the analyses were the old design's
+    analyses::clear(self);
     self.data.save = None;
     // the Export window was for the old design
     self.files.export = None;
@@ -1911,6 +1918,7 @@ impl App {
       self.draw_busy(ui, &ctx);
       return;
     }
+    analyses::refresh(self);
     // Escape closes the 3D PRINT dialog, Image Options and the data panel's prompts first
     let escaped = file_dialogs::escape(self, &ctx);
     if !escaped && !file_dialogs::modal_open(self) && self.electronics.is_none() {

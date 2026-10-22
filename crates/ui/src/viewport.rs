@@ -971,7 +971,7 @@ fn sketch_3d_manipulator(app: &App, painter: &egui::Painter, view: &View) {
 
 /// The section and analysis settings as render parameters.
 fn view_params(app: &App) -> serde_json::Value {
-  let mut v = app.analysis.clone().unwrap_or(json!({}));
+  let mut v = crate::analyses::render_params(app).unwrap_or(json!({}));
   // a Sweep's or Loft's Analysis tab shows its analysis while the dialog is open
   if let Some(a) = app.dialog.as_ref().and_then(|d| d.tab_analysis())
     && v.get("analysis").is_none()
@@ -5171,9 +5171,7 @@ pub(crate) fn axis_param(origin: DVec3, dir: DVec3, o: DVec3, d: DVec3) -> Optio
 
 /// The Measure dialog's result: a line between the closest points with the distance.
 fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
-  if let Some(c) = app.dialog.as_ref().and_then(|d| d.marker())
-    && let Some(p) = view.to_screen(&app.cam, c)
-  {
+  for p in crate::analyses::centers(app).into_iter().filter_map(|c| view.to_screen(&app.cam, c)) {
     // centre of mass: Fusion's quartered circle
     let col = Color32::from_rgb(30, 30, 30);
     painter.circle_filled(p, 8.0, Color32::WHITE);
