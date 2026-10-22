@@ -191,6 +191,15 @@ pub struct ToolState {
   /// anything was picked since it started.
   pub(crate) con_picks: usize,
   pub(crate) con_any: bool,
+  /// A dimension's value being dragged: its constraint and the grab's offset from the value's
+  /// centre (screen points).
+  pub(crate) dim_drag: Option<(u32, Vec2)>,
+  /// Measure was opened from a dimension box's menu: its measurement goes into the box when it
+  /// closes.
+  pub(crate) measure_fill: bool,
+  /// 3D Sketch: where the Line chain's last point is in the world (off the sketch plane when it
+  /// was taken from a model vertex).
+  pub(crate) last3d: Option<DVec3>,
 }
 
 /// Fusion's rho for a new conic curve.
@@ -992,7 +1001,15 @@ fn sketch_3d_manipulator(app: &App, painter: &egui::Painter, view: &View) {
   let Some((_, plane)) = sketch_plane(app) else { return };
   let Some(last) = app.tstate.pts.last() else { return };
   let project = |p: DVec3| view.to_screen(&app.cam, p);
-  crate::manipulators::sketch_axes(painter, &project, &app.cam, plane.to_world(*last), plane.normal());
+  // a point taken off the plane: the manipulator sits there, and the segment runs from it
+  let at = app.tstate.last3d.filter(|w| plane.to_local(*w) == *last).unwrap_or_else(|| plane.to_world(*last));
+  if (at - plane.origin).dot(plane.normal()).abs() > 1e-6
+    && let Some(cur) = app.tstate.hud.cursor.map(|c| plane.to_world(c.0))
+    && let (Some(a), Some(b)) = (project(at), project(cur))
+  {
+    painter.line_segment([a, b], Stroke::new(1.5, Color32::from_rgb(6, 150, 214)));
+  }
+  crate::manipulators::sketch_axes(painter, &project, &app.cam, at, plane.normal());
 }
 
 /// The section and analysis settings as render parameters.
@@ -1341,6 +1358,9 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     return;
   }
   let Some((p, snapped)) = sketch_cursor(app, view, pos) else { return };
+  if app.tool == Tool::Line && app.palette.sketch_3d && line_3d_click(app, view, pos, sk, &plane, p) {
+    return;
+  }
   if matches!(app.tool, Tool::Spline | Tool::ControlSpline) {
     // clicking the last point again finishes the spline
     if app.tstate.pts.last().is_some_and(|l| (l[0] - p[0]).hypot(l[1] - p[1]) < 1e-9) {
@@ -1351,6 +1371,49 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     return;
   }
   place_point(app, sk, p, snapped);
+}
+
+/// How far from the screen point a model vertex still takes a 3D Sketch point (points).
+const VERTEX_SNAP_PX: f32 = 8.0;
+
+/// The model vertex nearest the screen point `pos` within [`VERTEX_SNAP_PX`], in the world.
+fn vertex_near(app: &App, view: &View, pos: Pos2) -> Option<DVec3> {
+  let mut best: Option<(f32, DVec3)> = None;
+  for b in app.s.model.bodies.iter().filter(|b| app.s.body_visible(b.id) && !b.is_mesh()) {
+    for (_, _, w) in fox_engine::scene::body_vertices(b) {
+      let Some(at) = view.to_screen(&app.cam, w) else { continue };
+      let d = at.distance(pos);
+      if d <= VERTEX_SNAP_PX && best.is_none_or(|(bd, _)| d < bd) {
+        best = Some((d, w));
+      }
+    }
+  }
+  best.map(|b| b.1)
+}
+
+/// The Line tool with the palette's 3D Sketch on, as Fusion runs it: a click near a model
+/// vertex takes the vertex where it is in 3D, off the sketch plane, and a segment with an end
+/// off the plane is a 3D sketch line (`sketch.line3d`). Returns false for a click the plane
+/// tool takes as usual (both ends on the plane); `p` is the plane cursor.
+fn line_3d_click(app: &mut App, view: &View, pos: Pos2, sk: FeatureId, plane: &Plane, p: [f64; 2]) -> bool {
+  let target = vertex_near(app, view, pos).unwrap_or_else(|| plane.to_world(p));
+  let off = |w: DVec3| (w - plane.origin).dot(plane.normal()).abs() > 1e-6;
+  let prev = if app.tstate.pts.is_empty() { None } else { app.tstate.last3d };
+  app.tstate.last3d = Some(target);
+  if !off(target) && prev.is_none_or(|w| !off(w)) {
+    return false;
+  }
+  app.tstate.hud = HeadsUp::default();
+  if let Some(a) = prev {
+    let made = app.run("sketch.line3d", json!({"sketch": sk.0, "points": [a.to_array(), target.to_array()]}));
+    if made.is_none() {
+      app.tstate.last3d = Some(a);
+      return true;
+    }
+  }
+  // the chain carries on from here (its plane tools see the point's shadow on the plane)
+  app.tstate.pts.push(plane.to_local(target));
+  true
 }
 
 /// Adds the active tool's next point; the last one draws the shape. Values typed in the heads-up
@@ -2691,6 +2754,8 @@ fn dim_shape_at(
       let (p, q) = (s.pos(*a)?, s.pos(*b)?);
       linear_at(p, q, unit(p, q)?)
     }
+    ConstraintKind::HorizontalDistance { a, b, .. } => linear_at(s.pos(*a)?, s.pos(*b)?, [1.0, 0.0]),
+    ConstraintKind::VerticalDistance { a, b, .. } => linear_at(s.pos(*a)?, s.pos(*b)?, [0.0, 1.0]),
     ConstraintKind::PointLineDistance { p, line, .. } => {
       let pts = s.curve_points(*line);
       let (l0, l1, pp) = (s.pos(*pts.first()?)?, s.pos(*pts.get(1)?)?, s.pos(*p)?);
@@ -2863,9 +2928,10 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
     });
   ctx.data_mut(|d| d.insert_temp(empty_id, refused && !commit && !cancel));
   if measure {
-    // Measure opens beside the box, as in Fusion (its readout is typed back by hand)
+    // Measure opens beside the box, as in Fusion; what it measures fills the box when it closes
     let d = crate::dialogs::Dialog::open(app, crate::dialogs::Kind::Inspect);
     app.dialog = Some(d);
+    app.tstate.measure_fill = true;
   }
   if commit {
     // the Enter is this box's, not the open dialog's OK
@@ -2898,6 +2964,20 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
   }
   if !commit && !cancel {
     app.dim_edit = Some((cid, text, pos));
+  }
+}
+
+/// Measure, opened from a dimension box's menu, is closing: the distance it measured (if any)
+/// goes into the box, in full with its unit, as Fusion writes it back.
+pub(crate) fn fill_dim_from_measure(app: &mut App) {
+  if !std::mem::take(&mut app.tstate.measure_fill) {
+    return;
+  }
+  let Some((a, b, _)) = &app.measure else { return };
+  let d = (*b - *a).length();
+  let unit = app.s.design.units;
+  if let Some((_, text, _)) = app.dim_edit.as_mut() {
+    *text = dim_full_text(unit, false, d);
   }
 }
 
@@ -2986,6 +3066,27 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
   }
 }
 
+/// Where the screen point `p` falls on `plane` (sketch coordinates).
+fn screen_to_sketch(app: &App, view: &View, plane: &Plane, p: Pos2) -> Option<[f64; 2]> {
+  let (o, d) = view.ray(&app.cam, p);
+  ray_plane(o, d, plane.origin, plane.normal()).map(|hit| plane.to_local(hit))
+}
+
+/// Moves dimension `c`'s value to `to` (sketch coordinates) in the solved sketch while its value
+/// is dragged; letting go stores it with `sketch.dimension_label`.
+pub(crate) fn drag_dim_label(
+  s: &mut fox_engine::Session,
+  sk: FeatureId,
+  c: fox_engine::sketch::ConstraintId,
+  to: [f64; 2],
+) {
+  let Some(r) = s.model.sketches.get_mut(&sk) else { return };
+  if let Some(c) = r.sketch.constraints.iter_mut().find(|x| x.id == c) {
+    c.label = Some(to);
+    s.revision += 1;
+  }
+}
+
 /// Dimension labels and constraint glyphs of the sketch being edited. Returns true when a click
 /// was consumed.
 fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &View) -> bool {
@@ -3002,6 +3103,8 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     _ => None,
   };
   let mut right_click: Option<(fox_engine::sketch::ConstraintId, Pos2)> = None;
+  // a dimension value let go after a drag, and where it was put
+  let mut dropped: Option<(fox_engine::sketch::ConstraintId, [f64; 2])> = None;
   for c in &sketch.constraints {
     if c.kind.dim().is_some() && !app.show_dims || c.kind.dim().is_none() && !app.show_constraints {
       continue;
@@ -3021,7 +3124,33 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
         },
       };
       let r = Rect::from_center_size(at, size);
-      let resp = ui.interact(r, ui.id().with(("dim", c.id.0)), Sense::click());
+      let resp = ui.interact(r, ui.id().with(("dim", c.id.0)), Sense::click_and_drag());
+      // dragging the value moves it, as in Fusion: its new spot sets the offset and side
+      if resp.drag_started()
+        && let Some(p) = resp.interact_pointer_pos()
+      {
+        app.tstate.dim_drag = Some((c.id.0, at - p));
+      }
+      if let (Some((id, grab)), Some(p)) = (app.tstate.dim_drag, resp.interact_pointer_pos())
+        && id == c.id.0
+        && resp.dragged()
+        && let Some(to) = screen_to_sketch(app, view, &plane, p + grab)
+      {
+        drag_dim_label(&mut app.s, sk, c.id, to);
+        consumed = true;
+      }
+      if resp.drag_stopped() && app.tstate.dim_drag.is_some_and(|d| d.0 == c.id.0) {
+        app.tstate.dim_drag = None;
+        dropped = app
+          .s
+          .model
+          .sketches
+          .get(&sk)
+          .and_then(|r| r.sketch.constraint(c.id))
+          .and_then(|x| x.label)
+          .map(|to| (c.id, to));
+        consumed = true;
+      }
       // plain dark text with no box, as Fusion draws it; the text and line turn blue under the
       // cursor or selected
       let hot = selected || resp.hovered();
@@ -3105,6 +3234,9 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     app.hover = None;
     crate::marking::open(app, p);
     consumed = true;
+  }
+  if let Some((constraint, to)) = dropped {
+    app.run("sketch.dimension_label", json!({"sketch": sk.0, "constraint": constraint.0, "at": to}));
   }
   consumed
 }
@@ -6837,5 +6969,124 @@ mod tests {
     // the next command clears it
     app.run("sketch.point", json!({"sketch": sk.0, "at": [3.0, 3.0]}));
     assert!(app.warning_toast.is_none());
+  }
+
+  /// `ui:sketch:dimension-placement-kept`: a placed dimension keeps its offset and side, a
+  /// dragged value moves it (live in the solved sketch, stored on release), and horizontal and
+  /// vertical distances draw at their place too.
+  #[test]
+  fn dragged_dimension_value_keeps_its_new_place() {
+    let (mut app, sk) = sketching(Tool::Select);
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [20, 0]]})).unwrap();
+    let line = r["curves"][0].as_u64().unwrap();
+    let d = app.run(
+      "sketch.dimension",
+      json!({"sketch": sk.0, "type": "distance", "curves": [line], "value": "20", "at": [10, 8]}),
+    );
+    let cid = fox_engine::sketch::ConstraintId(d.unwrap()["constraint"].as_u64().unwrap() as u32);
+    let to_screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, -p[1] as f32));
+    let shape_of = |app: &App| {
+      let s = &app.s.model.sketches[&sk].sketch;
+      let c = s.constraint(cid).unwrap();
+      dim_shape(s, &c.kind, c.kind.dim().unwrap(), c.label, Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap()
+    };
+    assert!((shape_of(&app).label.y + 8.0).abs() < 1e-3, "above the line, 8 off: {:?}", shape_of(&app).label);
+    // dragged below the line: the solved sketch follows at once, the design on release
+    drag_dim_label(&mut app.s, sk, cid, [10.0, -12.0]);
+    assert!((shape_of(&app).label.y - 12.0).abs() < 1e-3, "{:?}", shape_of(&app).label);
+    assert_eq!(app.s.design.sketch(sk).unwrap().constraint(cid).unwrap().label, Some([10.0, 8.0]));
+    app.run("sketch.dimension_label", json!({"sketch": sk.0, "constraint": cid.0, "at": [10.0, -12.0]})).unwrap();
+    assert_eq!(app.s.design.sketch(sk).unwrap().constraint(cid).unwrap().label, Some([10.0, -12.0]));
+    assert!((shape_of(&app).label.y - 12.0).abs() < 1e-3);
+    // a horizontal distance between two points draws at its place
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 10], [15, 30]]})).unwrap();
+    let h = app.run(
+      "sketch.dimension",
+      json!({"sketch": sk.0, "type": "horizontal", "curves": [r["curves"][0]], "value": "15", "at": [7, 40]}),
+    );
+    let hid = fox_engine::sketch::ConstraintId(h.unwrap()["constraint"].as_u64().unwrap() as u32);
+    let s = &app.s.model.sketches[&sk].sketch;
+    let c = s.constraint(hid).unwrap();
+    let shape = dim_shape(s, &c.kind, c.kind.dim().unwrap(), c.label, Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap();
+    assert!((shape.label.y + 40.0).abs() < 1e-3, "{:?}", shape.label);
+    // nothing to move without a dimension
+    assert!(app.run("sketch.dimension_label", json!({"sketch": sk.0, "constraint": 9999, "at": [0, 0]})).is_none());
+  }
+
+  /// `ui:sketch:dim-box-measure-fill`: Measure opened from a dimension box's menu writes what it
+  /// measured into the box when it closes; Measure opened any other way leaves the box alone.
+  #[test]
+  fn measure_from_the_dimension_box_fills_it() {
+    let (mut app, _) = sketching(Tool::Dimension);
+    app.dim_edit = Some((0, "20 mm".into(), Pos2::new(200.0, 200.0)));
+    let measured = || Some((DVec3::ZERO, DVec3::new(3.0, 4.0, 12.0), "13.00 mm".to_string()));
+    // the box menu's Measure
+    let mut d = crate::dialogs::Dialog::open(&mut app, crate::dialogs::Kind::Inspect);
+    app.tstate.measure_fill = true;
+    app.measure = measured();
+    d.leave(&mut app);
+    assert_eq!(app.dim_edit.as_ref().unwrap().1, "13 mm");
+    assert!(!app.tstate.measure_fill);
+    // Measure from the toolbar doesn't touch it
+    app.dim_edit = Some((0, "20 mm".into(), Pos2::new(200.0, 200.0)));
+    let mut d = crate::dialogs::Dialog::open(&mut app, crate::dialogs::Kind::Inspect);
+    app.measure = measured();
+    d.leave(&mut app);
+    assert_eq!(app.dim_edit.as_ref().unwrap().1, "20 mm");
+  }
+
+  /// `ui:sketch:3d-sketch-input`: with 3D Sketch on, a Line click near a model vertex takes it
+  /// where it is in 3D, and the segment to it is a 3D sketch line, drawn blue; with it off the
+  /// same click stays on the sketch plane.
+  #[test]
+  fn three_d_sketch_line_takes_a_model_vertex_off_the_plane() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    app.set_tool(Tool::Line);
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)), ppp: 1.0, w: 800, h: 600 };
+    let (_, plane) = sketch_plane(&app).unwrap();
+    // a top corner of the box, 10 above the sketch plane
+    let corner = fox_engine::scene::body_vertices(&app.s.model.bodies[0])
+      .into_iter()
+      .map(|v| v.2)
+      .find(|w| (w.z - 10.0).abs() < 1e-9)
+      .unwrap();
+    let at = view.to_screen(&app.cam, corner).unwrap();
+    app.palette.sketch_3d = true;
+    // the chain starts on the plane, far from the box
+    assert!(!line_3d_click(&mut app, &view, Pos2::new(-500.0, -500.0), sk, &plane, [30.0, 30.0]));
+    place_point(&mut app, sk, [30.0, 30.0], None);
+    assert!(line_3d_click(&mut app, &view, at, sk, &plane, plane.to_local(corner)));
+    let sketch = app.s.design.sketch(sk).unwrap();
+    assert_eq!(sketch.curves3d.len(), 1, "a 3D sketch line");
+    let c = &sketch.curves3d[0];
+    assert!(c.drawn);
+    let fox_engine::sketch::Curve3dKind::Line { a, b } = c.kind else { panic!("{:?}", c.kind) };
+    assert_eq!(a, [30.0, 30.0, 0.0]);
+    assert!((DVec3::from(b) - corner).length() < 1e-9, "{b:?}");
+    // and the chain goes on from the vertex: back down to the plane is 3D too
+    assert!(line_3d_click(&mut app, &view, Pos2::new(-500.0, -500.0), sk, &plane, [30.0, 0.0]));
+    assert_eq!(app.s.design.sketch(sk).unwrap().curves3d.len(), 2);
+    // drawn as the sketch's own curves: blue
+    let opts = scene_options(&mut app);
+    let (sc, _) = fox_engine::scene::SceneBuilder::default().build(&app.s, &opts);
+    let blue = sc
+      .lines
+      .iter()
+      .filter(|l| l.color == fox_engine::scene::SKETCH_FREE && l.points.iter().any(|p| (p[2] - 10.0).abs() < 1e-3))
+      .count();
+    assert!(blue >= 1, "the 3D line draws blue");
+    // with 3D Sketch off, nothing leaves the plane
+    app.palette.sketch_3d = false;
+    viewport_reset(&mut app);
+    place_point(&mut app, sk, [50.0, 50.0], None);
+    place_point(&mut app, sk, plane.to_local(corner), None);
+    assert_eq!(app.s.design.sketch(sk).unwrap().curves3d.len(), 2);
+  }
+
+  fn viewport_reset(app: &mut App) {
+    reset_tool_state(app);
   }
 }

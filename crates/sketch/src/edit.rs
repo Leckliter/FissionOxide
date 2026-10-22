@@ -486,6 +486,22 @@ impl Sketch {
   /// keeps its end farther from that point and its near end moves to the chamfer
   /// (a line that stops short is extended, one that runs past the corner is trimmed back).
   pub fn chamfer(&mut self, l1: CurveId, l2: CurveId, d1: f64, d2: f64) -> Result<CurveId, SketchError> {
+    let (line, n1, n2) = self.chamfer_cut(l1, l2, d1, d2)?;
+    // Fusion's chamfer carries a distance dimension along each line from the corner it cut off
+    self.add_constraint(ConstraintKind::ChamferDistance { p: n1, line: l1, other: l2, value: Dim::new(d1) })?;
+    self.add_constraint(ConstraintKind::ChamferDistance { p: n2, line: l2, other: l1, value: Dim::new(d2) })?;
+    Ok(line)
+  }
+
+  /// [`Sketch::chamfer`]'s geometry without its dimensions: the new line and its ends on `l1`
+  /// and `l2`.
+  fn chamfer_cut(
+    &mut self,
+    l1: CurveId,
+    l2: CurveId,
+    d1: f64,
+    d2: f64,
+  ) -> Result<(CurveId, PointId, PointId), SketchError> {
     self.not_text(l1)?;
     self.not_text(l2)?;
     if !(d1 > EPS && d2 > EPS && d1.is_finite() && d2.is_finite()) {
@@ -502,15 +518,13 @@ impl Sketch {
     let line = self.add_curve(CurveKind::Line { a: n1, b: n2 })?;
     self.drop_if_unused(c.near1);
     self.drop_if_unused(c.near2);
-    // Fusion's chamfer carries a distance dimension along each line from the corner it cut off
-    self.add_constraint(ConstraintKind::ChamferDistance { p: n1, line: l1, other: l2, value: Dim::new(d1) })?;
-    self.add_constraint(ConstraintKind::ChamferDistance { p: n2, line: l2, other: l1, value: Dim::new(d2) })?;
-    Ok(line)
+    Ok((line, n1, n2))
   }
 
   /// Fusion's Distance and Angle sketch chamfer: cuts `l1` back `distance` from the corner, and
   /// the chamfer leaves that point at `angle` (radians) to `l1`, measured inside the corner, to
-  /// meet `l2`.
+  /// meet `l2`. As in Fusion it carries a distance dimension along `l1` and an angle dimension
+  /// between the chamfer and `l1`, reading `angle`.
   pub fn chamfer_angle(&mut self, l1: CurveId, l2: CurveId, distance: f64, angle: f64) -> Result<CurveId, SketchError> {
     self.not_text(l1)?;
     self.not_text(l2)?;
@@ -525,7 +539,19 @@ impl Sketch {
       return Err(SketchError::InvalidValue("at this angle the chamfer doesn't reach the second line".into()));
     }
     let d2 = distance * angle.sin() / rest.sin();
-    self.chamfer(l1, l2, distance, d2)
+    let (line, n1, _) = self.chamfer_cut(l1, l2, distance, d2)?;
+    self.add_constraint(ConstraintKind::ChamferDistance { p: n1, line: l1, other: l2, value: Dim::new(distance) })?;
+    // the angle constraint holds the turn from its first line's direction to its second's (mod
+    // 180°): take the lines in the order whose turn is the chamfer's angle, not its supplement
+    let dir = |s: &Sketch, id: CurveId| -> Option<P> {
+      let pts = s.curve_points(id);
+      Some(sub(s.pos(*pts.get(1)?)?, s.pos(*pts.first()?)?))
+    };
+    let (u, w) = (dir(self, l1).ok_or(SketchError::NoCurve(l1))?, dir(self, line).ok_or(SketchError::NoCurve(line))?);
+    let turn = cross(u, w).atan2(dot(u, w)).rem_euclid(PI);
+    let (a, b) = if (turn - angle).abs() <= (PI - turn - angle).abs() { (l1, line) } else { (line, l1) };
+    self.add_constraint(ConstraintKind::Angle { a, b, value: Dim::new(angle) })?;
+    Ok(line)
   }
 
   /// The corner two lines make for a chamfer: the point where they meet (at an end, a crossing
@@ -1213,6 +1239,31 @@ mod tests {
     let up = 10.0 * 30f64.to_radians().tan();
     let p = find_profiles(&s);
     assert_eq!(p.len(), 1);
+    assert!((p[0].area() - (1200.0 - 5.0 * up)).abs() < 1e-6, "{}", p[0].area());
+    // Fusion's dimensions: 10 along the bottom and 30° between the chamfer and the bottom
+    let dims: Vec<(&str, f64)> =
+      s.constraints.iter().filter_map(|c| c.kind.dim().map(|d| (c.kind.name(), d.value))).collect();
+    assert_eq!(dims.len(), 2, "{dims:?}");
+    assert_eq!(dims[0], ("Chamfer distance", 10.0));
+    assert_eq!(dims[1].0, "Angle");
+    assert!((dims[1].1 - 30f64.to_radians()).abs() < 1e-12);
+    // the angle drives the chamfer: at 45° it leaves the bottom at 45°
+    let id = s.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Angle { .. })).unwrap().id;
+    s.set_dim(id, Dim::new(45f64.to_radians())).unwrap();
+    assert!(s.solve().ok());
+    let dir = |s: &Sketch, c: CurveId| {
+      let p = s.curve_points(c);
+      unit(sub(s.pos(p[1]).unwrap(), s.pos(p[0]).unwrap())).unwrap()
+    };
+    let chamfer = s.curves.last().unwrap().id;
+    let between = dot(dir(&s, r[0]), dir(&s, chamfer)).abs().acos().to_degrees();
+    assert!((between - 45.0).abs() < 1e-6, "{between}");
+    // the same on a corner whose first line runs the other way
+    let mut s = Sketch::new();
+    let r = s.add_rectangle([0.0, 0.0], [40.0, 30.0]).unwrap();
+    s.chamfer_angle(r[1], r[0], 10.0, 30f64.to_radians()).unwrap();
+    assert!(s.solve().ok());
+    let p = find_profiles(&s);
     assert!((p[0].area() - (1200.0 - 5.0 * up)).abs() < 1e-6, "{}", p[0].area());
     // the angle has to leave room to reach the second line
     let mut s = Sketch::new();

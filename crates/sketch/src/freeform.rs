@@ -1123,6 +1123,8 @@ impl Sketch {
     }
     pts.push(sb);
     let blend = self.add_curve(CurveKind::QuinticSpline { points: pts })?;
+    // its shape follows from the two ends: the solver places its interior points
+    self.blends.push(crate::SketchBlend { curve: blend, a, a_end: ea, b, b_end: eb, g2 });
     for other in [a, b] {
       let kind = if g2 {
         ConstraintKind::Curvature { a: other, b: blend }
@@ -1632,6 +1634,48 @@ mod tests {
         left(unit(sub(p, c)).unwrap())
       };
       assert!(cross(unit(bz_d1(&last, 1.0)).unwrap(), ccw_at_start).abs() < 1e-6);
+    }
+  }
+
+  /// `ui:sketch:blend-curve-constrained`: a blend adds no degrees of freedom, as in Fusion: its
+  /// interior points are placed from the two ends (not free, not drawn), it reads as fully
+  /// constrained, and it follows the curves it joins.
+  #[test]
+  fn blend_curves_add_no_degrees_of_freedom() {
+    for g2 in [false, true] {
+      let mut s = Sketch::new();
+      let (l, [l0, l1]) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(10.0, 0.0)).unwrap();
+      let (m, [m0, m1]) = s.add_line(PtSpec::At(30.0, 10.0), PtSpec::At(40.0, 20.0)).unwrap();
+      for p in [l0, l1, m0, m1] {
+        let at = s.pos(p).unwrap();
+        s.add_constraint(ConstraintKind::Fix { p, x: at[0], y: at[1] }).unwrap();
+      }
+      let before = s.solve();
+      assert_eq!(before.dof, 0);
+      let b = s.blend(l, m, None, g2).unwrap();
+      let r = s.solve();
+      assert!(r.ok(), "{r:?}");
+      assert_eq!(r.dof, 0, "the blend adds no freedom: {r:?}");
+      assert!(r.free_points.is_empty(), "{r:?}");
+      assert!(!r.curve_free(&s, b) && s.is_blend(b));
+      let interior = s.blend_interior();
+      assert_eq!(interior.len(), crate::QUINTIC_POINTS - 2);
+      // the blend follows a line it joins, still tangent to it
+      let mut s2 = s.clone();
+      s2.constraints.retain(|c| !matches!(c.kind, ConstraintKind::Fix { p, .. } if p == m0 || p == m1));
+      assert!(s2.drag(m1, [40.0, 40.0]).ok());
+      let bz = s2.beziers(b);
+      let last = bz[bz.len() - 1];
+      let (p0, p1) = (s2.pos(m0).unwrap(), s2.pos(m1).unwrap());
+      let d = unit(sub(p1, p0)).unwrap();
+      assert!(dist(last[3], p0) < 1e-9);
+      assert!(cross(unit(bz_d1(&last, 1.0)).unwrap(), d).abs() < 1e-6, "still tangent");
+      // with free lines the sketch has just their freedom
+      let free = s2.solve();
+      assert_eq!(free.dof, 4, "the second line's two ends: {free:?}");
+      // deleting a joined curve leaves an ordinary spline
+      s.remove_curve(m).unwrap();
+      assert!(!s.is_blend(b) && s.blends.is_empty());
     }
   }
 

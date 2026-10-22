@@ -122,7 +122,7 @@ cmds! {
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default +Y), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
-  "sketch.project" => "Project a body's silhouette (or one face's edges, which follow the body) into the sketch", "{body, face?, associative?}";
+  "sketch.project" => "Project a body's silhouette (or one face's edges, or the edges given, which follow the body) into the sketch", "{body, face?, edges?: [id], associative?}";
   "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true)}";
   "extrude" => "Extrude sketch profiles or planar faces", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, faces?: [{body, face} | {point}] (planar faces, in place of a sketch's profiles), distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body|to_vertex, to?: face (flat or curved) | {body} | point for to_vertex ({at} | {vertex: edge, end?} | {center: edge} | {point: id}; stops on the plane through it parallel to the sketch), start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect|new_component, component_name?: (new_component; default the next ComponentN), targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, symmetric?: bool (angle turns each way), angle2? (two sides: the angle the other way), operation?, targets?: [body] (bodies join/cut may change)}";
@@ -541,6 +541,8 @@ cmds! {
   "mesh.scale" => "Scale Mesh: scale mesh bodies about a point (default their centre), uniformly or per axis", "{bodies, center?: [x,y,z], scale_type?: uniform|non_uniform, factor? | x, y, z}";
   "surface.sweep" => "Surface body swept from sketch curves or profile boundaries along a path", "{sketch?, curves?, profiles?, path: sketch id, path_curves?: [id], orientation?: perpendicular|parallel}";
   "surface.loft" => "Surface body lofted through sections: a sketch's profile boundary or curves, in order", "{sections: [sketch id | {sketch, profile?: [x,y], curves?: [id]}], closed?}";
+  "sketch.line3d" => "3D Sketch line: segments through world points, off the sketch plane (Fusion's 3D Sketch); they are sweep paths and rails, never part of a profile", "{sketch?, points: [[x,y,z], ...]}";
+  "sketch.dimension_label" => "Move a placed sketch dimension's value (drag its text): where it sits sets its offset and side; null puts it back at the default", "{sketch?, constraint, at: [x,y] | null}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1817,6 +1819,58 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       })?;
       Ok(json!({}))
     }
+    "sketch.line3d" => {
+      let sk = sketch_id(s, p)?;
+      let pts: Vec<[f64; 3]> = p
+        .get("points")
+        .and_then(Value::as_array)
+        .ok_or(CmdError::new("missing 'points'"))?
+        .iter()
+        .map(|v| {
+          let a: Option<Vec<f64>> = v.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect());
+          match a.as_deref() {
+            Some([x, y, z]) if x.is_finite() && y.is_finite() && z.is_finite() => Ok([*x, *y, *z]),
+            _ => Err(CmdError::new("each point must be [x, y, z]")),
+          }
+        })
+        .collect::<Result<_, _>>()?;
+      if pts.len() < 2 {
+        return Err(CmdError::new("a 3D line needs two points"));
+      }
+      let made = s.edit(move |d| {
+        let sketch = d.sketch_mut(sk)?;
+        let mut made = Vec::new();
+        for w in pts.windows(2) {
+          let l = ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2) + (w[1][2] - w[0][2]).powi(2)).sqrt();
+          if l > 1e-9 {
+            made.push(sketch.add_line3d(w[0], w[1]));
+          }
+        }
+        if made.is_empty() {
+          return Err(CmdError::new("the points coincide"));
+        }
+        Ok(made)
+      })?;
+      Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>()}))
+    }
+    "sketch.dimension_label" => {
+      let sk = sketch_id(s, p)?;
+      let c = ConstraintId(req_u32(p, "constraint")?);
+      let at = match p.get("at") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(pt_of(v).ok_or(CmdError::new("'at' must be [x, y]"))?),
+      };
+      s.edit(move |d| {
+        let sketch = d.sketch_mut(sk)?;
+        let c = sketch.constraints.iter_mut().find(|x| x.id == c).ok_or(CmdError::new("no such constraint"))?;
+        if c.kind.dim().is_none() {
+          return Err(CmdError::new("not a dimension"));
+        }
+        c.label = at;
+        Ok(())
+      })?;
+      Ok(json!({}))
+    }
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -2884,6 +2938,8 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
   let plane = s.model.sketches.get(&sk).map(|r| r.plane).ok_or(CmdError::new("the sketch failed to build"))?;
   let body = s.model.body(BodyId(req_u32(p, "body")?)).ok_or(CmdError::new("no such body"))?;
   let face = p.get("face").and_then(Value::as_u64).map(|f| f as u32);
+  // Specified Entities' edge picks: those edges alone
+  let edges: Vec<u32> = ids(p, "edges");
   let associative = p.get("associative").and_then(Value::as_bool).unwrap_or(true);
   let n = plane.normal();
   let lines = body.shape.edge_lines((body.diagonal() * 0.001).clamp(0.005, 0.2))?;
@@ -2947,7 +3003,7 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
     }
   }
   let mut todo: Vec<(E, Option<EdgeRef>)> = Vec::new();
-  if face.is_none() {
+  if face.is_none() && edges.is_empty() {
     // a whole body projects as its silhouette, as in Fusion: the outline of its shadow along the
     // sketch normal, which no single edge of the body follows, so nothing stays linked
     let outline = body.shape.silhouette(&plane)?;
@@ -2975,7 +3031,7 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
     join(&mut pieces);
     todo.extend(pieces.into_iter().map(|e| (e, None)));
   }
-  for e in body.edges().iter().filter(|e| face.is_some_and(|f| e.faces.contains(&f))) {
+  for e in body.edges().iter().filter(|e| face.is_some_and(|f| e.faces.contains(&f)) || edges.contains(&e.id)) {
     let l = |v: fox_kernel::glam::DVec3| plane.to_local(v);
     let link = associative.then(|| body.edge_ref(e, [0; 2]));
     match e.kind {
@@ -3709,6 +3765,10 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
       }
       o => return Err(CmdError::new(format!("unknown constraint '{o}'"))),
     };
+    // Vertical on a Horizontal line (or the reverse) is refused, though a point-sized line solves
+    if sketch.contradicts(&kind) {
+      return Err(conflict());
+    }
     let id = sketch.add_constraint(kind)?;
     let r = sketch.solve();
     if !r.ok() {

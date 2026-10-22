@@ -58,6 +58,10 @@ impl SolveReport {
   /// Whether `curve` can still move or change size (drawn blue), rather than being fully
   /// constrained (drawn black): one of its points is free, or it is a circle with a free radius.
   pub fn curve_free(&self, sketch: &Sketch, curve: CurveId) -> bool {
+    // a blend follows the curves it joins and adds no freedom of its own: drawn black
+    if sketch.is_blend(curve) {
+      return false;
+    }
     self.free_curves.contains(&curve) || sketch.curve_points(curve).iter().any(|p| self.free_points.contains(p))
   }
 }
@@ -266,6 +270,7 @@ impl Sketch {
     drop(sys);
     if solved || keep_on_failure {
       vars.write_back(self, &x);
+      self.place_blends();
       self.place_texts();
     }
     SolveReport {
@@ -421,8 +426,11 @@ impl<'a> System<'a> {
     let mut x0 = Vec::new();
     let mut px = Vec::with_capacity(sketch.points.len());
     let mut py = Vec::with_capacity(sketch.points.len());
+    // a blend's interior points follow from its ends (placed after the solve, not solved for)
+    let blends = sketch.solver_blends();
+    let derived = sketch.blend_interior();
     for (i, p) in sketch.points.iter().enumerate() {
-      if p.fixed || Some(p.id) == hold || follow[i].is_some() {
+      if p.fixed || Some(p.id) == hold || follow[i].is_some() || derived.contains(&p.id) {
         px.push(None);
         py.push(None);
       } else {
@@ -441,7 +449,10 @@ impl<'a> System<'a> {
         cr.push(None);
       }
     }
-    let mut eqns: Vec<Eqn> = (0..sketch.constraints.len()).map(Eqn::User).collect();
+    let mut eqns: Vec<Eqn> = (0..sketch.constraints.len())
+      .filter(|ci| !sketch.held_by_blend(&sketch.constraints[*ci].kind, &blends))
+      .map(Eqn::User)
+      .collect();
     for (i, c) in sketch.curves.iter().enumerate() {
       if matches!(c.kind, CurveKind::Arc { .. }) {
         eqns.push(Eqn::ArcRadius(i));

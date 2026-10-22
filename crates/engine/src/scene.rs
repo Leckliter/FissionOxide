@@ -1045,11 +1045,13 @@ fn sketch_lines(
     push(scene, pts.into_iter().map(w).collect(), look(pick, idle, c.reference()), id, linetype);
   }
   // included 3D geometry, at its world position (projected geometry to the palette)
-  for c in sk.curves3d.iter().filter(|c| show.projected && (show.construction || !c.construction)) {
+  // (3D sketch lines drawn with 3D Sketch on are the sketch's own: free, blue, always shown)
+  for c in sk.curves3d.iter().filter(|c| (c.drawn || show.projected) && (show.construction || !c.construction)) {
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
     let points = c.kind.polyline(48).into_iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
     let id = if pickable { picks.id(pick) } else { 0 };
-    push(scene, points, look(pick, SKETCH_FIXED, c.construction), id, (c.construction, false));
+    let idle = if c.drawn { SKETCH_FREE } else { SKETCH_FIXED };
+    push(scene, points, look(pick, idle, c.construction), id, (c.construction, false));
   }
   if editing {
     // spline tangent handles and Bézier handles: a thin line from the curve to each handle
@@ -1091,8 +1093,9 @@ fn sketch_lines(
   // fill inside a dark ring once selected. A visible sketch shows them outside the sketch too,
   // all as small open circles, where they pick ahead of body vertices. A text's glyph points
   // are its own business: only its anchor is shown.
+  // and a blend's interior control points follow from its ends: never drawn (no fit-point ticks)
   let glyph_points: std::collections::HashSet<PointId> =
-    sk.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
+    sk.texts.iter().flat_map(|t| t.points.iter().copied()).chain(sk.blend_interior()).collect();
   let filled = filled_points(sk);
   // projected geometry's points: dark-purple filled dots, in the sketch and outside it, hidden
   // with the projected curves by the palette's Projected Geometries option

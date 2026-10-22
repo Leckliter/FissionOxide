@@ -8,6 +8,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 pub mod behaviour;
+mod blendlink;
 mod build;
 mod conic;
 mod curve3d;
@@ -33,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub use behaviour::Behaviours;
+pub use blendlink::SketchBlend;
 pub use build::{PtSpec, circumcenter};
 pub use conic::{RHO_RANGE, conic_at, conic_beziers, conic_weight};
 pub use curve3d::{Curve3d, Curve3dKind, CurveSource};
@@ -80,6 +82,9 @@ pub struct Sketch {
   /// sketch plane, usable as sweep paths and rails but never part of a profile.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub curves3d: Vec<Curve3d>,
+  /// Blend curves kept to the curves they join (their interior points are placed, not solved).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub blends: Vec<SketchBlend>,
   /// The geometry behaviours this sketch was made with (profiles, solver, curve evaluation): a
   /// new sketch has all of [`behaviour::CURRENT`], one read from a file what it stored (none if
   /// the field is missing), so it rebuilds as it did. See [`behaviour`].
@@ -555,6 +560,7 @@ impl Sketch {
       spuns: Vec::new(),
       flats: Vec::new(),
       curves3d: Vec::new(),
+      blends: Vec::new(),
       behaviours: Behaviours::current(),
     }
   }
@@ -726,6 +732,7 @@ impl Sketch {
       self.remove_text(t)?;
     }
     self.curves.retain(|c| c.id != id);
+    self.blends.retain(|b| b.curve != id && b.a != id && b.b != id);
     let still_used: Vec<PointId> = self.curves.iter().flat_map(|c| curve_points(&c.kind)).collect();
     let orphans: Vec<PointId> =
       curve_points(&curve.kind).into_iter().filter(|p| *p != ORIGIN && !still_used.contains(p)).collect();
@@ -1185,6 +1192,28 @@ impl Sketch {
 
   pub(crate) fn curve_index(&self) -> HashMap<CurveId, usize> {
     self.curves.iter().enumerate().map(|(i, c)| (c.id, i)).collect()
+  }
+
+  /// Whether `kind` makes a pair of points both horizontal and vertical with what the sketch
+  /// already holds (Vertical on a Horizontal line, or the other way round). A zero-length line
+  /// satisfies both, so the solver accepts it; Fusion refuses the second one as a conflict.
+  pub fn contradicts(&self, kind: &ConstraintKind) -> bool {
+    // (is horizontal, the two points in order)
+    let axis = |k: &ConstraintKind| -> Option<(bool, [PointId; 2])> {
+      let ends = |l: CurveId| match self.curve(l).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => Some([(*a).min(*b), (*a).max(*b)]),
+        _ => None,
+      };
+      match *k {
+        ConstraintKind::Horizontal { line } => Some((true, ends(line)?)),
+        ConstraintKind::Vertical { line } => Some((false, ends(line)?)),
+        ConstraintKind::HorizontalPoints { a, b } => Some((true, [a.min(b), a.max(b)])),
+        ConstraintKind::VerticalPoints { a, b } => Some((false, [a.min(b), a.max(b)])),
+        _ => None,
+      }
+    };
+    let Some((h, pts)) = axis(kind) else { return false };
+    self.constraints.iter().filter_map(|c| axis(&c.kind)).any(|(h2, p2)| h2 != h && p2 == pts)
   }
 }
 
