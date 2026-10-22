@@ -30,6 +30,7 @@ mod forms;
 mod gen_ui;
 mod glyphs;
 mod gpu;
+mod grid_dialogs;
 mod handles;
 mod help;
 mod icons;
@@ -120,10 +121,15 @@ pub struct App {
   /// Display Settings ▸ Object Visibility and Effects.
   pub objects: navbar::ObjectVisibility,
   pub effects: fox_engine::render::Effects,
+  /// The Sketch Palette's Sketch Grid: the grid in a sketch.
   pub show_grid: bool,
   /// Grid and Snaps: the grid's spacing, and manipulator increments.
   pub grid: navbar::GridSettings,
   pub increments: navbar::Increments,
+  /// Grid and Snaps ▸ Layout Grid: the ground grid in the 3D view (off by default, as Fusion's).
+  pub layout_grid: bool,
+  /// The docked GRID SETTINGS or SET INCREMENTS dialog, while open.
+  pub(crate) grid_dialog: Option<grid_dialogs::GridDialog>,
   /// Orbiting lets the view roll (Free Orbit) instead of keeping +Z up.
   pub free_orbit: bool,
   /// Sketch palette options.
@@ -453,6 +459,8 @@ impl App {
       show_grid: true,
       grid: Default::default(),
       increments: Default::default(),
+      layout_grid: false,
+      grid_dialog: None,
       free_orbit: false,
       show_dims: true,
       snap: false,
@@ -988,6 +996,11 @@ impl App {
     // does anything else, as in Fusion
     if egui::Popup::is_any_open(ctx) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
       egui::Popup::close_all(ctx);
+      return;
+    }
+    // Esc cancels GRID SETTINGS and SET INCREMENTS, from one of their fields too
+    if self.grid_dialog.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+      self.grid_dialog = None;
       return;
     }
     if ctx.egui_wants_keyboard_input() {
@@ -1805,6 +1818,7 @@ impl App {
     updates::window(self, &ctx);
     capture::windows(self, &ctx);
     navbar::ground_offset_window(self, &ctx);
+    grid_dialogs::window(self, &ctx);
     customize::key_window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
     config_ui::table_window(self, &ctx);

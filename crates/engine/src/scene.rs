@@ -243,6 +243,9 @@ pub struct ViewOptions {
   /// The Sketch Palette's Profile, Points, Projected Geometries and Construction Geometries
   /// options: what the sketch being edited draws.
   pub sketch_show: SketchShow,
+  /// Draw the X (red) and Y (green) axis lines across the grid, as Fusion's Layout Grid in the
+  /// 3D view has them.
+  pub grid_axes: bool,
 }
 
 /// What the Sketch Palette shows of the sketch being edited (every option on by default, as
@@ -658,6 +661,9 @@ impl SceneBuilder {
         opts.grid_step.filter(|g| g.is_finite() && *g > 0.0),
         (!opts.hide_origin).then_some(axis_len),
       );
+      if opts.grid_axes {
+        grid_axis_lines(&mut scene, s, opts.grid_step.filter(|g| g.is_finite() && *g > 0.0));
+      }
     }
     if opts.toolpaths {
       toolpath_lines(&mut scene, s);
@@ -765,6 +771,27 @@ fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Optio
       points: vec![[0.0, 0.0, 0.0], b],
       color: col,
       width: 1.5,
+      id: 0,
+      on_top: false,
+      dashed: false,
+      dash_dot: false,
+      behind: true,
+    });
+  }
+}
+
+/// The Layout Grid's axis lines: world X in red and Y in green, across the grid's whole extent on
+/// the XY plane.
+fn grid_axis_lines(scene: &mut Scene, s: &Session, fixed: Option<f64>) {
+  let step = fixed.unwrap_or_else(|| grid_step(s));
+  let ext = (((scene_size(s) / step).ceil() as i64).clamp(2, 60) as f64 * step) as f32;
+  for (a, b, col) in
+    [([-ext, 0.0, 0.0], [ext, 0.0, 0.0], ORIGIN_X_COLOR), ([0.0, -ext, 0.0], [0.0, ext, 0.0], ORIGIN_Y_COLOR)]
+  {
+    scene.lines.push(Polyline {
+      points: vec![a, b],
+      color: col,
+      width: 1.0,
       id: 0,
       on_top: false,
       dashed: false,

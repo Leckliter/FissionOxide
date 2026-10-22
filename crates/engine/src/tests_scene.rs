@@ -568,3 +568,32 @@ fn projected_geometry_draws_purple_with_filled_points() {
     }
   }
 }
+
+#[test]
+fn layout_grid_axes_cross_the_grid_in_red_and_green() {
+  let s = Session::default();
+  let axis_lines = |opts: &ViewOptions| {
+    let (scene, _) = SceneBuilder::default().build(&s, opts);
+    scene
+      .lines
+      .iter()
+      .filter(|l| l.color == scene::ORIGIN_X_COLOR || l.color == scene::ORIGIN_Y_COLOR)
+      .map(|l| (l.color, l.points.clone()))
+      .collect::<Vec<_>>()
+  };
+  // the grid alone: no axis lines (the origin's own axes are drawn by the UI)
+  assert!(axis_lines(&ViewOptions { hide_origin: true, ..Default::default() }).is_empty());
+  let lines = axis_lines(&ViewOptions { hide_origin: true, grid_axes: true, ..Default::default() });
+  assert_eq!(lines.len(), 2, "{lines:?}");
+  let (x_col, x) = &lines[0];
+  let (y_col, y) = &lines[1];
+  assert_eq!(*x_col, scene::ORIGIN_X_COLOR);
+  assert_eq!(*y_col, scene::ORIGIN_Y_COLOR);
+  // each runs across the whole grid through the origin
+  assert!(x[0][0] < 0.0 && x[1][0] > 0.0 && x[0][1] == 0.0 && x[1][1] == 0.0, "{x:?}");
+  assert!(y[0][1] < 0.0 && y[1][1] > 0.0 && y[0][0] == 0.0 && y[1][0] == 0.0, "{y:?}");
+  // a hidden grid takes its axis lines with it
+  assert!(
+    axis_lines(&ViewOptions { hide_grid: true, hide_origin: true, grid_axes: true, ..Default::default() }).is_empty()
+  );
+}
