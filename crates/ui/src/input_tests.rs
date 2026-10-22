@@ -2352,3 +2352,21 @@ fn the_extrude_preview_is_not_hover_highlighted() {
   let prompt = h.app.dialog.as_ref().unwrap().prompt(h.app.hover.is_some() || h.app.tstate.over_preview);
   assert_eq!(prompt.as_deref(), Some("Hold Ctrl to modify selection"));
 }
+
+/// `ui:surface:finish-sketch-returns-tab`: a sketch started from the SURFACE tab comes back to
+/// SURFACE on Finish Sketch, and one started from SOLID to SOLID.
+#[test]
+fn finish_sketch_returns_to_the_tab_it_started_from() {
+  use crate::panels::Tab;
+  let mut h = Harness::new();
+  for tab in [Tab::Surface, Tab::Solid, Tab::Surface] {
+    h.app.tab = tab;
+    h.frame(vec![]);
+    h.app.create_sketch(json!("xy"));
+    h.frame(vec![]);
+    assert_eq!(h.app.tab, Tab::Sketch);
+    h.app.finish_sketch();
+    h.frame(vec![]);
+    assert_eq!(h.app.tab, tab);
+  }
+}

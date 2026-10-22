@@ -876,7 +876,8 @@ pub(crate) fn separator(ui: &mut egui::Ui) {
 pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
   let sketching = app.s.edit_sketch.is_some();
   if !sketching && app.tab == Tab::Sketch {
-    app.tab = Tab::Solid;
+    // back to the tab the sketch was started from, as in Fusion
+    app.tab = app.pre_sketch_tab.take().filter(|t| !matches!(t, Tab::Sketch | Tab::Form)).unwrap_or(Tab::Solid);
   }
   if !app.form.active && app.tab == Tab::Form {
     app.tab = Tab::Solid;

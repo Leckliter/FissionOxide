@@ -203,6 +203,9 @@ pub struct App {
   /// The 3D view before the open sketch turned the camera to its plane; finishing the sketch
   /// goes back to it, as in Fusion.
   pre_sketch_cam: Option<Camera>,
+  /// The ribbon tab the open sketch was started from; finishing it comes back to that tab
+  /// (SURFACE stays SURFACE), as in Fusion.
+  pub(crate) pre_sketch_tab: Option<panels::Tab>,
   /// The ViewCube's orientation, Home view and projection mode.
   cube: viewcube::CubeState,
   /// An origin or construction plane selected in the browser (a `sketch.create` plane: "xy" or
@@ -533,6 +536,7 @@ impl App {
       last_sketch: None,
       cam_move: None,
       pre_sketch_cam: None,
+      pre_sketch_tab: None,
       cube: viewcube::CubeState::default(),
       picked_plane: None,
       export_dxf: None,
@@ -1545,6 +1549,7 @@ impl App {
     if self.run("sketch.create", json!({"plane": plane})).is_some() {
       if !was_sketching {
         self.pre_sketch_cam = Some(before);
+        self.pre_sketch_tab = Some(self.tab);
       }
       self.s.selection.clear();
       origin::clear(self);
@@ -1566,6 +1571,7 @@ impl App {
     if self.run("sketch.edit", json!({"sketch": id.0})).is_some() {
       if !was_sketching {
         self.pre_sketch_cam = Some(before);
+        self.pre_sketch_tab = Some(self.tab);
       }
       self.auto_look_at_sketch();
       self.tab = panels::Tab::Sketch;

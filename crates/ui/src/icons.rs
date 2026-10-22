@@ -786,8 +786,9 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.arrow_head((0.37, 0.0), (0.0, -1.0), 0.13, Ink);
     }
     Icon::Revolve => {
-      k.band(k.arc_pts((0.5, 0.5), 0.36, 0.3, -2.9, 0.1), 4.6);
-      k.arrow_head((0.92, 0.47), (0.25, -1.0), 0.16, Blue);
+      // a wide revolved sheet, not a thin ring
+      k.band(k.arc_pts((0.5, 0.48), 0.34, 0.28, -2.9, 0.1), 8.0);
+      k.arrow_head((0.92, 0.42), (0.25, -1.0), 0.18, Blue);
       k.dashed((0.5, 0.02), (0.5, 0.98), Ink);
     }
     Icon::Box => k.block(0.1, 0.38, 0.66, 0.9, 0.26, BlueLight, Blue, BlueDark),
@@ -1693,8 +1694,9 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       }
     }
     Icon::Patch => {
-      k.solid(&[(0.08, 0.2), (0.56, 0.2), (0.56, 0.56), (0.08, 0.56)], Blue);
-      k.solid(&[(0.56, 0.2), (0.92, 0.5), (0.92, 0.9), (0.56, 0.56)], BlueDark);
+      // a folded sheet, both halves in the family colour
+      k.solid(&[(0.06, 0.16), (0.52, 0.16), (0.52, 0.66), (0.06, 0.66)], Blue);
+      k.solid(&[(0.52, 0.16), (0.94, 0.42), (0.94, 0.92), (0.52, 0.66)], BlueLight);
     }
     Icon::Ruled => {
       k.solid(&[(0.06, 0.66), (0.46, 0.2), (0.94, 0.2), (0.54, 0.66)], BlueLight);
@@ -1705,10 +1707,14 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.p.add(Shape::line(k.arc_pts((0.5, 1.1), 0.8, 0.8, 0.6, PI - 0.6), Stroke::new(w * 1.3, k.col(Blue))));
     }
     Icon::Trim => {
-      k.circle((0.24, 0.78), 0.14, None, Some(Ink));
-      k.circle((0.76, 0.78), 0.14, None, Some(Ink));
-      k.thick((0.32, 0.66), (0.78, 0.06), Ink, 1.3);
-      k.thick((0.68, 0.66), (0.22, 0.06), Ink, 1.3);
+      // a sheet with a piece cut away along the dashed line, scissors over it
+      k.solid(&[(0.04, 0.3), (0.62, 0.3), (0.62, 0.96), (0.04, 0.96)], Blue);
+      k.solid(&[(0.7, 0.3), (0.96, 0.3), (0.96, 0.96), (0.7, 0.96)], BlueLight);
+      k.dashed((0.66, 0.24), (0.66, 1.0), Ink);
+      k.circle((0.3, 0.2), 0.1, Some(White), Some(Ink));
+      k.circle((0.3, 0.52), 0.1, Some(White), Some(Ink));
+      k.thick((0.38, 0.24), (0.9, 0.5), Ink, 1.3);
+      k.thick((0.38, 0.48), (0.9, 0.2), Ink, 1.3);
     }
     Icon::Untrim | Icon::Unstitch => {
       if icon == Icon::Untrim {
