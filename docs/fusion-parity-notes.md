@@ -561,3 +561,16 @@ state) and a small dialog in FissionOxide. UTILITIES: Fusion's three-pane Script
 Material Browser's tree drawn on one line, and Compute All's "Computed in" message. 10 rows in three
 batches (`parity/batches/map-wave31.json`, two of them reopened keys), six match rows, two blocked rows,
 six fixing-merged keys verified. Both areas are done; the Timeline is next.
+
+## 2026-10-22, prober 17: Timeline and Browser
+
+The timeline and browser side by side at 908 px after building sketch, extrude, fillet, offset plane,
+two more sketches and a rectangular pattern in FissionOxide (report
+`parity/reports/2026-10-22-timeline-browser.md`). Suppress, Create Group, stepping and reorder drops
+match. Fusion's sketch item menu, Shift-range multi-selection with its Create Group menu, group
+icon/bracket/tooltip/menu, live recompute during a marker drag, Play replaying from the start, the gear's
+Direct Modeling and swatch options, the dark item tooltip with the component name, and removing
+rolled-back rows from the browser all differ. In the browser the solid body menu and two folder details
+differ. 16 rows in three batches (`parity/batches/map-wave32.json`), seven match rows, 13 fixing-merged
+keys verified. Component rows, Activate and the Joints folder need an Assembly Design with saved
+designs and are left for the ASSEMBLY row. Both areas are done; Workspaces is next.

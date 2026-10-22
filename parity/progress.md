@@ -1,40 +1,52 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 12:40, session "Parity prober 16"
+## Last stop: 2026-10-22, 13:00, session "Parity prober 17"
 
-Finished this session: "PLASTIC tab" and "MANAGE (BOM) and UTILITIES tabs" (both done, with
-not-exercised lists in `coverage.md`). Report `parity/reports/2026-10-22-plastic-manage-utilities.md`,
-`map-wave31.json`, batches `ui-manage-bom-palette` (2), `ui-utilities-addins-make` (4) and
-`ui-utilities-tips-status` (4, two of them reopened keys), all `ready` in `index.jsonl` with no fixer yet.
-The three batches touch different files (dialogs.rs Kind::Bom; plugins_ui.rs / panels.rs / customize.rs;
-tips.rs / material_ui.rs / lib.rs) and can run in parallel; `ui-utilities-addins-make` and
-`ui-modify-menu-tooltips` (fixing) both touch `menus.rs`, rebase if needed.
-Fusion's plastic commands (Plastic Rules, Boss, Snap Fit, Rest, Lip/Groove, Rule Fillet) are not offered on
-this Personal licence: `ui:plastic:plastic-features` is `blocked`.
-Verified: `ui:toolbar:tooltip-style`, `ui:toolbar:tooltip-expanded-illustration`, `ui:toolbar:tooltip-texts-solid`,
-`ui:dialogs:rib-rows`, `ui:dialogs:web-rows`, `ui:chrome:3d-print-dialog`. Reopened: `ui:dialogs:manage-materials`
-(library tree overlaps on one line), `ui:chrome:status-dev-messages` (Compute All writes "Computed in 0.0 s").
-About 180 other keys are still `fixing-merged` from earlier waves; re-verify those that fall inside the
-area you probe.
+Finished this session: "Timeline" and "Browser" (both done, with not-exercised lists in `coverage.md`).
+Report `parity/reports/2026-10-22-timeline-browser.md`, `map-wave32.json`, batches
+`ui-timeline-menus-groups` (6), `ui-timeline-rollback-play` (7) and `ui-browser-body-rows` (3), all `ready`
+in `index.jsonl` with no fixer yet. The two timeline batches both edit the timeline in
+`crates/ui/src/panels.rs` (different functions) and `ui-timeline-menus-groups` also
+`panels/timeline_groups.rs`: start them one after the other, or tell the second to rebase.
+`ui-browser-body-rows` shares `body_menu` with `ui-surface-results` (fixing).
+Verified 13 keys (three timeline, ten browser). Still `fixing-merged` in these areas:
+`ui:timeline:error-toast`, `ui:timeline:error-dialog`, `ui:timeline:failed-item-menu`,
+`ui:timeline:suppressed-item-menu`, `ui:timeline:hole-extra-sketch` (need a failed feature or a hole),
+`ui:browser:convert-design-type`, `ui:browser:new-named-view-inline-name`.
+The wave-31 batches (`ui-manage-bom-palette`, `ui-utilities-addins-make`, `ui-utilities-tips-status`) have
+cloud fixers (`fixing`).
 
 ## Next prober: start here
 
 1. Take the next `todo` in `coverage.md` (the ASSEMBLY row still needs two saved designs; leave it):
-   "Timeline: every item type icon, groups, suppress, rollback, play, context menus, drag, errors". Fusion's
-   "Untitled*" document has a timeline of sketches, an extrude and fillets; FissionOxide's design is empty,
-   so build a few features first (sketch, extrude, fillet, a pattern, a construction plane) in both.
-2. Re-verify the `fixing-merged` timeline keys first (`ui:timeline:*`, two of them) and any wave-30/31 key
-   a fixer has set to `fixing-merged` since this stop (history entries dated after 2026-10-22 12:40 local).
-3. Rebuild before probing: the running binary is `main` at `c94d76ac`; kill `fissionoxide.exe` first,
-   `cargo build --release -p fissionoxide` took about 2.5 minutes.
+   "Workspaces: Render, Animation, Simulation, Manufacture (turning, milling tabs), Drawing, Electronics".
+   Switch with the DESIGN dropdown at the toolbar's left in both apps; some Fusion workspaces may be
+   blocked on the Personal licence (record `blocked`).
+2. Re-verify any wave-31/32 key a fixer has set to `fixing-merged` since this stop (history entries
+   dated after 2026-10-22 13:00 local), and the timeline keys listed above if a failed feature is easy
+   to make (a fillet larger than the edge allows).
+3. Rebuild before probing: the running binary is `main` at `f1f9ed56`; kill `fissionoxide.exe` first,
+   `cargo build --release -p fissionoxide` took about 3 minutes.
 
-Where the documents stand: Fusion has four tabs: "Untitled*" (active, inches, Body1, Sketch1..4, UTILITIES
-tab), "Untitled*(1)" (the MESH-tab design), "Untitled(2)" (an empty Assembly Design) and "Untitled*(3)"
-(sheet metal). Both windows were snapped with Win+Left and sit at screenshot x 0..908: Fusion at y 80..730,
-FissionOxide at y 0..785 (one empty design, mm, UTILITIES tab, Data Panel closed). Fusion's taskbar button
-at (497,803), FissionOxide's at (572,803).
+Where the documents stand: Fusion has four tabs: "Untitled*" (active, inches, Body1, Sketch1..4, Plane1,
+a timeline group "Group1" of three sketches, Fillet1 moved to the end), "Untitled*(1)" (the MESH-tab
+design), "Untitled(2)" (an empty Assembly Design) and "Untitled*(3)" (sheet metal). Both windows sit at
+screenshot x 0..908: Fusion at y 80..730, FissionOxide at y 0..785 (mm design with Body1..3, a
+pattern, Plane1, Sketch1..3, a one-sketch timeline group, Body2 hidden, SOLID tab, Data Panel closed).
+Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
 
 ## Traps
+- Shift+click and Ctrl+click from the automation tool did not extend FissionOxide's timeline selection
+  (recorded as `ui:timeline:multi-select`); Fusion took them. A Ctrl+click once made Explorer the
+  frontmost app for the tool (the next right-click was refused at tier "click"): click FissionOxide's
+  title bar first.
+- After Expand Group in FissionOxide the open-folder icon takes a slot and the marker moves right: take a
+  screenshot before grabbing the marker, or you drag the last feature instead.
+- Fusion's Part Design refuses New Component ("Save design required", Cancel at (597,445)); in the empty
+  Assembly Design "Untitled(2)" New Component creates an external cloud design (External1 in Default
+  Project): Cancel it.
+- `zoom` returns the region at native pixels (no magnification): a 150 px region comes back about 200 px
+  wide. Timeline icons stay 16 px; read names from tooltips instead.
 - Win+Left is the quickest way to place a window left of the overlay; dismiss the snap assist by clicking the
   app's own canvas. FissionOxide snaps to 728 px wide: drag its right edge (x 727) to 907 with
   `left_mouse_down` / `mouse_move` / `left_mouse_up` to match Fusion's 908 px. `left_click_drag` on the right

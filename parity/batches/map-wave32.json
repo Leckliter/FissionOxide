@@ -1,0 +1,18 @@
+{
+  "ui:timeline:sketch-item-menu": "ui-timeline-menus-groups",
+  "ui:timeline:single-item-menu-extras": "ui-timeline-menus-groups",
+  "ui:timeline:multi-select": "ui-timeline-menus-groups",
+  "ui:timeline:group-icon": "ui-timeline-menus-groups",
+  "ui:timeline:group-tooltip": "ui-timeline-menus-groups",
+  "ui:timeline:group-menu": "ui-timeline-menus-groups",
+  "ui:timeline:rollback-browser-rows": "ui-timeline-rollback-play",
+  "ui:timeline:marker-drag-live": "ui-timeline-rollback-play",
+  "ui:timeline:play-from-start": "ui-timeline-rollback-play",
+  "ui:timeline:settings-menu": "ui-timeline-rollback-play",
+  "ui:timeline:item-tooltip": "ui-timeline-rollback-play",
+  "ui:timeline:suppressed-healthy-icon": "ui-timeline-rollback-play",
+  "ui:timeline:drag-feedback": "ui-timeline-rollback-play",
+  "ui:browser:body-row-menu": "ui-browser-body-rows",
+  "ui:browser:folder-eye-children-hidden": "ui-browser-body-rows",
+  "ui:browser:construction-folder-collapsed": "ui-browser-body-rows"
+}
