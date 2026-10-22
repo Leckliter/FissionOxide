@@ -39,6 +39,8 @@ mod navbar;
 mod notifications;
 mod origin;
 mod palette;
+#[cfg(test)]
+mod palette_tests;
 mod panels;
 mod params_ui;
 mod plugins_ui;
@@ -1422,6 +1424,9 @@ impl App {
       }
       self.s.selection.clear();
       origin::clear(self);
+      // a new sketch starts with Slice and 3D Sketch off, as in Fusion
+      self.palette.slice = false;
+      self.palette.sketch_3d = false;
       self.auto_look_at_sketch();
       self.tab = panels::Tab::Sketch;
       self.browser_sketches = Some(true);
@@ -1535,11 +1540,14 @@ impl App {
     self.look_at_plane(&plane);
   }
 
-  /// Turns the camera to look straight at a plane (a sketch's, or an origin plane).
+  /// Turns the camera to look straight at a plane (a sketch's, or an origin plane) from its
+  /// normal's side, with the plane's x axis to the right and its y axis up the screen, as Fusion
+  /// does: text, the grid labels and dimensions read upright on every origin plane (XY from the
+  /// FRONT of a Y-up design: +X right, +Y up; Fusion's XZ frame x=+X, y=-Z; YZ x=-Z, y=+Y).
   pub(crate) fn look_at_plane(&mut self, plane: &fox_engine::kernel::Plane) {
-    let n = plane.normal();
     let o = plane.origin;
-    let mut to = self.looking_along(n);
+    let mut to = self.view_now();
+    to.set_basis(plane.x, plane.normal());
     if self.s.model.bodies.is_empty() {
       to.target = o.to_array();
     }

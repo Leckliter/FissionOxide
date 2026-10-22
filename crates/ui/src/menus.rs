@@ -1291,6 +1291,15 @@ fn rich_tip(resp: egui::Response, scope: Scope, it: &Item, key: &str) -> egui::R
   })
 }
 
+/// The ribbon's tooltip on a sketch tool's toggle elsewhere (the Sketch Palette's Feature
+/// Options): its name, description line and shortcut, expanding like a ribbon button's.
+pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -> egui::Response {
+  let (icon, label, _) = Cmd::SketchTool(tool).info();
+  let it = Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(Cmd::SketchTool(tool)), disabled: false };
+  let key = key_of(prefs, Scope::Sketch, label);
+  rich_tip(resp, Scope::Sketch, &it, key)
+}
+
 /// Every command the toolbar offers on `tabs`, in toolbar order, each label/command pair once.
 pub(crate) fn commands(tabs: &[Tab]) -> Vec<Entry> {
   fn walk(menu: &[E], tab: Tab, out: &mut Vec<Entry>) {

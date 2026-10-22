@@ -290,6 +290,12 @@ impl ToolState {
   }
 }
 
+/// Tests elsewhere in the crate place a tool's point without a click.
+#[cfg(test)]
+pub(crate) fn push_point_for_test(app: &mut App, p: [f64; 2]) {
+  app.tstate.pts.push(p);
+}
+
 pub fn reset_tool_state(app: &mut App) {
   // a pick-pick tool's first pick was selected (drawn bold blue): it isn't any more
   crate::sketch_modify::unselect_picks(app);
@@ -423,7 +429,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |=
     crate::library_ui::place_clicks(app, &resp, &painter, &|p| view.to_screen(&cam, p), &|p| view.ray(&cam, p));
   if app.s.edit_sketch.is_some() {
-    if app.show_grid {
+    if grid_shown(app) {
       grid_labels(app, &painter, &view);
     }
     consumed |= sketch_overlay(app, ui, &painter, &view);
@@ -470,6 +476,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   track_arc_wind(app, &resp, &view);
   offset_follow(app, &resp, &view);
   tool_preview(app, &painter, &resp, &view);
+  sketch_3d_manipulator(app, &painter, &view);
   trim_preview(app, &painter, &resp, &view);
   crate::sketch_modify::preview(app, &painter, &resp, &view);
   consumed |= crate::sketch_modify::manipulator(app, &resp, &painter, &view, &ctx);
@@ -750,7 +757,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
   ViewOptions {
     hover: app.hover,
     hide_edges: !app.visual_style.edges(),
-    hide_grid: !app.show_grid,
+    hide_grid: !grid_shown(app),
     // the origin axes (dashed, each with its own eye under the Origin folder's) are drawn over
     // the image by `crate::origin`, so the scene draws none of its own
     hide_origin: true,
@@ -775,12 +782,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hover_more: app.glyph_hover.clone(),
     preview_curves: app.dialog.as_ref().map(|d| d.preview_curves().to_vec()).unwrap_or_default(),
     sketch_show: app.palette.show(),
-    // the palette's Slice: the model sectioned at the sketch plane, the side the camera is on cut
-    // away so the sketch shows over the cut
-    section: match app.s.edit_sketch.filter(|_| app.palette.slice).and_then(|sk| app.s.model.sketches.get(&sk)) {
-      Some(r) => Some(slice_plane(r.plane, app.cam.eye())),
-      None => analysis.section,
-    },
+    // the palette's Slice reaches the scene as the `slice` render parameter (see `slice_params`)
     ..analysis
   }
 }
@@ -807,7 +809,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     style: app.visual_style,
     objects: app.objects,
     effects: app.effects,
-    show_grid: app.show_grid,
+    show_grid: grid_shown(app),
     grid_step: app.grid.step(),
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of,
@@ -850,6 +852,49 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
   app.render_key = Some(key);
 }
 
+/// The Sketch Palette's Slice as a render parameter: the open sketch and whether the camera is
+/// behind its plane (`flip`), so the scene cuts away the part of each body between the camera
+/// and the plane. None while Slice is off or no sketch is open.
+pub(crate) fn slice_params(app: &App) -> Option<serde_json::Value> {
+  if !app.palette.slice {
+    return None;
+  }
+  let (sk, plane) = sketch_plane(app)?;
+  let flip = slice_plane(plane, app.cam.eye()).normal() != plane.normal();
+  Some(json!({"sketch": sk.0, "flip": flip}))
+}
+
+/// Whether the sketch grid is drawn: the palette's Sketch Grid, except while 3D Sketch is on and
+/// a tool with a 3D form runs, when Fusion hides it under the tool's 3D manipulator.
+pub(crate) fn grid_shown(app: &App) -> bool {
+  let tool_3d = app.s.edit_sketch.is_some() && app.tool != Tool::Select && sketch_3d_enabled(app);
+  app.show_grid && !(app.palette.sketch_3d && tool_3d)
+}
+
+/// Whether the palette's 3D Sketch checkbox takes clicks: Fusion greys it while a tool with no
+/// 3D form runs (Ellipse, Conic Curve, Point, Text, the splines) and enables it otherwise,
+/// dialog tools (Mirror, patterns, Project, Sketch Dimension, Fillet, Offset, ...) included.
+pub(crate) fn sketch_3d_enabled(app: &App) -> bool {
+  if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Form(f) if f.cmd == "sketch.text.form"))
+  {
+    return false;
+  }
+  !matches!(app.tool, Tool::Ellipse | Tool::Conic | Tool::Point | Tool::Spline | Tool::ControlSpline)
+}
+
+/// 3D Sketch on: the Line tool's 3D manipulator at the start of the segment being drawn (the
+/// last placed point), a plane handle across the sketch normal and the three axis arrows, as
+/// Fusion shows it. Drawn only: the solver keeps the sketch in its plane.
+fn sketch_3d_manipulator(app: &App, painter: &egui::Painter, view: &View) {
+  if !app.palette.sketch_3d || app.tool != Tool::Line {
+    return;
+  }
+  let Some((_, plane)) = sketch_plane(app) else { return };
+  let Some(last) = app.tstate.pts.last() else { return };
+  let project = |p: DVec3| view.to_screen(&app.cam, p);
+  crate::manipulators::sketch_axes(painter, &project, &app.cam, plane.to_world(*last), plane.normal());
+}
+
 /// The section and analysis settings as render parameters.
 fn view_params(app: &App) -> serde_json::Value {
   let mut v = app.analysis.clone().unwrap_or(json!({}));
@@ -864,6 +909,9 @@ fn view_params(app: &App) -> serde_json::Value {
   }
   if let Some(sec) = &app.section {
     v["section"] = sec.clone();
+  }
+  if let Some(sl) = slice_params(app) {
+    v["slice"] = sl;
   }
   if crate::render_ui::shading(app) {
     v["render_look"] = crate::render_ui::look_key(app);

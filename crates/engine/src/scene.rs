@@ -177,6 +177,9 @@ pub struct ViewOptions {
   /// Section analysis: bodies are cut away on the side the plane's normal points to, and the
   /// cut is capped.
   pub section: Option<Plane>,
+  /// The section is the Sketch Palette's Slice: the cut face is drawn as Fusion draws it, a
+  /// magenta diagonal hatch over a pale fill with a black outline (not the analysis cap).
+  pub slice: bool,
   pub analysis: Option<fox_render::Analysis>,
   /// Colour bodies by how sharply they curve.
   pub curvature: bool,
@@ -360,8 +363,12 @@ impl SceneBuilder {
           }
         };
         if let Some(c) = cap {
+          if opts.slice {
+            slice_cap_lines(&mut scene, &c, &pl, grid_step(s) * SLICE_HATCH_STEP);
+          }
           let n = vec![(-pl.normal()).as_vec3().to_array(); c.positions.len()];
-          let mut mesh = mesh_of(&TriMesh { normals: n, ..c }, Vec::new(), mix(base, [120, 60, 50, 255], 0.35), None);
+          let cap_color = if opts.slice { SLICE_FILL } else { mix(base, [120, 60, 50, 255], 0.35) };
+          let mut mesh = mesh_of(&TriMesh { normals: n, ..c }, Vec::new(), cap_color, None);
           mesh.analyze = false;
           scene.meshes.push(mesh);
         }
@@ -1099,6 +1106,108 @@ fn section_cap(shape: &Shape, pl: &Plane, size: f64) -> Option<TriMesh> {
   cut.tessellate((size * 0.001).clamp(0.01, 0.5)).ok()
 }
 
+/// The Sketch Palette's Slice draws the cut face as Fusion does: a pale fill under a magenta
+/// diagonal hatch, outlined in black.
+pub const SLICE_FILL: [u8; 4] = [250, 236, 246, 255];
+pub const SLICE_HATCH: [u8; 4] = [214, 46, 170, 255];
+pub const SLICE_OUTLINE: [u8; 4] = [20, 20, 20, 255];
+/// Hatch spacing as a fraction of the grid step.
+const SLICE_HATCH_STEP: f64 = 0.25;
+
+/// The Slice cap's hatch and outline: 45° lines `step` apart clipped to the cap's triangles, and
+/// the cap's boundary (the edges one triangle uses), both lifted a hair off the cut so they draw
+/// over the fill.
+fn slice_cap_lines(scene: &mut Scene, cap: &TriMesh, pl: &Plane, step: f64) {
+  let lift = pl.normal() * (step * 0.01).max(1e-3);
+  let world = |p: [f64; 2]| (pl.to_world(p) + lift).as_vec3().to_array();
+  let line = |pts: Vec<[f32; 3]>, color, width| Polyline {
+    points: pts,
+    color,
+    width,
+    id: 0,
+    on_top: false,
+    dashed: false,
+    behind: false,
+  };
+  for seg in cap_outline(cap) {
+    let pts = seg.iter().map(|p| (*p + lift).as_vec3().to_array()).collect();
+    scene.lines.push(line(pts, SLICE_OUTLINE, 1.5));
+  }
+  for (a, b) in hatch_segments(cap, pl, step) {
+    scene.lines.push(line(vec![world(a), world(b)], SLICE_HATCH, 1.0));
+  }
+}
+
+/// The boundary of a tessellated face: every edge only one triangle uses, as a line each.
+fn cap_outline(cap: &TriMesh) -> Vec<[DVec3; 2]> {
+  let mut count: HashMap<(u32, u32), u32> = HashMap::new();
+  for t in cap.indices.chunks_exact(3) {
+    for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+      *count.entry((a.min(b), a.max(b))).or_default() += 1;
+    }
+  }
+  let at = |i: u32| cap.positions.get(i as usize).map(|p| DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
+  let mut out: Vec<[DVec3; 2]> =
+    count.iter().filter(|(_, n)| **n == 1).filter_map(|((a, b), _)| Some([at(*a)?, at(*b)?])).collect();
+  out.sort_by(|p, q| p[0].x.total_cmp(&q[0].x).then(p[0].y.total_cmp(&q[0].y)).then(p[0].z.total_cmp(&q[0].z)));
+  out
+}
+
+/// Diagonal hatch lines (u + v = k, `step` apart in the plane's coordinates) clipped to each
+/// triangle of the cap, as (start, end) in plane coordinates.
+fn hatch_segments(cap: &TriMesh, pl: &Plane, step: f64) -> Vec<([f64; 2], [f64; 2])> {
+  let step = if step > 1e-9 { step } else { 1.0 };
+  let local =
+    |i: u32| cap.positions.get(i as usize).map(|p| pl.to_local(DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64)));
+  let mut out = Vec::new();
+  for t in cap.indices.chunks_exact(3) {
+    let (Some(a), Some(b), Some(c)) = (local(t[0]), local(t[1]), local(t[2])) else { continue };
+    let tri = [a, b, c];
+    // along the hatch direction (1, 1): k = u + v, each line k = n·step·√2
+    let k = |p: [f64; 2]| p[0] + p[1];
+    let ks = [k(a), k(b), k(c)];
+    let (lo, hi) =
+      (ks.iter().cloned().fold(f64::INFINITY, f64::min), ks.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+    let pitch = step * std::f64::consts::SQRT_2;
+    let mut n = (lo / pitch).ceil() as i64;
+    while (n as f64) * pitch <= hi {
+      let kk = n as f64 * pitch;
+      n += 1;
+      // where the line crosses the triangle's edges
+      let mut hits: Vec<[f64; 2]> = Vec::new();
+      for i in 0..3 {
+        let (p, q) = (tri[i], tri[(i + 1) % 3]);
+        let (dp, dq) = (k(p) - kk, k(q) - kk);
+        if dp == 0.0 {
+          hits.push(p);
+        }
+        if (dp < 0.0) != (dq < 0.0) && dp != 0.0 && dq != 0.0 {
+          let s = dp / (dp - dq);
+          hits.push([p[0] + (q[0] - p[0]) * s, p[1] + (q[1] - p[1]) * s]);
+        }
+      }
+      hits.dedup_by(|x, y| (x[0] - y[0]).abs() < 1e-9 && (x[1] - y[1]).abs() < 1e-9);
+      if hits.len() >= 2 {
+        // the two farthest apart
+        let (mut best, mut d) = ((hits[0], hits[1]), -1.0);
+        for i in 0..hits.len() {
+          for j in i + 1..hits.len() {
+            let dd = (hits[i][0] - hits[j][0]).powi(2) + (hits[i][1] - hits[j][1]).powi(2);
+            if dd > d {
+              d = dd;
+              best = (hits[i], hits[j]);
+            }
+          }
+        }
+        if d > 1e-12 {
+          out.push(best);
+        }
+      }
+    }
+  }
+  out
+}
+
 /// Per-vertex colours from how sharply the surface curves there: blue flat, through green and
 /// yellow, to red tight.
 fn curvature_colors(m: &TriMesh) -> Vec<[u8; 4]> {
@@ -1385,6 +1494,17 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
     let offset = sec.get("offset").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
     let flip = sec.get("flip").and_then(serde_json::Value::as_bool).unwrap_or(false);
     o.section = Some(view_plane(s, &plane, offset, flip)?);
+  }
+  // the Sketch Palette's Slice: the open sketch's plane, turned to face the camera (`flip`
+  // when the eye is behind it), so the part of each body in front of the plane is cut away
+  if let Some(sl) = p.get("slice").filter(|v| !v.is_null())
+    && o.section.is_none()
+  {
+    let id = sl.get("sketch").and_then(serde_json::Value::as_u64).ok_or("slice needs 'sketch'")? as u32;
+    let pl = s.model.sketches.get(&FeatureId(id)).map(|r| r.plane).ok_or("slice: no such sketch")?;
+    let flip = sl.get("flip").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    o.section = Some(if flip { Plane { origin: pl.origin, x: pl.x, y: -pl.y } } else { pl });
+    o.slice = true;
   }
   o.toolpaths = p.get("toolpaths").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   o.cut = p.get("cut").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));

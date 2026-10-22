@@ -404,6 +404,53 @@ fn section_view_is_capped() {
   assert!(cut.positions.iter().enumerate().all(|(i, p)| !cut.indices.contains(&(i as u32)) || p[1] >= 10.0 - 1e-4));
 }
 
+/// The Sketch Palette's Slice: `slice: {sketch, flip}` sections at the sketch's plane (turned
+/// when the camera is behind it), the cut capped in Fusion's pale fill with a magenta hatch and a
+/// black outline rather than the analysis cap.
+#[test]
+fn slice_sections_at_the_sketch_plane_with_a_hatched_cap() {
+  let mut s = Session::default();
+  block(&mut s, 40.0, 20.0, 10.0);
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 5}));
+  let plane = s.design.features.last().unwrap().id;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": plane.0}}));
+  let sk = s.edit_sketch.unwrap();
+  let opts = crate::scene::view_options(&s, &json!({"slice": {"sketch": sk.0}})).unwrap();
+  assert!(opts.slice);
+  let pl = opts.section.expect("a section plane");
+  assert!((pl.origin.z - 5.0).abs() < 1e-9 && pl.normal().z > 0.999);
+  let (scene, _) = crate::scene::SceneBuilder::default().build(&s, &opts);
+  let cut = scene.meshes.iter().find(|m| m.analyze).unwrap();
+  assert!(cut.indices.iter().all(|i| cut.positions[*i as usize][2] <= 5.0 + 1e-4), "the top is cut away");
+  let cap = scene.meshes.iter().find(|m| !m.analyze && !m.indices.is_empty()).expect("the cap");
+  assert_eq!(cap.color, crate::scene::SLICE_FILL);
+  let hatch: Vec<_> = scene.lines.iter().filter(|l| l.color == crate::scene::SLICE_HATCH).collect();
+  let outline: Vec<_> = scene.lines.iter().filter(|l| l.color == crate::scene::SLICE_OUTLINE).collect();
+  // 45° lines across the 40 × 20 cut, a quarter grid step apart, and its four sides
+  assert!(hatch.len() > 10, "{} hatch lines", hatch.len());
+  for l in &hatch {
+    let (a, b) = (l.points[0], l.points[1]);
+    assert!(((b[0] - a[0]) + (b[1] - a[1])).abs() < 1e-3, "diagonal: {a:?} {b:?}");
+    assert!((a[2] - 5.0).abs() < 0.1 && (b[2] - 5.0).abs() < 0.1);
+  }
+  assert!(outline.len() >= 4, "{} outline segments", outline.len());
+  assert!(
+    outline
+      .iter()
+      .all(|l| l.points.iter().all(|p| p[0] < 1e-3 || p[0] > 40.0 - 1e-3 || p[1] < 1e-3 || p[1] > 20.0 - 1e-3))
+  );
+  // from below (flip) the bottom is cut away instead
+  let opts = crate::scene::view_options(&s, &json!({"slice": {"sketch": sk.0, "flip": true}})).unwrap();
+  let (scene, _) = crate::scene::SceneBuilder::default().build(&s, &opts);
+  let cut = scene.meshes.iter().find(|m| m.analyze).unwrap();
+  assert!(cut.indices.iter().all(|i| cut.positions[*i as usize][2] >= 5.0 - 1e-4));
+  // section analysis wins over Slice while both are asked for
+  let both = json!({"slice": {"sketch": sk.0}, "section": {"plane": "xz", "offset": -10}});
+  let opts = crate::scene::view_options(&s, &both).unwrap();
+  assert!(!opts.slice && opts.section.is_some());
+  assert!(crate::scene::view_options(&s, &json!({"slice": {"sketch": 9999}})).is_err());
+}
+
 #[test]
 fn parameter_change_regenerates_in_the_background() {
   let mut s = Session::default();

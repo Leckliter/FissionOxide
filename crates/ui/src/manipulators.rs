@@ -457,6 +457,28 @@ fn draw(painter: &egui::Painter, l: &Layout, lit: Option<Handle>) {
   }
 }
 
+/// 3D Sketch's manipulator at a sketch tool's start point, as Fusion draws it: the X, Y and Z
+/// arrows and a square plane handle across `normal` (the sketch plane's, drawn in that axis's
+/// colour: blue for an XY sketch). Drawn only; nothing drags it.
+pub(crate) fn sketch_axes(
+  painter: &egui::Painter,
+  project: &dyn Fn(DVec3) -> Option<Pos2>,
+  cam: &fox_engine::render::Camera,
+  origin: DVec3,
+  normal: DVec3,
+) {
+  let (right, up, _) = cam.basis();
+  let Some(size) = world_size(project, right, origin, SIZE_PX) else { return };
+  // the plane handle sits across the world axis nearest the sketch normal
+  let n = [normal.x.abs(), normal.y.abs(), normal.z.abs()];
+  let across = (0..3).max_by(|a, b| n[*a].total_cmp(&n[*b])).unwrap_or(2);
+  let mut t = Triad::world(origin);
+  t.rings = [false; 3];
+  t.planes = [across == 0, across == 1, across == 2];
+  let l = layout(&t, size, (right, up), project);
+  draw(painter, &l, None);
+}
+
 /// World length that spans `px` points on screen at `at`.
 fn world_size(project: &dyn Fn(DVec3) -> Option<Pos2>, right: DVec3, at: DVec3, px: f64) -> Option<f64> {
   let (a, b) = (project(at)?, project(at + right)?);

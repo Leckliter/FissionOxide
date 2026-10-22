@@ -2587,23 +2587,6 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
               theme::TEXT,
             );
           };
-          // while a tool with several types runs, its types sit above Options, as in Fusion
-          let variants = feature_options(app.tool);
-          if !variants.is_empty() {
-            section(ui, "Feature Options");
-            ui.horizontal(|ui| {
-              ui.set_height(27.0);
-              ui.add_space(14.0);
-              for &t in variants {
-                let (icon, name, _) = Cmd::SketchTool(t).info();
-                if icons::icon_button(ui, icon, 22.0, name, app.tool == t, None).clicked() && app.tool != t {
-                  app.set_tool(t);
-                }
-              }
-            });
-            ui.add_space(2.0);
-          }
-          section(ui, "Options");
           let row = |ui: &mut egui::Ui, label: &str, add: &mut dyn FnMut(&mut egui::Ui)| {
             ui.horizontal(|ui| {
               ui.set_height(27.0);
@@ -2612,6 +2595,27 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
               ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| add(ui));
             });
           };
+          // while a tool with several types runs, its types sit above Options, as in Fusion: a row
+          // named after the family (Line, Rectangle, ...) with an icon toggle per type, the running
+          // one lit, each with the ribbon's tooltip
+          let variants = feature_options(app.tool);
+          if !variants.is_empty() {
+            section(ui, "Feature Options");
+            row(ui, feature_options_label(app.tool), &mut |ui| {
+              // laid out right to left, so the last listed is the leftmost
+              for &t in variants.iter().rev() {
+                let (icon, _, _) = Cmd::SketchTool(t).info();
+                let resp = icons::icon_button(ui, icon, 22.0, "", app.tool == t, None);
+                let resp = crate::menus::sketch_tool_tip(resp, &app.prefs, t);
+                if resp.clicked() && app.tool != t {
+                  // the points already placed carry over to the other kind
+                  switch_feature_option(app, t);
+                }
+              }
+            });
+            ui.add_space(2.0);
+          }
+          section(ui, "Options");
           // the toggles light up when every selected curve has that linetype
           let (construction, centerline) = linetype_state(app, sk);
           row(ui, "Linetype", &mut |ui| {
@@ -2623,7 +2627,8 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
             }
           });
           row(ui, "Look At", &mut |ui| {
-            if icons::icon_button(ui, Icon::LookAt, 22.0, "Look at the sketch plane", false, None).clicked() {
+            // a push button with Fusion's plain tooltip; it draws the same after the click
+            if icons::icon_button(ui, Icon::LookAt, 22.0, "Look At", false, None).clicked() {
               app.look_at_selection();
             }
           });
@@ -2633,6 +2638,7 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
           row(ui, "Snap", &mut |ui| {
             ui.checkbox(&mut app.snap, "");
           });
+          // Slice sections every body at the sketch plane (see `viewport::slice_params`)
           row(ui, "Slice", &mut |ui| {
             ui.checkbox(&mut app.palette.slice, "");
           });
@@ -2654,35 +2660,11 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
           row(ui, "Construction Geometries", &mut |ui| {
             ui.checkbox(&mut app.palette.construction, "");
           });
+          // 3D Sketch greys while a tool with no 3D form runs, as in Fusion
+          let sketch_3d_enabled = crate::viewport::sketch_3d_enabled(app);
           row(ui, "3D Sketch", &mut |ui| {
-            ui.checkbox(&mut app.palette.sketch_3d, "");
+            ui.add_enabled(sketch_3d_enabled, egui::Checkbox::without_text(&mut app.palette.sketch_3d));
           });
-          // Fusion's Feature Options while a polygon tool is active: circumscribed, inscribed, edge
-          if matches!(app.tool, Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon) {
-            ui.add_space(4.0);
-            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
-            triangle(ui.painter(), r.left_center() + vec2(5.0, 0.0), true, theme::GROUP_LABEL);
-            ui.painter().text(
-              r.left_center() + vec2(16.0, 0.0),
-              egui::Align2::LEFT_CENTER,
-              "Feature Options",
-              egui::FontId::proportional(13.0),
-              theme::TEXT,
-            );
-            row(ui, "Polygon", &mut |ui| {
-              // laid out right to left, so the last listed is the leftmost
-              for (tool, icon, hint) in [
-                (Tool::EdgePolygon, Icon::PolygonEdge, "Edge Polygon"),
-                (Tool::Polygon, Icon::Polygon, "Inscribed Polygon"),
-                (Tool::CircPolygon, Icon::PolygonCirc, "Circumscribed Polygon"),
-              ] {
-                if icons::icon_button(ui, icon, 22.0, hint, app.tool == tool, None).clicked() {
-                  // the point already placed carries over to the other kind
-                  app.tool = tool;
-                }
-              }
-            });
-          }
           // Fusion's Feature Options while a chamfer runs (equal distance, distance and angle, two
           // distance) and while Blend Curve runs (tangent G1, curvature G2)
           if app.tool.is_chamfer() || app.tool == Tool::Blend {
@@ -2755,22 +2737,45 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
 }
 
 /// The types of the running sketch tool, for the palette's Feature Options section: Fusion
-/// lists a tool's variants there (2-point / 3-point / center rectangle, the five circles, ...)
-/// and nothing for tools with one form (Line).
+/// lists a tool's variants there (Line / Midpoint Line, 2-point / 3-point / center rectangle,
+/// the five circles, ...) and nothing for tools with one form (Fit Point Spline, Ellipse, Point).
 pub(crate) fn feature_options(tool: Tool) -> &'static [Tool] {
-  use Tool::*;
-  const RECTS: &[Tool] = &[Rect, Rect3, CenterRect];
-  const CIRCLES: &[Tool] = &[Circle, Circle2P, Circle3P, Circle2T, Circle3T];
-  const ARCS: &[Tool] = &[Arc3, CenterArc, TangentArc];
-  const POLYGONS: &[Tool] = &[Polygon, CircPolygon, EdgePolygon];
-  const SLOTS: &[Tool] = &[Slot, OverallSlot, CenterSlot, ArcSlot3, ArcSlotCenter];
-  const SPLINES: &[Tool] = &[Spline, ControlSpline];
-  for family in [RECTS, CIRCLES, ARCS, POLYGONS, SLOTS, SPLINES] {
+  for (family, _) in FEATURE_OPTION_FAMILIES {
     if family.contains(&tool) {
       return family;
     }
   }
   &[]
+}
+
+/// The families the Feature Options section shows, each with the name of its row (the tool's
+/// family, as Fusion labels it).
+const FEATURE_OPTION_FAMILIES: &[(&[Tool], &str)] = {
+  use Tool::*;
+  &[
+    (&[Line, MidpointLine], "Line"),
+    (&[Rect, Rect3, CenterRect], "Rectangle"),
+    (&[Circle, Circle2P, Circle3P, Circle2T, Circle3T], "Circle"),
+    (&[Arc3, CenterArc, TangentArc], "Arc"),
+    (&[Polygon, CircPolygon, EdgePolygon], "Polygon"),
+    (&[Slot, OverallSlot, CenterSlot, ArcSlot3, ArcSlotCenter], "Slot"),
+  ]
+};
+
+/// The name of the Feature Options row for `tool`'s family ("" for a tool without one).
+pub(crate) fn feature_options_label(tool: Tool) -> &'static str {
+  FEATURE_OPTION_FAMILIES.iter().find(|(f, _)| f.contains(&tool)).map_or("", |(_, l)| l)
+}
+
+/// A Feature Options toggle switches the running tool to another type of the same family. The
+/// polygon kinds keep the point already placed (they all start from a centre or a vertex); the
+/// others start over, as the steps of one type don't fit another.
+fn switch_feature_option(app: &mut App, tool: Tool) {
+  if matches!(tool, Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon) {
+    app.tool = tool;
+  } else {
+    app.set_tool(tool);
+  }
 }
 
 /// "1 profile" / "2 profiles".
@@ -3843,8 +3848,9 @@ mod row_menu_tests {
     assert_eq!(sketch_coord(LengthUnit::Mm, 10.0), "10.00");
   }
 
-  /// The palette's Feature Options list a running tool's types, as Fusion's does: rectangles,
-  /// circles, arcs, polygons, slots and splines; Line (one form) and Select show none.
+  /// The palette's Feature Options list a running tool's types, as Fusion's does: lines,
+  /// rectangles, circles, arcs, polygons and slots, in a row named after the family; the splines,
+  /// Select and the single-form tools show none.
   #[test]
   fn feature_options_list_the_tools_types() {
     assert_eq!(feature_options(Tool::Rect), &[Tool::Rect, Tool::Rect3, Tool::CenterRect]);
@@ -3852,13 +3858,43 @@ mod row_menu_tests {
     assert_eq!(feature_options(Tool::Circle3T).len(), 5);
     assert!(feature_options(Tool::Circle).contains(&Tool::Circle2P));
     assert_eq!(feature_options(Tool::TangentArc), &[Tool::Arc3, Tool::CenterArc, Tool::TangentArc]);
-    assert!(feature_options(Tool::Line).is_empty());
+    // Line and Midpoint Line share a "Line" row (Fusion's), the Line (L) toggle first
+    assert_eq!(feature_options(Tool::Line), &[Tool::Line, Tool::MidpointLine]);
+    assert_eq!(feature_options(Tool::MidpointLine), feature_options(Tool::Line));
+    assert_eq!(feature_options_label(Tool::MidpointLine), "Line");
+    assert_eq!(feature_options_label(Tool::Circle2T), "Circle");
+    assert_eq!(feature_options_label(Tool::ArcSlot3), "Slot");
+    // Fit Point Spline shows no Feature Options in Fusion (nor does Control Point Spline)
+    assert!(feature_options(Tool::Spline).is_empty());
+    assert!(feature_options(Tool::ControlSpline).is_empty());
+    assert_eq!(feature_options_label(Tool::Spline), "");
     assert!(feature_options(Tool::Select).is_empty());
     assert!(feature_options(Tool::Dimension).is_empty());
-    for t in feature_options(Tool::Slot) {
-      // every type has a ribbon icon and name for its toggle
-      assert!(!Cmd::SketchTool(*t).info().1.is_empty());
+    assert!(feature_options(Tool::Ellipse).is_empty());
+    for (family, label) in FEATURE_OPTION_FAMILIES {
+      assert!(!label.is_empty());
+      for t in *family {
+        // every type has a ribbon icon and name for its toggle
+        assert!(!Cmd::SketchTool(*t).info().1.is_empty());
+      }
     }
+  }
+
+  /// Switching a Feature Options toggle keeps a polygon's placed point (the kinds share their
+  /// first click) and starts the other families over.
+  #[test]
+  fn feature_option_switch_keeps_a_polygons_point() {
+    let (mut app, _) = sketched();
+    app.set_tool(Tool::Polygon);
+    crate::viewport::push_point_for_test(&mut app, [5.0, 5.0]);
+    switch_feature_option(&mut app, Tool::CircPolygon);
+    assert_eq!(app.tool, Tool::CircPolygon);
+    assert!(!app.tstate.is_empty(), "the centre carries over");
+    app.set_tool(Tool::Rect);
+    crate::viewport::push_point_for_test(&mut app, [5.0, 5.0]);
+    switch_feature_option(&mut app, Tool::Rect3);
+    assert_eq!(app.tool, Tool::Rect3);
+    assert!(app.tstate.is_empty(), "a rectangle starts over");
   }
 
   #[test]
