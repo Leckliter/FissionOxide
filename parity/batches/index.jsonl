@@ -89,7 +89,7 @@
 {"name": "ui-surface-menus", "items": 5, "status": "done", "pr": "3a812bd", "fixer": "cloud task_f0efebd1 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-surface-modify-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_5bf3c132 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-surface-results", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_de1420ec (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-mesh-body-and-insert", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_fe0e6853 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-mesh-body-and-insert", "items": 5, "status": "done", "pr": "4790822", "fixer": "cloud task_fe0e6853 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-mesh-modify-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_b104991d (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-mesh-new-modify", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_c3b91987 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-mesh-prepare-create", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_830371a8 (requested 2026-10-22 by the coordinator)"}
