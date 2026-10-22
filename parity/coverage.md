@@ -9,7 +9,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [done (2026-10-21)] Toolbar tabs and panel dropdowns at full width; responsive collapse at narrow widths
 - [done (2026-10-21); SOLID tab only: not exercised: the other tabs, the SKETCH tab buttons, QAT / application bar / navigation bar tooltips, Pin to Shortcuts effect, the shortcut dialogs' OK and reset flows] Tooltips on every ribbon button (short and expanded), pin/unpin, customise shortcuts
 - [done (2026-10-21)] Preferences dialog (layout, General); todo: every other Preferences page vs Fusion's
-- [todo] Data Panel: projects, folders, upload, versions, search, Recent/Activity/Trash
+- [in progress (2026-10-21, prober 7)] Data Panel: projects, folders, upload, versions, search, Recent/Activity/Trash
 - [todo] Save, Save As, Open, Open Recent, Export, New Drawing, Insert into Design, Capture Image, 3D Print dialogs
 - [todo] Document Settings, units change, Named Views (create, edit, restore), Comments panel
 - [todo] Status bar readouts for every selection kind; lower-left messages
