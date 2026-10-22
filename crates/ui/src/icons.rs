@@ -421,6 +421,15 @@ pub enum Icon {
   // Draft's Type row
   DraftFixedPlane,
   DraftPartingLine,
+  // Reduce's Remesh Type, Plane Cut's Fill Type and Convert Mesh's Method (see `mesh`)
+  RemeshAdaptive,
+  RemeshUniform,
+  FillNone,
+  FillUniform,
+  FillMinimal,
+  ConvertFaceted,
+  ConvertPrismatic,
+  ConvertOrganic,
 }
 
 #[derive(Clone, Copy)]
@@ -1612,11 +1621,19 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     }
     Icon::InsertMesh
     | Icon::Tessellate
-    | Icon::BaseMesh
-    | Icon::DirectEdit
-    | Icon::Repair
     | Icon::Remesh
     | Icon::Reduce
+    | Icon::RemeshAdaptive
+    | Icon::RemeshUniform
+    | Icon::FillNone
+    | Icon::FillUniform
+    | Icon::FillMinimal
+    | Icon::ConvertFaceted
+    | Icon::ConvertPrismatic
+    | Icon::ConvertOrganic => mesh::paint(&k, icon),
+    Icon::BaseMesh
+    | Icon::DirectEdit
+    | Icon::Repair
     | Icon::PlaneCut
     | Icon::Smooth
     | Icon::ScaleMesh
@@ -1625,11 +1642,7 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.line((0.08, 0.38), (0.62, 0.92), BlueDark);
       k.line((0.62, 0.38), (0.08, 0.92), BlueDark);
       match icon {
-        Icon::InsertMesh => {
-          k.thick((0.0, 0.12), (0.34, 0.12), Ink, 1.4);
-          k.arrow_head((0.46, 0.12), (1.0, 0.0), 0.16, Ink);
-        }
-        Icon::Tessellate | Icon::ScaleMesh => k.solid(&[(0.66, 0.04), (0.96, 0.04), (0.96, 0.34), (0.66, 0.34)], Light),
+        Icon::ScaleMesh => k.solid(&[(0.66, 0.04), (0.96, 0.04), (0.96, 0.34), (0.66, 0.34)], Light),
         Icon::BaseMesh | Icon::DirectEdit => {
           for i in 0..4 {
             let a = i as f32 * FRAC_PI_2 * 0.5;
@@ -1642,7 +1655,6 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
           }
         }
         Icon::Repair => k.solid(&[(0.04, 0.72), (0.66, 0.72), (0.66, 0.86), (0.04, 0.86)], White),
-        Icon::Remesh | Icon::Reduce => k.line((0.35, 0.38), (0.35, 0.92), BlueDark),
         Icon::PlaneCut => k.solid(&[(0.0, 0.7), (0.3, 0.2), (0.98, 0.2), (0.68, 0.7)], Orange),
         Icon::Smooth => k.circle((0.74, 0.24), 0.18, Some(BlueLight), Some(Blue)),
         _ => k.ellipse((0.36, 0.65), 0.3, 0.1, None, Blue),
@@ -2928,5 +2940,6 @@ pub fn chevron(p: &Painter, c: Pos2, color: Color32) {
   ));
 }
 
+mod mesh;
 #[cfg(test)]
 mod sheet;

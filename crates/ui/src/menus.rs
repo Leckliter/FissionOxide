@@ -538,7 +538,7 @@ const MESH_MODIFY: &[E] = &[
   x("Direct Edit", Icon::DirectEdit).g(),
   x("Remesh", Icon::Remesh).g(),
   c("Reduce", Icon::Reduce, D(Kind::Form(&forms::MESH_REDUCE))).g(),
-  c("Plane Cut", Icon::PlaneCut, D(Kind::SplitBody)).g(),
+  c("Plane Cut", Icon::PlaneCut, D(Kind::PlaneCut)).g(),
   x("Shell", Icon::Shell),
   x("Combine", Icon::Combine).g(),
   c("Smooth", Icon::Smooth, D(Kind::Form(&forms::MESH_SMOOTH))).g(),
@@ -1172,17 +1172,8 @@ const MESH: [Group; 3] = [
   Group { label: "PREPARE", quick: &["Repair", "Generate Face Groups", "Combine Face Groups"], menu: MESH_PREPARE },
   Group {
     label: "MODIFY",
-    quick: &[
-      "Remesh",
-      "Reduce",
-      "Plane Cut",
-      "Shell",
-      "Combine",
-      "Move/Copy",
-      "Scale Mesh",
-      "Direct Edit",
-      "Bill of Materials",
-    ],
+    // Fusion's MESH tab shows only Remesh and Reduce in MODIFY
+    quick: &["Remesh", "Reduce"],
     menu: MESH_MODIFY,
   },
 ];
@@ -2300,5 +2291,17 @@ mod tests {
     for (i, (label, icon)) in icons.iter().enumerate() {
       assert!(!icons[i + 1..].iter().any(|(_, o)| o == icon), "{label}'s {icon:?} is shared");
     }
+  }
+
+  /// Fusion's MESH tab: CREATE and PREPARE show three icons, MODIFY only Remesh and Reduce, and
+  /// Plane Cut opens its own dialog.
+  #[test]
+  fn mesh_panels_show_fusions_quick_buttons() {
+    let prefs = Prefs::default();
+    let names = |g: &Group| quick_items(&prefs, Tab::Mesh, g).iter().map(|i| i.label).collect::<Vec<_>>();
+    assert_eq!(names(&MESH[0]), ["Insert Mesh", "Tessellate", "Create Mesh Section Sketch"]);
+    assert_eq!(names(&MESH[1]), ["Repair", "Generate Face Groups", "Combine Face Groups"]);
+    assert_eq!(names(&MESH[2]), ["Remesh", "Reduce"]);
+    assert!(matches!(find(MESH_MODIFY, "Plane Cut").and_then(|i| i.cmd), Some(Cmd::Dialog(Kind::PlaneCut))));
   }
 }
