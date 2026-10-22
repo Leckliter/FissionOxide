@@ -799,7 +799,8 @@ impl Cmd {
           // Fusion opens REMOVE to pick them
           app.start(Kind::Form(&crate::forms::REMOVE));
         } else {
-          app.run("body.remove", json!({"bodies": bodies}));
+          // a component picked whole goes as a component (its browser row goes too)
+          app.run("body.remove", crate::dialogs::remove_params(&app.s, &bodies));
           app.s.selection.clear();
         }
       }
@@ -4043,6 +4044,17 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
             timeline_groups::bracket(app, ui, &g, *from, *to);
           }
         }
+        // a primitive's temporary sketch, at the end until OK (see `dialogs::temp_sketch_name`)
+        if let Some(name) = crate::dialogs::temp_sketch_name(app) {
+          let (rect, r) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::hover());
+          icons::draw_tinted(
+            ui.painter(),
+            Rect::from_center_size(rect.center(), Vec2::splat(20.0)),
+            Icon::Sketch,
+            icons::Tint::Blue,
+          );
+          r.on_hover_text(name);
+        }
         if active >= n && marker(ui, marker_dragged).drag_started() {
           drag = Some(start_marker_drag(app, active));
         }
@@ -5048,4 +5060,10 @@ mod timeline_preview_tests {
     let h = Hidden::of(&f, &[FeatureId(5)], 5).with_owned([1]);
     assert_eq!((h.shown(5), h.item(2), h.real(3)), (3, 3, 5));
   }
+}
+
+/// The browser's component rows (id, depth), for tests elsewhere in the crate.
+#[cfg(test)]
+pub(crate) fn component_rows(app: &App) -> Vec<(u32, usize)> {
+  browser_assembly::component_tree(app)
 }

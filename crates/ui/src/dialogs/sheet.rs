@@ -137,7 +137,7 @@ impl Dialog {
     });
     ui.end_row();
     Self::field(ui, "Angle", &mut self.angle, dirty);
-    Self::check(ui, "Flip direction", &mut self.flip, dirty);
+    super::icon_row::flip_toggle(ui, "Flip", "Flip direction", &mut self.flip, dirty);
     Self::check(ui, "Fold the other side", &mut self.flag, dirty);
   }
 

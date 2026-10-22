@@ -601,7 +601,7 @@ impl Dialog {
 
   // ---- rectangular pattern ----
 
-  fn pattern_kind(&self) -> &'static str {
+  pub(super) fn pattern_kind(&self) -> &'static str {
     if self.solid.hp.kind.is_empty() { "bodies" } else { self.solid.hp.kind }
   }
 

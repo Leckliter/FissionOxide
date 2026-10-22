@@ -145,6 +145,15 @@ pub const PLACE_SECOND_PICK: &str = "place_second_pick";
 /// keeps the target's id and name on the lump holding the target, and the tools' lumps become
 /// new bodies, as in Fusion. Without it the first lump the kernel lists keeps the target's id.
 pub const COMBINE_KEEPS_TARGET: &str = "combine_keeps_target";
+/// A Combine join keeps every lump in the target body, as Fusion does: two bodies that don't
+/// touch become one body of two lumps (the target's id and name), and no new body appears.
+/// Without it the lumps are split into bodies as [`COMBINE_KEEPS_TARGET`] says.
+pub const COMBINE_JOIN_ONE_BODY: &str = "combine_join_one_body";
+/// Replace Face onto a plane moves every picked face along the plane's normal (towards it), and
+/// leaves the picked faces that run along the plane (a tangent chain's sides) where they are, so
+/// a rounded slab's top, rounds and sides become one flat top. Without it a curved face moves
+/// along its mean normal, which spreads a round sideways.
+pub const REPLACE_FACE_ALONG_PLANE: &str = "replace_face_along_plane";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -172,6 +181,8 @@ pub const CURRENT: &[&str] = &[
   OFFSET_FACES_EXTEND,
   PLACE_SECOND_PICK,
   COMBINE_KEEPS_TARGET,
+  COMBINE_JOIN_ONE_BODY,
+  REPLACE_FACE_ALONG_PLANE,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

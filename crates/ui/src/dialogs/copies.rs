@@ -70,7 +70,10 @@ impl Dialog {
   /// Does the dialog make copies of bodies (Mirror, the patterns), drawn as ghosts while
   /// previewed?
   fn makes_copies(&self) -> bool {
-    matches!(self.kind, Kind::Mirror | Kind::RectPattern | Kind::CircPattern) || pattern_key(self.kind) == Some("path")
+    matches!(self.kind, Kind::Mirror | Kind::RectPattern | Kind::CircPattern)
+      || pattern_key(self.kind) == Some("path")
+      // a primitive's new body previews grey too, as Fusion's does
+      || super::primitive::base_of(self.kind).is_some()
   }
 
   /// Notes the bodies a preview added (those not in `before`) when it made copies.
@@ -92,6 +95,10 @@ impl Dialog {
   /// Fusion's Type row: three icon toggles switching the pattern dialog between its kinds.
   pub(super) fn pattern_type_row(&mut self, ui: &mut egui::Ui) {
     let Some(mut cur) = pattern_key(self.kind) else { return };
+    // an edited pattern stays the kind it is
+    if self.editing.is_some() {
+      return;
+    }
     ui.label("Type");
     if icon_row(ui, &mut cur, &PATTERN_KINDS, "") {
       self.switch = Some(pattern_kind(cur));
@@ -249,7 +256,7 @@ impl Dialog {
   /// Does the dialog take a plane from the viewport's origin and construction planes (drawn for
   /// it as Create Sketch draws them)? Mirror does, as Fusion shows the origin planes for it.
   pub(crate) fn wants_plane(&self) -> bool {
-    self.kind == Kind::Mirror && self.editing.is_none()
+    self.kind == Kind::Mirror && !self.picks_fixed()
   }
 
   /// A plane clicked in the viewport (`"xy"` or `{"feature"}`): Mirror's plane.
@@ -368,7 +375,7 @@ impl Dialog {
   /// Does a click on a visible origin item go to the dialog: Mirror's plane, or Circular
   /// Pattern's axis while its Axis row is active?
   pub(crate) fn wants_origin(&self) -> bool {
-    self.editing.is_none() && (self.kind == Kind::Mirror || self.kind == Kind::CircPattern && self.pick_row == 1)
+    !self.picks_fixed() && (self.kind == Kind::Mirror || self.kind == Kind::CircPattern && self.pick_row == 1)
   }
 
   /// An origin item clicked in the canvas or browser while the dialog is open; false when the

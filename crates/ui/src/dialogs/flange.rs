@@ -316,7 +316,7 @@ impl Dialog {
         ui.end_row();
         Self::field(ui, "Distance", &mut self.distance2, dirty);
         Self::check(ui, "Symmetric", &mut self.flag, dirty);
-        Self::check(ui, "Flip", &mut self.flip, dirty);
+        super::icon_row::flip_toggle(ui, "Flip", "Flip", &mut self.flip, dirty);
         self.sheet_rule_row(app, ui);
       }
       _ => {}

@@ -226,17 +226,20 @@ impl Ctx<'_> {
         if faces.is_empty() {
           return Err("pick the faces to replace".into());
         }
-        let surface = match (target.as_mut(), plane.as_mut()) {
+        // the target plane's normal, when the replacement is flat
+        let (surface, flat) = match (target.as_mut(), plane.as_mut()) {
           (Some(fr), _) => {
             let (tbi, info) = self.face_info(fr)?;
-            self.state.bodies[tbi].shape.face_shape(info.id).map_err(ke)?
+            let flat = (info.kind == SurfaceKind::Plane).then_some(info.normal);
+            (self.state.bodies[tbi].shape.face_shape(info.id).map_err(ke)?, flat)
           }
           (None, Some(p)) => {
             let pl = self.resolve_plane(p)?;
-            Shape::plane_face(pl.origin, pl.normal(), 1.0).map_err(ke)?
+            (Shape::plane_face(pl.origin, pl.normal(), 1.0).map_err(ke)?, Some(pl.normal()))
           }
           (None, None) => return Err("pick the replacement surface or plane".into()),
         };
+        let flat = flat.filter(|_| self.behaviours.has(fox_sketch::behaviour::REPLACE_FACE_ALONG_PLANE));
         let size = self.through_all(&Plane::XY);
         let ext = surface.extended_face(size, 0.0, DVec3::ZERO, DVec3::Z).map_err(ke)?;
         let mut by_body: Vec<(usize, Vec<(u32, DVec3, DVec3)>)> = Vec::new();
@@ -247,11 +250,20 @@ impl Ctx<'_> {
             SurfaceKind::Plane => info.normal,
             _ => self.mean_normal(bi, info.id).ok_or("a face that curves all the way round can't be replaced")?,
           };
+          // onto a plane every face moves along its normal; one running along it stays put
+          let n = match flat {
+            Some(pn) if n.dot(pn).abs() < 0.1 => continue,
+            Some(pn) => pn * n.dot(pn).signum(),
+            None => n,
+          };
           let f = (info.id, n, info.center);
           match by_body.iter_mut().find(|(b, _)| *b == bi) {
             Some((_, v)) => v.push(f),
             None => by_body.push((bi, vec![f])),
           }
+        }
+        if by_body.is_empty() {
+          return Err("the picked faces run along the plane: none can move onto it".into());
         }
         for (bi, list) in by_body {
           let shape = replace(&self.state.bodies[bi].shape, &list, &ext, size)?;

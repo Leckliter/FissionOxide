@@ -566,3 +566,33 @@ fn tangent_chains_and_silhouette_split() {
   assert_eq!(s.model.bodies.len(), 2);
   assert!(s.execute("silhouette_split", &json!({"body": body})).is_err(), "a direction is needed");
 }
+
+/// Replace Face with Tangent Chain over a rounded slab's top: the top, its edge rounds and the
+/// sides they run into go to the target plane, as one 40 × 20 × 15 block.
+#[test]
+fn replace_face_tangent_chain_over_rounds() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 40, "depth": 20, "height": 10}));
+  let b = &s.model.bodies[0];
+  let edges: Vec<Value> = b
+    .edges()
+    .iter()
+    .filter(|e| e.length > 39.0 && e.mid.z > 9.0)
+    .map(|e| json!({"body": b.id.0, "edge": e.id}))
+    .collect();
+  run(&mut s, "fillet", json!({"edges": edges, "radius": 2}));
+  let b = &s.model.bodies[0];
+  let top =
+    json!({"body": b.id.0, "face": b.faces().iter().find(|f| f.normal.z > 0.99 && f.origin.z > 9.0).unwrap().id});
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 15}));
+  let up = s.design.features.last().unwrap().id.0;
+  run(&mut s, "replace_face", json!({"faces": [top], "plane": {"feature": up}, "tangent_chain": true}));
+  match &s.design.features.last().unwrap().kind {
+    fox_model::FeatureKind::ReplaceFace { faces, .. } => assert_eq!(faces.len(), 5),
+    k => panic!("{k:?}"),
+  }
+  assert_eq!(s.model.bodies.len(), 1);
+  assert!((volume(&s) - 12_000.0).abs() < 1e-2, "{}", volume(&s));
+  let m = s.model.bodies[0].shape.mass().unwrap();
+  assert!((m.bbox_max.z - 15.0).abs() < 1e-6 && (m.bbox_max.y - m.bbox_min.y - 20.0).abs() < 1e-6, "{m:?}");
+}

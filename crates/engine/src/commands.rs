@@ -215,7 +215,7 @@ cmds! {
   "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, symmetric?, bodies?, join?}";
   "move" => "Move/rotate bodies or a component: turned about pivot by rotate (X, Y, Z angles, as Fusion's Free Move), translated, then turned about axis by angle; copy keeps the originals and adds moved copies (Create Copy)", "{bodies? | component?, translate?: [x,y,z], axis?, angle?, rotate?: [ax, ay, az], pivot?: [x,y,z], copy?: bool}";
   "combine" => "Join/cut/intersect bodies", "{target, tools: [id], operation, keep_tools?}";
-  "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
+  "body.remove" => "Remove bodies or components (as a timeline feature): a component's bodies and those of the components below it go, and the browser drops its row", "{bodies?: [id], components?: [id]}";
   "body.rename" => "Rename a body", "{body, name}";
   "body.visible" => "Show or hide a body", "{body, visible}";
   "body.material" => "Set bodies' own physical material (it wins over their component's; nothing clears it)", "{bodies: [id], material?}";
@@ -1312,8 +1312,14 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       add_feature(s, FeatureKind::Combine { target, tools, operation, keep_tools })
     }
     "body.remove" => {
-      let bodies = ids(p, "bodies").into_iter().map(BodyId).collect();
-      add_feature(s, FeatureKind::RemoveBodies { bodies })
+      let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
+      // Fusion's REMOVE takes components too: their bodies and those below them go
+      let components: Vec<fox_model::ComponentId> =
+        ids(p, "components").into_iter().map(fox_model::ComponentId).collect();
+      if let Some(c) = components.iter().find(|c| s.design.component(**c).is_none()) {
+        return Err(CmdError::new(format!("no component {}", c.0)));
+      }
+      add_feature(s, FeatureKind::RemoveBodies { bodies, components })
     }
     "body.rename" => {
       let b = BodyId(req_u32(p, "body")?);
@@ -2607,7 +2613,10 @@ fn edit_picks(s: &Session, id: FeatureId, picks: &Value) -> Result<serde_json::M
       }
       out.insert("edges".into(), serde_json::to_value(edges)?);
     }
-    Some(_) => return Err(CmdError::new("only a fillet's or chamfer's picks can be edited")),
+    Some(kind) => {
+      return crate::edit_picks::fields(s, kind, picks)
+        .unwrap_or_else(|| Err(CmdError::new("this feature's picks can't be edited")));
+    }
     None => return Err(CmdError::new("no such feature")),
   }
   Ok(out)

@@ -34,6 +34,8 @@ fn joining_bodies_apart_keeps_the_targets_name_on_the_target() {
   // either way round, the target keeps its id and name; the tool's lump is a new body
   for target_is_box in [true, false] {
     let (mut s, bx, cy) = apart();
+    // (a design from before Fusion's one-body join)
+    s.design.behaviours.remove(fox_sketch::behaviour::COMBINE_JOIN_ONE_BODY);
     let (target, tool, kept) = if target_is_box { (bx, cy, 8000.0) } else { (cy, bx, cyl) };
     let name = s.body_name(fox_model::BodyId(target));
     run(&mut s, "combine", json!({"target": target, "tools": [tool], "operation": "join"}));
@@ -43,6 +45,22 @@ fn joining_bodies_apart_keeps_the_targets_name_on_the_target() {
     let other = s.model.bodies.iter().find(|b| b.id.0 != target).unwrap();
     assert!(other.id.0 != tool, "the tool's lump is a new body");
   }
+}
+
+/// Fusion's Combine Join of bodies that don't touch: one body of two lumps, the target's (its
+/// id and name), the tool's row gone and no new body.
+#[test]
+fn joining_bodies_apart_makes_one_body_of_two_lumps() {
+  let (mut s, bx, cy) = apart();
+  let name = s.body_name(fox_model::BodyId(bx));
+  run(&mut s, "combine", json!({"target": bx, "tools": [cy], "operation": "join"}));
+  assert_eq!(s.model.bodies.len(), 1);
+  let b = &s.model.bodies[0];
+  assert_eq!(b.id.0, bx);
+  assert_eq!(s.body_name(b.id), name);
+  assert_eq!(b.shape.solids().unwrap().len(), 2, "two lumps");
+  let cyl = std::f64::consts::PI * 25.0 * 10.0;
+  assert!((volume_of(&s, bx) - 8000.0 - cyl).abs() < 1e-3);
 }
 
 #[test]

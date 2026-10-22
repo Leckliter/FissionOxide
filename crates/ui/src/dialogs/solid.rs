@@ -1249,6 +1249,7 @@ mod tests {
     run(&mut s, "sketch.finish", json!({}));
     let mut d = Dialog::blank(Kind::Revolve);
     d.sketch = Some(sk);
+    d.profiles = vec![s.model.sketches[&sk].profiles[0].interior_point()];
     d.op = "new_body";
     // Type Full is a whole turn whatever the angle field says
     d.angle = "90 deg".into();
@@ -1309,6 +1310,7 @@ mod tests {
     run(&mut s, "sketch.finish", json!({}));
     let mut d = Dialog::blank(Kind::Revolve);
     d.sketch = Some(sk);
+    d.profiles = vec![s.model.sketches[&sk].profiles[0].interior_point()];
     d.solid.rev_full = true;
     apply(&mut s, &mut d);
     let ring = std::f64::consts::PI * 75.0 * 10.0;

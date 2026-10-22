@@ -33,7 +33,7 @@ pub static JOINT_ORIGIN: Form = Form {
     Input::Expr { key: "offset_x", label: "Offset X", default: "0 mm" },
     Input::Expr { key: "offset_y", label: "Offset Y", default: "0 mm" },
     Input::Expr { key: "offset", label: "Offset Z", default: "0 mm" },
-    Input::Check { key: "flip", label: "Flip" },
+    Input::Flip { key: "flip", label: "Flip" },
     Input::Text { key: "name", label: "Name", default: "" },
   ],
   picks_model: false,

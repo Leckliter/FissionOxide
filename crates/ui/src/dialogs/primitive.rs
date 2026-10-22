@@ -480,9 +480,113 @@ fn plane_name(s: &Session, plane: &Value) -> String {
   }
 }
 
-/// The drawing step in the viewport: the rubber-band rectangle or circle from the first click to
-/// the pointer with its size beside it (as the sketch tools' heads-up dimensions), and the
-/// clicks that place it. Points snap to `step`. True while it owns the pointer.
+/// The heads-up boxes while a rectangle or circle base is sized, as Fusion's: what was typed in
+/// each (empty: the box follows the pointer) and the box with the keyboard. Typing goes into the
+/// active box, Tab moves to the next and Enter places the base at the typed size.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct Hud {
+  pub typed: [String; 2],
+  pub active: usize,
+}
+
+fn hud_id() -> egui::Id {
+  egui::Id::new("primitive-hud")
+}
+
+/// The boxes a base has: the rectangle's length and width, the circle's diameter.
+fn hud_boxes(base: Base) -> usize {
+  match base {
+    Base::Rect => 2,
+    Base::Circle => 1,
+    Base::Point => 0,
+  }
+}
+
+/// A typed size (mm): a bare number or unitless expression is in the design's unit.
+pub(super) fn typed_mm(s: &Session, unit: fox_engine::model::LengthUnit, text: &str) -> Option<f64> {
+  use fox_engine::expr::{Empty, Kind as K, eval, eval_raw};
+  let t = text.trim();
+  if t.is_empty() {
+    return None;
+  }
+  let bare = matches!(eval_raw(t, &Empty), Ok(v) if !v.has_unit);
+  let e = if bare { format!("({t}) * 1 {}", unit.symbol()) } else { t.to_string() };
+  eval(&e, K::Length, &s.model.params).ok().filter(|v| *v > 1e-9)
+}
+
+/// Where the typed sizes put the base's second point, from its first `a` towards the pointer `c`.
+pub(super) fn hud_point(base: Base, a: [f64; 2], c: [f64; 2], sizes: [Option<f64>; 2]) -> [f64; 2] {
+  let sign = |d: f64| if d < 0.0 { -1.0 } else { 1.0 };
+  match base {
+    Base::Rect => {
+      [sizes[0].map_or(c[0], |w| a[0] + sign(c[0] - a[0]) * w), sizes[1].map_or(c[1], |h| a[1] + sign(c[1] - a[1]) * h)]
+    }
+    Base::Circle => sizes[0].map_or(c, |d| {
+      let (dx, dy) = (c[0] - a[0], c[1] - a[1]);
+      let l = dx.hypot(dy);
+      let (ux, uy) = if l > 1e-9 { (dx / l, dy / l) } else { (1.0, 0.0) };
+      [a[0] + ux * d / 2.0, a[1] + uy * d / 2.0]
+    }),
+    Base::Point => c,
+  }
+}
+
+/// While a primitive is being made on a picked plane: the name of Fusion's temporary sketch its
+/// base is drawn on, which the browser and timeline list until OK.
+pub(crate) fn temp_sketch_name(app: &App) -> Option<String> {
+  let d = app.dialog.as_ref()?;
+  if base_of(d.kind).is_none() || d.editing.is_some() || d.place == Step::Plane {
+    return None;
+  }
+  let features = &app.s.design.features;
+  let n = features.iter().filter(|f| matches!(f.kind, fox_engine::model::FeatureKind::Sketch { .. })).count() + 1;
+  (n..).map(|k| format!("Sketch{k}")).find(|name| !features.iter().any(|f| f.name == *name))
+}
+
+/// The base as drawn, in plane coordinates: the rectangle's corners or the circle's points.
+fn base_outline(base: Base, a: [f64; 2], c: [f64; 2]) -> Vec<[f64; 2]> {
+  match base {
+    Base::Rect => vec![a, [c[0], a[1]], c, [a[0], c[1]]],
+    Base::Circle => {
+      let r = (c[0] - a[0]).hypot(c[1] - a[1]);
+      (0..64)
+        .map(|k| {
+          let t = std::f64::consts::TAU * k as f64 / 64.0;
+          [a[0] + r * t.cos(), a[1] + r * t.sin()]
+        })
+        .collect()
+    }
+    Base::Point => Vec::new(),
+  }
+}
+
+/// The drawn base's outline once the dialog is open: Fusion draws the base's edges blue on the
+/// grey preview body.
+fn placed_outline(d: &Dialog, s: &Session) -> Option<(Plane, Vec<[f64; 2]>)> {
+  let base = base_of(d.kind)?;
+  let plane = plane_of(s, &d.plane)?;
+  let unit_len = |e: &str| d.len(s, e);
+  let at = d.at_pt()?;
+  let pts = match (base, d.kind) {
+    (Base::Rect, _) => {
+      let (l, w) = (unit_len(&d.a)?, unit_len(&d.b)?);
+      base_outline(base, [at[0] - l / 2.0, at[1] - w / 2.0], [at[0] + l / 2.0, at[1] + w / 2.0])
+    }
+    (Base::Circle, Kind::Form(_)) => {
+      let c = d.form_value("at")?.as_array()?;
+      let c = [c.first()?.as_f64()?, c.get(1)?.as_f64()?];
+      let r = unit_len(d.form_value("diameter")?.as_str()?)? / 2.0;
+      base_outline(base, c, [c[0] + r, c[1]])
+    }
+    (Base::Circle, _) => base_outline(base, at, [at[0] + unit_len(&d.a)? / 2.0, at[1]]),
+    _ => return None,
+  };
+  Some((plane, pts))
+}
+
+/// The plane pick's and the base drawing's canvas overlay: the base following the pointer with
+/// its heads-up size boxes, a dot at the pointer, and the click that places the next point. Once
+/// the dialog is open, the base's outline in blue. True when it took the canvas's pointer.
 pub(crate) fn overlay(
   app: &mut App,
   resp: &egui::Response,
@@ -493,74 +597,191 @@ pub(crate) fn overlay(
 ) -> bool {
   let Some(d) = app.dialog.as_ref() else { return false };
   let Some(base) = base_of(d.kind) else { return false };
+  let ink = Color32::from_rgb(30, 110, 235);
+  let stroke = Stroke::new(1.5, ink);
   let from = match d.place {
     Step::First => None,
     Step::Second(a) => Some(a),
-    _ => return false,
+    Step::Done => {
+      // the dialog is open: the drawn base stays outlined in blue on the preview
+      if d.editing.is_none()
+        && let Some((plane, pts)) = placed_outline(d, &app.s)
+      {
+        let v: Vec<Pos2> = pts.iter().filter_map(|p| project(plane.to_world(*p))).collect();
+        if v.len() == pts.len() && v.len() > 1 {
+          painter.add(egui::Shape::closed_line(v, stroke));
+        }
+      }
+      return false;
+    }
+    Step::Plane => return false,
   };
   let Some(plane) = plane_of(&app.s, &d.plane) else { return false };
   let unit = d.unit;
-  let cur = resp.hover_pos().or(resp.interact_pointer_pos()).and_then(|p| {
+  let ctx = resp.ctx.clone();
+  let mut hud: Hud = ctx.data(|m| m.get_temp(hud_id())).unwrap_or_default();
+  if from.is_none() {
+    hud = Hud::default();
+  }
+  let n = hud_boxes(base);
+  let raw = resp.hover_pos().or(resp.interact_pointer_pos()).and_then(|p| {
     let (o, dir) = ray(p);
     on_plane(&plane, o, dir).map(|q| q.map(|v| snap(v, step)))
   });
-  let s = |p: [f64; 2]| project(plane.to_world(p));
-  let ink = Color32::from_rgb(30, 110, 235);
-  let stroke = Stroke::new(1.5, ink);
-  let label = |at: Pos2, text: String| {
-    let font = egui::FontId::proportional(12.0);
-    let g = painter.layout_no_wrap(text, font, Color32::from_gray(30));
-    let r = egui::Rect::from_center_size(at, g.size() + egui::vec2(10.0, 4.0));
-    painter.rect(r, 2.0, Color32::WHITE, Stroke::new(1.0, ink), egui::StrokeKind::Inside);
-    painter.galley(r.min + egui::vec2(5.0, 2.0), g, Color32::from_gray(30));
+  let sizes = [typed_mm(&app.s, unit, &hud.typed[0]), typed_mm(&app.s, unit, &hud.typed[1])];
+  let cur = match (raw, from) {
+    (Some(c), Some(a)) => Some(hud_point(base, a, c, sizes)),
+    (c, _) => c,
   };
+  let s = |p: [f64; 2]| project(plane.to_world(p));
+  // the boxes' places and the live sizes they show
+  let mut boxes: Vec<(Pos2, String)> = Vec::new();
   if let Some(c) = cur {
-    if let Some(p) = s(c) {
+    if let Some(p) = raw.and_then(s) {
       painter.circle_filled(p, 3.0, ink);
     }
-    match (from, base) {
-      (Some(a), Base::Rect) => {
-        let pts = [a, [c[0], a[1]], c, [a[0], c[1]]];
-        let v: Vec<Pos2> = pts.iter().filter_map(|p| s(*p)).collect();
-        if v.len() == 4 {
-          painter.add(egui::Shape::closed_line(v, stroke));
+    if let Some(a) = from {
+      let pts = base_outline(base, a, c);
+      let v: Vec<Pos2> = pts.iter().filter_map(|p| s(*p)).collect();
+      if v.len() == pts.len() {
+        painter.add(egui::Shape::closed_line(v, stroke));
+      }
+      match base {
+        Base::Rect => {
+          if let Some(p) = s([(a[0] + c[0]) / 2.0, a[1]]) {
+            boxes.push((p + egui::vec2(0.0, 14.0), mm(unit, (c[0] - a[0]).abs())));
+          }
+          if let Some(p) = s([c[0], (a[1] + c[1]) / 2.0]) {
+            boxes.push((p + egui::vec2(36.0, 0.0), mm(unit, (c[1] - a[1]).abs())));
+          }
         }
-        if let Some(p) = s([(a[0] + c[0]) / 2.0, a[1]]) {
-          label(p + egui::vec2(0.0, 14.0), mm(unit, (c[0] - a[0]).abs()));
-        }
-        if let Some(p) = s([c[0], (a[1] + c[1]) / 2.0]) {
-          label(p + egui::vec2(36.0, 0.0), mm(unit, (c[1] - a[1]).abs()));
+        _ => {
+          let r = (c[0] - a[0]).hypot(c[1] - a[1]);
+          if let (Some(p), Some(q)) = (s(a), s(c)) {
+            painter.add(egui::Shape::dashed_line(&[p, q], Stroke::new(1.0, ink), 4.0, 3.0));
+            boxes.push((q + egui::vec2(30.0, -14.0), mm(unit, 2.0 * r)));
+          }
         }
       }
-      (Some(a), _) => {
-        let r = (c[0] - a[0]).hypot(c[1] - a[1]);
-        let v: Vec<Pos2> = (0..64)
-          .filter_map(|k| {
-            let t = std::f64::consts::TAU * k as f64 / 64.0;
-            s([a[0] + r * t.cos(), a[1] + r * t.sin()])
-          })
-          .collect();
-        if v.len() == 64 {
-          painter.add(egui::Shape::closed_line(v, stroke));
-        }
-        if let (Some(p), Some(q)) = (s(a), s(c)) {
-          painter.add(egui::Shape::dashed_line(&[p, q], Stroke::new(1.0, ink), 4.0, 3.0));
-          label(q + egui::vec2(30.0, -14.0), mm(unit, 2.0 * r));
-        }
+    }
+  }
+  let mut commit = false;
+  if from.is_some() && n > 0 && boxes.len() == n {
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
+      hud.active = (hud.active + 1) % n;
+    }
+    commit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    hud.active = hud.active.min(n - 1);
+    for (i, (p, live)) in boxes.iter().enumerate() {
+      if i == hud.active {
+        // the box with the keyboard: typing replaces the live size, which shows as its hint
+        let mut text = hud.typed[i].clone();
+        egui::Area::new(hud_id().with(i))
+          .fixed_pos(*p)
+          .pivot(egui::Align2::CENTER_CENTER)
+          .order(egui::Order::Foreground)
+          .show(&ctx, |ui| {
+            let r = ui.add(
+              egui::TextEdit::singleline(&mut text)
+                .id(hud_id().with(("edit", i)))
+                .hint_text(live.as_str())
+                .desired_width(62.0)
+                .font(egui::FontId::proportional(12.0))
+                .margin(egui::Margin::symmetric(3, 1))
+                .lock_focus(true),
+            );
+            if !r.has_focus() {
+              r.request_focus();
+            }
+          });
+        hud.typed[i] = text;
+        continue;
       }
-      _ => {}
+      let typed = !hud.typed[i].trim().is_empty();
+      let text = if typed { hud.typed[i].trim().to_string() } else { live.clone() };
+      let font = egui::FontId::proportional(12.0);
+      let g = painter.layout_no_wrap(text, font, Color32::from_gray(30));
+      let r = egui::Rect::from_center_size(*p, g.size() + egui::vec2(10.0, 4.0));
+      painter.rect(r, 2.0, Color32::WHITE, Stroke::new(1.0, ink), egui::StrokeKind::Inside);
+      painter.galley(r.min + egui::vec2(5.0, 2.0), g, Color32::from_gray(30));
     }
   }
   if resp.contains_pointer() {
     resp.ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
   }
-  if resp.clicked()
+  let placed = (resp.clicked() || commit) && cur.is_some();
+  if placed
     && let Some(c) = cur
     && let Some(d) = app.dialog.as_mut()
   {
     d.place_click(c);
+    hud = Hud::default();
   }
+  ctx.data_mut(|m| m.insert_temp(hud_id(), hud));
   resp.contains_pointer()
+}
+
+// ---- Pipe's arrows ----
+
+/// Pipe: its path (the picked curves of the path sketch, chained as the engine chains them) in
+/// sketch coordinates, with the sketch's plane.
+fn pipe_path(d: &Dialog, s: &Session) -> Option<(Vec<fox_engine::sketch::Seg>, Plane)> {
+  let sketch = fox_engine::model::FeatureId(u32::try_from(d.form_value("path")?.as_u64()?).ok()?);
+  let curves: Vec<fox_engine::sketch::CurveId> = d
+    .form_value("path_curves")
+    .and_then(Value::as_array)
+    .map(|a| a.iter().filter_map(Value::as_u64).map(|c| fox_engine::sketch::CurveId(c as u32)).collect())
+    .unwrap_or_default();
+  let r = s.model.sketches.get(&sketch)?;
+  let segs = fox_engine::model::sheet::open_path(&r.sketch, &curves).ok()?;
+  (!segs.is_empty()).then_some((segs, r.plane))
+}
+
+/// Is the dialog Pipe's?
+pub(super) fn is_pipe(kind: Kind) -> bool {
+  matches!(kind, Kind::Form(f) if std::ptr::eq(f, &crate::forms::PIPE))
+}
+
+impl Dialog {
+  /// Fusion's Pipe arrows: one at the pipe's end along the path for the Distance (the fraction
+  /// of the path it runs), one out from the path's start for the Section Size. (Fusion's arrow
+  /// at the path's start drags the second Distance, which the engine doesn't take: a pipe runs
+  /// from its path's start.)
+  pub(super) fn pipe_handles(&self, s: &Session) -> Option<Vec<Handle>> {
+    let (segs, pl) = pipe_path(self, s)?;
+    let total = fox_engine::model::pathpattern::path_length(&segs);
+    let f = self.form_value("distance")?.as_str()?.trim().parse::<f64>().ok()?.clamp(0.0, 1.0);
+    let world = |t: [f64; 2]| (pl.x * t[0] + pl.y * t[1]).try_normalize();
+    let (end, t_end) = fox_engine::model::pathpattern::path_at(&segs, total * f)?;
+    let (start, t_start) = fox_engine::model::pathpattern::path_at(&segs, 0.0)?;
+    let size = self.len(s, self.form_value("diameter")?.as_str()?)?;
+    let side = pl.normal().cross(world(t_start)?).try_normalize()?;
+    Some(vec![
+      Handle::arrow(pl.to_world(end), world(t_end)?, total * f, format!("{f:.2}")),
+      Handle::arrow(pl.to_world(start), side, size / 2.0, mm(self.unit, size)),
+    ])
+  }
+
+  /// Takes Pipe arrow `i`'s dragged value `v` (snapped to `step`) into its row: the Distance as
+  /// the fraction of the path, or the Section Size. False when nothing changed.
+  pub(super) fn set_pipe_handle(&mut self, s: &Session, i: usize, v: f64, step: f64) -> bool {
+    let Kind::Form(f) = self.kind else { return false };
+    let (key, value) = match i {
+      0 => {
+        let Some((segs, _)) = pipe_path(self, s) else { return false };
+        let total = fox_engine::model::pathpattern::path_length(&segs);
+        if total <= 1e-9 {
+          return false;
+        }
+        ("distance", format!("{:.2}", (v / total).clamp(0.01, 1.0)))
+      }
+      1 => ("diameter", mm(self.unit, 2.0 * snap(v, step).max(step.max(1e-3) / 2.0))),
+      _ => return false,
+    };
+    let Some(j) = f.inputs.iter().position(|x| x.key() == key) else { return false };
+    self.form.values[j] = json!(value);
+    true
+  }
 }
 
 #[cfg(test)]

@@ -1200,6 +1200,10 @@ pub enum FeatureKind {
   },
   RemoveBodies {
     bodies: Vec<BodyId>,
+    /// Components removed whole (Fusion's REMOVE takes components too): their bodies, and
+    /// those of the components below them, go, and the browser drops their rows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    components: Vec<ComponentId>,
   },
   /// Solid through profiles of several sketches, in order.
   Loft {
@@ -3662,10 +3666,10 @@ mod tests {
   #[test]
   fn marker_inserts_before_rolled_back_features() {
     let mut d = Design::new("t");
-    let a = d.add_feature(FeatureKind::RemoveBodies { bodies: vec![] }).unwrap();
-    let b = d.add_feature(FeatureKind::RemoveBodies { bodies: vec![] }).unwrap();
+    let a = d.add_feature(FeatureKind::RemoveBodies { bodies: vec![], components: vec![] }).unwrap();
+    let b = d.add_feature(FeatureKind::RemoveBodies { bodies: vec![], components: vec![] }).unwrap();
     d.set_marker(Some(1));
-    let c = d.add_feature(FeatureKind::RemoveBodies { bodies: vec![] }).unwrap();
+    let c = d.add_feature(FeatureKind::RemoveBodies { bodies: vec![], components: vec![] }).unwrap();
     assert_eq!(d.features.iter().map(|f| f.id).collect::<Vec<_>>(), vec![a, c, b]);
     assert_eq!(d.active_len(), 2);
     d.remove_feature(a).unwrap();

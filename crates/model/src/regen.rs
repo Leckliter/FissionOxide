@@ -1245,7 +1245,9 @@ impl Ctx<'_> {
         if !*keep_tools {
           self.state.bodies.retain(|b| b.id == *target || !tools.contains(&b.id));
         }
-        if op == BoolOp::Union && self.behaviours.has(fox_sketch::behaviour::COMBINE_KEEPS_TARGET) {
+        if op == BoolOp::Union && self.behaviours.has(fox_sketch::behaviour::COMBINE_JOIN_ONE_BODY) {
+          // one body, however many lumps
+        } else if op == BoolOp::Union && self.behaviours.has(fox_sketch::behaviour::COMBINE_KEEPS_TARGET) {
           self.split_keeping_target(id, *target, &was);
         } else {
           self.split_multi(id, *target);
@@ -1279,8 +1281,10 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::RemoveBodies { bodies } => {
-        self.state.bodies.retain(|b| !bodies.contains(&b.id));
+      FeatureKind::RemoveBodies { bodies, components } => {
+        let mut gone = bodies.clone();
+        gone.extend(crate::assembly::bodies_below(self.components, components));
+        self.state.bodies.retain(|b| !gone.contains(&b.id));
         Ok(None)
       }
       FeatureKind::Loft { sections, ruled, closed, operation, rails, centerline } => {
@@ -2643,9 +2647,9 @@ fn pick_profiles(sk: &SketchResult, points: &[[f64; 2]]) -> (Vec<Profile>, bool)
   (out, missing)
 }
 
-fn union_all(mut tools: Vec<Shape>) -> Result<Shape, String> {
-  let first = tools.drain(..1).next().ok_or("nothing to build")?;
-  let mut acc = first;
+fn union_all(tools: Vec<Shape>) -> Result<Shape, String> {
+  let mut tools = tools.into_iter();
+  let mut acc = tools.next().ok_or("nothing to build")?;
   for t in tools {
     acc = acc.boolean(&t, BoolOp::Union).map_err(ke)?;
   }

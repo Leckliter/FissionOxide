@@ -27,7 +27,7 @@ pub(super) struct Cache {
   pivot: Option<(Vec<u32>, DVec3)>,
   /// Offset Plane: the base last taken from the selection (a planar face or construction
   /// plane), so a plane chosen from the dropdown afterwards isn't overridden by it.
-  offset_base: Option<Value>,
+  pub(super) offset_base: Option<Value>,
   /// Offset Plane: the construction plane its preview added.
   preview_plane: Option<FeatureId>,
   /// Draft: the angle handle has been dragged, so its floating value box shows (Fusion opens it
@@ -424,6 +424,7 @@ impl Dialog {
       Kind::Section if !self.plane.is_null() => self.section_handles(s),
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::PLANE_ANGLE) => self.angle_plane_handles(s),
       Kind::Fillet => self.fillet_handles(s),
+      k if super::primitive::is_pipe(k) => self.pipe_handles(s),
       _ => None,
     }
     .unwrap_or_default()
@@ -591,6 +592,11 @@ impl Dialog {
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::PLANE_ANGLE) => {
         let Some(i) = f.inputs.iter().position(|x| x.key() == "angle") else { return };
         self.form.values[i] = json!(deg(v_snapped));
+      }
+      k if super::primitive::is_pipe(k) => {
+        if !self.set_pipe_handle(s, i, v, step) {
+          return;
+        }
       }
       _ => {
         if !self.set_surface_handle(v, step) {

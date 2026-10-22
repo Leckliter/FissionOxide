@@ -260,7 +260,9 @@ fn context_menu(r: &egui::Response, add: impl FnOnce(&mut egui::Ui)) {
 /// The Sketches folder and its rows.
 pub(super) fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
   let sketches = listed(app);
-  if sketches.is_empty() {
+  // a primitive's base being drawn sits on Fusion's temporary sketch, listed until OK
+  let temp = crate::dialogs::temp_sketch_name(app);
+  if sketches.is_empty() && temp.is_none() {
     return;
   }
   let id = egui::Id::new("tree-sketches");
@@ -334,6 +336,9 @@ pub(super) fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
         }
       });
     }
+  }
+  if let Some(name) = temp {
+    tree_row(ui, id.with("temp"), 2, None, Some(true), Icon::SketchSmall, &name, false, theme::TEXT);
   }
 }
 

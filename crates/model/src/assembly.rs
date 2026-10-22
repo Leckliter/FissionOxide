@@ -479,6 +479,26 @@ pub fn align_transform(
   })
 }
 
+/// The components `roots` and every component below them (sub-assemblies), each once.
+pub fn components_below(all: &[Component], roots: &[ComponentId]) -> Vec<ComponentId> {
+  let mut out: Vec<ComponentId> = roots.iter().copied().filter(|r| all.iter().any(|c| c.id == *r)).collect();
+  let mut k = 0;
+  while k < out.len() && out.len() < 4096 {
+    let p = out[k];
+    let kids: Vec<ComponentId> =
+      all.iter().filter(|c| c.parent == Some(p) && !out.contains(&c.id)).map(|c| c.id).collect();
+    out.extend(kids);
+    k += 1;
+  }
+  out
+}
+
+/// The bodies of the components `roots` and of every component below them.
+pub fn bodies_below(all: &[Component], roots: &[ComponentId]) -> Vec<BodyId> {
+  let comps = components_below(all, roots);
+  all.iter().filter(|c| comps.contains(&c.id)).flat_map(|c| c.bodies.iter().copied()).collect()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

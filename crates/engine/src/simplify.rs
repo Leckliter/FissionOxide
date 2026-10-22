@@ -167,7 +167,7 @@ fn replace_with_primitives(s: &mut Session, p: &Value) -> CmdResult {
       crate::newcomp::attach(d, id, None, active)?;
       made.push(id);
     }
-    let id = d.add_feature(FeatureKind::RemoveBodies { bodies: bodies.clone() })?;
+    let id = d.add_feature(FeatureKind::RemoveBodies { bodies: bodies.clone(), components: Vec::new() })?;
     crate::newcomp::attach(d, id, None, active)?;
     made.push(id);
     Ok(made)

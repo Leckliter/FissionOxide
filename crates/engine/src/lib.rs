@@ -56,6 +56,7 @@ mod surfaces;
 mod trace;
 mod views;
 
+mod edit_picks;
 mod mesh_edit;
 
 use std::path::PathBuf;
@@ -687,6 +688,8 @@ mod tests_gen;
 mod tests_hub_server;
 #[cfg(test)]
 mod tests_include;
+#[cfg(test)]
+mod tests_leftovers;
 #[cfg(test)]
 mod tests_mechanism;
 #[cfg(test)]

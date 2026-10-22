@@ -3,8 +3,9 @@
 //! pencil and menu), and the edit pencil those rows show.
 //!
 //! FissionOxide's designs store a length unit only, so the mass half of a unit system follows
-//! the length (`LengthUnit::mass_symbol`, as the Units row shows it) and is not picked apart. FissionOxide has one design type, Part, so Convert
-//! Design Type lists Fusion's other types greyed and its Convert button stays greyed.
+//! the length (`LengthUnit::mass_symbol`, as the Units row shows it) and is not picked apart.
+//! Convert Design Type opens on the design's own type and converts it to Part, Assembly or
+//! Hybrid Design (`design.type`).
 
 use egui::{Color32, RichText, Stroke, pos2, vec2};
 use fox_engine::model::LengthUnit;
@@ -41,9 +42,28 @@ impl DesignType {
     }
   }
 
-  /// Whether FissionOxide can make a design of this type: part designs only.
+  /// Whether FissionOxide can make a design of this type: every type, as Fusion converts
+  /// between them.
   pub fn available(self) -> bool {
-    self == DesignType::Part
+    true
+  }
+
+  /// The design's type as the dialog lists it.
+  pub fn of(t: fox_engine::model::DesignType) -> DesignType {
+    match t {
+      fox_engine::model::DesignType::Part => DesignType::Part,
+      fox_engine::model::DesignType::Assembly => DesignType::Assembly,
+      fox_engine::model::DesignType::Hybrid => DesignType::Hybrid,
+    }
+  }
+
+  /// The `design.type` key.
+  pub fn key(self) -> &'static str {
+    match self {
+      DesignType::Part => "part",
+      DesignType::Assembly => "assembly",
+      DesignType::Hybrid => "hybrid",
+    }
   }
 }
 
@@ -72,7 +92,8 @@ pub fn open_units(app: &mut App) {
 
 /// Convert Design Type: opens the dialog on the design's type.
 pub fn open_convert(app: &mut App) {
-  open(app, DocDialog::Convert { kind: DesignType::Part }, CONVERT_PROMPT);
+  let kind = DesignType::of(app.s.design.design_type);
+  open(app, DocDialog::Convert { kind }, CONVERT_PROMPT);
 }
 
 fn open(app: &mut App, d: DocDialog, prompt: &str) {
@@ -107,7 +128,7 @@ pub fn changed(app: &App) -> bool {
 fn differs(app: &App, d: DocDialog) -> bool {
   match d {
     DocDialog::Units { unit } => unit != app.s.design.units,
-    DocDialog::Convert { kind } => kind != DesignType::Part && kind.available(),
+    DocDialog::Convert { kind } => kind != DesignType::of(app.s.design.design_type) && kind.available(),
   }
 }
 
@@ -116,9 +137,16 @@ pub fn confirm(app: &mut App) {
   if !changed(app) {
     return;
   }
-  if let Some(DocDialog::Units { unit }) = app.doc_dialog {
-    close(app);
-    app.run("design.units", json!({"unit": unit.symbol()}));
+  match app.doc_dialog {
+    Some(DocDialog::Units { unit }) => {
+      close(app);
+      app.run("design.units", json!({"unit": unit.symbol()}));
+    }
+    Some(DocDialog::Convert { kind }) => {
+      close(app);
+      app.run("design.type", json!({"type": kind.key()}));
+    }
+    None => {}
   }
 }
 
@@ -237,7 +265,7 @@ fn convert_fields(ui: &mut egui::Ui, kind: &mut DesignType) {
       for t in DesignType::ALL {
         ui.add_enabled_ui(t.available(), |ui| ui.selectable_value(kind, t, t.label()))
           .response
-          .on_disabled_hover_text("FissionOxide makes part designs only");
+          .on_disabled_hover_text("Not a design type FissionOxide makes");
       }
     });
   });
@@ -332,14 +360,28 @@ mod tests {
   }
 
   #[test]
-  fn convert_design_type_offers_only_part() {
+  fn convert_design_type_opens_on_the_designs_type_and_converts() {
     let mut app = App::with_session(Session::default());
     open_convert(&mut app);
     let d = app.doc_dialog.expect("open");
+    assert_eq!(d, DocDialog::Convert { kind: DesignType::Part });
     assert_eq!(title(&app, d), "CONVERT UNTITLED");
     assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some(CONVERT_PROMPT));
-    assert!(!changed(&app), "Convert is greyed");
-    assert_eq!(DesignType::ALL.iter().filter(|t| t.available()).collect::<Vec<_>>(), [&DesignType::Part]);
+    assert!(!changed(&app), "Convert is greyed until another type is picked");
+    assert!(DesignType::ALL.iter().all(|t| t.available()));
+    // Part Design to Assembly Design
+    app.doc_dialog = Some(DocDialog::Convert { kind: DesignType::Assembly });
+    assert!(changed(&app));
+    confirm(&mut app);
+    assert!(app.doc_dialog.is_none());
+    assert_eq!(app.s.design.design_type, fox_engine::model::DesignType::Assembly);
+    // an Assembly Design opens on Assembly and converts to Hybrid
+    open_convert(&mut app);
+    assert_eq!(app.doc_dialog, Some(DocDialog::Convert { kind: DesignType::Assembly }));
+    assert!(!changed(&app));
+    app.doc_dialog = Some(DocDialog::Convert { kind: DesignType::Hybrid });
+    confirm(&mut app);
+    assert_eq!(app.s.design.design_type, fox_engine::model::DesignType::Hybrid);
     // the other dialog takes its place, with its own prompt
     open_units(&mut app);
     assert!(units_open(&app) && !convert_open(&app));

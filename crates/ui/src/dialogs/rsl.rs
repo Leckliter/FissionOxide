@@ -232,7 +232,7 @@ impl Dialog {
   /// Fusion's REVOLVE rows: Profile, Axis (a pick, no default) and Project Axis, then once the
   /// axis is picked Extent Type, Angle, Direction and Operation.
   pub(super) fn revolve_fields(&mut self, ui: &mut egui::Ui) {
-    let creating = self.editing.is_none();
+    let creating = !self.picks_fixed();
     let accent = self.accent();
     ui.label("Profile");
     let n = self.profiles.len();

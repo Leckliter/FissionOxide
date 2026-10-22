@@ -226,7 +226,9 @@ fn linked_components(app: &mut App, ui: &mut egui::Ui) {
 /// Components in browser order (each followed by its sub-components) with their depth.
 pub(super) fn component_tree(app: &App) -> Vec<(u32, usize)> {
   let d = &app.s.design;
-  let mut out: Vec<(u32, usize)> = Vec::new();
+  // the components a Remove took out (and those below them) have no rows, as in Fusion
+  let mut out: Vec<(u32, usize)> = removed_components(d).into_iter().map(|c| (c.0, usize::MAX)).collect();
+  let gone = out.len();
   fn walk(d: &fox_engine::model::Design, parent: Option<ComponentId>, depth: usize, out: &mut Vec<(u32, usize)>) {
     for c in &d.components {
       let p = c.parent.filter(|p| d.component(*p).is_some());
@@ -242,7 +244,21 @@ pub(super) fn component_tree(app: &App) -> Vec<(u32, usize)> {
       out.push((c.id.0, 0));
     }
   }
-  out
+  out.split_off(gone)
+}
+
+/// The components an active Remove feature took out, with every component below them.
+pub(crate) fn removed_components(d: &fox_engine::model::Design) -> Vec<ComponentId> {
+  let roots: Vec<ComponentId> = d.features[..d.active_len()]
+    .iter()
+    .filter(|f| !f.suppressed)
+    .filter_map(|f| match &f.kind {
+      FeatureKind::RemoveBodies { components, .. } => Some(components.iter().copied()),
+      _ => None,
+    })
+    .flatten()
+    .collect();
+  fox_engine::model::assembly::components_below(&d.components, &roots)
 }
 
 /// An inserted sub-assembly's rigid/flexible state, if `component` is one (or is in one).

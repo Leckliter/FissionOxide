@@ -73,10 +73,16 @@ mod mesh_modify;
 pub(crate) use export_dxf::{SaveWindow, save_window};
 pub(crate) use mesh::group_triangle;
 pub(crate) use primitive::overlay as place_overlay;
+pub(crate) use primitive::temp_sketch_name;
 #[cfg(test)]
 mod construct_tests;
+#[cfg(test)]
+mod leftovers_tests;
 
 pub(crate) use section::{KeptSection, shown_section};
+mod edit_picks;
+mod remove;
+pub(crate) use remove::remove_params;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
 pub(crate) const PICK_PLANE_HINT: &str = "Select a plane or planar face";
@@ -1569,7 +1575,7 @@ impl Dialog {
         s.selection = picked.iter().map(|(index, _)| Sel::Profile { sketch, index: *index }).collect();
         return true;
       }
-      _ => return false,
+      kind => return self.load_more_edit_picks(s, &kind),
     }
     s.selection = self.picked_selection();
     true
@@ -1608,7 +1614,12 @@ impl Dialog {
         match self.kind {
           Kind::Fillet => p["picks"] = self.fillet_params(),
           Kind::Chamfer => p["picks"] = json!({"edges": self.edges, "tangent_chain": !self.solid.no_chain}),
-          _ => {}
+          _ => {
+            if let Some(picks) = self.more_edit_picks() {
+              p["picks"] = picks;
+            }
+            self.circ_edit_distribution(&mut p["set"]);
+          }
         }
       }
       return Some(("feature.edit", p));
@@ -1616,7 +1627,7 @@ impl Dialog {
     let op = self.op;
     Some(match self.kind {
       Kind::SurfExtrude | Kind::SurfRevolve | Kind::SurfSweep | Kind::SurfLoft => return self.surf_command(),
-      Kind::Form(f) => crate::forms::engine_command(f, self.form.params(f)),
+      Kind::Form(f) => self.with_removed_components(crate::forms::engine_command(f, self.form.params(f))),
       Kind::PickPlane
       | Kind::Inspect
       | Kind::Appearance
@@ -2129,7 +2140,19 @@ impl Dialog {
   /// Enough input to try?
   fn ready(&self) -> bool {
     // an edit's stored picks stand; a fillet's or chamfer's picked again need an edge
-    if self.editing.is_some() && !(self.repicks && matches!(self.kind, Kind::Fillet | Kind::Chamfer)) {
+    // (the dialogs whose edit picks again need their picks, as when creating)
+    let repicked = matches!(
+      self.kind,
+      Kind::Fillet
+        | Kind::Chamfer
+        | Kind::Revolve
+        | Kind::Shell
+        | Kind::OffsetPlane
+        | Kind::Mirror
+        | Kind::RectPattern
+        | Kind::CircPattern
+    );
+    if self.editing.is_some() && !(self.repicks && repicked) {
       return true;
     }
     if self.placing() {
@@ -2139,7 +2162,8 @@ impl Dialog {
       k if surface::is_surface(k) => self.surf_ready(),
       Kind::Form(f) => self.form.missing(f).is_none(),
       Kind::Extrude => (self.sketch.is_some() && !self.profiles.is_empty()) || self.extrudes_faces(),
-      Kind::Revolve => self.sketch.is_some() && !self.axis.is_empty(),
+      // as Extrude: nothing revolves until a profile is picked (Fusion previews no region unasked)
+      Kind::Revolve => self.sketch.is_some() && !self.profiles.is_empty() && !self.axis.is_empty(),
       Kind::Fillet => self.fillet_ready(),
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty() || !self.bodies.is_empty(),
@@ -2404,6 +2428,7 @@ impl Dialog {
         self.form.chain_path(f, s);
         self.extend_chain(f, s);
         stitch::find_open_edges(&mut self.form, f, s);
+        self.sync_remove(s);
         if self.form.values != before {
           self.dirty = !self.picks();
         }
@@ -2547,27 +2572,11 @@ impl Dialog {
       }
       Kind::Move => self.sync_move(s),
       Kind::RectPattern => self.pattern_sync(s),
-      Kind::Mirror if self.editing.is_none() => self.mirror_sync(s),
-      Kind::CircPattern if self.editing.is_none() => self.circ_sync(s),
+      Kind::Mirror => self.mirror_sync(s),
+      Kind::CircPattern => self.circ_sync(s),
       Kind::Interference => self.interference_sync(s),
       Kind::Section => self.section_sync(s),
       Kind::Combine if !self.applied => self.sync_combine(s),
-      Kind::Mirror | Kind::CircPattern if !self.applied || !self.picks() => {
-        let mut b: Vec<u32> = Vec::new();
-        for x in &s.selection {
-          let id = match x {
-            Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } => body.0,
-            _ => continue,
-          };
-          if !b.contains(&id) {
-            b.push(id);
-          }
-        }
-        if !b.is_empty() && b != self.bodies {
-          self.bodies = b;
-          self.dirty = !self.picks();
-        }
-      }
       _ => {}
     }
   }
@@ -2872,7 +2881,7 @@ impl Dialog {
       }
       return Some(match self.kind {
         Kind::Extrude => "Select sketch profiles or planar faces to extrude".into(),
-        Kind::Revolve if self.sketch.is_some() => "Select the axis to revolve the profile around".into(),
+        Kind::Revolve if !self.profiles.is_empty() => "Select the axis to revolve the profile around".into(),
         Kind::Revolve => "Select sketch profiles or planar faces to revolve".into(),
         Kind::Fillet => "Select edges, faces, or features to fillet".into(),
         Kind::Chamfer => "Select edges or faces to chamfer".into(),
@@ -3061,7 +3070,7 @@ impl Dialog {
     match self.kind {
       k if surface::is_surface(k) => self.surf_missing(),
       Kind::Form(f) => self.form.missing(f).unwrap_or("missing input"),
-      Kind::Revolve if self.sketch.is_some() => "select the axis to revolve the profile around",
+      Kind::Revolve if !self.profiles.is_empty() => "select the axis to revolve the profile around",
       Kind::Extrude | Kind::Revolve => "select a profile",
       Kind::Fillet => "select edges or faces",
       Kind::Chamfer => "select edges",
@@ -3214,7 +3223,7 @@ impl Dialog {
         }
       }
       Kind::RectPattern => {
-        if creating {
+        if self.editing.is_none() {
           self.pattern_type_row(ui);
         }
         self.pattern_fields(app, ui)
@@ -3932,7 +3941,7 @@ impl Dialog {
         }
         Self::field(ui, "Angle", &mut self.angle, dirty);
         Self::field(ui, "Offset", &mut self.distance, dirty);
-        Self::check(ui, "Flip", &mut self.flip, dirty);
+        icon_row::flip_toggle(ui, "Flip", "Flip", &mut self.flip, dirty);
       }
       Kind::Interference => self.interference_fields(app, ui),
       Kind::CenterOfMass => self.center_of_mass_rows(app, ui),

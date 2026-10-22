@@ -281,6 +281,7 @@ mod tests {
     run(&mut s, "sketch.finish", json!({}));
     let mut d = Dialog::blank(Kind::Revolve);
     d.sketch = Some(sk);
+    d.profiles = vec![s.model.sketches[&sk].profiles[0].interior_point()];
     d.axis = "z".into();
     d.preview(&mut s);
     assert_eq!((d.op, s.model.bodies.len()), ("new_body", 2));

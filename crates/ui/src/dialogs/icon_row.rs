@@ -44,6 +44,17 @@ pub(super) fn icon_row(ui: &mut egui::Ui, cur: &mut &'static str, choices: &[Cho
   changed
 }
 
+/// Fusion's Flip toggle: the row's label, then the Flip icon button, lit while flipped
+/// (Draft, Flange, Hem, Fold and Joint flip a direction this way, not with a checkbox).
+pub(super) fn flip_toggle(ui: &mut egui::Ui, label: &str, hint: &str, v: &mut bool, dirty: &mut bool) {
+  ui.label(label);
+  if icons::icon_button(ui, Icon::Flip, 24.0, hint, *v, None).clicked() {
+    *v = !*v;
+    *dirty = true;
+  }
+  ui.end_row();
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

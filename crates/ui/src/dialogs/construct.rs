@@ -124,7 +124,7 @@ impl Dialog {
 
   /// An Offset Plane being made: a plane picked in the browser or the canvas becomes its plane.
   pub(crate) fn takes_plane(&self) -> bool {
-    self.kind == Kind::OffsetPlane && self.editing.is_none()
+    self.kind == Kind::OffsetPlane && !self.picks_fixed()
   }
 
   /// Clears Offset Plane's plane (the chip's x): the picked face or plane is deselected and the
