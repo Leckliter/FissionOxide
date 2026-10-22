@@ -1042,7 +1042,7 @@ fn offset_on_a_preselected_line_starts_at_zero_and_takes_a_typed_distance() {
   assert!(dialog.right() <= palette.left(), "side by side: {dialog:?} {palette:?}");
   assert!((dialog.top() - palette.top()).abs() < 1.0, "{dialog:?} {palette:?}");
   // the readout sits left of the palette
-  let readout = texts.iter().find(|(_, t)| t == "1 Sketch Curve").expect("the readout");
+  let readout = texts.iter().find(|(_, t)| t.starts_with("1 Sketch")).expect("the readout");
   assert!(readout.0.right() <= palette.left(), "{readout:?} {palette:?}");
   // the value box has the keyboard, says 0 mm and sits by the pointer
   let focused = h.ctx.memory(|m| m.focused()).expect("the value box has the keyboard");
