@@ -593,6 +593,11 @@ impl Session {
       .unwrap_or_else(|| format!("Body {}", id.0))
   }
 
+  /// Whether `id` is a surface body (no solid inside), which Fusion's browser marks orange.
+  pub fn body_is_surface(&self, id: BodyId) -> bool {
+    self.model.body(id).is_some_and(|b| b.is_surface())
+  }
+
   pub fn body_visible(&self, id: BodyId) -> bool {
     self.design.body_settings(id).map(|s| s.visible).unwrap_or(true)
   }

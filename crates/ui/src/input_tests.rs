@@ -2370,3 +2370,35 @@ fn finish_sketch_returns_to_the_tab_it_started_from() {
     assert_eq!(h.app.tab, tab);
   }
 }
+
+/// Resting on a sketch dimension shows its parameter as Fusion does: "d1 = 40.0 mm" in white
+/// on the dark tooltip panel, not egui's light box.
+#[test]
+fn a_hovered_dimensions_tooltip_is_dark() {
+  use crate::theme;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  let line = h.app.run("sketch.line", json!({"points": [[-20, 0], [20, 0]]})).unwrap();
+  let c = line["curves"][0].clone();
+  h.app.run("sketch.dimension", json!({"type": "distance", "curves": [c], "value": "40"})).unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.app.fit_view_now();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let label = h.find(vec![], "40.00").expect("the dimension's value is drawn");
+  let shown = h.rest_rects(label.center(), 1.2);
+  let tip = shown.iter().find(|(_, t)| t == "d1 = 40.0 mm").map(|(r, _)| *r);
+  let tip = tip.unwrap_or_else(|| panic!("the parameter tooltip: {shown:?}"));
+  assert!(tip.top() > label.top(), "under the text: {tip:?} vs {label:?}");
+  let shapes = h.frame_shapes(0.1);
+  assert!(
+    shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.fill == theme::TOOLTIP && r.rect.contains_rect(tip))),
+    "a dark panel behind the tooltip"
+  );
+  let color = shapes.iter().find_map(|s| match s {
+    egui::Shape::Text(t) if t.galley.text() == "d1 = 40.0 mm" => Some(text_color(t)),
+    _ => None,
+  });
+  assert_eq!(color, Some(theme::TOOLTIP_TITLE));
+}

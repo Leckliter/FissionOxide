@@ -216,6 +216,7 @@ cmds! {
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
   "body.rename" => "Rename a body", "{body, name}";
   "body.visible" => "Show or hide a body", "{body, visible}";
+  "body.material" => "Set bodies' own physical material (it wins over their component's; nothing clears it)", "{bodies: [id], material?}";
   "body.topology" => "A body's faces and edges: surface/curve kind, area, normal, centre, endpoints, length and which faces meet at each edge", "{body, faces?: bool, edges?: bool}";
   "feature.edit" => "Change feature properties (fields merged into the feature); a fillet's or chamfer's picks give its edges again, resolved on the model as it is (roll the marker to before the feature first); marker_after leaves the marker just after the feature, as Edit Feature shows it", "{feature, set: {...}, picks?: {edges?, faces?, sets?, radius?, tangent_chain?}, marker_after?: bool}";
   "feature.delete" => "Delete a feature and the features that depend on it; a deleted sketch's features stay, built from its cached geometry with a warning, unless cascade", "{feature, cascade?: bool}";
@@ -1262,6 +1263,32 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let v = p.get("visible").and_then(Value::as_bool).unwrap_or(true);
       s.design.body_settings_mut(b).visible = v;
       s.dirty = true;
+      Ok(json!({}))
+    }
+    "body.material" => {
+      let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
+      if bodies.is_empty() {
+        return Err(CmdError::new("missing 'bodies'"));
+      }
+      if let Some(b) = bodies.iter().find(|b| s.model.body(**b).is_none()) {
+        return Err(CmdError::new(format!("no body {}", b.0)));
+      }
+      let material = match p.get("material").and_then(Value::as_str) {
+        Some(m) => Some(
+          fox_model::assembly::MATERIALS
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(m))
+            .map(|(n, _)| n.to_string())
+            .ok_or_else(|| CmdError::new(format!("unknown material '{m}'")))?,
+        ),
+        None => None,
+      };
+      s.edit(|d| {
+        for b in &bodies {
+          d.body_settings_mut(*b).material = material.clone();
+        }
+        Ok(())
+      })?;
       Ok(json!({}))
     }
     "body.topology" => body_topology(s, p),

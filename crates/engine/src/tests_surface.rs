@@ -485,3 +485,39 @@ fn surface_examples_build() {
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
   assert!(s.model.bodies[0].shape.mass().unwrap().volume > 0.0);
 }
+
+/// Fusion names a Patch "SurfacePatch1" (its surface Extrude "SurfaceExtrude1"); surface bodies
+/// are told apart from solids, and a body outside a component takes a physical material of its
+/// own, which wins over its component's.
+#[test]
+fn surface_features_and_bodies_as_fusion_names_them() {
+  let mut s = Session::default();
+  let patch = square(&mut s);
+  let extruded = wall(&mut s);
+  let names: Vec<&str> = s
+    .design
+    .features
+    .iter()
+    .filter(|f| !matches!(f.kind, fox_model::FeatureKind::Sketch { .. }))
+    .map(|f| f.name.as_str())
+    .collect();
+  assert_eq!(names, ["SurfacePatch1", "SurfaceExtrude1"]);
+  run(&mut s, "box", json!({"width": 5, "depth": 5, "height": 5}));
+  let solid = last(&s);
+  let surface = |s: &Session, b: u32| s.body_is_surface(fox_model::BodyId(b));
+  assert!(surface(&s, patch) && surface(&s, extruded) && !surface(&s, solid));
+
+  run(&mut s, "body.material", json!({"bodies": [solid], "material": "aluminum"}));
+  let props = |s: &mut Session| {
+    run(s, "inspect.properties", json!({"items": [{"type": "body", "body": solid}]}))["items"][0].clone()
+  };
+  assert_eq!(props(&mut s)["material"], "Aluminum");
+  run(&mut s, "component.create", json!({"name": "Part", "bodies": [solid]}));
+  let comp = s.design.components.iter().find(|c| c.name == "Part").unwrap().id.0;
+  run(&mut s, "component.material", json!({"component": comp, "material": "Steel"}));
+  assert_eq!(props(&mut s)["material"], "Aluminum", "the body's own material wins");
+  run(&mut s, "body.material", json!({"bodies": [solid]}));
+  assert_eq!(props(&mut s)["material"], "Steel", "cleared, the component's shows");
+  assert!(s.execute("body.material", &json!({"bodies": [solid], "material": "cheese"})).is_err());
+  assert!(s.execute("body.material", &json!({"bodies": [999], "material": "Steel"})).is_err());
+}

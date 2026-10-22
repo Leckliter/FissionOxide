@@ -68,6 +68,8 @@ pub enum Icon {
   Gear,
   Component,
   Body,
+  /// A surface body's browser row: an orange curved sheet, where a solid body has a grey block.
+  SurfaceBody,
   SketchSmall,
   Eye,
   EyeOff,
@@ -507,6 +509,7 @@ fn family(icon: Icon) -> Tint {
     | Sustainability | Select | WindowSel | FreeformSel | PaintSel => Tint::Green,
     Sketch | SketchSmall | Construction => Tint::Teal,
     MeshBody | MeshFeature => Tint::Gold,
+    SurfaceBody => Tint::Orange,
     _ => Tint::Blue,
   }
 }
@@ -1124,6 +1127,19 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.line((x0, y1), (x1, y0), BlueDark);
       k.line((x0, y0), (x1 + d, y0 - d * 0.7), BlueDark);
       k.line((x1, y1), (x1 + d, y0 - d * 0.7), BlueDark);
+    }
+    Icon::SurfaceBody => {
+      // a thin sheet curving up at its back, drawn in strips so each fill is convex
+      let near = |t: f32| (0.06 + 0.6 * t, 0.86 - 0.22 * (t * PI).sin());
+      let far = |t: f32| (0.34 + 0.6 * t, 0.5 - 0.22 * (t * PI).sin());
+      let n = 8;
+      for i in 0..n {
+        let (a, b) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
+        k.fill(&[near(a), near(b), far(b), far(a)], Blue);
+      }
+      let mut outline: Vec<(f32, f32)> = (0..=n).map(|i| near(i as f32 / n as f32)).collect();
+      outline.extend((0..=n).rev().map(|i| far(i as f32 / n as f32)));
+      k.p.add(Shape::closed_line(k.pts(&outline), Stroke::new(w * 0.8, k.edge(Blue))));
     }
     Icon::SketchSmall => {
       k.solid(&[(0.08, 0.2), (0.92, 0.2), (0.92, 0.84), (0.08, 0.84)], White);
