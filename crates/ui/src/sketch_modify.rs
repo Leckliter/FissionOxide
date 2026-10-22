@@ -543,10 +543,12 @@ mod tests {
     assert_eq!(viewport::sketch_prompt(Tool::Chamfer, &app.tstate), Some("Select a second line"));
     pick(&mut app, sk, lines[1], [40.0, 10.0]);
     assert_eq!(dims(&app, sk), vec![("Chamfer distance", 2.5), ("Chamfer distance", 2.5)]);
+    // the warning is Fusion's toast at the canvas's lower right, not the status line
     assert_eq!(
-      app.status.as_ref().map(|s| s.0.as_str()),
-      Some("Constraints and/or dimensions were removed during operation.")
+      app.warning_toast.as_ref().map(|t| t.warnings.clone()),
+      Some(vec!["Constraints and/or dimensions were removed during operation.".to_string()])
     );
+    assert!(app.status.as_ref().is_none_or(|(s, _)| !s.contains("removed")), "{:?}", app.status);
     assert_eq!(app.tstate.applied.as_ref().unwrap().text, "2.5 mm");
     // the arrow drag's live value: the chamfer is re-applied in the same undo step
     let steps = app.s.undo_history().len();
