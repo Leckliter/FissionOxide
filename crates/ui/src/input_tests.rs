@@ -1016,6 +1016,8 @@ impl Harness {
     out.drop_without_applying_deltas();
     all
   }
+}
+
 /// `ui:sketch:offset-default-follow`, `ui:sketch:offset-dialog-rows`,
 /// `ui:sketch:status-readout-under-palette`: O on a pre-selected line opens OFFSET beside the
 /// Sketch Palette on its left, the offset at 0 mm on the line (the pointer doesn't move it), the
