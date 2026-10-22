@@ -149,7 +149,7 @@ impl Dialog {
 
   /// Brings the cached manipulator geometry up to date; the viewport calls it every frame.
   pub fn refresh_manip(&mut self, s: &Session) {
-    if self.editing.is_some() {
+    if self.picks_fixed() {
       return;
     }
     match self.kind {
@@ -274,9 +274,6 @@ impl Dialog {
   /// Shell's thickness arrows, Draft's angle dial, the rectangular pattern's distance and count
   /// handles along each direction and the circular pattern's angle and count dials.
   pub fn handles(&self, s: &Session) -> Vec<Handle> {
-    if self.editing.is_some() {
-      return Vec::new();
-    }
     match self.kind {
       Kind::Extrude => self.taper_handle(s),
       Kind::Shell => self.shell_handles(s),
@@ -1250,8 +1247,8 @@ mod tests {
     d.axis = format!("axis:{}", ax["feature"]);
     let Shape::Dial { center, radius, .. } = d.handles(&s)[0].shape else { panic!() };
     assert!(close(center, DVec3::new(10.0, 0.0, 15.0)) && (radius.unwrap() - 20.0).abs() < 1e-6);
-    // no handles while editing a feature
+    // Edit Feature shows the handles as creation does
     d.editing = Some(FeatureId(1));
-    assert!(d.handles(&s).is_empty());
+    assert!(!d.handles(&s).is_empty());
   }
 }

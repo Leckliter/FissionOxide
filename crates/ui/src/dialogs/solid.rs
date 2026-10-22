@@ -130,7 +130,7 @@ impl FilletRow {
   }
 
   /// "1 Face", "2 Edges", "1 Face, 2 Edges" or "Select".
-  fn label(&self) -> String {
+  pub(super) fn label(&self) -> String {
     let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
     match (self.faces.len(), self.edges.len()) {
       (0, 0) => "Select".into(),
@@ -163,7 +163,7 @@ impl Dialog {
       }
     });
     ui.end_row();
-    if let Some(k) = switch_type.filter(|_| creating) {
+    if let Some(k) = switch_type.filter(|_| self.editing.is_none()) {
       self.set_fillet_type(&mut app.s, k);
     }
     if self.solid.fillet_type == "full_round" {

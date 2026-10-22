@@ -217,7 +217,7 @@ cmds! {
   "body.rename" => "Rename a body", "{body, name}";
   "body.visible" => "Show or hide a body", "{body, visible}";
   "body.topology" => "A body's faces and edges: surface/curve kind, area, normal, centre, endpoints, length and which faces meet at each edge", "{body, faces?: bool, edges?: bool}";
-  "feature.edit" => "Change feature properties (fields merged into the feature)", "{feature, set: {...}}";
+  "feature.edit" => "Change feature properties (fields merged into the feature); a fillet's or chamfer's picks give its edges again, resolved on the model as it is (roll the marker to before the feature first); marker_after leaves the marker just after the feature, as Edit Feature shows it", "{feature, set: {...}, picks?: {edges?, faces?, sets?, radius?, tangent_chain?}, marker_after?: bool}";
   "feature.delete" => "Delete a feature and the features that depend on it; a deleted sketch's features stay, built from its cached geometry with a warning, unless cascade", "{feature, cascade?: bool}";
   "feature.suppress" => "Suppress or unsuppress a feature", "{feature, suppressed?: bool}";
   "feature.rename" => "Rename a feature", "{feature, name}";
@@ -1270,8 +1270,17 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "feature.edit" => {
       let id = FeatureId(req_u32(p, "feature")?);
-      let set = p.get("set").and_then(Value::as_object).ok_or(CmdError::new("missing 'set' object"))?.clone();
+      let mut set = p.get("set").and_then(Value::as_object).ok_or(CmdError::new("missing 'set' object"))?.clone();
+      if let Some(picks) = p.get("picks") {
+        set.extend(edit_picks(s, id, picks)?);
+      }
+      let after = p.get("marker_after").and_then(Value::as_bool).unwrap_or(false);
       s.edit(|d| {
+        if after {
+          // Edit Feature's rolled-back view: the marker just after the feature
+          let i = d.index_of(id).ok_or(CmdError::new("no such feature"))?;
+          d.set_marker(Some(i + 1));
+        }
         let f = d.feature_mut(id).ok_or(CmdError::new("no such feature"))?;
         let mut v = serde_json::to_value(&f.kind)?;
         if let Some(obj) = v.as_object_mut() {
@@ -2303,6 +2312,32 @@ pub(crate) fn sketch_line_at(s: &Session, p: DVec3) -> Result<(FeatureId, CurveI
     Some((sk, c, d)) if d < 0.05 => Ok((sk, c)),
     _ => Err(CmdError::new(format!("no edge or sketch line at {:?}", p.to_array()))),
   }
+}
+
+/// `feature.edit`'s `picks`: a fillet's or chamfer's edges picked again (the creation command's
+/// `edges`, `faces`, `sets`, `radius` and `tangent_chain`), resolved on the model as it is, so
+/// with the marker before the feature they name the edges it rounds.
+fn edit_picks(s: &Session, id: FeatureId, picks: &Value) -> Result<serde_json::Map<String, Value>, CmdError> {
+  let mut out = serde_json::Map::new();
+  match s.design.feature(id).map(|f| &f.kind) {
+    Some(FeatureKind::Fillet { .. }) => {
+      let (edges, radius, sets) = crate::fillet::selection_sets(s, picks)?;
+      out.insert("edges".into(), serde_json::to_value(edges)?);
+      out.insert("radius".into(), json!(radius));
+      out.insert("sets".into(), serde_json::to_value(sets)?);
+    }
+    Some(FeatureKind::Chamfer { .. }) => {
+      let chain = picks.get("tangent_chain").and_then(Value::as_bool).unwrap_or(false);
+      let edges = crate::fillet::selection_edges(s, picks, chain, &mut Vec::new())?;
+      if edges.is_empty() {
+        return Err(CmdError::new("no edges given"));
+      }
+      out.insert("edges".into(), serde_json::to_value(edges)?);
+    }
+    Some(_) => return Err(CmdError::new("only a fillet's or chamfer's picks can be edited")),
+    None => return Err(CmdError::new("no such feature")),
+  }
+  Ok(out)
 }
 
 /// {"body", "edge"} or {"point": [x,y,z]} on the edge.

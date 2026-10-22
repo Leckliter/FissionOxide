@@ -2847,8 +2847,9 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
     app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
   let at = readout_anchor(app.canvas, palette);
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("selection-info")));
-  // the readout moves left of the warning icon at the status bar's right end
-  let shift = if app.warning_toast.is_some() { WARNING_ICON + 6.0 } else { 0.0 };
+  // the readout moves left of the warning and error icons at the status bar's right end
+  let icons = usize::from(app.warning_toast.is_some()) + usize::from(!app.error_toast.failed.is_empty());
+  let shift = icons as f32 * (WARNING_ICON + 6.0);
   painter.text(
     at - vec2(shift, 0.0),
     egui::Align2::RIGHT_BOTTOM,
@@ -3251,6 +3252,126 @@ pub fn warning_toast(app: &mut App, ctx: &egui::Context) {
           });
         });
     });
+}
+
+/// Fusion's error toast: the failed features it has shown (it comes up again when another one
+/// fails) and when it last came up (egui time).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ErrorToast {
+  pub failed: Vec<FeatureId>,
+  pub since: Option<f64>,
+}
+
+/// The features whose error shows (failed, not rolled back or suppressed), each with its line
+/// in the error toast: the message for the feature the open dialog previews (a fillet too big
+/// for its edges), the name for the others (a later feature an edit broke), as Fusion's toast
+/// reads them.
+pub(crate) fn failed_features(app: &App) -> Vec<(FeatureId, String)> {
+  let own = app.dialog.as_ref().and_then(|d| d.own_feature());
+  let preview = app.dialog.as_ref().map(|d| d.preview_features(&app.s)).unwrap_or_default();
+  app
+    .s
+    .design
+    .features
+    .iter()
+    .filter(|f| !f.suppressed)
+    .filter_map(|f| {
+      let st = app.s.model.status(f.id)?;
+      let e = st.error.as_ref().filter(|_| !st.rolled_back)?;
+      let own = own == Some(f.id) || preview.contains(&f.id);
+      Some((f.id, if own { e.clone() } else { f.name.clone() }))
+    })
+    .collect()
+}
+
+/// The error toast's title: `1 error(s)`, as Fusion counts them.
+pub(crate) fn error_title(n: usize) -> String {
+  format!("{n} error(s)")
+}
+
+/// Brings the error toast up again when a feature fails that it hasn't shown yet.
+pub(crate) fn note_failures(toast: &mut ErrorToast, failed: &[(FeatureId, String)], now: f64) {
+  let ids: Vec<FeatureId> = failed.iter().map(|(id, _)| *id).collect();
+  if ids.iter().any(|id| !toast.failed.contains(id)) {
+    toast.since = Some(now);
+  }
+  toast.failed = ids;
+}
+
+/// Fusion's error glyph: a red disc with a white X.
+fn error_glyph(p: &egui::Painter, rect: Rect) {
+  let c = rect.center();
+  let r = rect.width().min(rect.height()) / 2.0;
+  p.circle_filled(c, r, theme::ERROR);
+  let d = r * 0.42;
+  let stroke = Stroke::new(1.6, Color32::WHITE);
+  p.line_segment([c - vec2(d, d), c + vec2(d, d)], stroke);
+  p.line_segment([c + vec2(-d, d), c + vec2(d, -d)], stroke);
+}
+
+/// Fusion's error toast at the canvas's lower right (a red circled X, bold "1 error(s)", a line
+/// per failed feature and More Info) for a few seconds after a feature fails, and the red X at
+/// the right end of the status readout while any feature's error shows: a dialog's failing
+/// preview, or a later feature an edit broke.
+pub fn error_toast(app: &mut App, ctx: &egui::Context) {
+  let failed = failed_features(app);
+  let now = ctx.input(|i| i.time);
+  note_failures(&mut app.error_toast, &failed, now);
+  if failed.is_empty() {
+    return;
+  }
+  let palette =
+    app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
+  // left of the warning icon when both show
+  let shift = if app.warning_toast.is_some() { WARNING_ICON + 6.0 } else { 0.0 };
+  let at = readout_anchor(app.canvas, palette) - vec2(shift, 0.0);
+  let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("error-icon")));
+  error_glyph(&painter, Rect::from_min_size(at - Vec2::splat(WARNING_ICON), Vec2::splat(WARNING_ICON)));
+  let since = app.error_toast.since.unwrap_or(now);
+  if now - since > TOAST_SECS {
+    return;
+  }
+  ctx.request_repaint_after(std::time::Duration::from_millis(250));
+  let mut more = false;
+  egui::Area::new(egui::Id::new("error-toast"))
+    .fixed_pos(readout_anchor(app.canvas, palette) - vec2(0.0, 28.0))
+    .pivot(egui::Align2::RIGHT_BOTTOM)
+    .order(egui::Order::Middle)
+    .show(ctx, |ui| {
+      egui::Frame::new()
+        .fill(theme::PANEL)
+        .stroke(Stroke::new(1.0, theme::BORDER))
+        .corner_radius(3.0)
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .shadow(egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(40) })
+        .show(ui, |ui| {
+          ui.set_max_width(320.0);
+          ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(WARNING_ICON + 2.0), egui::Sense::hover());
+            error_glyph(ui.painter(), r.shrink(1.0));
+            ui.vertical(|ui| {
+              ui.spacing_mut().item_spacing.y = 3.0;
+              ui.label(RichText::new(error_title(failed.len())).strong().color(theme::TEXT));
+              for (_, line) in &failed {
+                ui.label(RichText::new(line).color(theme::TEXT));
+              }
+              more = ui.link("More Info").clicked();
+            });
+          });
+        });
+    });
+  if more {
+    // each failed feature's message, in the status bar
+    let msgs: Vec<String> = failed
+      .iter()
+      .filter_map(|(id, _)| {
+        let f = app.s.design.feature(*id)?;
+        Some(format!("{}: {}", f.name, app.s.model.status(*id)?.error.as_ref()?))
+      })
+      .collect();
+    app.status = Some((msgs.join("; "), true));
+  }
 }
 
 // ---------------------------------------------------------------- timeline
@@ -3795,6 +3916,9 @@ pub fn edit_feature(app: &mut App, id: FeatureId) {
     _ => {
       app.cancel_dialog();
       app.dialog = crate::dialogs::Dialog::edit(app, id);
+      if let Some(d) = app.dialog.as_mut() {
+        d.begin_edit(&mut app.s);
+      }
       if app.dialog.is_none() {
         app.status = Some(("This feature has no editable properties yet".into(), false));
       }

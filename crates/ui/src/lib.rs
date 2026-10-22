@@ -112,6 +112,8 @@ pub struct App {
   /// Trim, Break): shown at the canvas's lower right, with a warning icon at the right end of the
   /// status readout until the next command.
   pub(crate) warning_toast: Option<panels::WarningToast>,
+  /// The error toast and status-bar badge for failed features (see [`panels::error_toast`]).
+  pub(crate) error_toast: panels::ErrorToast,
   /// The red message of the last command [`App::run`] refused: it goes when the next command
   /// succeeds (Fusion leaves nothing behind a refused command).
   run_error: Option<String>,
@@ -461,6 +463,7 @@ impl App {
       status: None,
       hint: None,
       warning_toast: None,
+      error_toast: panels::ErrorToast::default(),
       run_error: None,
       show_params: false,
       params_ui: params_ui::Panel::default(),
@@ -1830,6 +1833,7 @@ impl App {
     toolbox::show(self, &ctx);
     panels::canvas_status(self, &ctx);
     panels::unsaved_banner(self, &ctx);
+    panels::error_toast(self, &ctx);
     panels::selection_info(self, &ctx);
     panels::warning_toast(self, &ctx);
     notifications::panel(self, &ctx);

@@ -101,7 +101,7 @@ fn keeps_picks(kind: Kind) -> bool {
 impl Dialog {
   /// Asks for a preview when live preview is on and the command changed since the last one.
   pub(super) fn live_check(&mut self) {
-    if !self.live.on || !self.picks() || self.editing.is_some() || self.dirty || !self.ready() {
+    if !self.live.on || !self.picks() || self.picks_fixed() || self.dirty || !self.ready() {
       return;
     }
     let cmd = self.command().map(|(c, p)| json!([c, p]));
@@ -117,7 +117,7 @@ impl Dialog {
     self.live.tried = Some(json!([cmd, params]));
     self.live.before = s.model.bodies.iter().map(|b| b.id).collect();
     self.live.picked.clear();
-    if keeps_picks(self.kind) && self.editing.is_none() {
+    if keeps_picks(self.kind) && !self.picks_fixed() {
       let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
       for f in &self.faces {
         if let (Some(b), Some(id)) = (get(f, "body"), get(f, "face"))
@@ -141,7 +141,7 @@ impl Dialog {
   /// previewed body, so only they draw in the selection colour and the body keeps its own
   /// appearance, as in Fusion. (The session drops picks on a body a feature changed.)
   pub(super) fn reselect_picks(&self, s: &mut Session) {
-    if !keeps_picks(self.kind) || self.editing.is_some() {
+    if !keeps_picks(self.kind) || self.picks_fixed() {
       return;
     }
     s.selection = self

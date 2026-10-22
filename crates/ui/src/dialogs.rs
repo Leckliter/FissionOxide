@@ -25,6 +25,8 @@ pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod copies;
 mod export_dxf;
+#[cfg(test)]
+mod edit_tests;
 mod newcomp;
 mod primitive;
 mod redefine;
@@ -424,6 +426,25 @@ pub struct Manipulator {
   pub value: f64,
 }
 
+/// An edited primitive's Placement row: the plane it stands on, named as its creation dialog
+/// names a picked one ("XY plane", "Face of Body1", a construction plane's name).
+fn placement_label(app: &App, plane: &fox_engine::model::PlaneRef) -> String {
+  use fox_engine::model::{OriginPlane, PlaneRef};
+  match plane {
+    PlaneRef::Origin { plane } => match plane {
+      OriginPlane::Xy => "XY plane",
+      OriginPlane::Xz => "XZ plane",
+      OriginPlane::Yz => "YZ plane",
+    }
+    .into(),
+    PlaneRef::Construction { feature } => {
+      app.s.design.feature(*feature).map_or_else(|| "Plane".into(), |f| f.name.clone())
+    }
+    PlaneRef::Face { face, .. } => format!("Face of {}", app.s.body_name(face.body)),
+    _ => "Plane".into(),
+  }
+}
+
 /// The world plane a dialog's plane value ("xy", {"feature"}, {"body", "face"}) names.
 fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
   use fox_engine::model::OriginPlane;
@@ -458,6 +479,14 @@ pub struct Dialog {
   pub kind: Kind,
   /// Feature being edited (timeline double-click); None while creating.
   pub editing: Option<FeatureId>,
+  /// While Edit Feature has the design rolled back to the edited feature (inside a transaction),
+  /// the marker to roll forward to on OK; see [`Dialog::begin_edit`].
+  rolled: Option<Option<usize>>,
+  /// The edited feature's picks were found again on the rolled-back model: its rows are the
+  /// creation dialog's, live (Fillet, Chamfer, Extrude).
+  repicks: bool,
+  /// The feature the applied preview made (or the one edited).
+  previewed: Option<FeatureId>,
   /// A preview step is applied to the session.
   applied: bool,
   error: Option<String>,
@@ -640,6 +669,9 @@ impl Dialog {
     Dialog {
       kind,
       editing: None,
+      rolled: None,
+      repicks: false,
+      previewed: None,
       applied: false,
       error: None,
       dirty: false,
@@ -1138,9 +1170,10 @@ impl Dialog {
   pub fn edit(app: &App, id: FeatureId) -> Option<Dialog> {
     let f = app.s.design.feature(id)?;
     let mut d = match &f.kind {
-      FeatureKind::Extrude { sketch, extent, operation, .. } => {
+      FeatureKind::Extrude { sketch, profiles, extent, operation } => {
         let mut d = Dialog::blank(Kind::Extrude);
         d.sketch = Some(*sketch);
+        d.profiles = profiles.clone();
         // a flipped extrude shows a negative distance, as in Fusion (`extrude::split_sign`)
         d.distance = if extent.flip { extrude::negate(&extent.distance) } else { extent.distance.clone() };
         d.distance2 = extent.distance2.clone();
@@ -1205,7 +1238,7 @@ impl Dialog {
         d.faces = vec![Value::Null; faces.len()];
         d
       }
-      FeatureKind::Primitive { shape, at, operation, .. } => {
+      FeatureKind::Primitive { shape, plane, at, operation } => {
         let kind = match shape {
           Primitive::Box { .. } => Kind::Box,
           Primitive::Cylinder { .. } => Kind::Cylinder,
@@ -1216,6 +1249,7 @@ impl Dialog {
         d.load_primitive(shape);
         d.at = [fox_engine::sketch::Dim::new(at[0]).expr, fox_engine::sketch::Dim::new(at[1]).expr];
         d.op = op_str(*operation);
+        d.plane_label = placement_label(app, plane);
         d
       }
       FeatureKind::ConstructionPlane { offset, .. } => {
@@ -1276,6 +1310,107 @@ impl Dialog {
     Some(d)
   }
 
+  /// Edit Feature rolls the design back to the edited feature while its dialog is open, as
+  /// Fusion does: the marker moves to just after it, the later features roll back (faded in the
+  /// timeline, their bodies gone), and OK or Cancel rolls forward again. It all happens in a
+  /// transaction, so OK leaves one undo step and Cancel restores the design as it was. Fillet,
+  /// Chamfer and Extrude find their picks again on the model before the feature, so their
+  /// rows are the creation dialog's, live.
+  pub(crate) fn begin_edit(&mut self, s: &mut Session) {
+    let Some(id) = self.editing else { return };
+    let Some(i) = s.design.index_of(id) else { return };
+    if s.begin_transaction().is_err() {
+      return;
+    }
+    let old = s.design.marker;
+    if s.execute("timeline.marker", &json!({"at": i})).is_err() {
+      let _ = s.rollback_transaction();
+      return;
+    }
+    self.rolled = Some(old);
+    self.repicks = self.load_edit_picks(s);
+    self.preview(s);
+  }
+
+  /// Ends Edit Feature's rolled-back view: OK (`keep`) rolls the marker forward to where it was
+  /// and keeps the edit as one undo step; Cancel restores the design.
+  fn end_edit(&mut self, s: &mut Session, keep: bool) {
+    let Some(old) = self.rolled.take() else { return };
+    if keep {
+      let _ = s.execute("timeline.marker", &json!({"at": old}));
+      let _ = s.commit_transaction_named("Edit Feature");
+    } else {
+      let _ = s.rollback_transaction();
+    }
+  }
+
+  /// Finds the edited feature's picks on the rolled-back model: a fillet's or chamfer's edges
+  /// (every set's) and an extrude's profiles, selected as the creation dialog shows them. False
+  /// when one can't be found (the rows then keep the stored picks unchanged).
+  fn load_edit_picks(&mut self, s: &mut Session) -> bool {
+    let Some(kind) = self.editing.and_then(|id| s.design.feature(id)).map(|f| f.kind.clone()) else {
+      return false;
+    };
+    let find = |er: &fox_engine::model::EdgeRef| -> Option<Value> {
+      let e = s.model.body(er.body)?.find_edge(er)?;
+      Some(json!({"body": er.body.0, "edge": e}))
+    };
+    let all = |refs: &[fox_engine::model::EdgeRef]| refs.iter().map(find).collect::<Option<Vec<Value>>>();
+    match kind {
+      FeatureKind::Fillet { edges, sets, .. } => {
+        let Some(first) = all(&edges) else { return false };
+        let Some(rest) = sets.iter().map(|set| all(&set.edges)).collect::<Option<Vec<_>>>() else { return false };
+        for (row, picks) in self.solid.rows.iter_mut().skip(1).zip(rest) {
+          row.edges = picks;
+        }
+        if let Some(row) = self.solid.rows.first_mut() {
+          row.edges = first.clone();
+        }
+        self.edges = first;
+      }
+      FeatureKind::Chamfer { edges, .. } => {
+        let Some(picks) = all(&edges) else { return false };
+        self.edges = picks;
+      }
+      FeatureKind::Extrude { sketch, profiles, .. } => {
+        let Some(r) = s.model.sketches.get(&sketch) else { return false };
+        // the regions the stored points fall in (none stored: every region)
+        let mut picked = Vec::new();
+        for p in &profiles {
+          let Some(index) = r.profiles.iter().position(|x| x.contains(*p)) else { return false };
+          picked.push((index, r.profiles[index].interior_point()));
+        }
+        if profiles.is_empty() {
+          picked = r.profiles.iter().enumerate().map(|(i, x)| (i, x.interior_point())).collect();
+        }
+        self.profiles = picked.iter().map(|(_, p)| *p).collect();
+        s.selection = picked.iter().map(|(index, _)| Sel::Profile { sketch, index: *index }).collect();
+        return true;
+      }
+      _ => return false,
+    }
+    s.selection = self.picked_selection();
+    true
+  }
+
+  /// Are the dialog's picks fixed? An edited feature's are, unless Edit Feature found them again
+  /// on the rolled-back model ([`Dialog::begin_edit`]).
+  fn picks_fixed(&self) -> bool {
+    self.editing.is_some() && !self.repicks
+  }
+
+  /// Did the live preview fail (the feature computed, with an error)? OK greys and the error
+  /// toast says why, as in Fusion.
+  pub(crate) fn failed(&self) -> bool {
+    self.applied && self.error.is_some()
+  }
+
+  /// The feature the showing preview made or edited (the error toast names its message rather
+  /// than its name).
+  pub(crate) fn own_feature(&self) -> Option<FeatureId> {
+    self.previewed.filter(|_| self.applied)
+  }
+
   /// The command (name, params) this dialog applies.
   fn command(&self) -> Option<(&'static str, Value)> {
     self.with_comp_name(self.command_base())
@@ -1283,7 +1418,18 @@ impl Dialog {
 
   fn command_base(&self) -> Option<(&'static str, Value)> {
     if let Some(id) = self.editing {
-      return Some(("feature.edit", json!({"feature": id.0, "set": self.edit_set()?})));
+      let mut p = json!({"feature": id.0, "set": self.edit_set()?});
+      if self.rolled.is_some() {
+        p["marker_after"] = json!(true);
+      }
+      if self.repicks {
+        match self.kind {
+          Kind::Fillet => p["picks"] = self.fillet_params(),
+          Kind::Chamfer => p["picks"] = json!({"edges": self.edges, "tangent_chain": !self.solid.no_chain}),
+          _ => {}
+        }
+      }
+      return Some(("feature.edit", p));
     }
     let op = self.op;
     Some(match self.kind {
@@ -1650,12 +1796,18 @@ impl Dialog {
     Some(match self.kind {
       Kind::Extrude => {
         let (distance, flip) = self.extrude_distance();
-        json!({
+        let mut set = json!({
           "extent": self.edit_extrude_rows(self.edit_extent(
             json!({"kind": self.extent, "distance": distance, "distance2": self.distance2, "flip": flip}),
           )),
           "operation": self.op,
-        })
+        });
+        // the profiles picked again (none: as stored)
+        if self.repicks && !self.profiles.is_empty() {
+          set["sketch"] = json!(self.sketch?.0);
+          set["profiles"] = json!(self.profiles);
+        }
+        set
       }
       Kind::Revolve => {
         let two = self.extent == "two_sides";
@@ -1744,6 +1896,7 @@ impl Dialog {
     match result {
       Ok(v) => {
         self.applied = true;
+        self.previewed = self.editing.or_else(|| v.get("feature").and_then(Value::as_u64).map(|f| FeatureId(f as u32)));
         self.note_preview(&v);
         self.error = v.get("error").and_then(Value::as_str).map(str::to_string);
         self.summary = v.get("summary").and_then(Value::as_str).map(str::to_string);
@@ -1765,7 +1918,8 @@ impl Dialog {
 
   /// Enough input to try?
   fn ready(&self) -> bool {
-    if self.editing.is_some() {
+    // an edit's stored picks stand; a fillet's or chamfer's picked again need an edge
+    if self.editing.is_some() && !(self.repicks && matches!(self.kind, Kind::Fillet | Kind::Chamfer)) {
       return true;
     }
     if self.placing() {
@@ -1827,7 +1981,7 @@ impl Dialog {
       s.undo();
       s.drop_redo();
       self.applied = false;
-      if self.picks() && self.editing.is_none() {
+      if self.picks() && !self.picks_fixed() {
         // the picks are valid again on the un-previewed model
         s.selection = self.picked_selection();
       }
@@ -1896,11 +2050,12 @@ impl Dialog {
   pub fn cancel(&mut self, s: &mut Session) {
     self.withdraw(s);
     self.redefine_restore(s);
+    self.end_edit(s, false);
   }
 
   /// Is a model-picking dialog's preview showing? (Viewport clicks withdraw it first.)
   pub fn previewing_model(&self) -> bool {
-    self.applied && self.picks() && self.editing.is_none()
+    self.applied && self.picks() && !self.picks_fixed()
   }
 
   pub fn unpreview(&mut self, s: &mut Session) {
@@ -1977,7 +2132,7 @@ impl Dialog {
 
   /// Picks up selection changes made in the viewport while the dialog is open.
   fn sync_selection(&mut self, s: &Session) {
-    if self.editing.is_some() {
+    if self.picks_fixed() {
       return;
     }
     match self.kind {
@@ -2231,7 +2386,8 @@ impl Dialog {
               self.fields(app, ui);
             });
           }
-          if let Some(e) = &self.error {
+          // a failed preview's message is in the error toast instead, as Fusion shows it
+          if let Some(e) = self.error.as_ref().filter(|_| !self.failed()) {
             ui.add_space(6.0);
             ui.label(RichText::new(format!("⚠ {e}")).color(theme::ERROR));
           } else if let Some(n) = self.summary.as_ref().filter(|_| self.applied) {
@@ -2254,7 +2410,7 @@ impl Dialog {
               theme::GROUP_LABEL,
             );
             if !self.kind.reports() {
-              if self.picks() && self.editing.is_none() {
+              if self.picks() && !self.picks_fixed() {
                 self.live_checkbox(ui, &mut app.s);
               }
               ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2302,6 +2458,7 @@ impl Dialog {
       }
       if self.applied && self.error.is_none() {
         keep = false;
+        self.end_edit(&mut app.s, true);
         app.s.selection.clear();
         // select the traced shapes (not their holes), ready to extrude
         if let (Some(r), Some(sketch)) = (self.trace.as_ref().and_then(|t| t.result.as_ref()), app.s.edit_sketch) {
@@ -2329,10 +2486,9 @@ impl Dialog {
         }
       } else if !self.applied && self.error.is_none() {
         self.error = Some(self.missing_input().into());
-      } else if self.applied {
-        // keep the failing feature in the timeline (red), like Fusion
-        keep = false;
       }
+      // a failing preview (OK greyed, from the marking menu or with Preview off) keeps the
+      // dialog open, as Fusion's greyed OK does
     }
     if cancel {
       self.cancel(&mut app.s);
@@ -2471,14 +2627,16 @@ impl Dialog {
   }
 
   /// Is OK live? Greyed while the dialog lacks its input, as in Fusion: Extrude until a profile
-  /// is picked, the others until what they need (`ready`) is there.
-  fn ok_enabled(&self) -> bool {
-    match self.kind {
-      Kind::Extrude if self.editing.is_none() => !self.profiles.is_empty(),
+  /// is picked, the others until what they need (`ready`) is there; and while the live preview
+  /// fails (a fillet too big for its edges), until a value that works is typed.
+  pub(crate) fn ok_enabled(&self) -> bool {
+    let input = match self.kind {
+      Kind::Extrude if !self.picks_fixed() => !self.profiles.is_empty(),
       // an offset of 0.00 sits on its curve, a fillet or shell of 0.00 has no size: OK waits
       // for a value
       _ => self.ready() && !self.waits_for_value(),
-    }
+    };
+    input && !self.failed()
   }
 
   /// Is the dialog's value still at 0.00 (or half typed), where Fusion previews nothing and OK
@@ -2547,7 +2705,7 @@ impl Dialog {
   }
 
   fn fields(&mut self, app: &mut App, ui: &mut egui::Ui) {
-    let creating = self.editing.is_none();
+    let creating = !self.picks_fixed();
     match self.kind {
       // Create Sketch has no dialog (`show` returns before drawing one): the planes to pick are
       // drawn in the viewport (`viewport::plane_picker`) with the cursor hint
@@ -4966,6 +5124,8 @@ impl Dialog {
 
   /// Puts back what the dialog changed in the app while open (Measure's selection filter).
   pub(crate) fn leave(&mut self, app: &mut App) {
+    // an edit closed some other way keeps what it shows and rolls forward
+    self.end_edit(&mut app.s, true);
     if let Some((priority, vertices)) = self.saved_filter.take() {
       app.sel_priority = priority;
       app.sel_filter.vertices = vertices;

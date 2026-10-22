@@ -75,7 +75,7 @@ impl Dialog {
 
   /// Rows of the Extrude dialog.
   pub(super) fn extrude_rows(&mut self, ui: &mut egui::Ui) {
-    let creating = self.editing.is_none();
+    let creating = !self.picks_fixed();
     let mut dirty = false;
     let ext = &mut self.solid.ext;
     // Type: Fusion's pair of icon toggles
