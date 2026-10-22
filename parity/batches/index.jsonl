@@ -115,7 +115,7 @@
 {"name": "ui-appbar-home-updates", "items": 5, "status": "done", "pr": "6ccce1f", "fixer": "cloud session_01VWL8BTzUvcLi4UW8PJVfVv"}
 {"name": "ui-documents-window-tabs", "items": 5, "status": "done", "pr": "acc137c", "fixer": "cloud task_0d1b70a8 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-marking-menu-targets", "items": 8, "status": "done", "pr": "f4ed9f7", "fixer": "cloud task_af4df33d (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-preferences-pages", "items": 9, "status": "fixing", "pr": null, "fixer": "cloud task_9f140052 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-preferences-pages", "items": 9, "status": "done", "pr": "4006204", "fixer": "cloud task_9f140052 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-sketch", "items": 8, "status": "done", "pr": "e74fc0d", "fixer": "cloud task_83e62b33 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-dialogs", "items": 9, "status": "fixing", "pr": null, "fixer": "cloud task_d7c5cd94 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-chrome", "items": 8, "status": "done", "pr": "01e9e36", "fixer": "cloud task_730cf83a (requested 2026-10-22 by the coordinator)"}
