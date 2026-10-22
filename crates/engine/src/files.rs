@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use fox_exchange::archive::{Archive, read_foxz, write_foxz};
-use fox_exchange::dxf::{Drawing, Entity, Spline, read_dxf, write_dxf};
+use fox_exchange::dxf::{Drawing, Entity, Spline, read_dxf};
 use fox_exchange::svg::{SvgUnits, read_svg_as, write_svg};
 use fox_exchange::{FormatKind, Mesh, format_for_path};
 use fox_kernel::glam::DVec3;
@@ -557,12 +557,26 @@ fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
 /// Sketch geometry as DXF entities (sketch coordinates); `exact` gives splines and ellipses as
 /// Bézier pieces (SVG) instead of SPLINE and ELLIPSE entities (DXF).
 pub(crate) fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
+  sketch_entities_where(sk, exact, |_| true, true)
+}
+
+/// [`sketch_entities`] of the curves `keep` passes, with the sketch's lone points if `points`
+/// (a point at the end of a curve left out stays out).
+pub(crate) fn sketch_entities_where(
+  sk: &Sketch,
+  exact: bool,
+  keep: impl Fn(&fox_sketch::Curve) -> bool,
+  points: bool,
+) -> Vec<(Entity, bool)> {
   let pos = |id| sk.pos(id).unwrap_or([0.0, 0.0]);
   let mut out = Vec::new();
   let mut on_curve = std::collections::HashSet::new();
   for c in &sk.curves {
     for p in fox_sketch::curve_points(&c.kind) {
       on_curve.insert(p);
+    }
+    if !keep(c) {
+      continue;
     }
     if c.kind.is_freeform() {
       if exact {
@@ -634,7 +648,7 @@ pub(crate) fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
     };
     out.push((e, c.reference()));
   }
-  for p in &sk.points {
+  for p in sk.points.iter().filter(|_| points) {
     if p.id != fox_sketch::ORIGIN && !on_curve.contains(&p.id) {
       out.push((Entity::Point { at: [p.x, p.y] }, false));
     }
@@ -767,11 +781,29 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
         .map(|r| &r.sketch)
         .ok_or(CmdError::new("that sketch isn't computed (rolled back?)"))?;
       let svg = fmt.id == "svg";
-      let ents = sketch_entities(sk, svg);
+      // Fusion's Export DXF: the unit and the Visible Geometry check boxes (all on by default)
+      let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(true);
+      let (points, projected, construction) = (flag("points"), flag("projected"), flag("construction"));
+      let linked: Vec<fox_sketch::CurveId> = match s.design.feature(id).map(|f| &f.kind) {
+        Some(FeatureKind::Sketch { links, .. }) => links.iter().map(|l| l.curve).collect(),
+        _ => Vec::new(),
+      };
+      let keep = |c: &fox_sketch::Curve| (construction || !c.reference()) && (projected || !linked.contains(&c.id));
+      let ents = sketch_entities_where(sk, svg, keep, points);
       if ents.is_empty() {
         return Err(CmdError::new("the sketch is empty"));
       }
-      std::fs::write(&path, if svg { write_svg(&ents) } else { write_dxf(&ents) })?;
+      let unit = p.get("units").and_then(Value::as_str).unwrap_or("mm");
+      let text = if svg {
+        write_svg(&ents)
+      } else {
+        fox_exchange::dxf::write_dxf_in(&ents, unit).ok_or_else(|| {
+          let keys: Vec<&str> = fox_exchange::dxf::DXF_UNITS.iter().map(|u| u.0).collect();
+          CmdError::new(format!("unknown DXF unit '{unit}' ({})", keys.join(", ")))
+        })?
+      };
+      std::fs::write(&path, text)?;
+      out["units"] = json!(unit);
       out["sketch"] = json!(id.0);
       out["entities"] = json!(ents.len());
     }

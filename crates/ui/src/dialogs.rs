@@ -23,9 +23,14 @@ mod move_copy;
 mod pieces;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
+mod export_dxf;
 mod newcomp;
 mod primitive;
+mod redefine;
+#[cfg(test)]
+mod sketch_row_tests;
 mod solid;
+pub(crate) use export_dxf::{SaveWindow, save_window};
 pub(crate) use primitive::overlay as place_overlay;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
@@ -113,6 +118,10 @@ pub enum Kind {
   TraceImage,
   /// Appearance: a library of swatches to drag onto bodies and faces, and the design's own.
   Appearance,
+  /// Redefine Sketch Plane (a sketch row's menu): the sketch onto another plane or planar face.
+  RedefinePlane,
+  /// Export DXF (a sketch row's menu): the unit and the geometry, then where to save.
+  ExportDxf,
 }
 
 impl Kind {
@@ -136,6 +145,8 @@ impl Kind {
       Kind::OffsetPlane => "OFFSET PLANE",
       Kind::Inspect => "MEASURE",
       Kind::Appearance => "APPEARANCE",
+      Kind::RedefinePlane => "REDEFINE SKETCH PLANE",
+      Kind::ExportDxf => "EXPORT DXF",
       Kind::Loft => "LOFT",
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
@@ -207,6 +218,8 @@ impl Kind {
       Kind::OffsetPlane => Icon::Plane,
       Kind::Inspect => Icon::Measure,
       Kind::Appearance => Icon::Appearance,
+      Kind::RedefinePlane => Icon::Plane,
+      Kind::ExportDxf => Icon::ExportDxf,
       Kind::Loft => Icon::Loft,
       Kind::Sweep => Icon::Sweep,
       Kind::Hole => Icon::Hole,
@@ -315,6 +328,8 @@ impl Kind {
       Kind::DrawingTitle => ("Title Block", "Fill in the title block"),
       Kind::DrawingSettings => ("Sheet Settings", "Sheet size, scale, projection and tables"),
       Kind::Appearance => ("Appearance", "Drag appearances onto bodies or faces (A)"),
+      Kind::RedefinePlane => ("Redefine Sketch Plane", "Put the sketch on another plane or planar face"),
+      Kind::ExportDxf => ("Export DXF", "Save the sketch as a DXF file"),
       _ => (self.title(), ""),
     };
     (self.icon(), name, hint)
@@ -565,6 +580,10 @@ pub struct Dialog {
   /// Box, Cylinder, Sphere, Torus and Coil: the plane pick and drawing before the dialog shows
   /// (see [`primitive`]).
   place: primitive::Step,
+  /// Redefine Sketch Plane's pick and the timeline it rolled back (see [`redefine`]).
+  redefine: redefine::State,
+  /// Export DXF's unit and Visible Geometry check boxes (see [`export_dxf`]).
+  dxf: export_dxf::Options,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -689,6 +708,8 @@ impl Dialog {
       dir_lines: Vec::new(),
       focus_text: false,
       place: primitive::Step::Done,
+      redefine: redefine::State::default(),
+      dxf: export_dxf::Options::default(),
     }
   }
 
@@ -1601,6 +1622,8 @@ impl Dialog {
         ("combine", json!({"target": target, "tools": tools, "operation": op, "keep_tools": self.keep_tools}))
       }
       Kind::Move => self.move_command()?,
+      Kind::RedefinePlane => self.redefine_command()?,
+      Kind::ExportDxf => return None,
     })
   }
 
@@ -1771,6 +1794,8 @@ impl Dialog {
       Kind::NewDrawing => self.view_on.iter().any(|v| *v),
       Kind::DrawingMoveView | Kind::DrawingDimension => self.target.is_some() && self.view.is_some(),
       Kind::DrawingView => self.target.is_some() && (self.choice != "flat" || !self.bodies.is_empty()),
+      Kind::RedefinePlane => self.sketch.is_some() && self.redefine.picked.is_some(),
+      Kind::ExportDxf => self.sketch.is_some(),
       _ => true,
     }
   }
@@ -1848,6 +1873,7 @@ impl Dialog {
 
   pub fn cancel(&mut self, s: &mut Session) {
     self.withdraw(s);
+    self.redefine_restore(s);
   }
 
   /// Is a model-picking dialog's preview showing? (Viewport clicks withdraw it first.)
@@ -2102,6 +2128,7 @@ impl Dialog {
   pub fn show(&mut self, app: &mut App, ctx: &egui::Context) -> bool {
     self.sync_selection(&app.s);
     self.hole_sync(app);
+    self.redefine_sync(app);
     if self.kind == Kind::PickPlane
       && let Some(Sel::Face { body, face }) = app.s.selection.iter().find(|x| matches!(x, Sel::Face { .. })).copied()
     {
@@ -2215,6 +2242,16 @@ impl Dialog {
     if self.dirty {
       self.preview(&mut app.s);
     }
+    // Export DXF's OK asks where to save; Redefine Sketch Plane's puts the timeline back first
+    if ok && self.kind == Kind::ExportDxf {
+      ok = false;
+      keep = false;
+      self.dxf_ok(app);
+    }
+    if ok && self.kind == Kind::RedefinePlane {
+      ok = false;
+      keep = !self.redefine_ok(app);
+    }
     if ok {
       if !self.applied {
         self.preview(&mut app.s);
@@ -2304,6 +2341,7 @@ impl Dialog {
         Kind::Combine => "Select tool bodies".into(),
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
         Kind::Draft => "Select faces to draft".into(),
+        Kind::RedefinePlane => redefine::HINT.into(),
         // one prompt for the whole pick, as Fusion words it
         Kind::SkScale => {
           "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
@@ -2436,6 +2474,7 @@ impl Dialog {
       Kind::NewDrawing => "pick at least one view",
       Kind::DrawingMoveView | Kind::DrawingDimension => "pick a view",
       Kind::DrawingView if self.choice == "flat" => "select a sheet metal body",
+      Kind::RedefinePlane => "select a planar face or a work plane",
       _ => "missing input",
     }
   }
@@ -2637,6 +2676,8 @@ impl Dialog {
       Kind::Move => self.move_fields(app, ui),
       Kind::Inspect => self.inspect(app, ui),
       Kind::Appearance => self.appearance(app, ui),
+      Kind::RedefinePlane => self.redefine_rows(app, ui),
+      Kind::ExportDxf => self.dxf_rows(app, ui),
       Kind::Section => section_fields(app, ui),
       Kind::Analysis(kind) => analysis_fields(app, ui, kind),
       Kind::Form(f) => {
@@ -5489,14 +5530,19 @@ fn chip_text(n: usize, what: &str) -> String {
 /// A selection input: a white "Select" chip until something is picked, then a chip tinted with
 /// the command's accent showing the count, with a ✕ beside it.
 fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> egui::Response {
+  sel_chip_lit(ui, accent, text, has, has)
+}
+
+/// A selection chip, lit (the accent's tint) when `lit`, with the clear x after it when `has`.
+fn sel_chip_lit(ui: &mut egui::Ui, accent: egui::Color32, text: &str, lit: bool, has: bool) -> egui::Response {
   let font = egui::FontId::proportional(12.0);
   let tw = ui.painter().layout_no_wrap(text.to_string(), font.clone(), theme::TEXT).size().x;
   let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 52.0, 22.0), egui::Sense::hover());
   let chip = egui::Rect::from_min_size(rect.min, egui::vec2(tw + 32.0, 22.0));
   let p = ui.painter();
   let ir = egui::Rect::from_center_size(chip.left_center() + egui::vec2(12.0, 0.0), egui::Vec2::splat(15.0));
-  let fill = if has { crate::icons::tint_of(accent, 0.84) } else { egui::Color32::WHITE };
-  let stroke = if has { accent } else { theme::BORDER };
+  let fill = if lit { crate::icons::tint_of(accent, 0.84) } else { egui::Color32::WHITE };
+  let stroke = if lit { accent } else { theme::BORDER };
   p.rect(chip, 3.0, fill, egui::Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
   crate::icons::draw(p, ir, Icon::Select, accent);
   p.text(chip.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, theme::TEXT);

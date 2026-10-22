@@ -198,6 +198,8 @@ pub struct App {
   /// An origin or construction plane selected in the browser (a `sketch.create` plane: "xy" or
   /// `{feature}`); Create Sketch starts on it, and the viewport highlights it.
   pub(crate) picked_plane: Option<Value>,
+  /// Fusion's Export DXF window (the EXPORT DXF dialog's OK opens it).
+  pub(crate) export_dxf: Option<dialogs::SaveWindow>,
   /// The origin point or axis picked in the browser or the canvas (a picked origin plane is
   /// `picked_plane`); see [`origin`].
   pub(crate) picked_origin: Option<origin::OriginItem>,
@@ -498,6 +500,7 @@ impl App {
       pre_sketch_cam: None,
       cube: viewcube::CubeState::default(),
       picked_plane: None,
+      export_dxf: None,
       picked_origin: None,
       hover_origin: None,
       origin_eyes: [true; 7],
@@ -996,6 +999,10 @@ impl App {
     // does anything else, as in Fusion
     if egui::Popup::is_any_open(ctx) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
       egui::Popup::close_all(ctx);
+      // Fusion's EXPORT DXF: Escape on its open Units list cancels the whole dialog
+      if self.dialog.as_ref().is_some_and(|d| d.kind == dialogs::Kind::ExportDxf) {
+        self.cancel_dialog();
+      }
       return;
     }
     // Esc cancels GRID SETTINGS and SET INCREMENTS, from one of their fields too
@@ -1819,6 +1826,7 @@ impl App {
     }
     data_panel::save_window(self, &ctx);
     file_dialogs::windows(self, &ctx);
+    dialogs::save_window(self, &ctx);
     updates::window(self, &ctx);
     capture::windows(self, &ctx);
     navbar::ground_offset_window(self, &ctx);

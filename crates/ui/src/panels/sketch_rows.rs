@@ -67,8 +67,8 @@ fn sketch_plane(app: &App, fid: FeatureId) -> Option<(Value, String)> {
   }
 }
 
-/// A sketch row's menu, as Fusion's (`None` is a separator). Move to Group, Create Selection Set,
-/// Redefine Sketch Plane and Slice Sketch are listed greyed; Slice Sketch is missing while the
+/// A sketch row's menu, as Fusion's (`None` is a separator). Move to Group, Create Selection Set
+/// and Slice Sketch are listed greyed; Slice Sketch is missing while the
 /// sketch is hidden, as in Fusion.
 pub(crate) fn sketch_menu(app: &App, fid: FeatureId) -> Vec<Option<RowItem>> {
   let profiles = !app.hidden_profiles.contains(&fid);
@@ -85,7 +85,7 @@ pub(crate) fn sketch_menu(app: &App, fid: FeatureId) -> Vec<Option<RowItem>> {
     row_item(Icon::Plane, "Offset Plane", on_plane(RowCmd::OffsetPlane)),
     None,
     row_item(Icon::Sketch, "Edit Sketch", RowCmd::EditSketch),
-    row_item(Icon::Plane, "Redefine Sketch Plane", RowCmd::NotYet),
+    row_item(Icon::Plane, "Redefine Sketch Plane", RowCmd::RedefinePlane),
     row_item(Icon::Select, "Select Sketch Plane", on_plane(RowCmd::SelectSketchPlane)),
   ];
   if visible {
@@ -162,13 +162,17 @@ pub(crate) fn run_sketch_cmd(app: &mut App, fid: FeatureId, name: &str, cmd: Row
         app.look_at_plane(&plane);
       }
     }
+    // Fusion's EXPORT DXF dialog (unit, visible geometry), whose OK asks where to save
     RowCmd::SaveAsDxf => {
-      let Some(p) = rfd::FileDialog::new().add_filter("DXF", &["dxf"]).set_file_name(format!("{name}.dxf")).save_file()
-      else {
-        return;
-      };
-      if app.run("export", json!({"path": p, "sketch": fid.0})).is_some() {
-        app.status = Some((format!("Saved {name} as {}", p.display()), false));
+      app.start(crate::dialogs::Kind::ExportDxf);
+      if let Some(d) = app.dialog.as_mut() {
+        d.dxf_begin(&app.s, fid);
+      }
+    }
+    RowCmd::RedefinePlane => {
+      app.start(crate::dialogs::Kind::RedefinePlane);
+      if let Some(d) = app.dialog.as_mut() {
+        d.redefine_begin(&mut app.s, fid);
       }
     }
     RowCmd::FindInWindow => marking::find_in_window(app, &[], Some(fid)),
@@ -380,7 +384,7 @@ mod tests {
     assert_eq!(keys(&items), [("Extrude".into(), "E"), ("Delete".into(), "Del"), ("Show/Hide".into(), "V")]);
     let greyed: Vec<String> =
       items.iter().flatten().filter(|i| i.cmd == RowCmd::NotYet).map(|i| i.label.clone()).collect();
-    assert_eq!(greyed, ["Move to Group", "Create Selection Set", "Redefine Sketch Plane", "Slice Sketch", "Configure"]);
+    assert_eq!(greyed, ["Move to Group", "Create Selection Set", "Slice Sketch", "Configure"]);
     // the toggles read the other way once used
     for cmd in [
       RowCmd::ProfileVisibility,

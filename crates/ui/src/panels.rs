@@ -2163,6 +2163,8 @@ pub(crate) enum RowCmd {
   ConstructionVisibility,
   FindInTimeline,
   ConvertDesignType,
+  /// A sketch row's Redefine Sketch Plane.
+  RedefinePlane,
 }
 
 /// One row of a browser context menu.
@@ -3718,6 +3720,8 @@ mod sketch_rows;
 mod timeline_groups;
 
 pub(crate) use browser_rows::{doc_name, unsaved as is_unsaved, window_title};
+#[cfg(test)]
+pub(crate) use sketch_rows::run_sketch_cmd;
 pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};
 
 #[cfg(test)]

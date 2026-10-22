@@ -175,9 +175,9 @@ pub(crate) fn name_field(ui: &mut egui::Ui, text: &mut String, first: &mut bool)
   out.response.response
 }
 
-/// Whether one of the modal windows (Save, Open, Export) shows: the app's shortcuts wait.
+/// Whether one of the modal windows (Save, Open, Export, a sketch's Export DXF) shows: the app's shortcuts wait.
 pub(crate) fn modal_open(app: &App) -> bool {
-  app.data.save.is_some() || app.files.open.is_some() || app.files.export.is_some()
+  app.data.save.is_some() || app.files.open.is_some() || app.files.export.is_some() || app.export_dxf.is_some()
 }
 
 /// Escape closes the docked 3D PRINT dialog, the Image Options window and the data panel's
