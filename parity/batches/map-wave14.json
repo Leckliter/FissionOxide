@@ -1,0 +1,8 @@
+{
+  "ui:toolbar:tooltip-style": "ui-toolbar-tooltips",
+  "ui:toolbar:tooltip-expanded-illustration": "ui-toolbar-tooltips",
+  "ui:toolbar:tooltip-texts-solid": "ui-toolbar-tooltips",
+  "ui:toolbar:row-options-menu": "ui-toolbar-customize-2",
+  "ui:toolbar:change-shortcut-dialog": "ui-toolbar-customize-2",
+  "ui:toolbar:shortcuts-toolbox-style": "ui-toolbar-customize-2"
+}

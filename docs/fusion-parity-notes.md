@@ -361,3 +361,15 @@ greyed, and Save As DXF goes straight to the Windows file dialog where Fusion as
 visible geometry first. 12 rows in three batches (`parity/batches/map-wave13.json`), eight match
 rows, twelve verified (the wave-9/10 browser rows and the sketch selection feedback colours).
 Desktop control was denied three times before the user approved it.
+
+## 2026-10-21, prober 7 (continued): SOLID ribbon tooltips, pin/unpin, shortcut customisation
+
+Every SOLID ribbon button hovered for 1 s and 4 s in both apps, then the CREATE > Extrude row's
+options, pin/unpin, Change Keyboard Shortcut and the S toolbox (report
+`parity/reports/2026-10-21-ribbon-tooltips.md`). Fusion's tooltip is a dark panel with the
+shortcut in the title, two paragraphs at once and a large illustration plus "Press Ctrl+/ for
+more help." after 3 s; FissionOxide's is a light panel with one line, a "Shortcut:" row and its own
+icon, and every text differs (Fusion's 20 texts are in the batch). Fusion's row options are two
+checkboxes and a dialog entry; its shortcut dialog is a modal with hints and Reset to default.
+6 rows in two batches (`parity/batches/map-wave14.json`), five match rows, two verified
+(`row-options-glyph`, `tooltip-style`).
