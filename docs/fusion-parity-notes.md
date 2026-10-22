@@ -332,3 +332,19 @@ in five batches (`parity/batches/map-wave11.json`), five match rows, three verif
 (`heads-up-units-and-lock`, `glyph-style-create-tools`, `palette-linetype`), two reopened
 (`constraint-tool-flow`, `constraint-glyphs`). Trap: the Claude overlay swallowed FissionOxide's
 palette checkbox clicks at x >= 1040 until the window was dragged left.
+
+## 2026-10-21, prober 6: Sketch Palette remainder, heads-up input, sketch display
+
+Look At, Slice, 3D Sketch, Centerline and Feature Options for every CREATE and MODIFY tool, the
+Rectangle / Circle / Arc / Slot / Polygon heads-up boxes with expressions and a parameter name,
+the dimension box's kebab menu and Enter on an empty box, and the sketch display colours (report
+`parity/reports/2026-10-21-palette-hud-display.md`). FissionOxide enters an XY sketch from the
+back (BACK, +X left) where Fusion shows FRONT; a "d1*2" heads-up expression is ignored and a
+leading letter is swallowed; the kebab menu lists Change Parameters / Delete where Fusion lists
+recent values and Measure; centerlines and construction draw grey even dashes where Fusion draws
+tan dash-dot / dashes; profile fills are nearly white inside the sketch and steel blue outside
+where Fusion uses (230,245,250) both ways; Fusion's Slice hatches the section and 3D Sketch adds a
+triad to the Line tool. 17 rows in three batches (`parity/batches/map-wave12.json`), seven match
+rows, nine verified, three reopened (`profile-color-3d`, `look-at-sketch-up`,
+`point-glyph-style`). Desktop control of fissionoxide.exe was denied twice before the user
+approved it; Fusion's side was recorded meanwhile.

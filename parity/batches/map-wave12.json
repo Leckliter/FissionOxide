@@ -1,0 +1,19 @@
+{
+  "ui:sketch:look-at-tooltip": "ui-sketch-palette-look-slice-3d",
+  "ui:sketch:slice-section-look": "ui-sketch-palette-look-slice-3d",
+  "ui:sketch:3d-sketch-manipulator": "ui-sketch-palette-look-slice-3d",
+  "ui:sketch:feature-options-line-blend": "ui-sketch-palette-look-slice-3d",
+  "ui:sketch:centerline-style": "ui-sketch-linetype-and-colors",
+  "ui:sketch:construction-color": "ui-sketch-linetype-and-colors",
+  "ui:sketch:construction-on-centerline": "ui-sketch-linetype-and-colors",
+  "ui:sketch:curve-idle-color": "ui-sketch-linetype-and-colors",
+  "ui:sketch:grid-label-style": "ui-sketch-linetype-and-colors",
+  "ui:sketch:hud-parameter-expression": "ui-sketch-hud-expressions",
+  "ui:sketch:hud-letter-first-key": "ui-sketch-hud-expressions",
+  "ui:sketch:hud-expression-normalised": "ui-sketch-hud-expressions",
+  "ui:sketch:rectangle-heads-up-layout": "ui-sketch-hud-expressions",
+  "ui:sketch:dim-box-menu": "ui-sketch-hud-expressions",
+  "ui:sketch:dim-box-empty-enter": "ui-sketch-hud-expressions",
+  "ui:sketch:three-point-arc-third-step": "ui-sketch-hud-expressions",
+  "ui:sketch:circle-diameter-prompt": "ui-sketch-hud-expressions"
+}
