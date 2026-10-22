@@ -79,7 +79,6 @@ pub(crate) const RESERVED: &[(&str, &str, Option<Scope>)] = &[
   ("Enter", "Finish", None),
   ("Backspace", "Delete", None),
   ("F6", "Fit", None),
-  ("Home", "Home View", None),
   ("V", "Show/Hide", None),
   ("X", "Construction", Some(Scope::Sketch)),
 ];
@@ -625,6 +624,7 @@ mod tests {
     assert_eq!(k.conflict("design.Extrude", Scope::Design, "Alt+S", &all), Some(Conflict::Reserved("the S toolbox")));
     // Shift+S is Scripts and Add-Ins' key, not the S toolbox's
     assert_eq!(k.conflict("design.Extrude", Scope::Design, "Shift+S", &all), None);
+    assert_eq!(k.conflict("design.Extrude", Scope::Design, "Home", &all), None);
     assert_eq!(k.conflict("sketch.Line", Scope::Sketch, "X", &all), Some(Conflict::Reserved("Construction")));
     assert_eq!(k.conflict("design.Extrude", Scope::Design, "X", &all), None);
     // changed keys count, not the defaults

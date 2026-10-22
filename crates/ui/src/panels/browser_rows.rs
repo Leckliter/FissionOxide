@@ -838,8 +838,9 @@ mod tests {
     assert_ne!(fox_engine::scene::sketch_visible(&app.s, sk), shown);
     app.s.selection.clear();
     app.status = None;
+    // with nothing selected Show/Hide says nothing, as in Fusion
     app.toggle_visibility();
-    assert_eq!(app.hint.as_deref(), Some("Show/Hide: select bodies, faces or edges first"));
+    assert_eq!((app.hint.as_deref(), app.status.as_ref()), (None, None));
   }
 
   #[test]

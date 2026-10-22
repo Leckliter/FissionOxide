@@ -487,6 +487,8 @@ struct RenderKey {
   palette: palette::SketchPalette,
   /// The plane Create Sketch previews the grid on.
   grid_plane: Option<fox_engine::kernel::Plane>,
+  /// Display Component Colors.
+  component_colors: bool,
   /// The see-through squares drawn over the scene (the origin planes): on the GPU they are
   /// handed over apart from the scene, so the GPU's scene key leaves them out.
   quads: Vec<fox_engine::render::Quad>,
@@ -1260,8 +1262,8 @@ impl App {
     }
     use egui::{Key, Modifiers};
     // File ▸ View's Ctrl+Alt keys, then commands with two or more modifiers: Ctrl+S would take
-    // Ctrl+Alt+S too
-    if file_menu::view_keys(self, ctx) || self.command_keys(ctx, true) {
+    // Ctrl+Alt+S too; the Help rows' Ctrl+/ and Shift+H
+    if file_menu::view_keys(self, ctx) || self.command_keys(ctx, true) || help::keys(self, ctx) {
       return;
     }
     let pressed = |k: Key, m: Modifiers| ctx.input_mut(|i| i.consume_key(m, k));
@@ -1357,9 +1359,6 @@ impl App {
     if pressed(Key::F6, Modifiers::NONE) {
       self.fit_view();
     }
-    if pressed(Key::Home, Modifiers::NONE) {
-      self.go_home();
-    }
     if pressed(Key::V, Modifiers::NONE) {
       self.toggle_visibility();
     }
@@ -1385,7 +1384,10 @@ impl App {
       toolbox::workspace_tabs(self)
     };
     let mut keys: Vec<(egui::Modifiers, egui::Key, panels::Cmd)> = Vec::new();
-    let workspace = menus::commands(&tabs);
+    let part = self.s.design.design_type.is_part();
+    // a Part Design's J and Shift+J (Joint, As-built Joint) do nothing, as in Fusion
+    let workspace: Vec<_> =
+      menus::commands(&tabs).into_iter().filter(|e| !(part && menus::assembly_only(e.cmd))).collect();
     for e in &workspace {
       let key = menus::key_of(&self.prefs, tips::Scope::of(e.tab), e.label);
       if let Some((m, k)) = customize::parse_combo(key)
@@ -1400,7 +1402,7 @@ impl App {
       && self.drawing.is_none()
       && !(self.generative || self.manufacture || self.render.active || self.form.active)
     {
-      for e in menus::commands(&[panels::Tab::Sketch]) {
+      for e in menus::commands(&[panels::Tab::Sketch]).into_iter().filter(|e| !(part && menus::assembly_only(e.cmd))) {
         let key = menus::key_of(&self.prefs, tips::Scope::Sketch, e.label);
         if let Some((m, k)) = customize::parse_combo(key)
           && !keys.iter().any(|(m2, k2, _)| (*m2, *k2) == (m, k))
@@ -1451,7 +1453,7 @@ impl App {
       if ctx.input_mut(|i| i.consume_key(m, k)) {
         match c {
           // these work in a sketch without finishing it
-          Cmd::Delete | Cmd::ComputeAll => c.run(self),
+          Cmd::Delete | Cmd::ComputeAll | Cmd::ComponentColors => c.run(self),
           _ => self.launch(c),
         }
         return true;
@@ -1712,10 +1714,7 @@ impl App {
         _ => {}
       }
     }
-    if bodies.is_empty() && features.is_empty() {
-      self.hint("Show/Hide: select bodies, faces or edges first");
-      return;
-    }
+    // with nothing to show or hide it does nothing and says nothing, as in Fusion
     for f in features {
       if construction::is_construction(self, f) {
         construction::toggle_eye(self, f);
@@ -1727,11 +1726,12 @@ impl App {
     if bodies.is_empty() {
       return;
     }
+    // the bodies stay selected (a hidden one draws as a see-through blue ghost), so V again
+    // shows them, as in Fusion
     for b in bodies {
       let visible = self.s.body_visible(b);
       self.run("body.visible", json!({"body": b.0, "visible": !visible}));
     }
-    self.s.selection.clear();
   }
 
   /// Puts the dialog back after its frame while it stays open; a construction dialog's Type or
@@ -2869,6 +2869,107 @@ mod tests {
       std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert_eq!(app.status, None);
+  }
+
+  fn press_with(app: &mut App, ctx: &egui::Context, key: egui::Key, modifiers: egui::Modifiers, at: egui::Pos2) {
+    let input = egui::RawInput {
+      events: vec![
+        egui::Event::PointerMoved(at),
+        egui::Event::ModifiersChanged(modifiers),
+        egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers },
+      ],
+      ..Default::default()
+    };
+    ctx.run_ui(input, |ui| app.shortcuts(ui.ctx())).drop_without_applying_deltas();
+  }
+
+  /// `ui:shortcuts:v-keeps-selection` and `ui:shortcuts:v-nothing-selected`: V hides a selected
+  /// body and keeps it selected, so V again shows it; with nothing selected it says nothing.
+  #[test]
+  fn v_keeps_the_body_selected_and_is_silent_with_nothing_selected() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let body = app.s.model.bodies[0].id;
+    let mid = app.canvas.center();
+    app.s.selection = vec![Sel::Body { body }];
+    press(&mut app, &ctx, egui::Key::V, mid);
+    assert!(!app.s.body_visible(body));
+    assert_eq!(app.s.selection, [Sel::Body { body }]);
+    press(&mut app, &ctx, egui::Key::V, mid);
+    assert!(app.s.body_visible(body));
+    assert_eq!(app.s.selection, [Sel::Body { body }]);
+    app.s.selection.clear();
+    app.status = None;
+    press(&mut app, &ctx, egui::Key::V, mid);
+    assert_eq!((app.status.clone(), app.hint.clone()), (None, None));
+    assert!(app.s.body_visible(body));
+  }
+
+  /// `ui:shortcuts:home-key`: Home on the canvas leaves the view as it is.
+  #[test]
+  fn home_leaves_the_view() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    app.cam.yaw += 0.7;
+    app.cam.distance *= 0.3;
+    let cam = app.cam;
+    let mid = app.canvas.center();
+    press(&mut app, &ctx, egui::Key::Home, mid);
+    settle_camera(&mut app);
+    assert_eq!(app.cam, cam);
+    assert!(customize::RESERVED.iter().all(|(k, ..)| *k != "Home"));
+  }
+
+  /// `ui:shortcuts:j-in-part-design`: J and Shift+J do nothing in a Part Design, in 3D and in
+  /// a sketch.
+  #[test]
+  fn j_does_nothing_in_a_part_design() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let mid = app.canvas.center();
+    assert!(app.s.design.design_type.is_part());
+    for sketch in [false, true] {
+      if sketch {
+        app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+      }
+      press(&mut app, &ctx, egui::Key::J, mid);
+      press_with(&mut app, &ctx, egui::Key::J, egui::Modifiers::SHIFT, mid);
+      assert!(app.dialog.is_none(), "sketch {sketch}: {:?}", app.dialog.as_ref().map(|d| d.kind));
+    }
+    assert!(!app.command_key_table().iter().any(|(_, k, _)| *k == egui::Key::J));
+  }
+
+  /// `ui:shortcuts:shift-s-scripts`: Shift+S opens Scripts and Add-Ins, not the S toolbox.
+  #[test]
+  fn shift_s_opens_scripts_and_add_ins() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let mid = app.canvas.center();
+    press_with(&mut app, &ctx, egui::Key::S, egui::Modifiers::SHIFT, mid);
+    assert!(app.toolbox.is_none());
+    assert!(app.plugins.open);
+    app.plugins.open = false;
+    press_with(&mut app, &ctx, egui::Key::S, egui::Modifiers::NONE, mid);
+    assert!(app.toolbox.is_some() && !app.plugins.open);
+  }
+
+  /// `ui:shortcuts:shift-n-component-colors`: Shift+N turns Display Component Colors on and
+  /// off, in 3D and in a sketch (which stays open).
+  #[test]
+  fn shift_n_toggles_component_colors() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let mid = app.canvas.center();
+    press_with(&mut app, &ctx, egui::Key::N, egui::Modifiers::SHIFT, mid);
+    assert!(app.ctx_menu.component_colors);
+    assert!(viewport::scene_options(&mut app).component_colors);
+    press_with(&mut app, &ctx, egui::Key::N, egui::Modifiers::SHIFT, mid);
+    assert!(!app.ctx_menu.component_colors);
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sketch = app.s.edit_sketch;
+    press_with(&mut app, &ctx, egui::Key::N, egui::Modifiers::SHIFT, mid);
+    assert!(app.ctx_menu.component_colors);
+    assert_eq!(app.s.edit_sketch, sketch);
   }
 
   #[test]

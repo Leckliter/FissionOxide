@@ -295,6 +295,7 @@ mod tests {
       palette: Default::default(),
       ghosts: Vec::new(),
       grid_plane: None,
+      component_colors: false,
       quads: Vec::new(),
       tints: Vec::new(),
     };

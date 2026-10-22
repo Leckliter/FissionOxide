@@ -632,3 +632,58 @@ fn construction_visibility_hides_planes_axes_and_points() {
   run(&mut s, "sketch.finish", json!({}));
   assert!(s.execute("construction.visible", &json!({"feature": sketch, "visible": false})).is_err());
 }
+
+/// Show/Hide on a selected body keeps it selected: it draws as a see-through selection-blue
+/// ghost with no edges until the selection goes, as in Fusion.
+#[test]
+fn a_hidden_body_still_selected_draws_as_a_blue_ghost() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
+  let body = s.model.bodies[0].id;
+  run(&mut s, "body.visible", json!({"body": body.0, "visible": false}));
+  // the body's face meshes' colours and its edge lines
+  let drawn = |s: &Session| {
+    let (sc, picks) = SceneBuilder::default().build(s, &ViewOptions::default());
+    let faces: Vec<[u8; 4]> = sc
+      .meshes
+      .iter()
+      .filter(|m| matches!(m.tri_ids.first().and_then(|id| picks.get(*id)), Some(Pick::Face { .. })))
+      .map(|m| m.color)
+      .collect();
+    let edges = sc.lines.iter().filter(|l| matches!(picks.get(l.id), Some(Pick::Edge { .. }))).count();
+    (faces, edges)
+  };
+  assert_eq!(drawn(&s), (vec![], 0), "a hidden body draws nothing");
+  s.selection = vec![Sel::Body { body }];
+  let (faces, edges) = drawn(&s);
+  let ghost = [scene::SELECT_COLOR[0], scene::SELECT_COLOR[1], scene::SELECT_COLOR[2], scene::HIDDEN_SELECTED_ALPHA];
+  assert!(!faces.is_empty() && faces.iter().all(|c| *c == ghost), "{faces:?}");
+  assert_eq!(edges, 0, "no edges on the ghost");
+  // shown again, it is the solid selection blue with its edges
+  run(&mut s, "body.visible", json!({"body": body.0, "visible": true}));
+  let (faces, edges) = drawn(&s);
+  assert!(!faces.is_empty() && faces.iter().all(|c| *c == scene::SELECT_COLOR) && edges > 0);
+}
+
+/// Display Component Colors draws each body in its component's colour (the root's first), over
+/// its own appearance, and the appearance comes back when it is turned off.
+#[test]
+fn component_colors_draw_bodies_in_their_components_colour() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
+  let body = s.model.bodies[0].id;
+  run(&mut s, "body.appearance", json!({"body": body.0, "appearance": "Copper"}));
+  let colors = |s: &Session, on: bool| -> Vec<[u8; 4]> {
+    let (sc, _) = SceneBuilder::default().build(s, &ViewOptions { component_colors: on, ..Default::default() });
+    sc.meshes.iter().map(|m| m.color).collect()
+  };
+  let root = scene::component_color(None);
+  assert_eq!(root, scene::COMPONENT_COLORS[0]);
+  assert!(!colors(&s, false).contains(&root));
+  assert!(colors(&s, true).iter().all(|c| *c == root), "{:?}", colors(&s, true));
+  let id = s.design.add_component("Part A", vec![body]).unwrap();
+  let own = scene::component_color(Some(id));
+  assert_ne!(own, root);
+  assert!(colors(&s, true).iter().all(|c| *c == own));
+  assert!(!colors(&s, false).contains(&own));
+}

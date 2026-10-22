@@ -347,7 +347,7 @@ const INSPECT: &[E] = &[
   E::Sep,
   x("Navigator", Icon::Navigator),
   E::Sep,
-  x("Display Component Colors", Icon::ComponentColors).k("Shift+N"),
+  c("Display Component Colors", Icon::ComponentColors, Cmd::ComponentColors).k("Shift+N"),
   x("Display Mesh Face Groups", Icon::FaceGroups).k("Shift+F"),
   E::Sep,
   x("History", Icon::History),
@@ -375,8 +375,8 @@ const INSERT: &[E] = &[
 const ASSEMBLE: &[E] = &[x("Add To Assembly", Icon::AddToAssembly)];
 
 /// FissionOxide's component and joint commands, which Fusion's ASSEMBLE lists only in an
-/// assembly design: not in a Part Design's dropdown, still found by the S toolbox and the
-/// keyboard shortcuts (J, Shift+J).
+/// assembly design: not in a Part Design's dropdown, still found by the S toolbox. Their keys
+/// (J, Shift+J) do nothing in a Part Design, as in Fusion (see [`assembly_only`]).
 const ASSEMBLE_MORE: &[E] = &[
   c("New Component", Icon::Component, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
@@ -842,6 +842,12 @@ const SKETCH_MODIFY_MORE: &[E] = &[
   c("Remove Duplicates", Icon::SkRemoveDuplicates, D(Kind::Form(&forms::SK_REMOVE_DUPLICATES))),
   c("Clean Up", Icon::SkCleanup, D(Kind::Form(&forms::SK_CLEANUP))),
 ];
+
+/// A command Fusion has only in an assembly design (one of [`ASSEMBLE_MORE`]'s): its key does
+/// nothing in a Part Design.
+pub(crate) fn assembly_only(cmd: Cmd) -> bool {
+  ASSEMBLE_MORE.iter().any(|e| matches!(e, E::I(Item { cmd: Some(c), .. }) if *c == cmd))
+}
 
 /// A tab's commands that its dropdowns don't show (see [`SKETCH_MODIFY_MORE`], [`ASSEMBLE_MORE`]
 /// and [`CAM_MORE`]).
@@ -1376,7 +1382,7 @@ const UTIL_INSPECT: &[E] = &[
   E::Sep,
   x("Navigator", Icon::Navigator),
   E::Sep,
-  x("Display Component Colors", Icon::ComponentColors).k("Shift+N"),
+  c("Display Component Colors", Icon::ComponentColors, Cmd::ComponentColors).k("Shift+N"),
   x("Display Mesh Face Groups", Icon::FaceGroups).k("Shift+F"),
   E::Sep,
   x("History", Icon::History),

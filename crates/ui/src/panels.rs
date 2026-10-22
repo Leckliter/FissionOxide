@@ -152,7 +152,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           ui.spacing_mut().item_spacing.x = 4.0;
           avatar(app, ui);
           let help = bar_icon(ui, Icon::Help, "Help", true);
-          egui::Popup::menu(&help).show(|ui| help_menu(app, ui));
+          egui::Popup::menu(&help).show(|ui| crate::help::menu(app, ui));
           // the bell opens the Notifications panel under it; the dot shows while there is news
           let bell = bar_icon(ui, Icon::Bell, "Notifications", true);
           if bell.clicked() {
@@ -169,7 +169,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           ui.painter().rect(r, 3.0, theme::CONTEXT_TAB, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
           icons::draw_color(ui.painter(), r.shrink(5.0), Icon::Assistant);
           if resp.on_hover_text("Autodesk Assistant").clicked() {
-            app.status = Some(("The Autodesk Assistant isn't part of FissionOxide".into(), false));
+            crate::help::assistant(app);
           }
           if icons::icon_button(ui, Icon::Configure, 28.0, "Plugins", app.plugins.open, None).clicked() {
             crate::plugins_ui::open_window(app);
@@ -313,47 +313,6 @@ pub(crate) fn file_menu_action(app: &mut App, label: &str) {
   }
 }
 
-/// Fusion's Help (?) menu, less what FissionOxide has no counterpart for (Quick Setup waits for
-/// the Preferences dialog).
-fn help_menu(app: &mut App, ui: &mut egui::Ui) {
-  ui.set_min_width(260.0);
-  if ui.button("Learning and Documentation").on_hover_text(crate::help::DOCS).clicked() {
-    ui.close();
-    crate::help::open(app, crate::help::DOCS);
-  }
-  if ui.button("Keyboard Shortcuts").on_hover_text("Every key FissionOxide binds").clicked() {
-    ui.close();
-    app.help.shortcuts = true;
-  }
-  if ui.button("What's New").on_hover_text("This version's release notes").clicked() {
-    ui.close();
-    crate::help::whats_new(app);
-  }
-  ui.separator();
-  if ui.button("Diagnostic Log").on_hover_text("Open the folder with FissionOxide's log").clicked() {
-    ui.close();
-    crate::help::diagnostic_log(app);
-  }
-  if ui.button(app.updates.menu_label()).clicked() {
-    ui.close();
-    app.updates.check_now();
-  }
-  ui.separator();
-  ui.label(RichText::new("Navigation").strong());
-  let nav = app.preferences.values.nav;
-  {
-    use crate::preferences::NavAction::*;
-    ui.label(format!("Orbit: {} · Pan: {} · Zoom: {}", nav.describe(Orbit), nav.describe(Pan), nav.describe(Zoom)));
-  }
-  ui.separator();
-  ui.horizontal(|ui| {
-    let (r, _) = ui.allocate_exact_size(vec2(20.0, 22.0), egui::Sense::hover());
-    logo::paint(ui.painter(), r);
-    ui.label(RichText::new("FissionOxide").strong());
-    ui.label(RichText::new(format!("{} · parametric CAD on OpenCASCADE", fox_desktop::VERSION)).color(theme::MUTED));
-  });
-}
-
 /// The profile button; its menu has Preferences, as in Fusion.
 fn avatar(app: &mut App, ui: &mut egui::Ui) {
   let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::click());
@@ -436,6 +395,8 @@ pub(crate) enum Cmd {
   ManageMaterials,
   /// INSPECT > Properties: show or hide the docked Properties panel.
   Properties,
+  /// INSPECT > Display Component Colors: bodies and timeline icons in their component's colour.
+  ComponentColors,
   /// A Form workspace command (see [`crate::form_ui`]).
   Form(crate::form_ui::Act),
   /// Generative Design: study, preserve, obstacle, start, load, constraint, criteria,
@@ -555,7 +516,7 @@ impl Cmd {
       Cmd::Print3d => (Icon::Print3d, "3D Print", "Export the design as an STL mesh for printing"),
       Cmd::LookAt => (Icon::LookAt, "Look At", "Look at the sketch plane or a selected planar face"),
       Cmd::Fit => (Icon::Fit, "Fit", "Fit the design in the view (F6)"),
-      Cmd::Home => (Icon::Views, "Home View", "Go to the home view (Home)"),
+      Cmd::Home => (Icon::Views, "Home View", "Go to the home view"),
       Cmd::ToggleVisibility => (Icon::Eye, "Show/Hide", "Show or hide the selected bodies"),
       Cmd::DrawingView(k) => match k {
         "section" => (Icon::SectionView, "Section View", "A view cut across the part"),
@@ -664,6 +625,11 @@ impl Cmd {
         "Properties",
         "A panel with the type, geometry and overall size of the selection (or of the whole design)",
       ),
+      Cmd::ComponentColors => (
+        Icon::ComponentColors,
+        "Display Component Colors",
+        "Show each component's bodies and timeline features in the component's colour",
+      ),
       Cmd::SketchLibrary => {
         (Icon::SketchLibrary, "Sketch Library...", "Place DXF, SVG or .fox library parts where you click in the sketch")
       }
@@ -713,6 +679,7 @@ impl Cmd {
       Cmd::WindowSelect => app.sel_mode == crate::select::Mode::Window,
       Cmd::SelectMode(m) => app.sel_mode == m,
       Cmd::Properties => crate::props_ui::is_open(),
+      Cmd::ComponentColors => app.ctx_menu.component_colors,
       Cmd::Render(r) => r.active(app),
       Cmd::Anim(a) => a.active(app),
       _ => false,
@@ -830,6 +797,7 @@ impl Cmd {
       Cmd::Plugins => crate::plugins_ui::open_window(app),
       Cmd::ManageMaterials => crate::material_ui::open_browser(app),
       Cmd::Properties => crate::props_ui::toggle(),
+      Cmd::ComponentColors => app.ctx_menu.component_colors = !app.ctx_menu.component_colors,
       Cmd::SketchLibrary => crate::library_ui::open(app),
       Cmd::Render(r) => r.run(app),
       Cmd::Anim(a) => a.run(app),
@@ -3866,14 +3834,17 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 1.0;
-        let features: Vec<(FeatureId, String, Icon, icons::Tint, bool)> = app
+        let features: Vec<(FeatureId, String, Icon, icons::Tint, bool, Option<Color32>)> = app
           .s
           .design
           .features
           .iter()
           .enumerate()
           .filter(|(i, _)| !hidden.hides(*i))
-          .map(|(_, f)| (f.id, f.name.clone(), feature_icon(&f.kind), feature_tint(&f.kind), f.suppressed))
+          .map(|(_, f)| {
+            let comp = app.ctx_menu.component_colors.then(|| feature_component_color(app, f.id));
+            (f.id, f.name.clone(), feature_icon(&f.kind), feature_tint(&f.kind), f.suppressed, comp)
+          })
           .collect();
         let mut rects = Vec::with_capacity(features.len());
         // the dragged marker rolls the model as it goes: it fades only where the model lags
@@ -3884,7 +3855,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
         let mut collapsed: Option<(Rect, usize)> = None;
         // expanded groups with their first and last items, for the bracket under them
         let mut brackets: Vec<(timeline_groups::Shown, usize, usize)> = Vec::new();
-        for (i, (id, name, icon, tint, suppressed)) in features.into_iter().enumerate() {
+        for (i, (id, name, icon, tint, suppressed, comp)) in features.into_iter().enumerate() {
           if let Some((rect, last)) = collapsed {
             if i <= last {
               rects.push(rect);
@@ -3963,6 +3934,8 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
           }
           if dim {
             icons::draw(p, ir, icon, Color32::from_gray(185));
+          } else if let Some(c) = comp {
+            icons::draw(p, ir, icon, c);
           } else {
             icons::draw_tinted(p, ir, icon, tint);
           }
@@ -4455,6 +4428,15 @@ fn paint_marker(p: &egui::Painter, x: f32, top: f32, bottom: f32, c: Color32) {
   ));
 }
 
+/// A timeline icon's colour under Display Component Colors: the colour of the component that
+/// owns what the feature made (the root's for a sketch or a feature that made nothing).
+pub(crate) fn feature_component_color(app: &App, f: FeatureId) -> Color32 {
+  let made = app.s.feature_made(f);
+  let body = made.bodies.first().copied().or(made.faces.first().map(|(b, _)| *b));
+  let c = fox_engine::scene::component_color(body.and_then(|b| app.s.design.component_of(b)).map(|c| c.id));
+  Color32::from_rgb(c[0], c[1], c[2])
+}
+
 /// The colour family of a feature's timeline icon: orange for the surface features, as Fusion
 /// draws them (and as the SURFACE tab's menus do), otherwise the icon's own.
 pub(crate) fn feature_tint(k: &FeatureKind) -> icons::Tint {
@@ -4689,6 +4671,26 @@ pub(crate) use timeline_bar::Playback;
 #[cfg(test)]
 mod row_menu_tests {
   use super::*;
+
+  /// Display Component Colors gives timeline icons the colour of the component that owns what
+  /// the feature made, the root's for sketches.
+  #[test]
+  fn component_colors_tint_timeline_icons_by_component() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let sk = app.s.edit_sketch.expect("sketching");
+    app.run("extrude", json!({"sketch": sk.0, "distance": 5}));
+    let ext = app.s.design.features.last().unwrap().id;
+    let rgb = |c: [u8; 4]| Color32::from_rgb(c[0], c[1], c[2]);
+    let root = rgb(fox_engine::scene::component_color(None));
+    assert_eq!(feature_component_color(&app, sk), root);
+    assert_eq!(feature_component_color(&app, ext), root);
+    let body = app.s.model.bodies[0].id;
+    let id = app.s.design.add_component("Part A", vec![body]).unwrap();
+    assert_eq!(feature_component_color(&app, ext), rgb(fox_engine::scene::component_color(Some(id))));
+    assert_eq!(feature_component_color(&app, sk), root);
+  }
 
   /// Surface features show orange icons in the timeline, as Fusion's (and the SURFACE tab's
   /// menus) do; solid features keep their own colours.
