@@ -41,6 +41,9 @@ pub(super) fn form_icon(key: &str) -> Option<Icon> {
   match key {
     "to_next" => Some(Icon::ToNext),
     "depth" => Some(Icon::ExtentDistance),
+    // Reduce's Remesh Type
+    "adaptive" => Some(Icon::RemeshAdaptive),
+    "uniform" => Some(Icon::RemeshUniform),
     k => extrude_icon(k),
   }
 }

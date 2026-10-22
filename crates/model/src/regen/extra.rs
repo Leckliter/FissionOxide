@@ -493,7 +493,8 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::Mesh { bodies, op, amount } => {
+      FeatureKind::Mesh { settings: Some(_), .. } | FeatureKind::MeshPlaneCut { .. } => self.apply_mesh(id, kind),
+      FeatureKind::Mesh { bodies, op, amount, settings: None } => {
         let amount = fox_expr::eval(amount, fox_expr::Kind::Unitless, self.params).map_err(|e| e.to_string())?;
         for b in bodies.iter() {
           let bi = self.body_index(*b)?;

@@ -185,6 +185,78 @@ pub enum MeshOp {
   Convert,
 }
 
+/// The settings of Fusion's Reduce, Smooth and Convert Mesh dialogs. A mesh feature saved before
+/// them has none and rebuilds as it did (`amount` a fraction kept or a number of passes, the
+/// body converted in place). With them `amount` is Reduce's tolerance (mm), proportion (percent
+/// kept) or face count, as `reduce` says, and Smooth's smoothness (0–1); Convert Mesh makes a new
+/// body and leaves the mesh.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshSettings {
+  #[serde(default)]
+  pub reduce: ReduceType,
+  /// Reduce's Remesh Type: Uniform evens out the triangles' sizes, Adaptive (the default) keeps
+  /// them small where the surface curves.
+  #[serde(default)]
+  pub uniform: bool,
+  #[serde(default)]
+  pub method: ConvertMethod,
+  /// Convert Mesh's Operation: a base feature rather than a parametric one.
+  #[serde(default)]
+  pub base_feature: bool,
+}
+
+/// What Reduce's value is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReduceType {
+  /// The furthest the reduced surface may move from the original (mm).
+  Tolerance,
+  /// The percentage of the triangles kept.
+  #[default]
+  Proportion,
+  /// The number of triangles kept.
+  FaceCount,
+}
+
+/// The faces Convert Mesh gives the solid.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConvertMethod {
+  /// One face per triangle.
+  #[default]
+  Faceted,
+  /// Coplanar triangles merged into flat faces.
+  Prismatic,
+  /// Smooth surfaces fitted to the mesh (not in FissionOxide yet).
+  Organic,
+}
+
+/// What Plane Cut does with the body.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaneCutType {
+  /// Remove the part in front of the plane.
+  #[default]
+  Trim,
+  /// Both parts, as two bodies.
+  SplitBody,
+  /// Split the triangles along the plane, keeping one body.
+  SplitFaces,
+}
+
+/// How Plane Cut closes the opening it leaves.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FillType {
+  /// Left open.
+  None,
+  /// Even triangles across the opening.
+  #[default]
+  Uniform,
+  /// As few triangles as close it.
+  Minimal,
+}
+
 impl PointRef {
   pub(crate) fn feature(&self) -> Option<FeatureId> {
     match self {

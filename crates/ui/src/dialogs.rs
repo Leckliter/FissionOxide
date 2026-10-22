@@ -25,9 +25,13 @@ pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod copies;
 mod export_dxf;
+#[cfg(test)]
+mod mesh_tests;
 mod newcomp;
+mod plane_cut;
 mod primitive;
 mod redefine;
+pub(crate) use plane_cut::overlay as plane_cut_overlay;
 #[cfg(test)]
 mod sketch_row_tests;
 mod solid;
@@ -124,6 +128,8 @@ pub enum Kind {
   RedefinePlane,
   /// Export DXF (a sketch row's menu): the unit and the geometry, then where to save.
   ExportDxf,
+  /// Plane Cut on the MESH tab (see [`plane_cut`]).
+  PlaneCut,
 }
 
 impl Kind {
@@ -149,6 +155,7 @@ impl Kind {
       Kind::Appearance => "APPEARANCE",
       Kind::RedefinePlane => "REDEFINE SKETCH PLANE",
       Kind::ExportDxf => "EXPORT DXF",
+      Kind::PlaneCut => "PLANE CUT",
       Kind::Loft => "LOFT",
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
@@ -222,6 +229,7 @@ impl Kind {
       Kind::Appearance => Icon::Appearance,
       Kind::RedefinePlane => Icon::Plane,
       Kind::ExportDxf => Icon::ExportDxf,
+      Kind::PlaneCut => Icon::PlaneCut,
       Kind::Loft => Icon::Loft,
       Kind::Sweep => Icon::Sweep,
       Kind::Hole => Icon::Hole,
@@ -332,6 +340,7 @@ impl Kind {
       Kind::Appearance => ("Appearance", "Drag appearances onto bodies or faces (A)"),
       Kind::RedefinePlane => ("Redefine Sketch Plane", "Put the sketch on another plane or planar face"),
       Kind::ExportDxf => ("Export DXF", "Save the sketch as a DXF file"),
+      Kind::PlaneCut => ("Plane Cut", "Cut a mesh body with a plane: trim it, split it in two or split its faces"),
       _ => (self.title(), ""),
     };
     (self.icon(), name, hint)
@@ -358,6 +367,7 @@ impl Kind {
         | Kind::Joint
         | Kind::AsBuiltJoint
         | Kind::Refold
+        | Kind::PlaneCut
     )
   }
 
@@ -601,6 +611,8 @@ pub struct Dialog {
   /// Mirror's plane or Circular Pattern's axis as last picked from the selection: only a new
   /// pick replaces the one in the dialog (see [`copies`]).
   last_pick: Value,
+  /// Plane Cut's plane and settings (see [`plane_cut`]).
+  plane_cut: plane_cut::State,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -713,7 +725,7 @@ impl Dialog {
       saved_filter: None,
       palette: Default::default(),
       mv: move_copy::MoveForm::default(),
-      live: live::Live::default(),
+      live: live::Live::for_kind(kind),
       follow: false,
       sheet_picks: 0,
       comp_name: String::new(),
@@ -730,6 +742,7 @@ impl Dialog {
       switch: None,
       ghosts: Vec::new(),
       last_pick: Value::Null,
+      plane_cut: plane_cut::State::default(),
     }
   }
 
@@ -877,6 +890,11 @@ impl Dialog {
         d.plane_label = "XY plane".into();
       }
       Kind::SplitBody => d.bodies = sel_only_bodies(s),
+      // the body: a picked body, or the body of a picked face (a mesh's faces aren't planes to cut with)
+      Kind::PlaneCut => {
+        d.bodies = sel_bodies(s).into_iter().take(1).collect();
+        d.faces.clear();
+      }
       Kind::Interference => d.flag = true,
       Kind::DriveJoint | Kind::MotionStudy => {
         d.target = joints(s).first().map(|(id, _)| *id);
@@ -1642,6 +1660,7 @@ impl Dialog {
       Kind::Move => self.move_command()?,
       Kind::RedefinePlane => self.redefine_command()?,
       Kind::ExportDxf => return None,
+      Kind::PlaneCut => self.plane_cut_command()?,
     })
   }
 
@@ -1818,6 +1837,7 @@ impl Dialog {
       Kind::DrawingView => self.target.is_some() && (self.choice != "flat" || !self.bodies.is_empty()),
       Kind::RedefinePlane => self.sketch.is_some() && self.redefine.picked.is_some(),
       Kind::ExportDxf => self.sketch.is_some(),
+      Kind::PlaneCut => self.plane_cut_ready(),
       _ => true,
     }
   }
@@ -2159,6 +2179,7 @@ impl Dialog {
     }
     self.hole_sync(app);
     self.redefine_sync(app);
+    self.plane_cut_sync(app);
     if self.kind == Kind::PickPlane
       && let Some(Sel::Face { body, face }) = app.s.selection.iter().find(|x| matches!(x, Sel::Face { .. })).copied()
     {
@@ -2395,6 +2416,7 @@ impl Dialog {
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
         Kind::Draft => "Select faces to draft".into(),
         Kind::RedefinePlane => redefine::HINT.into(),
+        Kind::PlaneCut => plane_cut::HINT.into(),
         // one prompt for the whole pick, as Fusion words it
         Kind::SkScale => {
           "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
@@ -2412,6 +2434,12 @@ impl Dialog {
     // Mirror's prompt once both picks are in, whatever the pointer is over, as Fusion words it
     if self.kind == Kind::Mirror && self.editing.is_none() {
       return Some("Hold Ctrl to modify object selection or mirror plane".into());
+    }
+    // a mesh dialog keeps naming its settings, as Fusion's do
+    if let Kind::Form(f) = self.kind
+      && crate::forms::mesh_form(f)
+    {
+      return crate::forms::specify_prompt(f).map(String::from);
     }
     if hovering && self.selects() {
       return Some("Hold Ctrl to modify selection".into());
@@ -2542,6 +2570,7 @@ impl Dialog {
       Kind::DrawingMoveView | Kind::DrawingDimension => "pick a view",
       Kind::DrawingView if self.choice == "flat" => "select a sheet metal body",
       Kind::RedefinePlane => "select a planar face or a work plane",
+      Kind::PlaneCut => "select a mesh body and a cut plane",
       _ => "missing input",
     }
   }
@@ -2753,6 +2782,7 @@ impl Dialog {
       Kind::Appearance | Kind::Material => {}
       Kind::RedefinePlane => self.redefine_rows(app, ui),
       Kind::ExportDxf => self.dxf_rows(app, ui),
+      Kind::PlaneCut => self.plane_cut_rows(app, ui),
       Kind::Section => section_fields(app, ui),
       Kind::Analysis(kind) => analysis_fields(app, ui, kind),
       Kind::Form(f) => {
@@ -2853,6 +2883,8 @@ impl Dialog {
             _ if faces_mode => chip_text(faces_picked, if faces_picked == 1 { "face" } else { "faces" }),
             _ if planes > 0 => format!("{} selected", n + planes),
             0 => "Select".to_string(),
+            // a mesh dialog's chip counts, as Fusion's "1 selected"
+            1 if crate::forms::mesh_form(f) => "1 selected".to_string(),
             1 => v[0].as_u64().map(|b| s.body_name(BodyId(b as u32))).unwrap_or_default(),
             n => format!("{n} bodies"),
           };
@@ -3034,6 +3066,20 @@ impl Dialog {
         }
         // counted on the tools' chip
         Input::Planes { .. } => {}
+        Input::Slider { label, max, .. } => {
+          // the value, and a slider under it
+          let mut t = v.as_str().unwrap_or("").to_string();
+          Self::field(ui, label, &mut t, dirty);
+          ui.label("");
+          let mut x: f64 = t.trim().parse().unwrap_or(0.0);
+          let slider = egui::Slider::new(&mut x, 0.0..=*max as f64).show_value(false);
+          if ui.add(slider).changed() {
+            t = format!("{x:.2}");
+            *dirty = true;
+          }
+          ui.end_row();
+          self.form.values[i] = json!(t);
+        }
       }
     }
     if crate::forms::takes_sheet_points(f) {

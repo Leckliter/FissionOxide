@@ -3782,6 +3782,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::FullRoundFillet { .. } => Icon::Fillet,
     FeatureKind::IntersectionCurve { .. } => Icon::SplineFit,
     FeatureKind::Canvas { .. } => Icon::Canvas,
+    FeatureKind::MeshPlaneCut { .. } => Icon::PlaneCut,
   }
 }
 

@@ -34,6 +34,7 @@ mod inspect;
 pub mod library;
 mod made;
 mod mates;
+mod mesh_cmds;
 mod newcomp;
 mod params;
 pub mod properties;
@@ -647,6 +648,8 @@ mod tests_hub_server;
 mod tests_include;
 #[cfg(test)]
 mod tests_mechanism;
+#[cfg(test)]
+mod tests_mesh;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]

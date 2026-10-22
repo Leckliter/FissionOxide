@@ -259,17 +259,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       let bodies = body_list(s, p)?;
       add_feature(s, FeatureKind::ReverseNormal { bodies })
     })(),
-    "mesh.reduce" | "mesh.smooth" | "mesh.convert" => (|| {
-      let bodies = body_list(s, p)?;
-      let (op, default) = match name {
-        "mesh.reduce" => (MeshOp::Reduce, "0.5"),
-        "mesh.smooth" => (MeshOp::Smooth, "3"),
-        _ => (MeshOp::Convert, "1"),
-      };
-      let key = if op == MeshOp::Smooth { "passes" } else { "keep" };
-      let amount = opt_expr(p, key).or_else(|| opt_expr(p, "amount")).unwrap_or_else(|| default.into());
-      add_feature(s, FeatureKind::Mesh { bodies, op, amount })
-    })(),
+    "mesh.reduce" | "mesh.smooth" | "mesh.convert" => crate::mesh_cmds::mesh_tool(s, name, p),
+    "mesh.plane_cut" => crate::mesh_cmds::plane_cut(s, p),
     "body.appearance" => appearance(s, p),
     "appearances" => Ok(json!(
       APPEARANCES
