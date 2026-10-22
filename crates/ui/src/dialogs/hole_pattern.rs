@@ -5,7 +5,8 @@
 
 use egui::{Color32, Pos2, Rect, RichText, Stroke, pos2, vec2};
 use fox_engine::kernel::glam::DVec3;
-use fox_engine::model::{BodyId, FeatureId};
+use fox_engine::model::{BodyId, FeatureId, FeatureKind, HoleKind};
+use fox_engine::sketch::ConstraintKind;
 use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
@@ -30,9 +31,11 @@ pub(super) struct State {
   size: &'static str,
   /// Hole: the drill point's tip angle; flat ("" = angled).
   tip: String,
-  flat: bool,
+  pub(super) flat: bool,
   /// Hole: the Shape Settings group is folded up.
   shape_closed: bool,
+  /// Edit Hole: the placement sketch's dimensions the offsets set (constraint ids, as `edges`).
+  dims: Vec<u32>,
   /// Pattern type: "bodies" ("") or "components".
   pub(super) kind: &'static str,
   /// Directions picked as edges: the edge and its unit direction.
@@ -288,6 +291,84 @@ impl Dialog {
     Some(p)
   }
 
+  /// Edit Feature on a hole: the dialog filled from what it stores. A single hole's Face and
+  /// Reference rows are its placement sketch: the face it sits on and the dimensions holding its
+  /// point from the edges (their values are the offsets).
+  pub(super) fn load_hole(&mut self, s: &Session, kind: &FeatureKind) {
+    let FeatureKind::Hole {
+      sketch,
+      points,
+      kind,
+      diameter,
+      depth,
+      through_all,
+      tip_angle,
+      head_diameter,
+      head_depth,
+      head_angle,
+      flip,
+      placed,
+      ..
+    } = kind
+    else {
+      return;
+    };
+    self.sketch = Some(*sketch);
+    self.choice = match kind {
+      HoleKind::Simple => "simple",
+      HoleKind::Counterbore => "counterbore",
+      HoleKind::Countersink => "countersink",
+    };
+    let or = |v: &String, default: &str| if v.trim() == "0" { default.to_string() } else { v.clone() };
+    self.a = diameter.clone();
+    self.flag = *through_all;
+    self.b = if *through_all { "10 mm".into() } else { depth.clone() };
+    self.c = or(head_diameter, "9 mm");
+    self.d = or(head_depth, "3 mm");
+    self.e = head_angle.clone();
+    self.flip = *flip;
+    self.op = "cut";
+    let hp = &mut self.solid.hp;
+    hp.single = *placed;
+    hp.tap = "simple";
+    // a flat bottom is a 180° tip
+    let angle = |e: &str| fox_engine::expr::eval(e, fox_engine::expr::Kind::Angle, &s.model.params).ok();
+    hp.flat = angle(tip_angle).zip(angle("180 deg")).is_some_and(|(a, f)| (a - f).abs() < 1e-9);
+    hp.tip = if hp.flat { "118 deg".into() } else { tip_angle.clone() };
+    if !*placed {
+      return;
+    }
+    self.faces = vec![Value::Null];
+    let Ok(sk) = s.design.sketch(*sketch) else { return };
+    for c in &sk.constraints {
+      if let ConstraintKind::PointLineDistance { p, value, .. } = &c.kind
+        && points.first() == Some(p)
+        && hp.dims.len() < 2
+      {
+        hp.offsets[hp.dims.len()] = value.expr.clone();
+        hp.dims.push(c.id.0);
+        self.edges.push(Value::Null);
+      }
+    }
+  }
+
+  /// Fields for `feature.edit` on a hole; a single hole's offsets go to its placement sketch's
+  /// dimensions (`{constraint, value}`, which the engine sets there).
+  pub(super) fn hole_edit_set(&self) -> Value {
+    let hp = &self.solid.hp;
+    let mut p = json!({
+      "kind": self.choice, "diameter": self.a, "depth": self.b, "through_all": self.flag, "flip": self.flip,
+      "head_diameter": self.c, "head_depth": self.d, "head_angle": self.e,
+      "tip_angle": if hp.flat { "180 deg".to_string() } else { hp.tip.clone() },
+    });
+    if !hp.dims.is_empty() {
+      let offsets: Vec<Value> =
+        hp.dims.iter().zip(&hp.offsets).map(|(c, v)| json!({"constraint": c, "value": v})).collect();
+      p["offsets"] = json!(offsets);
+    }
+    p
+  }
+
   /// Fusion's Hole dialog: Placement (icons), Face and the two Reference rows (or the sketch and
   /// its points), then the Shape Settings group: Extents, Hole Type, Hole Tap Type, Drill Point
   /// and the hole diagram with its value boxes.
@@ -295,7 +376,8 @@ impl Dialog {
     let accent = self.accent();
     ui.label("Placement");
     let mut placement: &'static str = if self.solid.hp.single { "single" } else { "points" };
-    let switched = icon_row(ui, &mut placement, &PLACEMENTS, "");
+    let creating = self.editing.is_none();
+    let switched = ui.add_enabled_ui(creating, |ui| icon_row(ui, &mut placement, &PLACEMENTS, "")).inner;
     ui.end_row();
     if switched {
       self.withdraw(&mut app.s);
@@ -306,6 +388,8 @@ impl Dialog {
       ui.label("Face");
       let text = match self.faces.first().and_then(|f| ref_of(f, "body")) {
         Some(b) => format!("Face of {}", app.s.body_name(BodyId(b))),
+        // an edited hole's face is its sketch's, as Fusion's chip shows it
+        None if !creating && !self.faces.is_empty() => "1 selected".into(),
         None => "Select".into(),
       };
       sel_chip(ui, accent, &text, !self.faces.is_empty()).on_hover_text("Click a planar face where the hole goes");
@@ -367,7 +451,10 @@ impl Dialog {
     ui.label("Hole Tap Type");
     let tap_before = self.solid.hp.tap;
     let mut tap = if tap_before.is_empty() { "simple" } else { tap_before };
-    *dirty |= icon_row(ui, &mut tap, &TAPS, "needs engine support");
+    // a tapped hole's thread is a feature of its own, so the type is set when the hole is made
+    let row = ui.add_enabled_ui(creating, |ui| icon_row(ui, &mut tap, &TAPS, "needs engine support"));
+    row.response.on_disabled_hover_text("The tap type is set when the hole is made");
+    *dirty |= row.inner;
     ui.end_row();
     self.solid.hp.tap = tap;
     if tap != "simple" {
@@ -577,11 +664,18 @@ impl Dialog {
 
   pub(super) fn pattern_ready(&self) -> bool {
     let dirs_ok = (0..2).all(|k| !self.edge_mode(k) || self.solid.hp.edges[k].is_some());
-    dirs_ok && (self.pattern_kind() != "components" || !self.solid.hp.comps.is_empty())
+    // bodies: nothing picked is nothing to pattern (Fusion has no "all bodies" default)
+    let objects = match self.pattern_kind() {
+      "components" => !self.solid.hp.comps.is_empty(),
+      _ => !self.bodies.is_empty(),
+    };
+    dirs_ok && objects
   }
 
   pub(super) fn pattern_missing(&self) -> &'static str {
-    if (0..2).any(|k| self.edge_mode(k) && self.solid.hp.edges[k].is_none()) {
+    if self.pattern_kind() != "components" && self.bodies.is_empty() {
+      "select solid or surface bodies in the canvas or browser to pattern"
+    } else if (0..2).any(|k| self.edge_mode(k) && self.solid.hp.edges[k].is_none()) {
       "select a straight edge for the direction"
     } else {
       "select bodies of the components to pattern"

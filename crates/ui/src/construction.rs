@@ -1,25 +1,21 @@
 //! Construction planes in the canvas and the browser's Construction folder, as Fusion draws and
 //! picks them: a translucent peach square (the origin planes' colour) twice an origin plane's
-//! size, the same on screen whatever the zoom, centred on the plane's origin; grey under the
+//! square, the same on screen whatever the zoom, centred on the plane's origin; grey under the
 //! pointer, blue when selected, with the plane's name as the status readout ("Plane1"). The
 //! folder and each row have an eye (a plane shows only when both are on, V toggles the row's);
 //! a hidden plane stays drawn while it is selected. Selecting one is a UI-side pick, as an origin
 //! plane's is (`App::picked_plane` holds `{feature}`), so Create Sketch starts on it.
 
-use egui::{Color32, Pos2, Stroke};
+use egui::Pos2;
 use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::DVec3;
 use fox_engine::model::{FeatureId, FeatureKind};
+use fox_engine::render::Quad;
 use serde_json::json;
 
 use crate::App;
 use crate::dialogs::Kind;
-use crate::origin::{Look, PLANE_HOVER, PLANE_PLAIN, PLANE_SELECTED, plane_fill};
-
-/// A plane's edge: a faint darker peach, a darker grey under the pointer, a darker blue selected.
-const EDGE_PLAIN: [u8; 3] = [226, 196, 142];
-const EDGE_HOVER: [u8; 3] = [186, 182, 174];
-const EDGE_SELECTED: [u8; 3] = [70, 126, 186];
+use crate::origin::{Look, PLANE_HOVER, PLANE_PLAIN, PLANE_SELECTED, RowHover};
 
 /// The design's construction planes, in timeline order with their names: committed ones only
 /// (not the plane an open Offset Plane is previewing, which joins the browser on OK).
@@ -58,11 +54,10 @@ pub(crate) fn toggle_eye(app: &mut App, id: FeatureId) {
   app.run("construction.visible", json!({"feature": id.0, "visible": !on}));
 }
 
-/// Shown in the canvas: Object Visibility ▸ Construction (and its Planes) on, the folder's eye
-/// and the plane's own on, and the plane built and not suppressed.
+/// Shown in the canvas: Object Visibility ▸ Construction Planes on, the folder's eye and the
+/// plane's own on, and the plane built and not suppressed.
 pub(crate) fn visible(app: &App, id: FeatureId) -> bool {
-  app.objects.construction
-    && app.objects.construction_planes
+  app.objects.construction_planes
     && app.construction_shown
     && eye(app, id)
     && app.s.model.planes.contains_key(&id)
@@ -113,21 +108,25 @@ fn drawn(app: &App) -> Vec<(FeatureId, Plane)> {
     .collect()
 }
 
-/// Draws the construction planes over the rendered scene in Fusion's plain, hovered and selected
-/// looks.
-pub(crate) fn overlay(app: &App, painter: &egui::Painter, project: &dyn Fn(DVec3) -> Option<Pos2>) {
+/// The construction planes as see-through squares for the renderer (hidden behind bodies, as the
+/// origin planes are), each with a thin edge, in Fusion's plain, hovered or selected colour. A
+/// plane whose browser row is hovered is left to [`crate::origin::plane_quads`], which lights it.
+pub(crate) fn quads(app: &App) -> Vec<Quad> {
   let half = crate::viewport::plane_half_size(app);
+  let px = crate::viewport::origin_plane_size(app) / crate::viewport::ORIGIN_PLANE_PX;
+  let mut out = Vec::new();
   for (id, pl) in drawn(app) {
-    let corners = crate::viewport::plane_square(&pl, pl.origin, half);
-    let Some(pts) = corners.iter().map(|p| project(*p)).collect::<Option<Vec<Pos2>>>() else { continue };
-    let (sample, edge) = match look(app, id) {
-      Look::Plain => (PLANE_PLAIN, EDGE_PLAIN),
-      Look::Hovered => (PLANE_HOVER, EDGE_HOVER),
-      Look::Selected => (PLANE_SELECTED, EDGE_SELECTED),
+    if app.row_hover == Some(RowHover::Plane(id)) {
+      continue;
+    }
+    let sample = match look(app, id) {
+      Look::Plain => PLANE_PLAIN,
+      Look::Hovered => PLANE_HOVER,
+      Look::Selected => PLANE_SELECTED,
     };
-    let [r, g, b] = edge;
-    painter.add(egui::Shape::convex_polygon(pts, plane_fill(sample), Stroke::new(1.0, Color32::from_rgb(r, g, b))));
+    crate::origin::square(&mut out, crate::viewport::plane_square(&pl, pl.origin, half), sample, px);
   }
+  out
 }
 
 /// The visible construction plane under the pointer, the nearest along its ray, and none when a
@@ -173,23 +172,29 @@ mod tests {
     FeatureId(v["feature"].as_u64().unwrap() as u32)
   }
 
-  /// A construction plane is twice an origin plane's square, the same size on screen whatever the
-  /// model (an empty design shows it too), and the scene leaves it to the overlay.
+  /// A construction plane's square is twice an origin plane's on screen whatever the model (an
+  /// empty design shows it too), drawn by the renderer as quads (the scene draws no outline).
   #[test]
   fn planes_are_twice_an_origin_square_on_screen() {
     let mut app = app();
     let id = offset(&mut app, 25.0);
-    let origin = crate::viewport::origin_plane_half_size(&app);
-    assert!((crate::viewport::plane_half_size(&app) - 2.0 * origin).abs() < 1e-9);
+    let origin = crate::viewport::origin_plane_size(&app);
+    assert!((crate::viewport::plane_half_size(&app) - origin).abs() < 1e-9, "side 2 x an origin square's");
     assert_eq!(drawn(&app).len(), 1, "drawn in an empty design");
+    let q = quads(&app);
+    assert_eq!(q.len(), 5, "a fill and four edges");
+    assert!(q[0].corners.iter().all(|c| (c[2] - 25.0).abs() < 1e-4), "on the plane");
     assert!(crate::viewport::scene_options(&mut app).planes_drawn_by_caller);
     // a big body doesn't grow it
     app.run("box", json!({"width": 2000, "depth": 2000, "height": 10}));
-    assert!((crate::viewport::plane_half_size(&app) - 2.0 * origin).abs() < 1e-9);
+    assert!((crate::viewport::plane_half_size(&app) - origin).abs() < 1e-9);
     // zooming out keeps it the same on screen: bigger in the world
     app.cam.distance *= 2.0;
-    assert!(crate::viewport::plane_half_size(&app) > 3.0 * origin);
+    assert!(crate::viewport::plane_half_size(&app) > 1.5 * origin);
     assert_eq!(look(&app, id), Look::Plain);
+    // its browser row hovered, the Origin folder's quads light it instead
+    app.row_hover = Some(RowHover::Plane(id));
+    assert!(quads(&app).is_empty());
   }
 
   /// The pointer over a plane's square finds it (grey, its name in the status bar); a pick turns
@@ -228,7 +233,7 @@ mod tests {
     app.construction_shown = false;
     assert!(drawn(&app).is_empty());
     app.construction_shown = true;
-    app.objects.construction = false;
+    app.objects.construction_planes = false;
     assert!(drawn(&app).is_empty());
   }
 }

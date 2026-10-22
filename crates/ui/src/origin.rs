@@ -7,7 +7,8 @@
 
 use egui::{Color32, Pos2, Stroke};
 use fox_engine::kernel::glam::DVec3;
-use fox_engine::model::OriginPlane;
+use fox_engine::model::{FeatureId, OriginPlane};
+use fox_engine::render::Quad;
 use serde_json::{Value, json};
 
 use crate::App;
@@ -102,12 +103,12 @@ impl OriginItem {
     }
   }
 
-  /// An axis's own colour (the dashed line when nobody points at it).
-  fn axis_color(self) -> [u8; 4] {
+  /// An axis's own colour (the line when nobody points at it).
+  fn axis_color(self) -> [u8; 3] {
     match self {
-      OriginItem::X => fox_engine::scene::ORIGIN_X_COLOR,
-      OriginItem::Y => fox_engine::scene::ORIGIN_Y_COLOR,
-      _ => fox_engine::scene::ORIGIN_Z_COLOR,
+      OriginItem::X => AXIS_COLORS[0],
+      OriginItem::Y => AXIS_COLORS[1],
+      _ => AXIS_COLORS[2],
     }
   }
 }
@@ -129,8 +130,8 @@ pub(crate) fn toggle_eye(app: &mut App, item: OriginItem) {
 }
 
 /// Shown in the canvas: its Object Visibility row on (Origin Planes, Origin Axes or Origin
-/// Points), the folder's eye on and the item's own (Fusion's folder-and-child rule), and no sketch
-/// being edited.
+/// Points), the folder's eye on and the item's own (Fusion's folder-and-child rule), or a dialog
+/// that shows them for its picks, in a sketch as outside one.
 pub(crate) fn visible(app: &App, item: OriginItem) -> bool {
   let o = &app.objects;
   let row = match item {
@@ -138,7 +139,13 @@ pub(crate) fn visible(app: &App, item: OriginItem) -> bool {
     OriginItem::X | OriginItem::Y | OriginItem::Z => o.origin_axes,
     OriginItem::Xy | OriginItem::Xz | OriginItem::Yz => o.origin_planes,
   };
-  row && app.origin_shown && eye(app, item) && app.s.edit_sketch.is_none()
+  row && app.origin_shown && eye(app, item) || dialog_shows(app)
+}
+
+/// The open dialog shows the origin planes and axes for its picks (Revolve, Loft), as Fusion
+/// does whatever the Origin folder's eyes say.
+fn dialog_shows(app: &App) -> bool {
+  app.dialog.as_ref().is_some_and(|d| d.shows_origin())
 }
 
 /// All three plane eyes are on (the folder's Show/Hide Planes).
@@ -190,9 +197,9 @@ pub(crate) fn clear(app: &mut App) {
   app.picked_origin = None;
 }
 
-/// The status bar's readout for the picked origin item, else the hovered one.
+/// The status bar's readout for the picked origin item (a hovered one reads nothing, as in Fusion).
 pub(crate) fn status(app: &App) -> Option<String> {
-  let item = picked(app).or(app.hover_origin)?;
+  let item = picked(app)?;
   Some(match item {
     OriginItem::Point => format!("{} | {}", item.status(), coords(app, DVec3::ZERO)),
     _ => item.status().to_string(),
@@ -224,27 +231,38 @@ pub(crate) const PLANE_PLAIN: [u8; 3] = [254, 228, 177];
 pub(crate) const PLANE_HOVER: [u8; 3] = [232, 229, 222];
 /// A selected origin plane: blue.
 pub(crate) const PLANE_SELECTED: [u8; 3] = [127, 174, 216];
+/// The axes' own colours: pure red, green and blue.
+pub(crate) const AXIS_COLORS: [[u8; 3]; 3] = [[255, 0, 0], [0, 255, 0], [0, 0, 255]];
+/// How wide a plain axis draws.
+pub(crate) const AXIS_WIDTH: f32 = 2.0;
 /// A hovered axis: a solid blue line; selected, a deeper blue with a pale halo.
 pub(crate) const AXIS_HOVER: [u8; 3] = [74, 132, 246];
 pub(crate) const AXIS_SELECTED: [u8; 3] = [2, 126, 246];
-/// The origin point's ring (grey, hollow) and its selected fill (blue).
+/// The origin point's ring (grey, filled white) and its selected fill (blue).
 pub(crate) const POINT_RING: [u8; 3] = [128, 132, 138];
 pub(crate) const POINT_SELECTED: [u8; 3] = AXIS_SELECTED;
-/// How wide a hovered or selected axis draws, and a plane's edge.
+/// How wide a hovered or selected axis draws.
 pub(crate) const AXIS_LIT_WIDTH: f32 = 4.0;
-/// The origin point's radius on screen.
-pub(crate) const POINT_RADIUS: f32 = 4.5;
-/// How see-through a plane's square is.
-const PLANE_ALPHA: f32 = 230.0 / 255.0;
+/// The origin point's radius on screen (a ring about 7 px across).
+pub(crate) const POINT_RADIUS: f32 = 3.5;
+/// How far (a fraction of the axis) a plain axis runs solid before its dash-dot.
+const AXIS_SOLID: f32 = 1.0 / 3.0;
+/// A plain axis's dash-dot pattern past its solid start (px): long dash, gap, short dash, gap.
+const AXIS_DASHES: [f32; 4] = [10.0, 3.0, 3.0, 3.0];
+/// How see-through a plane's square is: the grid and the other planes show through it.
+const PLANE_ALPHA: f32 = 0.5;
+/// How opaque a plane's edge is.
+const EDGE_ALPHA: u8 = 200;
 /// The canvas background the planes blend over, mid-way down its gradient.
 const CANVAS_BG: [f32; 3] = [242.0, 243.0, 245.0];
 
-/// A plane's fill: the colour that, blended at [`PLANE_ALPHA`] over the canvas background, shows
-/// as `sample` (the colours above were sampled on screen).
-pub(crate) fn plane_fill(sample: [u8; 3]) -> Color32 {
+/// A plane's fill (unmultiplied RGBA): the colour that, blended at [`PLANE_ALPHA`] over the
+/// canvas background, shows as `sample` (the colours above were sampled on screen), or as near
+/// as a half see-through fill gets (the peach's red is past it).
+pub(crate) fn plane_rgba(sample: [u8; 3]) -> [u8; 4] {
   let c =
     |i: usize| ((sample[i] as f32 - CANVAS_BG[i] * (1.0 - PLANE_ALPHA)) / PLANE_ALPHA).round().clamp(0.0, 255.0) as u8;
-  Color32::from_rgba_unmultiplied(c(0), c(1), c(2), (PLANE_ALPHA * 255.0).round() as u8)
+  [c(0), c(1), c(2), (PLANE_ALPHA * 255.0).round() as u8]
 }
 
 fn rgb(c: [u8; 3]) -> Color32 {
@@ -259,50 +277,144 @@ pub(crate) enum Look {
   Selected,
 }
 
+/// A browser row under the pointer that lights its item in the canvas, as Fusion does: an origin
+/// item, or a construction plane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowHover {
+  Origin(OriginItem),
+  Plane(FeatureId),
+}
+
+/// Hovered in the canvas or by its browser row.
 pub(crate) fn look(app: &App, item: OriginItem) -> Look {
-  if picked(app) == Some(item) {
+  let dialog_axis = app.dialog.as_ref().and_then(|d| d.origin_axis());
+  if picked(app) == Some(item) || dialog_axis == Some(item) {
     Look::Selected
-  } else if app.hover_origin == Some(item) {
+  } else if app.hover_origin == Some(item) || app.row_hover == Some(RowHover::Origin(item)) {
     Look::Hovered
   } else {
     Look::Plain
   }
 }
 
-/// The corners of a plane's square, `half` either side of the origin.
-fn plane_corners(app: &App, plane: OriginPlane, half: f64) -> [DVec3; 4] {
-  let pl = plane.plane(app.s.design.frames());
-  crate::viewport::plane_square(&pl, pl.origin, half)
+/// The two world axes an origin plane spans; its square lies where both are positive.
+pub(crate) fn plane_axes(plane: OriginPlane) -> (DVec3, DVec3) {
+  match plane {
+    OriginPlane::Xy => (DVec3::X, DVec3::Y),
+    OriginPlane::Xz => (DVec3::X, DVec3::Z),
+    OriginPlane::Yz => (DVec3::Y, DVec3::Z),
+  }
 }
 
-/// Draws the visible origin items over the rendered scene: planes as translucent squares, axes
-/// as dashed lines in their colours, the origin as a hollow ring; the hovered and selected ones
-/// in Fusion's grey and blue. Nothing while Create Sketch offers its orange planes instead.
-pub(crate) fn overlay(app: &App, painter: &egui::Painter, project: &dyn Fn(DVec3) -> Option<Pos2>) {
-  let half = crate::viewport::origin_plane_half_size(app);
-  let reach = half * crate::viewport::ORIGIN_AXIS_REACH;
-  for item in OriginItem::ALL {
-    if !visible(app, item) {
-      continue;
-    }
-    let look = look(app, item);
-    if let Some(plane) = item.plane() {
-      let Some(pts) = plane_corners(app, plane, half).iter().map(|p| project(*p)).collect::<Option<Vec<Pos2>>>() else {
-        continue;
-      };
-      let sample = match look {
+/// How far off each axis an origin plane's square starts, for a square reaching `size`.
+fn plane_gap(size: f64) -> f64 {
+  size * crate::viewport::ORIGIN_PLANE_GAP_PX / crate::viewport::ORIGIN_PLANE_PX
+}
+
+/// The corners of an origin plane's square, as Fusion draws it: in the positive quadrant of its
+/// two axes, from a small gap off each axis out to `size`, so the three squares never overlap and
+/// the axes run through the gaps.
+pub(crate) fn plane_corners(plane: OriginPlane, size: f64) -> [DVec3; 4] {
+  let (a, b) = plane_axes(plane);
+  let g = plane_gap(size);
+  [a * g + b * g, a * size + b * g, a * size + b * size, a * g + b * size]
+}
+
+/// Whether a point of the plane lies in its square ([`plane_corners`]).
+pub(crate) fn in_square(plane: OriginPlane, p: DVec3, size: f64) -> bool {
+  let (a, b) = plane_axes(plane);
+  let span = plane_gap(size)..=size;
+  span.contains(&p.dot(a)) && span.contains(&p.dot(b))
+}
+
+/// Create Sketch, a primitive before its base is drawn, or Mirror waits for a plane (each offers
+/// its own orange squares).
+fn picking_plane(app: &App) -> bool {
+  app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane() || d.wants_plane())
+}
+
+/// The visible origin planes as see-through squares for the renderer, which hides them behind
+/// bodies and blends them over the grid and each other (overlaps read darker), each with a thin
+/// edge, in Fusion's plain, hovered or selected colour. While Create Sketch offers its own
+/// squares, none. A construction plane whose browser row is hovered draws grey over its square.
+pub(crate) fn plane_quads(app: &App) -> Vec<Quad> {
+  let mut out = Vec::new();
+  let size = crate::viewport::origin_plane_size(app);
+  let px = size / crate::viewport::ORIGIN_PLANE_PX;
+  if !picking_plane(app) {
+    for item in OriginItem::PLANES {
+      let Some(plane) = item.plane().filter(|_| visible(app, item)) else { continue };
+      let sample = match look(app, item) {
         Look::Plain => PLANE_PLAIN,
         Look::Hovered => PLANE_HOVER,
         Look::Selected => PLANE_SELECTED,
       };
-      painter.add(egui::Shape::convex_polygon(pts, plane_fill(sample), Stroke::new(1.0, rgb(sample))));
-    } else if let Some(dir) = item.axis() {
+      square(&mut out, plane_corners(plane, size), sample, px);
+    }
+  }
+  if let Some(RowHover::Plane(id)) = app.row_hover
+    && app.objects.construction_planes
+    && !app.s.design.feature(id).is_some_and(|f| f.suppressed)
+    && let Some(pl) = app.s.model.planes.get(&id)
+  {
+    let half = crate::viewport::plane_half_size(app);
+    square(&mut out, crate::viewport::plane_square(pl, pl.origin, half), PLANE_HOVER, px);
+  }
+  out
+}
+
+/// A square's fill and its edge (`px` world units wide, inside the square).
+pub(crate) fn square(out: &mut Vec<Quad>, c: [DVec3; 4], sample: [u8; 3], px: f64) {
+  let f = |p: DVec3| p.as_vec3().to_array();
+  out.push(Quad { corners: c.map(f), color: plane_rgba(sample) });
+  let [r, g, b] = sample;
+  for i in 0..4 {
+    let (a, z) = (c[i], c[(i + 1) % 4]);
+    let inward = (c[(i + 3) % 4] - a).normalize_or_zero() * px;
+    out.push(Quad { corners: [a, z, z + inward, a + inward].map(f), color: [r, g, b, EDGE_ALPHA] });
+  }
+}
+
+/// A plain axis from `a` (the origin) to `b`: solid for its first stretch, then long-dash /
+/// short-dash, ending in a dot.
+fn plain_axis(painter: &egui::Painter, a: Pos2, b: Pos2, color: Color32) {
+  let stroke = Stroke::new(AXIS_WIDTH, color);
+  let len = (b - a).length();
+  if len < 1.0 {
+    return;
+  }
+  let dir = (b - a) / len;
+  let solid = len * AXIS_SOLID;
+  painter.line_segment([a, a + dir * solid], stroke);
+  let mut t = solid;
+  let mut i = 0;
+  while t < len {
+    let step = AXIS_DASHES[i % 4];
+    if i % 2 == 0 {
+      painter.line_segment([a + dir * t, a + dir * (t + step).min(len)], stroke);
+    }
+    t += step;
+    i += 1;
+  }
+  painter.circle_filled(b, AXIS_WIDTH * 1.25, color);
+}
+
+/// Draws the visible origin axes and point over the rendered scene (the planes are drawn by the
+/// renderer, see [`plane_quads`], so these sit on top of them): each axis along its positive
+/// direction only, pure red, green or blue, solid then dash-dot to a dot past the squares; the
+/// origin a small grey ring filled white; the hovered and selected ones in Fusion's blues. Drawn
+/// in a sketch too.
+pub(crate) fn overlay(app: &App, painter: &egui::Painter, project: &dyn Fn(DVec3) -> Option<Pos2>) {
+  let reach = crate::viewport::origin_plane_size(app) * crate::viewport::ORIGIN_AXIS_REACH;
+  for item in OriginItem::AXES.into_iter().chain([OriginItem::Point]) {
+    if !visible(app, item) {
+      continue;
+    }
+    let look = look(app, item);
+    if let Some(dir) = item.axis() {
       let (Some(a), Some(b)) = (project(DVec3::ZERO), project(dir * reach)) else { continue };
       match look {
-        Look::Plain => {
-          let [r, g, bl, _] = item.axis_color();
-          painter.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.5, Color32::from_rgb(r, g, bl)), 4.0, 3.0));
-        }
+        Look::Plain => plain_axis(painter, a, b, rgb(item.axis_color())),
         Look::Hovered => {
           painter.line_segment([a, b], Stroke::new(AXIS_LIT_WIDTH, rgb(AXIS_HOVER)));
         }
@@ -314,10 +426,8 @@ pub(crate) fn overlay(app: &App, painter: &egui::Painter, project: &dyn Fn(DVec3
     } else {
       let Some(c) = project(DVec3::ZERO) else { continue };
       match look {
-        Look::Plain => {
-          painter.circle(c, POINT_RADIUS, Color32::from_white_alpha(160), Stroke::new(1.0, rgb(POINT_RING)))
-        }
-        Look::Hovered => painter.circle(c, POINT_RADIUS, Color32::WHITE, Stroke::new(1.5, rgb(POINT_RING))),
+        Look::Plain => painter.circle(c, POINT_RADIUS, Color32::WHITE, Stroke::new(1.0, rgb(POINT_RING))),
+        Look::Hovered => painter.circle(c, POINT_RADIUS, Color32::WHITE, Stroke::new(2.0, rgb(AXIS_HOVER))),
         Look::Selected => painter.circle_filled(c, POINT_RADIUS, rgb(POINT_SELECTED)),
       };
     }
@@ -328,18 +438,19 @@ pub(crate) fn overlay(app: &App, painter: &egui::Painter, project: &dyn Fn(DVec3
 const PICK_PX: f32 = 6.0;
 
 /// The visible origin item under the pointer, the point before the axes before the planes, and
-/// none when a body face is nearer along the pointer's ray.
+/// none when a body face is nearer along the pointer's ray. None in a sketch, where they show
+/// but the sketch's tools have the pointer.
 pub(crate) fn under(
   app: &App,
   pos: Pos2,
   project: &dyn Fn(DVec3) -> Option<Pos2>,
   ray: &dyn Fn(Pos2) -> (DVec3, DVec3),
 ) -> Option<OriginItem> {
-  if !OriginItem::ALL.iter().any(|i| visible(app, *i)) {
+  if app.s.edit_sketch.is_some() || !OriginItem::ALL.iter().any(|i| visible(app, *i)) {
     return None;
   }
-  let half = crate::viewport::origin_plane_half_size(app);
-  let reach = half * crate::viewport::ORIGIN_AXIS_REACH;
+  let size = crate::viewport::origin_plane_size(app);
+  let reach = size * crate::viewport::ORIGIN_AXIS_REACH;
   let (o, d) = ray(pos);
   let face = fox_engine::scene::ray_hits(&app.s, o, d).first().map(|h| h.0);
   // the depth along the ray of the point nearest to the item (the origin for the point)
@@ -366,14 +477,11 @@ pub(crate) fn under(
   }
   let mut best: Option<(f64, OriginItem)> = None;
   for item in OriginItem::PLANES {
-    if !visible(app, item) {
-      continue;
-    }
-    let pl = item.plane()?.plane(app.s.design.frames());
-    let Some(hit) = fox_engine::render::ray_plane(o, d, pl.origin, pl.normal()) else { continue };
+    let Some(plane) = item.plane().filter(|_| visible(app, item)) else { continue };
+    let (a, b) = plane_axes(plane);
+    let Some(hit) = fox_engine::render::ray_plane(o, d, DVec3::ZERO, a.cross(b)) else { continue };
     let t = (hit - o).dot(d);
-    let [u, v] = pl.to_local(hit);
-    if in_front(t) && u.abs() <= half && v.abs() <= half && best.is_none_or(|(bt, _)| t < bt) {
+    if in_front(t) && in_square(plane, hit, size) && best.is_none_or(|(bt, _)| t < bt) {
       best = Some((t, item));
     }
   }
@@ -424,8 +532,8 @@ mod tests {
     set_planes(&mut app, true);
     set_axes(&mut app, true);
     assert!(planes_shown(&app) && axes_shown(&app));
-    // Object Visibility's Origin Planes, Origin Axes and Origin Points rows hide their items; so
-    // does an open sketch
+    // Object Visibility's Origin Planes, Origin Axes and Origin Points rows hide their items; an
+    // open sketch doesn't
     app.objects.origin_planes = false;
     assert!(!visible(&app, OriginItem::Xy) && visible(&app, OriginItem::X) && visible(&app, OriginItem::Point));
     app.objects.origin_axes = false;
@@ -433,7 +541,60 @@ mod tests {
     assert!(OriginItem::ALL.iter().all(|i| !visible(&app, *i)));
     app.objects.show_origin();
     app.create_sketch(json!("xy"));
-    assert!(!visible(&app, OriginItem::Xy));
+    assert!(OriginItem::ALL.iter().all(|i| visible(&app, *i)), "shown in a sketch too");
+    assert_eq!(plane_quads(&app).len(), 15);
+  }
+
+  /// Each square lies in the positive quadrant of its plane's two axes, a small gap off each, so
+  /// the three never overlap; they are see-through, in the plain, hovered (in the canvas or by
+  /// the browser row) and selected colours, and Create Sketch replaces them with its own.
+  #[test]
+  fn planes_sit_in_their_positive_quadrant() {
+    let mut app = app();
+    app.origin_shown = true;
+    let size = crate::viewport::origin_plane_size(&app);
+    for item in OriginItem::PLANES {
+      let plane = item.plane().unwrap();
+      let (a, b) = plane_axes(plane);
+      for c in plane_corners(plane, size) {
+        assert!(c.dot(a) > 0.0 && c.dot(b) > 0.0 && c.dot(a.cross(b)).abs() < 1e-12, "{item:?} {c:?}");
+        assert!(c.dot(a) <= size + 1e-9 && c.dot(b) <= size + 1e-9);
+      }
+      assert!(in_square(plane, (a + b) * size * 0.5, size));
+      assert!(!in_square(plane, -(a + b) * size * 0.5, size), "{item:?}: not the negative quadrant");
+      assert!(!in_square(plane, a * size * 0.5, size), "{item:?}: the gap along the axis");
+    }
+    let fills = |app: &App| plane_quads(app).into_iter().step_by(5).map(|q| q.color).collect::<Vec<_>>();
+    assert_eq!(fills(&app), vec![plane_rgba(PLANE_PLAIN); 3]);
+    assert!(plane_rgba(PLANE_PLAIN)[3] < 160, "see-through");
+    app.hover_origin = Some(OriginItem::Xz);
+    assert_eq!(fills(&app)[1], plane_rgba(PLANE_HOVER));
+    app.hover_origin = None;
+    app.row_hover = Some(RowHover::Origin(OriginItem::Yz));
+    assert_eq!(fills(&app)[2], plane_rgba(PLANE_HOVER), "the browser row lights the plane");
+    assert_eq!(look(&app, OriginItem::Yz), Look::Hovered);
+    pick(&mut app, OriginItem::Xy);
+    assert_eq!(fills(&app)[0], plane_rgba(PLANE_SELECTED));
+    clear(&mut app);
+    app.new_sketch();
+    assert!(picking_plane(&app));
+    assert!(plane_quads(&app).is_empty(), "Create Sketch offers its own squares");
+  }
+
+  /// Hovering a construction plane's browser row draws its square grey in the canvas.
+  #[test]
+  fn a_construction_row_hover_lights_its_plane() {
+    let mut app = app();
+    app.run("plane.offset", json!({"plane": "xy", "offset": 10}));
+    let id = *app.s.model.planes.keys().next().expect("a construction plane");
+    assert!(plane_quads(&app).is_empty());
+    app.row_hover = Some(RowHover::Plane(id));
+    let quads = plane_quads(&app);
+    assert_eq!(quads.len(), 5);
+    assert_eq!(quads[0].color, plane_rgba(PLANE_HOVER));
+    assert!(quads[0].corners.iter().all(|c| (c[2] - 10.0).abs() < 1e-4), "on the plane");
+    app.objects.construction_planes = false;
+    assert!(plane_quads(&app).is_empty(), "not while construction geometry is hidden");
   }
 
   /// Picking an item clears the model's selection, picking it again clears the pick, and the
@@ -458,11 +619,11 @@ mod tests {
     assert_eq!(status(&app), None);
     pick(&mut app, OriginItem::Point);
     assert_eq!(status(&app).as_deref(), Some("Origin Point | X: 0.00 Y: 0.00 Z: 0.00 mm"));
-    // hovered, with nothing picked, the status names the hovered item
+    // hovered, with nothing picked, the status reads nothing (ui-status-readouts)
     clear(&mut app);
     app.hover_origin = Some(OriginItem::Xz);
-    assert_eq!(status(&app).as_deref(), Some("XZ Plane"));
-    assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("XZ Plane"));
+    assert_eq!(status(&app), None);
+    assert_eq!(crate::panels::selection_text(&app), None);
     // a model selection wins over a hovered origin item
     app.s.selection = vec![Sel::Body { body }];
     assert_eq!(crate::panels::selection_text(&app), Some(app.s.body_name(body)));
@@ -485,16 +646,16 @@ mod tests {
     assert_eq!(coords(&app, DVec3::new(25.4, 0.0, -12.7)), "X: 1.00 Y: 0.00 Z: -0.50 in");
   }
 
-  /// A plane's fill blended over the canvas shows the colour sampled in Fusion.
+  /// A plane's fill blended over the canvas shows the colour sampled in Fusion (the peach's red
+  /// within a few levels: a half see-through fill can't reach it).
   #[test]
   fn plane_fills_blend_to_the_sampled_colours() {
     for sample in [PLANE_PLAIN, PLANE_HOVER, PLANE_SELECTED] {
-      let f = plane_fill(sample);
-      let a = f.a() as f32 / 255.0;
-      // Color32 stores premultiplied channels: what shows is the channel plus the background's rest
-      for (i, c) in [f.r(), f.g(), f.b()].into_iter().enumerate() {
-        let shown = c as f32 + CANVAS_BG[i] * (1.0 - a);
-        assert!((shown - sample[i] as f32).abs() <= 1.5, "{sample:?} channel {i}: {shown}");
+      let f = plane_rgba(sample);
+      let a = f[3] as f32 / 255.0;
+      for i in 0..3 {
+        let shown = f[i] as f32 * a + CANVAS_BG[i] * (1.0 - a);
+        assert!((shown - sample[i] as f32).abs() <= 6.0, "{sample:?} channel {i}: {shown}");
       }
     }
   }
@@ -512,26 +673,32 @@ mod tests {
     assert_eq!(under(&app, at(DVec3::ZERO), &project, &ray), None, "the folder is hidden");
     app.origin_shown = true;
     assert_eq!(under(&app, at(DVec3::ZERO), &project, &ray), Some(OriginItem::Point));
-    let reach = crate::viewport::origin_plane_half_size(&app) * crate::viewport::ORIGIN_AXIS_REACH;
+    let reach = crate::viewport::origin_plane_size(&app) * crate::viewport::ORIGIN_AXIS_REACH;
     assert_eq!(under(&app, at(DVec3::X * reach * 0.6), &project, &ray), Some(OriginItem::X));
     assert_eq!(under(&app, at(DVec3::Z * reach * 0.6), &project, &ray), Some(OriginItem::Z));
     // the nearest plane along the ray wins: with only XY shown, a point in its square finds it
-    let half = crate::viewport::origin_plane_half_size(&app);
+    let half = crate::viewport::origin_plane_size(&app);
     set_eye(&mut app, OriginItem::Xz, false);
     set_eye(&mut app, OriginItem::Yz, false);
     assert_eq!(under(&app, at(DVec3::new(half * 0.5, half * 0.5, 0.0)), &project, &ray), Some(OriginItem::Xy));
     assert_eq!(under(&app, at(DVec3::new(half * 3.0, half * 3.0, 0.0)), &project, &ray), None, "outside the square");
+    assert_eq!(under(&app, at(DVec3::new(-half * 0.5, -half * 0.5, 0.0)), &project, &ray), None, "the other quadrant");
     set_planes(&mut app, true);
     assert!(
       under(&app, at(DVec3::new(half * 0.5, half * 0.5, 0.0)), &project, &ray).is_some_and(|p| p.plane().is_some())
     );
-    // a hidden axis isn't picked: a plane behind it is
+    // a hidden axis isn't picked, and the squares leave a gap along it
     set_eye(&mut app, OriginItem::X, false);
-    assert!(under(&app, at(DVec3::X * reach * 0.6), &project, &ray).is_some_and(|p| p.plane().is_some()));
+    assert_eq!(under(&app, at(DVec3::X * reach * 0.6), &project, &ray), None);
     // a body over the origin is nearer than the origin point
     app.run("box", json!({"width": 100, "depth": 100, "height": 100, "at": [0, 0]}));
     let hits = fox_engine::scene::ray_hits(&app.s, ray(at(DVec3::ZERO)).0, ray(at(DVec3::ZERO)).1);
     assert!(!hits.is_empty(), "the box covers the origin");
+    assert_eq!(under(&app, at(DVec3::ZERO), &project, &ray), None);
+    // in a sketch they show but the sketch's tools have the pointer
+    app.run("feature.delete", json!({"feature": app.s.design.features[0].id.0}));
+    assert!(under(&app, at(DVec3::ZERO), &project, &ray).is_some());
+    app.create_sketch(json!("xz"));
     assert_eq!(under(&app, at(DVec3::ZERO), &project, &ray), None);
   }
 }

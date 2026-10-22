@@ -166,3 +166,40 @@ fn asymmetric_and_full_round_fillets() {
   assert!((v - (20.0 * 10.0 * 15.0 + std::f64::consts::PI * 12.5 * 20.0)).abs() < 1e-3, "{v}");
   assert_eq!(s.model.bodies[0].faces().len(), 6);
 }
+
+/// `feature.edit`'s picks give an edited fillet or chamfer its edges again, resolved on the model
+/// before it (the marker rolled back), and `marker_after` leaves the marker just after it, as
+/// Edit Feature shows it; a fillet too big for its edges fails with Fusion's message.
+#[test]
+fn edit_picks_marker_after_and_the_too_big_message() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
+  let f = run(&mut s, "fillet", json!({"edges": [{"point": [10, 0, 20]}], "radius": 2}))["feature"].as_u64().unwrap();
+  run(&mut s, "chamfer", json!({"edges": [{"point": [0, 10, 20]}], "distance": 1}));
+  // Edit Feature on the fillet: the marker before it, then the edit puts it just after it
+  run(&mut s, "timeline.marker", json!({"at": 1}));
+  let v = run(
+    &mut s,
+    "feature.edit",
+    json!({"feature": f, "set": {}, "picks": {"edges": [{"point": [10, 20, 20]}], "radius": 3}, "marker_after": true}),
+  );
+  assert_eq!(v["feature"], json!(f));
+  assert_eq!(s.design.marker, Some(2));
+  let FeatureKind::Fillet { edges, radius, .. } = &s.design.features[1].kind else { panic!() };
+  assert_eq!(edges.len(), 1);
+  assert!((edges[0].point[1] - 20.0).abs() < 1e-6, "the back edge now: {:?}", edges[0].point);
+  assert!(radius.starts_with('3'), "{radius}");
+  // a chamfer's picks, and nothing else takes them
+  let c = s.design.features[2].id.0;
+  run(&mut s, "timeline.marker", json!({"at": 2}));
+  run(&mut s, "feature.edit", json!({"feature": c, "set": {}, "picks": {"edges": [{"point": [20, 10, 20]}]}}));
+  let FeatureKind::Chamfer { edges, .. } = &s.design.features[2].kind else { panic!() };
+  assert!((edges[0].point[0] - 20.0).abs() < 1e-6, "{:?}", edges[0].point);
+  let b = s.design.features[0].id.0;
+  assert!(s.execute("feature.edit", &json!({"feature": b, "set": {}, "picks": {}})).is_err());
+  // too big: Fusion's message, without the operation's name in front
+  run(&mut s, "timeline.marker", json!({"at": null}));
+  let v = s.execute("feature.edit", &json!({"feature": f, "set": {"radius": "50"}})).unwrap();
+  let e = v["error"].as_str().unwrap_or_default();
+  assert!(e.starts_with("The fillet/chamfer could not be created at the requested size."), "{v}");
+}

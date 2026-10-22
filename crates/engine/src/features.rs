@@ -87,8 +87,19 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       add_feature(s, FeatureKind::IntersectionCurve { curves, faces, with })
     })(),
     "pipe" => (|| {
-      const KEYS: [&str; 10] =
-        ["cmd", "path", "path_curves", "diameter", "size", "wall", "section", "distance", "distance_one", "operation"];
+      const KEYS: [&str; 11] = [
+        "cmd",
+        "path",
+        "path_curves",
+        "diameter",
+        "size",
+        "wall",
+        "section",
+        "distance",
+        "distance_one",
+        "operation",
+        "targets",
+      ];
       if let Some(k) = p.as_object().and_then(|o| o.keys().find(|k| !KEYS.contains(&k.as_str()))) {
         return Err(CmdError::new(format!("pipe doesn't take '{k}' ({})", KEYS[1..].join(", "))));
       }
@@ -113,7 +124,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         Some(size) => size,
         None => req_expr(p, "diameter").map_err(|_| CmdError::new("missing 'diameter' (or 'size')"))?,
       };
-      add_feature(
+      crate::commands::add_op_feature(
         s,
         FeatureKind::Pipe {
           path_sketch,
@@ -124,6 +135,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           section,
           distance: opt_expr(p, "distance").or_else(|| opt_expr(p, "distance_one")).unwrap_or_default(),
         },
+        p,
       )
     })(),
     "rib" | "web" => (|| {
@@ -271,7 +283,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       add_feature(s, FeatureKind::Mesh { bodies, op, amount })
     })(),
     "body.appearance" => appearance(s, p),
-    "appearances" => Ok(json!(APPEARANCES.iter().map(|(n, c)| json!({"name": n, "color": c})).collect::<Vec<_>>())),
+    "appearances" => Ok(json!(
+      APPEARANCES
+        .iter()
+        .map(|(n, c)| json!({"name": n, "color": c, "folder": appearance_folder(n)}))
+        .collect::<Vec<_>>()
+    )),
     "sketch.project_to_surface" => (|| {
       let sketch = sketch_for_feature(s, p)?;
       let faces = faces(s, p)?;
@@ -311,6 +328,40 @@ pub const APPEARANCES: [(&str, [u8; 3]); 16] = [
   ("Wood - Oak", [180, 132, 82]),
   ("Glass - Clear", [190, 220, 230]),
 ];
+
+/// The folders of Fusion's appearance library (Fusion Appearances), in its order.
+pub const APPEARANCE_FOLDERS: [&str; 18] = [
+  "Ceramic",
+  "Concrete",
+  "Emissive",
+  "Fabric",
+  "Flooring",
+  "Glass",
+  "Layered",
+  "Leather",
+  "Liquid",
+  "Metal",
+  "Miscellaneous",
+  "Other",
+  "Paint",
+  "Plastic",
+  "Roofing",
+  "Stone",
+  "Wall Covering",
+  "Wood",
+];
+
+/// The library folder (one of [`APPEARANCE_FOLDERS`]) an appearance of [`APPEARANCES`] sits in.
+pub fn appearance_folder(name: &str) -> &'static str {
+  let first = name.split([' ', '-']).next().unwrap_or("");
+  match first {
+    "Steel" | "Aluminum" | "Brass" | "Copper" | "Gold" => "Metal",
+    "Plastic" | "ABS" | "Rubber" => "Plastic",
+    "Wood" => "Wood",
+    "Glass" => "Glass",
+    _ => "Other",
+  }
+}
 
 /// Sets (or with no appearance/colour, clears) the appearance of bodies or a component's bodies.
 fn appearance(s: &mut Session, p: &Value) -> CmdResult {

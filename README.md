@@ -80,8 +80,8 @@ change a parameter and watch the whole history rebuild.
   primitives; Edit Form with a triad and soft modification; insert/delete edges, insert point,
   subdivide, extrude, bridge, fill hole, crease, mirror and circular symmetry, pull onto a body,
   Make Uniform, box/frame/smooth display. The body is an exact B-rep. See [Form](#form).
-- **Meshes.** Imported meshes become faceted bodies; reduce, smooth, or convert them back to
-  clean B-rep (coplanar triangles merged into faces).
+- **Meshes.** Inserted meshes stay mesh bodies named after their file (picked whole, drawn
+  smooth); reduce, smooth, or convert them to clean B-rep (coplanar triangles merged into faces).
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
   Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
   Flange (any angle, adjacent/inside/outside bend position, offsets), Lofted Flange between two
@@ -171,7 +171,7 @@ change a parameter and watch the whole history rebuild.
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Files, like Fusion.** Open, insert and export STEP, IGES, BRep, STL, OBJ, 3MF, PLY and DXF;
   export glTF (`.glb`) and USDZ too. Opening a STEP or mesh makes a new design from it; meshes
-  become faceted bodies you can cut and fillet. Designs are readable JSON (`.fox`) or a packed
+  stay mesh bodies until Convert Mesh makes them solids you can cut and fillet. Designs are readable JSON (`.fox`) or a packed
   archive with thumbnail and version history (`.foxz`, FissionOxide's `.f3d`/`.f3z`). See
   [File formats](#file-formats).
 - **Data panel with version history.** Every save is a new version in a project, never an
@@ -547,7 +547,7 @@ fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.
 | STEP `.step` `.stp`             | ✓             | ✓      | AP214 assemblies both ways: nested sub-assemblies as nested components, parts and sub-assemblies placed more than once as linked component copies (written back as instances), body names, body and face colours; surface-only files are sewn into shells/solids |
 | IGES `.iges` `.igs`             | ✓             | ✓      | Faces are sewn; closed shells become solids                     |
 | OpenCASCADE BRep `.brep`        | ✓             | ✓      | Lossless kernel format                                          |
-| STL `.stl` (binary / ASCII)     | ✓             | ✓      | Imported meshes become faceted bodies (≤ 250k triangles)        |
+| STL `.stl` (binary / ASCII)     | ✓             | ✓      | Inserts as a mesh body (≤ 250k triangles)                       |
 | OBJ `.obj`, PLY `.ply`, 3MF     | ✓             | ✓      | 3MF honours units, components and build transforms              |
 | glTF binary `.glb`, USDZ        |               | ✓      | Metres / Y-up for web and AR viewers                            |
 | DXF `.dxf`                      | ✓             | ✓      | Lines, arcs, circles, polylines with bulges, splines and ellipses ↔ a sketch (R12, or R2000 when there are splines/ellipses) |

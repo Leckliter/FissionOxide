@@ -496,6 +496,8 @@ pub struct Renderer {
   quad: glow::Buffer,
   empty_vao: glow::VertexArray,
   meshes: Vec<GpuMesh>,
+  /// The see-through quads drawn with the transparent meshes ([`Renderer::set_quads`]).
+  quads: Vec<GpuMesh>,
   lines: Option<GpuInstances>,
   markers: Option<GpuInstances>,
   /// The body surfaces' fold edges, when the style draws silhouettes.
@@ -597,6 +599,7 @@ impl Renderer {
         quad,
         empty_vao,
         meshes: Vec::new(),
+        quads: Vec::new(),
         lines: None,
         markers: None,
         folds: None,
@@ -661,6 +664,20 @@ impl Renderer {
     self.background_colors = [scene.background_top, scene.background_bottom];
     self.analysis = scene.analysis;
     self.style = scene.style;
+    Ok(())
+  }
+
+  /// Replaces the see-through quads drawn over the scene ([`fox_render::Quad`]: depth-tested,
+  /// blended, no depth or ids written). They are kept apart from the scene, so changing them
+  /// (each camera move, for the origin planes) uploads only them.
+  pub fn set_quads(&mut self, gl: &Gl, quads: &[fox_render::Quad]) -> Result<(), String> {
+    for m in self.quads.drain(..) {
+      free_mesh(gl, m);
+    }
+    for q in quads {
+      let g = upload_mesh(gl, &q.mesh())?;
+      self.quads.push(g);
+    }
     Ok(())
   }
 
@@ -851,6 +868,7 @@ impl Renderer {
         pbr.draw_meshes(gl, &self.pbr_meshes(&runs), &pview, true);
         gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ZERO);
       }
+      self.draw_quads(gl);
 
       // sketch geometry in sketch mode and other on-top overlays
       gl.disable(glow::DEPTH_TEST);
@@ -913,6 +931,32 @@ impl Renderer {
           gl.draw_elements(glow::TRIANGLES, r.len() as i32, glow::UNSIGNED_INT, (r.start * 4) as i32);
         }
       }
+    }
+  }
+
+  /// The see-through quads, unlit in their colours, into the colour attachment only (the ids
+  /// behind them stay pickable), with the mesh program's view uniforms as the draw set them.
+  fn draw_quads(&self, gl: &Gl) {
+    if self.quads.is_empty() {
+      return;
+    }
+    let p = &self.mesh;
+    unsafe {
+      gl.use_program(Some(p.program));
+      gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
+      gl.uniform_1_i32(p.loc("u_has_hl"), 0);
+      gl.uniform_1_i32(p.loc("u_vcolor"), 0);
+      gl.uniform_1_i32(p.loc("u_mode"), 5);
+      gl.uniform_4_f32_slice(p.loc("u_param"), &[0.0; 4]);
+      for m in &self.quads {
+        gl.uniform_4_f32_slice(p.loc("u_color"), &unit(m.color));
+        gl.bind_vertex_array(Some(m.vao));
+        for c in &m.chunks {
+          let r = &c.full.range;
+          gl.draw_elements(glow::TRIANGLES, r.len() as i32, glow::UNSIGNED_INT, (r.start * 4) as i32);
+        }
+      }
+      gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
     }
   }
 
@@ -1181,7 +1225,7 @@ impl Renderer {
 
   /// Frees every GPU object.
   pub fn destroy(mut self, gl: &Gl) {
-    for m in self.meshes.drain(..) {
+    for m in self.meshes.drain(..).chain(self.quads.drain(..)) {
       free_mesh(gl, m);
     }
     for i in [self.lines.take(), self.markers.take(), self.folds.take()].into_iter().flatten() {

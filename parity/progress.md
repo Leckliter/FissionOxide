@@ -1,39 +1,75 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 11:25, session "Parity prober 13"
+## Last stop: 2026-10-22, 13:00, session "Parity prober 17"
 
-Finished this session: "SURFACE tab: every create/modify command and dialog" (done, with a
-not-exercised list in `coverage.md`). Report `parity/reports/2026-10-22-surface-tab.md`,
-`map-wave28.json`, batches `ui-surface-menus` (5), `ui-surface-create-dialogs` (6),
-`ui-surface-modify-dialogs` (5) and `ui-surface-results` (4), all `ready` in `index.jsonl` with no
-fixer yet. Prober 12's wave-27 batches (`ui-construct-methods`, `ui-inspect-measure-section`,
-`ui-inspect-analyses`, `ui-insert-new-design`) were assigned to cloud fixers by the coordinator
-during this session. Re-verified: `ui:sketch:horizontal-conflict`,
-`ui:sketch:tangent-arc-snap-marker` and `ui:sketch:dimension-label-and-hover` (verified; the
-dimension tooltip's light box is the new key `ui:sketch:dimension-hover-tooltip-style`).
+Finished this session: "Timeline" and "Browser" (both done, with not-exercised lists in `coverage.md`).
+Report `parity/reports/2026-10-22-timeline-browser.md`, `map-wave32.json`, batches
+`ui-timeline-menus-groups` (6), `ui-timeline-rollback-play` (7) and `ui-browser-body-rows` (3), all `ready`
+in `index.jsonl` with no fixer yet. The two timeline batches both edit the timeline in
+`crates/ui/src/panels.rs` (different functions) and `ui-timeline-menus-groups` also
+`panels/timeline_groups.rs`: start them one after the other, or tell the second to rebase.
+`ui-browser-body-rows` shares `body_menu` with `ui-surface-results` (fixing).
+Verified 13 keys (three timeline, ten browser). Still `fixing-merged` in these areas:
+`ui:timeline:error-toast`, `ui:timeline:error-dialog`, `ui:timeline:failed-item-menu`,
+`ui:timeline:suppressed-item-menu`, `ui:timeline:hole-extra-sketch` (need a failed feature or a hole),
+`ui:browser:convert-design-type`, `ui:browser:new-named-view-inline-name`.
+The wave-31 batches (`ui-manage-bom-palette`, `ui-utilities-addins-make`, `ui-utilities-tips-status`) have
+cloud fixers (`fixing`).
 
 ## Next prober: start here
 
-1. Take the next `todo` in `coverage.md`: "MESH tab: every command" (Design workspace, MESH tab in
-   both apps). Compare the tab's panels and dropdowns, every command's dialog as it opens and after
-   its first pick (Fusion needs a mesh body: Insert Mesh of an .stl/.obj, or Convert a body), the
-   result's browser row, timeline icon and right-click menu.
-2. Re-verify in the app any key in the MESH area marked `fixing-merged`, and any wave-27/28 key a
-   fixer has set to `fixing-merged` since (`python -c` over `ui-features.jsonl`, status
-   `fixing-merged`, history entries dated after 2026-10-22 11:00).
-3. Rebuild before probing: the running binary is `main` at `de1a1c5a`; kill `fissionoxide.exe`
-   first, `cargo build --release -p fissionoxide` took 2m 12s this time.
+1. Take the next `todo` in `coverage.md` (the ASSEMBLY row still needs two saved designs; leave it):
+   "Workspaces: Render, Animation, Simulation, Manufacture (turning, milling tabs), Drawing, Electronics".
+   Switch with the DESIGN dropdown at the toolbar's left in both apps; some Fusion workspaces may be
+   blocked on the Personal licence (record `blocked`).
+2. Re-verify any wave-31/32 key a fixer has set to `fixing-merged` since this stop (history entries
+   dated after 2026-10-22 13:00 local), and the timeline keys listed above if a failed feature is easy
+   to make (a fillet larger than the edge allows).
+3. Rebuild before probing: the running binary is `main` at `f1f9ed56`; kill `fissionoxide.exe` first,
+   `cargo build --release -p fissionoxide` took about 3 minutes.
 
-Where the documents stand: Fusion has three tabs: "Untitled*" (older), "Untitled*(1)" (Part Design,
-inches, active, on the SURFACE tab: plate, cylinder with a failed Chamfer1, spheres, coil, torus,
-Plane1, Point1, an Analysis folder, and now Body8, a patch on the disc from SurfacePatch1) and
-"Untitled(2)" (an empty Assembly Design); window at screenshot x 0..907, y 82..733. FissionOxide
-(built `de1a1c5a`) holds one design on the SURFACE tab: Sketch1 (circle), a surface Extrude (Body1),
-a Patch (Body2) and Sketch2 open on the patch face (circle, a line, a diameter dimension); its window
-was snapped with Win+Left and widened to x 0..850, y 0..790. Fusion's taskbar button at (497,803),
-FissionOxide's at (572,803).
+Where the documents stand: Fusion has four tabs: "Untitled*" (active, inches, Body1, Sketch1..4, Plane1,
+a timeline group "Group1" of three sketches, Fillet1 moved to the end), "Untitled*(1)" (the MESH-tab
+design), "Untitled(2)" (an empty Assembly Design) and "Untitled*(3)" (sheet metal). Both windows sit at
+screenshot x 0..908: Fusion at y 80..730, FissionOxide at y 0..785 (mm design with Body1..3, a
+pattern, Plane1, Sketch1..3, a one-sketch timeline group, Body2 hidden, SOLID tab, Data Panel closed).
+Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
 
 ## Traps
+- Shift+click and Ctrl+click from the automation tool did not extend FissionOxide's timeline selection
+  (recorded as `ui:timeline:multi-select`); Fusion took them. A Ctrl+click once made Explorer the
+  frontmost app for the tool (the next right-click was refused at tier "click"): click FissionOxide's
+  title bar first.
+- After Expand Group in FissionOxide the open-folder icon takes a slot and the marker moves right: take a
+  screenshot before grabbing the marker, or you drag the last feature instead.
+- Fusion's Part Design refuses New Component ("Save design required", Cancel at (597,445)); in the empty
+  Assembly Design "Untitled(2)" New Component creates an external cloud design (External1 in Default
+  Project): Cancel it.
+- `zoom` returns the region at native pixels (no magnification): a 150 px region comes back about 200 px
+  wide. Timeline icons stay 16 px; read names from tooltips instead.
+- Win+Left is the quickest way to place a window left of the overlay; dismiss the snap assist by clicking the
+  app's own canvas. FissionOxide snaps to 728 px wide: drag its right edge (x 727) to 907 with
+  `left_mouse_down` / `mouse_move` / `left_mouse_up` to match Fusion's 908 px. `left_click_drag` on the right
+  edge did nothing twice this session.
+- Double-clicking a snapped window's title bar restores it to its old size rather than maximising it.
+- Fusion's PLASTIC tab on this licence is SOLID's menus; do not hunt for Boss or Snap Fit again.
+- Fusion's Bill of Materials needs a saved design for rows; FissionOxide's "+" is still unsafe
+  (`ui-insert-new-design` is `fixing`), so do not start a new design there to get a clean one.
+- A fresh FissionOxide window can reach past screenshot x 1040, where its right edge is under the
+  Claude overlay and cannot be grabbed: drag the title bar left first (part of the window off screen),
+  narrow the right edge, then drag it back.
+- Fusion's Sheet Metal Rules is a palette (Close button); its Edit Rule window is modal. Fusion's
+  flat pattern environment opened with a canvas that stayed a beige fill at every zoom; Finish Flat
+  Pattern still works from the green button's dropdown.
+- FissionOxide's Flange dialog re-picks the consumed profile, and after that its Type dropdown and the
+  chip's x do nothing: select an edge first, then start Flange, to get an edge flange.
+- Fusion's Join by bend, Sheet Metal Fillet and Sheet Metal Chamfer open a subscription card (close it
+  with its x at the card's top right).
+- Clicking a selected browser row again starts a rename in Fusion; press Escape.
+- FissionOxide's "<name> isn't in FissionOxide yet" stays at the lower left and hides other lower-left
+  labels (Zoom Window's).
+- Dragging FissionOxide's title bar up past the top of the screen lands on Explorer (click tier) and
+  stops the batch with the button held: `left_mouse_up` at once, then drag sideways only.
 - FissionOxide's sketch shortcut "D" twice did nothing after the Coincident and Horizontal/Vertical
   toolbar flows (CREATE > Sketch Dimension worked); unrecorded, check whether shortcuts die after a
   constraint command.

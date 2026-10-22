@@ -233,6 +233,8 @@ impl State {
         Input::Check { .. } | Input::Flip { .. } => json!(false),
         Input::CheckOn { .. } => json!(true),
         Input::Choice { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
+        // (Pattern on Path is the pattern dialog's last Type)
+        Input::Icons { key: "pattern_type", .. } => json!("path"),
         Input::Icons { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         Input::Vec3 { default, .. } => json!(default),
         Input::Faces { .. }
@@ -552,6 +554,14 @@ impl State {
       "thread" if matches!(key, "length" | "offset" | "flip") => {
         get("full_length").and_then(Value::as_bool) == Some(false)
       }
+      // Pattern on Path: Type, Object Type, Objects and Path until both are picked
+      "pattern.path" => {
+        let picked = |k: &str| get(k).and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+        matches!(key, "pattern_type" | "object_type" | "bodies" | "path_curves" | "path")
+          || picked("bodies") && picked("path_curves")
+      }
+      // Joint Origin: Origin Mode and Snap until the snap is picked, as in Fusion
+      "joint_origin" => matches!(key, "mode" | "face") || get("face").is_some_and(|v| !v.is_null()),
       "drawing.feature_control" if key.starts_with("lower_") => {
         get("composite").and_then(Value::as_bool).unwrap_or(false)
       }
@@ -587,6 +597,9 @@ impl State {
       "rib" | "web" => key == "sketch",
       "emboss" => matches!(key, "sketch" | "wrap"),
       "boundary_fill" => key == "planes",
+      // (Fusion names joint origins itself; the browser renames them)
+      "joint_origin" => key == "name",
+      "pattern.path" => matches!(key, "path" | "start" | "join"),
       _ => false,
     }
   }
@@ -750,6 +763,17 @@ impl State {
         } else {
           "Place first corner of text frame"
         });
+      }
+    }
+    // Pattern on Path: the path is picked, not every curve of a sketch
+    if form.cmd == "pattern.path" {
+      let at = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
+      let empty = |k: &str| at(k).and_then(Value::as_array).is_none_or(Vec::is_empty);
+      if empty("bodies") {
+        return Some("Objects");
+      }
+      if empty("path_curves") {
+        return Some("Path");
       }
     }
     for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
@@ -1042,21 +1066,6 @@ pub static WEB: Form = Form {
   picks_model: false,
 };
 
-pub static SCALE: Form = Form {
-  title: "SCALE",
-  name: "Scale",
-  hint: "Scale bodies about a point",
-  icon: Icon::Scale,
-  cmd: "scale",
-  fixed: &[],
-  inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies (default all)", required: false },
-    Input::Vec3 { key: "center", label: "Point", default: ["0", "0", "0"] },
-    Input::Expr { key: "factor", label: "Scale factor", default: "2" },
-  ],
-  picks_model: false,
-};
-
 pub static SPLIT_FACE: Form = Form {
   title: "SPLIT FACE",
   name: "Split Face",
@@ -1079,20 +1088,6 @@ pub static REMOVE_FACES: Form = Form {
   cmd: "remove_faces",
   fixed: &[],
   inputs: &[Input::Faces { key: "faces", label: "Faces" }],
-  picks_model: true,
-};
-
-pub static OFFSET_FACE: Form = Form {
-  title: "OFFSET FACE",
-  name: "Offset Face",
-  hint: "Offset faces, flat or curved, along their normals",
-  icon: Icon::OffsetFace,
-  cmd: "press_pull",
-  fixed: &[],
-  inputs: &[
-    Input::Faces { key: "faces", label: "Faces" },
-    Input::Expr { key: "distance", label: "Distance", default: "1 mm" },
-  ],
   picks_model: true,
 };
 
@@ -1126,7 +1121,7 @@ pub static PLANE_ANGLE: Form = Form {
   title: "PLANE AT ANGLE",
   name: "Plane at Angle",
   hint: "A plane through an edge or axis, turned by an angle",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneAngle,
   cmd: "plane",
   fixed: &[("method", "angle")],
   inputs: &[
@@ -1141,7 +1136,7 @@ pub static MIDPLANE: Form = Form {
   title: "MIDPLANE",
   name: "Midplane",
   hint: "A plane halfway between two planes or faces",
-  icon: Icon::Plane,
+  icon: Icon::Midplane,
   cmd: "plane",
   fixed: &[("method", "midplane")],
   inputs: &[Input::Plane { key: "a", label: "First plane" }, Input::Plane { key: "b", label: "Second plane" }],
@@ -1152,7 +1147,7 @@ pub static TANGENT_PLANE: Form = Form {
   title: "TANGENT PLANE",
   name: "Tangent Plane",
   hint: "A plane tangent to a cylinder, cone or sphere at the picked point",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneTangent,
   cmd: "plane",
   fixed: &[("method", "tangent")],
   inputs: &[Input::Face { key: "face", label: "Face", near: Some("near") }],
@@ -1163,7 +1158,7 @@ pub static PLANE_TWO_EDGES: Form = Form {
   title: "PLANE THROUGH TWO EDGES",
   name: "Plane Through Two Edges",
   hint: "A plane through two coplanar straight edges",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneTwoEdges,
   cmd: "plane",
   fixed: &[("method", "two_edges")],
   inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
@@ -1174,7 +1169,7 @@ pub static PLANE_THREE_POINTS: Form = Form {
   title: "PLANE THROUGH THREE POINTS",
   name: "Plane Through Three Points",
   hint: "A plane through three points",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneThreePoints,
   cmd: "plane.points",
   fixed: &[],
   inputs: &[
@@ -1189,7 +1184,7 @@ pub static PLANE_ALONG_PATH: Form = Form {
   title: "PLANE ALONG PATH",
   name: "Plane Along Path",
   hint: "A plane across an edge, a fraction of the way along it",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneAlongPath,
   cmd: "plane",
   fixed: &[("method", "along_path")],
   inputs: &[
@@ -1203,7 +1198,7 @@ pub static AXIS_FACE: Form = Form {
   title: "AXIS THROUGH CYLINDER/CONE/TORUS",
   name: "Axis Through Cylinder/Cone/Torus",
   hint: "The axis of a round face",
-  icon: Icon::Axis,
+  icon: Icon::AxisCylinder,
   cmd: "axis",
   fixed: &[("method", "face")],
   inputs: &[Input::Face { key: "face", label: "Face", near: None }],
@@ -1214,7 +1209,7 @@ pub static AXIS_NORMAL: Form = Form {
   title: "AXIS PERPENDICULAR TO FACE",
   name: "Axis Perpendicular to Face",
   hint: "An axis normal to a face through the picked point",
-  icon: Icon::Axis,
+  icon: Icon::AxisNormal,
   cmd: "axis",
   fixed: &[("method", "normal")],
   inputs: &[Input::Face { key: "face", label: "Face", near: Some("near") }],
@@ -1225,7 +1220,7 @@ pub static AXIS_TWO_PLANES: Form = Form {
   title: "AXIS THROUGH TWO PLANES",
   name: "Axis Through Two Planes",
   hint: "The line where two planes meet",
-  icon: Icon::Axis,
+  icon: Icon::AxisTwoPlanes,
   cmd: "axis",
   fixed: &[("method", "two_planes")],
   inputs: &[Input::Plane { key: "a", label: "First plane" }, Input::Plane { key: "b", label: "Second plane" }],
@@ -1236,7 +1231,7 @@ pub static AXIS_EDGE: Form = Form {
   title: "AXIS THROUGH EDGE",
   name: "Axis Through Edge",
   hint: "An axis along a straight edge (or a circle's axis)",
-  icon: Icon::Axis,
+  icon: Icon::AxisEdge,
   cmd: "axis",
   fixed: &[("method", "edge")],
   inputs: &[Input::Edge { key: "edge", label: "Edge" }],
@@ -1247,7 +1242,7 @@ pub static AXIS_TWO_POINTS: Form = Form {
   title: "AXIS THROUGH TWO POINTS",
   name: "Axis Through Two Points",
   hint: "An axis through two points",
-  icon: Icon::Axis,
+  icon: Icon::AxisTwoPoints,
   cmd: "axis.points",
   fixed: &[],
   inputs: &[
@@ -1261,7 +1256,7 @@ pub static POINT_VERTEX: Form = Form {
   title: "POINT AT VERTEX",
   name: "Point at Vertex",
   hint: "A point at an end of an edge",
-  icon: Icon::CPoint,
+  icon: Icon::PointVertex,
   cmd: "point.vertex",
   fixed: &[],
   inputs: &[
@@ -1275,7 +1270,7 @@ pub static POINT_TWO_EDGES: Form = Form {
   title: "POINT THROUGH TWO EDGES",
   name: "Point Through Two Edges",
   hint: "Where two edges meet",
-  icon: Icon::CPoint,
+  icon: Icon::PointTwoEdges,
   cmd: "point",
   fixed: &[("method", "two_edges")],
   inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
@@ -1286,7 +1281,7 @@ pub static POINT_THREE_PLANES: Form = Form {
   title: "POINT THROUGH THREE PLANES",
   name: "Point Through Three Planes",
   hint: "Where three planes meet",
-  icon: Icon::CPoint,
+  icon: Icon::PointThreePlanes,
   cmd: "point",
   fixed: &[("method", "three_planes")],
   inputs: &[
@@ -1301,7 +1296,7 @@ pub static POINT_CENTER: Form = Form {
   title: "POINT AT CENTER",
   name: "Point at Center of Circle/Sphere/Torus",
   hint: "The centre of a round face",
-  icon: Icon::CPoint,
+  icon: Icon::PointCenter,
   cmd: "point",
   fixed: &[("method", "center")],
   inputs: &[Input::Face { key: "face", label: "Face", near: None }],
@@ -1312,7 +1307,7 @@ pub static POINT_EDGE_PLANE: Form = Form {
   title: "POINT AT EDGE AND PLANE",
   name: "Point at Edge and Plane",
   hint: "Where an edge crosses a plane",
-  icon: Icon::CPoint,
+  icon: Icon::PointEdgePlane,
   cmd: "point",
   fixed: &[("method", "edge_plane")],
   inputs: &[Input::Edge { key: "edge", label: "Edge" }, Input::Plane { key: "plane", label: "Plane" }],
@@ -1323,7 +1318,7 @@ pub static POINT_ALONG_PATH: Form = Form {
   title: "POINT ALONG PATH",
   name: "Point Along Path",
   hint: "A point a fraction of the way along an edge",
-  icon: Icon::CPoint,
+  icon: Icon::PointAlongPath,
   cmd: "point",
   fixed: &[("method", "along_path")],
   inputs: &[
@@ -1377,6 +1372,9 @@ pub static PATCH: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Patch's boundary pick
+// (batch ui-surface-create-dialogs)
+#[allow(dead_code)]
 pub static PATCH_SKETCH: Form = Form {
   title: "PATCH",
   name: "Patch (Sketch)",
@@ -2454,6 +2452,9 @@ pub static UNTRIM: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Trim's Trim Tool pick
+// (batch ui-surface-modify-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static TRIM_BODY: Form = Form {
   title: "TRIM",
   name: "Trim with Body",
@@ -2470,6 +2471,9 @@ pub static TRIM_BODY: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Trim's Trim Tool pick
+// (batch ui-surface-modify-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static TRIM_SKETCH: Form = Form {
   title: "TRIM",
   name: "Trim with Sketch",
@@ -2519,6 +2523,9 @@ pub static REPLACE_FACE: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Offset's Offset Type
+// (batch ui-surface-create-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static VARIABLE_OFFSET: Form = Form {
   title: "OFFSET",
   name: "Variable Offset",
@@ -2842,6 +2849,13 @@ pub static FORM_BOX: Form = Form {
   picks_model: false,
 };
 
+/// The solid patterns' Type row (the pattern dialog switches kind on it; see `dialogs::copies`).
+const PATTERN_TYPES: &[(&str, Icon, &str)] = &[
+  ("rectangular", Icon::Pattern, "Rectangular Pattern"),
+  ("circular", Icon::CircPattern, "Circular Pattern"),
+  ("path", Icon::PathPattern, "Pattern on Path"),
+];
+
 pub static PATH_PATTERN: Form = Form {
   title: "PATTERN ON PATH",
   name: "Pattern on Path",
@@ -2849,25 +2863,30 @@ pub static PATH_PATTERN: Form = Form {
   icon: Icon::Pattern,
   cmd: "pattern.path",
   fixed: &[],
+  // Fusion: the pattern dialog with Type on path: Type, Object Type, Objects and Path, then
+  // Distribution, Quantity, Distance and Orientation once both are picked (the path's sketch,
+  // start point and join are passed but not rows; see `State::hidden`)
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies", required: true },
+    Input::Icons { key: "pattern_type", label: "Type", options: PATTERN_TYPES },
+    Input::Choice { key: "object_type", label: "Object Type", options: &[("bodies", "Bodies")] },
+    Input::Bodies { key: "bodies", label: "Objects", required: true },
+    Input::Curves { key: "path_curves", label: "Path" },
     Input::Sketch { key: "path", label: "Path sketch" },
-    Input::Curves { key: "path_curves", label: "Path curves (default all)" },
-    Input::Expr { key: "count", label: "Quantity", default: "3" },
     Input::Choice {
       key: "distance_type",
-      label: "Distance type",
-      options: &[("spacing", "Spacing"), ("extent", "Extent")],
+      label: "Distribution",
+      options: &[("extent", "Extent"), ("spacing", "Spacing")],
     },
+    Input::Expr { key: "count", label: "Quantity", default: "3" },
     Input::Expr { key: "distance", label: "Distance", default: "10 mm" },
-    Input::Expr { key: "start", label: "Start point (0 to 1)", default: "0" },
-    Input::Check { key: "flip", label: "Flip" },
-    Input::Check { key: "symmetric", label: "Symmetric" },
     Input::Choice {
       key: "orientation",
       label: "Orientation",
-      options: &[("identical", "Identical"), ("along_path", "Path direction")],
+      options: &[("identical", "Identical"), ("along_path", "Path Direction")],
     },
+    Input::Check { key: "flip", label: "Flip" },
+    Input::Check { key: "symmetric", label: "Symmetric" },
+    Input::Expr { key: "start", label: "Start point (0 to 1)", default: "0" },
     Input::Check { key: "join", label: "Join to the original" },
   ],
   picks_model: true,
@@ -2968,6 +2987,17 @@ pub static SK_ISOPARAMETRIC: Form = Form {
   ],
   picks_model: true,
 };
+
+/// Why one option of a form's icon row is drawn greyed (not pickable): what FissionOxide can't
+/// do yet.
+pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static str> {
+  match (form.cmd, key, option) {
+    ("joint_origin", "mode", "between" | "two_edge") => {
+      Some("Only the Simple mode is in FissionOxide yet: a joint origin sits on one picked face")
+    }
+    _ => None,
+  }
+}
 
 /// Why a form's input is drawn greyed: what FissionOxide can't act on yet, or always does.
 /// The command's parameters from the values of Fusion's rows: Rib's Thickness Direction and

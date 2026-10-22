@@ -18,22 +18,37 @@ mod construct;
 mod extrude;
 mod hole_pattern;
 mod icon_row;
+#[cfg(test)]
+mod inspect_tests;
+mod interference;
 mod live;
 mod manip;
+mod modify;
 mod move_copy;
 mod pieces;
+mod press_owner;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
+mod auto_cut;
+mod body_picks;
+mod copies;
+mod edit_more;
+#[cfg(test)]
+mod edit_tests;
 mod export_dxf;
 mod newcomp;
 mod primitive;
 mod redefine;
+mod rsl;
+mod section;
 #[cfg(test)]
 mod sketch_row_tests;
 mod solid;
 mod thread;
 pub(crate) use export_dxf::{SaveWindow, save_window};
 pub(crate) use primitive::overlay as place_overlay;
+
+pub(crate) use section::{KeptSection, shown_section};
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
 pub(crate) const PICK_PLANE_HINT: &str = "Select a plane or planar face";
@@ -61,7 +76,11 @@ pub enum Kind {
   Sweep,
   Hole,
   PressPull,
+  /// Offset Face (MODIFY): faces moved along their normals by a distance.
+  OffsetFace,
   Draft,
+  /// Scale (MODIFY): bodies scaled about a point, uniformly or per axis.
+  Scale,
   SplitBody,
   // sheet metal
   Flange,
@@ -153,7 +172,9 @@ impl Kind {
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
       Kind::PressPull => "PRESS PULL",
+      Kind::OffsetFace => "OFFSET FACE",
       Kind::Draft => "DRAFT",
+      Kind::Scale => "SCALE",
       Kind::SplitBody => "SPLIT BODY",
       Kind::Flange => "FLANGE",
       Kind::Hem => "HEM",
@@ -228,7 +249,9 @@ impl Kind {
       Kind::Sweep => Icon::Sweep,
       Kind::Hole => Icon::Hole,
       Kind::PressPull => Icon::PressPull,
+      Kind::OffsetFace => Icon::OffsetFace,
       Kind::Draft => Icon::Draft,
+      Kind::Scale => Icon::Scale,
       Kind::SplitBody => Icon::SplitBody,
       Kind::Flange => Icon::Flange,
       Kind::Hem => Icon::Hem,
@@ -282,6 +305,8 @@ impl Kind {
       Kind::Hole => ("Hole", "Drill holes at a sketch's points (H)"),
       Kind::PressPull => ("Press Pull", "Push or pull faces along their normals (Q)"),
       Kind::Draft => ("Draft", "Taper faces about a pull direction"),
+      Kind::OffsetFace => ("Offset Face", "Offset faces, flat or curved, along their normals"),
+      Kind::Scale => ("Scale", "Scale bodies about a point"),
       Kind::SplitBody => ("Split Body", "Split bodies along a plane or planar face"),
       Kind::Flange => ("Flange", "Sheet metal from a profile, an open path or sheet edges"),
       Kind::Hem => ("Hem", "Fold sheet edges back on themselves"),
@@ -352,6 +377,7 @@ impl Kind {
         | Kind::Shell
         | Kind::Combine
         | Kind::PressPull
+        | Kind::OffsetFace
         | Kind::Draft
         | Kind::Hem
         | Kind::Rip
@@ -363,18 +389,23 @@ impl Kind {
     )
   }
 
+  /// Fusion's library palettes (Appearance, Physical Material): swatches applied by a drag or a
+  /// click, with Close rather than OK.
+  pub(crate) fn palette(self) -> bool {
+    matches!(self, Kind::Appearance | Kind::Material)
+  }
+
   /// Dialogs that only show information (no OK, nothing applied).
   pub(crate) fn reports(self) -> bool {
     matches!(
       self,
       Kind::Inspect
         | Kind::Appearance
+        | Kind::Material
         | Kind::FlatPattern
-        | Kind::Interference
         | Kind::Bom
         | Kind::MotionStudy
         | Kind::CenterOfMass
-        | Kind::Section
         | Kind::Analysis(_)
     )
   }
@@ -419,6 +450,25 @@ pub struct Manipulator {
   pub value: f64,
 }
 
+/// An edited primitive's Placement row: the plane it stands on, named as its creation dialog
+/// names a picked one ("XY plane", "Face of Body1", a construction plane's name).
+fn placement_label(app: &App, plane: &fox_engine::model::PlaneRef) -> String {
+  use fox_engine::model::{OriginPlane, PlaneRef};
+  match plane {
+    PlaneRef::Origin { plane } => match plane {
+      OriginPlane::Xy => "XY plane",
+      OriginPlane::Xz => "XZ plane",
+      OriginPlane::Yz => "YZ plane",
+    }
+    .into(),
+    PlaneRef::Construction { feature } => {
+      app.s.design.feature(*feature).map_or_else(|| "Plane".into(), |f| f.name.clone())
+    }
+    PlaneRef::Face { face, .. } => format!("Face of {}", app.s.body_name(face.body)),
+    _ => "Plane".into(),
+  }
+}
+
 /// The world plane a dialog's plane value ("xy", {"feature"}, {"body", "face"}) names.
 fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
   use fox_engine::model::OriginPlane;
@@ -446,13 +496,19 @@ const OPS: [(&str, &str); 5] = [
   ("intersect", "Intersect"),
   ("new_component", "New Component"),
 ];
-const REVOLVE_DIRECTIONS: [(&str, &str); 3] =
-  [("one_side", "One side"), ("two_sides", "Two sides"), ("symmetric", "Symmetric")];
 
 pub struct Dialog {
   pub kind: Kind,
   /// Feature being edited (timeline double-click); None while creating.
   pub editing: Option<FeatureId>,
+  /// While Edit Feature has the design rolled back to the edited feature (inside a transaction),
+  /// the marker to roll forward to on OK; see [`Dialog::begin_edit`].
+  rolled: Option<Option<usize>>,
+  /// The edited feature's picks were found again on the rolled-back model: its rows are the
+  /// creation dialog's, live (Fillet, Chamfer, Extrude).
+  repicks: bool,
+  /// The feature the applied preview made (or the one edited).
+  previewed: Option<FeatureId>,
   /// A preview step is applied to the session.
   applied: bool,
   error: Option<String>,
@@ -552,8 +608,8 @@ pub struct Dialog {
   manip: manip::Cache,
   /// Measure: the selection filter as it was before the dialog changed it.
   saved_filter: Option<(crate::select::Priority, bool)>,
-  /// Appearance applies to faces rather than bodies.
-  appearance_faces: bool,
+  /// The Appearance and Physical Material palettes' state (see [`crate::material_ui`]).
+  palette: crate::material_ui::Palette,
   /// Move/Copy's inputs (see [`move_copy`]).
   mv: move_copy::MoveForm,
   /// Live preview (see [`live`]).
@@ -588,6 +644,16 @@ pub struct Dialog {
   redefine: redefine::State,
   /// Export DXF's unit and Visible Geometry check boxes (see [`export_dxf`]).
   dxf: export_dxf::Options,
+  /// The patterns' Type row picked another pattern: the dialog becomes that one next frame
+  /// (see [`copies`]).
+  switch: Option<Kind>,
+  /// Bodies the previewed Mirror or pattern added: drawn as ghosts until OK (see [`copies`]).
+  ghosts: Vec<BodyId>,
+  /// Mirror's plane or Circular Pattern's axis as last picked from the selection: only a new
+  /// pick replaces the one in the dialog (see [`copies`]).
+  last_pick: Value,
+  /// Scale: the point it scales about (world mm), once picked or filled in from the first body.
+  point: Option<[f64; 3]>,
   /// Another command this dialog switches to (a construction dialog's Type or Method): the app
   /// cancels this one and starts that.
   pub(crate) switch_to: Option<Kind>,
@@ -630,6 +696,9 @@ impl Dialog {
     Dialog {
       kind,
       editing: None,
+      rolled: None,
+      repicks: false,
+      previewed: None,
       applied: false,
       error: None,
       dirty: false,
@@ -701,7 +770,7 @@ impl Dialog {
       trace: (kind == Kind::TraceImage).then(Box::default),
       manip: manip::Cache::default(),
       saved_filter: None,
-      appearance_faces: false,
+      palette: Default::default(),
       mv: move_copy::MoveForm::default(),
       live: live::Live::default(),
       follow: false,
@@ -717,6 +786,10 @@ impl Dialog {
       place: primitive::Step::Done,
       redefine: redefine::State::default(),
       dxf: export_dxf::Options::default(),
+      switch: None,
+      ghosts: Vec::new(),
+      last_pick: Value::Null,
+      point: None,
       switch_to: None,
     }
   }
@@ -766,7 +839,7 @@ impl Dialog {
       // the newest sketch's profiles are the ones to pick; Extrude takes only a picked one (as
       // in Fusion, E opens with Profiles: Select and no preview)
       d.sketch = s.edit_sketch.or(app.last_sketch).or_else(|| last_unconsumed_sketch(s));
-      if kind != Kind::Extrude
+      if !matches!(kind, Kind::Extrude | Kind::Sweep)
         && let Some(sk) = d.sketch
         && let Some(r) = s.model.sketches.get(&sk)
         && r.profiles.len() == 1
@@ -797,9 +870,11 @@ impl Dialog {
       d.plane_label = format!("Face of {}", s.body_name(*body));
     }
     match kind {
-      Kind::Fillet => d.radius = "2 mm".into(),
+      // Fusion starts a fillet's radius and a shell's thickness at 0.00, previewing nothing until
+      // a value is typed or the arrow dragged
+      Kind::Fillet => d.radius = "0 mm".into(),
       Kind::Chamfer => d.radius = "1 mm".into(),
-      Kind::Shell => d.radius = "2 mm".into(),
+      Kind::Shell => d.radius = "0 mm".into(),
       // Fusion's defaults for the values not drawn (0.10 in high, a 0.40 in sphere, a 0.20 in
       // tube); the drawing sets the rest
       Kind::Box => d.c = "2.54 mm".into(),
@@ -809,12 +884,18 @@ impl Dialog {
         d.b = "5.08 mm".into();
         d.position = "center";
       }
-      Kind::Revolve => d.axis = "z".into(),
+      // Fusion's Axis starts empty: no preview until one is picked
+      Kind::Revolve => d.axis = String::new(),
       Kind::Mirror => {
         d.join = false;
         d.choice = "bodies";
+        // Fusion: Objects take picked bodies, and the Mirror Plane starts empty (Select)
+        d.bodies = sel_only_bodies(s);
+        d.plane = Value::Null;
+        d.plane_label = String::new();
       }
-      Kind::RectPattern | Kind::CircPattern => d.join = false,
+      Kind::RectPattern => d.join = false,
+      Kind::CircPattern => d.circ_defaults(s),
       Kind::Combine => d.op = "join",
       // Move turns by nothing until asked (the blank dialog's angle is a full turn)
       Kind::Move => {
@@ -828,16 +909,8 @@ impl Dialog {
       Kind::Loft => {
         d.sections = sel_sections(s);
       }
-      Kind::Sweep => {
-        d.path = s
-          .design
-          .features
-          .iter()
-          .take(s.design.active_len())
-          .rev()
-          .find(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && Some(f.id) != d.sketch)
-          .map(|f| f.id);
-      }
+      // Fusion's Profile and Path start empty: both are picked in the canvas
+      Kind::Sweep => {}
       Kind::Hole => {
         d.choice = "simple";
         d.a = "5 mm".into();
@@ -852,10 +925,34 @@ impl Dialog {
         d.distance = "2 mm".into();
         d.choice = "automatic";
       }
+      // Fusion: Fixed Plane, the Pull Direction row active and nothing for it yet, Tangent Chain
+      // on, One Side; the angle (0.0 until set) shows once the picks are made
       Kind::Draft => {
-        d.angle = "3 deg".into();
-        d.plane = json!("xy");
-        d.plane_label = "XY plane".into();
+        d.choice = "fixed_plane";
+        d.position = "one_side";
+        d.flag = true;
+        d.angle = "0.0 deg".into();
+        d.angle2 = "0.0 deg".into();
+        d.plane = Value::Null;
+        d.plane_label = String::new();
+        d.pick_row = 0;
+      }
+      // Fusion: Entities active and nothing picked (no all-bodies default), Uniform, factor 1.00
+      // once a body is picked
+      Kind::Scale => {
+        d.choice = "uniform";
+        d.a = "1.00".into();
+        d.b = "1.00".into();
+        d.c = "1.00".into();
+        d.bodies.clear();
+        for x in &s.selection {
+          if let Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } = x
+            && !d.bodies.contains(&body.0)
+          {
+            d.bodies.push(body.0);
+          }
+        }
+        d.point = d.bodies.first().and_then(|b| body_centre(s, *b));
       }
       Kind::SplitBody => d.bodies = sel_only_bodies(s),
       Kind::Interference => d.flag = true,
@@ -955,7 +1052,6 @@ impl Dialog {
         d.origins = sel_origins(s);
         d.e = "2 mm".into();
       }
-      Kind::Material => d.name = "Steel".into(),
       Kind::SkFillet => d.radius = "2 mm".into(),
       Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => {
         d.distance = "2 mm".into();
@@ -1056,25 +1152,21 @@ impl Dialog {
     {
       d.form.set_drawing(f, &app.s, app.drawing);
     }
-    if kind == Kind::Section && app.section.is_none() {
-      // a picked planar face, else the front plane through the middle of the model
-      let face = app.s.selection.iter().find_map(|x| match x {
-        Sel::Face { body, face } if is_planar(&app.s, *body, *face) => Some(json!({"body": body.0, "face": face})),
-        _ => None,
-      });
-      // (the offset runs along the XZ plane's normal: −Y or +Y, as the design frames it)
-      let n = fox_engine::model::OriginPlane::Xz.plane(app.s.design.frames()).normal();
-      let mid = app.s.model.bounds().map(|(a, b)| n.dot((a + b) / 2.0)).unwrap_or(0.0);
-      app.section = Some(match face {
-        Some(f) => json!({"plane": f, "offset": 0.0, "flip": true}),
-        None => json!({"plane": "xz", "offset": (mid * 1000.0).round() / 1000.0, "flip": false}),
-      });
+    if kind == Kind::Section {
+      d.section_open(&app.s);
     }
     if let Kind::Analysis(a) = kind {
       app.analysis = Some(json!({"analysis": a, "pull": "z", "angle": 1.0}));
     }
     d.start_placing(app);
     d.localize(app.s.design.units);
+    if kind == Kind::PressPull {
+      d.sync_press_owner(&app.s);
+    }
+    // Fusion's Offset Face starts at 0.00 in the document unit
+    if kind == Kind::OffsetFace {
+      d.distance = d.unit.fixed(0.0, 2);
+    }
     d.dirty = !d.picks();
     d
   }
@@ -1120,9 +1212,10 @@ impl Dialog {
   pub fn edit(app: &App, id: FeatureId) -> Option<Dialog> {
     let f = app.s.design.feature(id)?;
     let mut d = match &f.kind {
-      FeatureKind::Extrude { sketch, extent, operation, .. } => {
+      FeatureKind::Extrude { sketch, profiles, extent, operation } => {
         let mut d = Dialog::blank(Kind::Extrude);
         d.sketch = Some(*sketch);
+        d.profiles = profiles.clone();
         // a flipped extrude shows a negative distance, as in Fusion (`extrude::split_sign`)
         d.distance = if extent.flip { extrude::negate(&extent.distance) } else { extent.distance.clone() };
         d.distance2 = extent.distance2.clone();
@@ -1187,7 +1280,7 @@ impl Dialog {
         d.faces = vec![Value::Null; faces.len()];
         d
       }
-      FeatureKind::Primitive { shape, at, operation, .. } => {
+      FeatureKind::Primitive { shape, plane, at, operation } => {
         let kind = match shape {
           Primitive::Box { .. } => Kind::Box,
           Primitive::Cylinder { .. } => Kind::Cylinder,
@@ -1198,6 +1291,7 @@ impl Dialog {
         d.load_primitive(shape);
         d.at = [fox_engine::sketch::Dim::new(at[0]).expr, fox_engine::sketch::Dim::new(at[1]).expr];
         d.op = op_str(*operation);
+        d.plane_label = placement_label(app, plane);
         d
       }
       FeatureKind::ConstructionPlane { offset, .. } => {
@@ -1238,34 +1332,164 @@ impl Dialog {
       }
       kind @ FeatureKind::Move { .. } => {
         let mut d = Dialog::blank(Kind::Move);
-        d.load_move(kind);
+        d.unit = app.s.design.units;
+        d.load_move(&app.s, kind);
+        d
+      }
+      kind @ FeatureKind::Draft { .. } => {
+        let mut d = Dialog::blank(Kind::Draft);
+        d.load_draft(kind);
         d
       }
       kind @ (FeatureKind::Emboss { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. }) => {
         solid::edit_form(kind)?
       }
+      kind @ (FeatureKind::Hole { .. }
+      | FeatureKind::Mirror { .. }
+      | FeatureKind::Combine { .. }
+      | FeatureKind::OffsetFaces { .. }) => edit_more::load(&app.s, kind)?,
       _ => return None,
     };
     d.editing = Some(id);
     d.unit = app.s.design.units;
     d.load_edit_anchor(&f.kind);
-    // a stored bare length is mm: in a design in another unit its box says so ("10 mm")
-    let u = d.unit;
+    // a stored bare length is mm, and an edit box always shows the unit, as Fusion's do ("2 mm")
+    let lengths = match d.kind {
+      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => 3,
+      Kind::Hole => 4,
+      _ => 0,
+    };
+    let s = &mut d.solid;
     let fields = [&mut d.distance, &mut d.distance2, &mut d.radius, &mut d.spacing, &mut d.spacing2];
-    for f in fields.into_iter().chain(d.translate.iter_mut()) {
-      *f = u.shown(f);
+    let more = [&mut s.distance2, &mut s.radius2, &mut s.thickness_out];
+    let abc = [&mut d.a, &mut d.b, &mut d.c, &mut d.d].into_iter().take(lengths);
+    let rows = s.rows.iter_mut().map(|r| &mut r.radius);
+    for f in fields.into_iter().chain(more).chain(abc).chain(rows).chain(d.translate.iter_mut()) {
+      *f = fox_engine::model::LengthUnit::pinned(f);
     }
     Some(d)
   }
 
+  /// Edit Feature rolls the design back to the edited feature while its dialog is open, as
+  /// Fusion does: the marker moves to just after it, the later features roll back (faded in the
+  /// timeline, their bodies gone), and OK or Cancel rolls forward again. It all happens in a
+  /// transaction, so OK leaves one undo step and Cancel restores the design as it was. Fillet,
+  /// Chamfer and Extrude find their picks again on the model before the feature, so their
+  /// rows are the creation dialog's, live.
+  pub(crate) fn begin_edit(&mut self, s: &mut Session) {
+    let Some(id) = self.editing else { return };
+    let Some(i) = s.design.index_of(id) else { return };
+    if s.begin_transaction().is_err() {
+      return;
+    }
+    let old = s.design.marker;
+    if s.execute("timeline.marker", &json!({"at": i})).is_err() {
+      let _ = s.rollback_transaction();
+      return;
+    }
+    self.rolled = Some(old);
+    self.repicks = self.load_edit_picks(s);
+    self.preview(s);
+  }
+
+  /// Ends Edit Feature's rolled-back view: OK (`keep`) rolls the marker forward to where it was
+  /// and keeps the edit as one undo step; Cancel restores the design.
+  fn end_edit(&mut self, s: &mut Session, keep: bool) {
+    let Some(old) = self.rolled.take() else { return };
+    if keep {
+      let _ = s.execute("timeline.marker", &json!({"at": old}));
+      let _ = s.commit_transaction_named("Edit Feature");
+    } else {
+      let _ = s.rollback_transaction();
+    }
+  }
+
+  /// Finds the edited feature's picks on the rolled-back model: a fillet's or chamfer's edges
+  /// (every set's) and an extrude's profiles, selected as the creation dialog shows them. False
+  /// when one can't be found (the rows then keep the stored picks unchanged).
+  fn load_edit_picks(&mut self, s: &mut Session) -> bool {
+    let Some(kind) = self.editing.and_then(|id| s.design.feature(id)).map(|f| f.kind.clone()) else {
+      return false;
+    };
+    let find = |er: &fox_engine::model::EdgeRef| -> Option<Value> {
+      let e = s.model.body(er.body)?.find_edge(er)?;
+      Some(json!({"body": er.body.0, "edge": e}))
+    };
+    let all = |refs: &[fox_engine::model::EdgeRef]| refs.iter().map(find).collect::<Option<Vec<Value>>>();
+    match kind {
+      FeatureKind::Fillet { edges, sets, .. } => {
+        let Some(first) = all(&edges) else { return false };
+        let Some(rest) = sets.iter().map(|set| all(&set.edges)).collect::<Option<Vec<_>>>() else { return false };
+        for (row, picks) in self.solid.rows.iter_mut().skip(1).zip(rest) {
+          row.edges = picks;
+        }
+        if let Some(row) = self.solid.rows.first_mut() {
+          row.edges = first.clone();
+        }
+        self.edges = first;
+      }
+      FeatureKind::Chamfer { edges, .. } => {
+        let Some(picks) = all(&edges) else { return false };
+        self.edges = picks;
+      }
+      FeatureKind::Extrude { sketch, profiles, .. } => {
+        let Some(r) = s.model.sketches.get(&sketch) else { return false };
+        // the regions the stored points fall in (none stored: every region)
+        let mut picked = Vec::new();
+        for p in &profiles {
+          let Some(index) = r.profiles.iter().position(|x| x.contains(*p)) else { return false };
+          picked.push((index, r.profiles[index].interior_point()));
+        }
+        if profiles.is_empty() {
+          picked = r.profiles.iter().enumerate().map(|(i, x)| (i, x.interior_point())).collect();
+        }
+        self.profiles = picked.iter().map(|(_, p)| *p).collect();
+        s.selection = picked.iter().map(|(index, _)| Sel::Profile { sketch, index: *index }).collect();
+        return true;
+      }
+      _ => return false,
+    }
+    s.selection = self.picked_selection();
+    true
+  }
+
+  /// Are the dialog's picks fixed? An edited feature's are, unless Edit Feature found them again
+  /// on the rolled-back model ([`Dialog::begin_edit`]).
+  fn picks_fixed(&self) -> bool {
+    self.editing.is_some() && !self.repicks
+  }
+
+  /// Did the live preview fail (the feature computed, with an error)? OK greys and the error
+  /// toast says why, as in Fusion.
+  pub(crate) fn failed(&self) -> bool {
+    self.applied && self.error.is_some()
+  }
+
+  /// The feature the showing preview made or edited (the error toast names its message rather
+  /// than its name).
+  pub(crate) fn own_feature(&self) -> Option<FeatureId> {
+    self.previewed.filter(|_| self.applied)
+  }
+
   /// The command (name, params) this dialog applies.
   fn command(&self) -> Option<(&'static str, Value)> {
-    self.with_comp_name(self.command_base())
+    self.with_comp_name(self.command_base()).map(|(c, p)| (c, self.with_cut_targets(p)))
   }
 
   fn command_base(&self) -> Option<(&'static str, Value)> {
     if let Some(id) = self.editing {
-      return Some(("feature.edit", json!({"feature": id.0, "set": self.edit_set()?})));
+      let mut p = json!({"feature": id.0, "set": self.edit_set()?});
+      if self.rolled.is_some() {
+        p["marker_after"] = json!(true);
+      }
+      if self.repicks {
+        match self.kind {
+          Kind::Fillet => p["picks"] = self.fillet_params(),
+          Kind::Chamfer => p["picks"] = json!({"edges": self.edges, "tangent_chain": !self.solid.no_chain}),
+          _ => {}
+        }
+      }
+      return Some(("feature.edit", p));
     }
     let op = self.op;
     Some(match self.kind {
@@ -1273,6 +1497,7 @@ impl Dialog {
       Kind::PickPlane
       | Kind::Inspect
       | Kind::Appearance
+      | Kind::Material
       | Kind::FlatPattern
       | Kind::Interference
       | Kind::Bom
@@ -1295,9 +1520,17 @@ impl Dialog {
         ),
       ),
       Kind::Hole => ("hole", self.hole_params()?),
-      Kind::PressPull => ("press_pull", json!({"faces": self.faces, "distance": self.distance})),
-      Kind::Draft => {
-        ("draft", json!({"faces": self.faces, "plane": self.plane, "angle": self.angle, "flip": self.flip}))
+      Kind::PressPull => self.press_pull_command(),
+      Kind::OffsetFace => ("press_pull", json!({"faces": self.faces, "distance": self.distance})),
+      Kind::Draft => ("draft", self.draft_params()),
+      Kind::Scale => {
+        let mut p = json!({"bodies": self.bodies, "center": self.point?});
+        if self.choice == "non_uniform" {
+          p["factors"] = json!([self.a, self.b, self.c]);
+        } else {
+          p["factor"] = json!(self.a);
+        }
+        ("scale", p)
       }
       Kind::SplitBody if self.target.is_some() => {
         let tool = self.target?;
@@ -1425,9 +1658,6 @@ impl Dialog {
           p["lead"] = json!(self.e);
         }
         ("joint", p)
-      }
-      Kind::Material => {
-        ("component.material", json!({"component": self.comps.iter().flatten().next()?, "material": self.name}))
       }
       Kind::SkFillet => ("sketch.fillet", json!({"curves": self.curves, "radius": self.radius})),
       Kind::SkChamfer => ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance})),
@@ -1618,13 +1848,7 @@ impl Dialog {
       }
       Kind::Mirror => ("mirror", json!({"plane": self.plane, "bodies": self.bodies, "join": self.join})),
       Kind::RectPattern => ("pattern.rectangular", self.pattern_params()?),
-      Kind::CircPattern => (
-        "pattern.circular",
-        json!({
-          "bodies": self.bodies, "axis": self.axis, "count": self.count, "angle": self.angle,
-          "symmetric": self.symmetric[0], "join": self.join,
-        }),
-      ),
+      Kind::CircPattern => ("pattern.circular", self.circ_params()?),
       Kind::Combine => {
         let (target, tools) = self.bodies.split_first()?;
         ("combine", json!({"target": target, "tools": tools, "operation": op, "keep_tools": self.keep_tools}))
@@ -1640,12 +1864,18 @@ impl Dialog {
     Some(match self.kind {
       Kind::Extrude => {
         let (distance, flip) = self.extrude_distance();
-        json!({
+        let mut set = json!({
           "extent": self.edit_extrude_rows(self.edit_extent(
             json!({"kind": self.extent, "distance": distance, "distance2": self.distance2, "flip": flip}),
           )),
           "operation": self.op,
-        })
+        });
+        // the profiles picked again (none: as stored)
+        if self.repicks && !self.profiles.is_empty() {
+          set["sketch"] = json!(self.sketch?.0);
+          set["profiles"] = json!(self.profiles);
+        }
+        set
       }
       Kind::Revolve => {
         let two = self.extent == "two_sides";
@@ -1673,8 +1903,10 @@ impl Dialog {
       Kind::CircPattern => {
         json!({"count": self.count, "angle": self.angle, "symmetric": self.symmetric[0], "join": self.join})
       }
-      Kind::Move => self.move_edit_set(),
+      Kind::Move => self.move_edit_set()?,
+      Kind::Draft => self.draft_edit_set(),
       Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
+      Kind::Hole | Kind::Mirror | Kind::Combine | Kind::PressPull => self.more_edit_set()?,
       _ => return None,
     })
   }
@@ -1713,6 +1945,9 @@ impl Dialog {
     self.dirty = false;
     let selection = s.selection.clone();
     self.withdraw(s);
+    if self.kind == Kind::Move {
+      self.prepare_move_edit(s);
+    }
     if self.kind.reports() {
       self.refresh_report(s);
       return;
@@ -1723,19 +1958,24 @@ impl Dialog {
     if !self.ready() {
       return;
     }
-    if self.kind == Kind::SkOffset && !self.offset_set() {
-      // at 0.00 (or half typed) the offset sits on its curve: nothing to preview, no complaint
+    if self.waits_for_value() {
+      // at 0.00 (or half typed) an offset sits on its curve and a fillet or shell has no size:
+      // nothing to preview, no complaint
       self.error = None;
       return;
     }
+    self.cut_ghost(s, cmd, &params);
     self.live_applying(s, cmd, &params);
+    let before: Vec<BodyId> = s.model.bodies.iter().map(|b| b.id).collect();
     let result = s.execute(cmd, &params);
+    self.note_copies(s, &before, result.is_ok());
     if let Some(t) = self.trace.as_mut() {
       t.result = result.as_ref().ok().cloned();
     }
     match result {
       Ok(v) => {
         self.applied = true;
+        self.previewed = self.editing.or_else(|| v.get("feature").and_then(Value::as_u64).map(|f| FeatureId(f as u32)));
         self.note_preview(&v);
         self.error = v.get("error").and_then(Value::as_str).map(str::to_string);
         self.summary = v.get("summary").and_then(Value::as_str).map(str::to_string);
@@ -1750,14 +1990,19 @@ impl Dialog {
         self.summary = None;
       }
     }
+    let switched = self.auto_cut_check(s);
     if !self.picks() {
       s.selection = selection;
+    }
+    if switched {
+      self.preview(s);
     }
   }
 
   /// Enough input to try?
   fn ready(&self) -> bool {
-    if self.editing.is_some() {
+    // an edit's stored picks stand; a fillet's or chamfer's picked again need an edge
+    if self.editing.is_some() && !(self.repicks && matches!(self.kind, Kind::Fillet | Kind::Chamfer)) {
       return true;
     }
     if self.placing() {
@@ -1766,20 +2011,24 @@ impl Dialog {
     match self.kind {
       Kind::Form(f) => self.form.missing(f).is_none(),
       Kind::Extrude => self.sketch.is_some() && !self.profiles.is_empty(),
-      Kind::Revolve => self.sketch.is_some(),
+      Kind::Revolve => self.sketch.is_some() && !self.axis.is_empty(),
       Kind::Fillet => self.fillet_ready(),
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty() || !self.bodies.is_empty(),
       Kind::Combine => self.bodies.len() >= 2,
-      Kind::Mirror if self.choice == "features" => !self.mirror_features.is_empty(),
+      Kind::Mirror if self.choice == "features" => !self.mirror_features.is_empty() && !self.plane.is_null(),
+      Kind::Mirror => !self.bodies.is_empty() && !self.plane.is_null(),
+      Kind::CircPattern => !self.bodies.is_empty() && self.circ_axis().is_some(),
       Kind::Move => self.move_ready(),
       Kind::Loft => self.sections.len() >= 2,
-      Kind::Sweep => self.sketch.is_some() && self.path.is_some(),
+      Kind::Sweep => self.sketch.is_some() && self.path.is_some() && !self.profiles.is_empty(),
       Kind::Hole => self.hole_ready(),
       Kind::Fold => self.sketch.is_some(),
       Kind::RectPattern => self.pattern_ready(),
       Kind::OffsetPlane => !self.plane.is_null(),
-      Kind::PressPull | Kind::Draft => !self.faces.is_empty(),
+      Kind::PressPull | Kind::OffsetFace => !self.faces.is_empty(),
+      Kind::Draft => !self.plane.is_null() && !self.faces.is_empty(),
+      Kind::Scale => !self.bodies.is_empty() && self.point.is_some(),
       Kind::Flange => {
         if self.choice == "edge" {
           !self.edges.is_empty()
@@ -1796,7 +2045,6 @@ impl Dialog {
         let need = self.saved.iter().filter(|n| n.is_empty()).count();
         self.origins.len() >= need && (!self.saved[0].is_empty() || self.comps.first().is_some_and(Option::is_some))
       }
-      Kind::Material => self.comps.iter().any(Option::is_some),
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
       Kind::SkCircPattern | Kind::SkScale => !self.curves.is_empty() && self.center.is_some(),
@@ -1819,7 +2067,7 @@ impl Dialog {
       s.undo();
       s.drop_redo();
       self.applied = false;
-      if self.picks() && self.editing.is_none() {
+      if self.picks() && !self.picks_fixed() {
         // the picks are valid again on the un-previewed model
         s.selection = self.picked_selection();
       }
@@ -1832,6 +2080,12 @@ impl Dialog {
     }
     let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
     let mut out = Vec::new();
+    // Draft's pull face stays picked (and blue) with the faces to draft
+    if self.kind == Kind::Draft
+      && let (Some(b), Some(i)) = (get(&self.plane, "body"), get(&self.plane, "face"))
+    {
+      out.push(Sel::Face { body: BodyId(b), face: i });
+    }
     for e in &self.edges {
       if let (Some(b), Some(i)) = (get(e, "body"), get(e, "edge")) {
         out.push(Sel::Edge { body: BodyId(b), edge: i });
@@ -1888,11 +2142,12 @@ impl Dialog {
   pub fn cancel(&mut self, s: &mut Session) {
     self.withdraw(s);
     self.redefine_restore(s);
+    self.end_edit(s, false);
   }
 
   /// Is a model-picking dialog's preview showing? (Viewport clicks withdraw it first.)
   pub fn previewing_model(&self) -> bool {
-    self.applied && self.picks() && self.editing.is_none()
+    self.applied && self.picks() && !self.picks_fixed()
   }
 
   pub fn unpreview(&mut self, s: &mut Session) {
@@ -1921,6 +2176,7 @@ impl Dialog {
         let (base, centre) = self.offset_base(s)?;
         Some(Manipulator { origin: centre, dir: self.offset_sign(s) * base.normal(), value: len(&self.distance)? })
       }
+      Kind::Section => self.section_manipulator(s),
       _ => self.more_manipulator(s),
     }
   }
@@ -1935,6 +2191,7 @@ impl Dialog {
         self.distance = manip::mm(self.unit, v);
       }
       Kind::OffsetPlane => self.distance = manip::mm(self.unit, v),
+      Kind::Section => self.set_section_distance(v),
       _ => {
         if !self.set_more_manipulator(v, step) {
           return;
@@ -1969,7 +2226,11 @@ impl Dialog {
 
   /// Picks up selection changes made in the viewport while the dialog is open.
   fn sync_selection(&mut self, s: &Session) {
-    if self.editing.is_some() {
+    if self.picks_fixed() {
+      // Edit Move's Selection stays live, as in Fusion
+      if self.kind == Kind::Move && self.mv.adds {
+        self.sync_move(s);
+      }
       return;
     }
     match self.kind {
@@ -2004,7 +2265,7 @@ impl Dialog {
           self.sync_object(s);
         }
         if self.kind == Kind::Sweep {
-          self.sync_guide_surface(s);
+          self.sync_sweep_picks(s);
         }
         if self.kind == Kind::Revolve {
           self.sync_revolve_axis(s);
@@ -2031,6 +2292,7 @@ impl Dialog {
           self.sections = secs;
           self.dirty = true;
         }
+        self.sync_loft_guides(s);
       }
       Kind::Hem | Kind::Rip | Kind::Flange if !self.applied => {
         let e = sel_edges(s);
@@ -2038,12 +2300,17 @@ impl Dialog {
           self.edges = e;
         }
       }
-      Kind::PressPull | Kind::Draft if !self.applied => {
+      Kind::PressPull | Kind::OffsetFace if !self.applied => {
         let f = sel_faces(s);
         if f != self.faces {
           self.faces = f;
+          if self.kind == Kind::PressPull {
+            self.sync_press_owner(s);
+          }
         }
       }
+      Kind::Draft if !self.applied => self.sync_draft(s),
+      Kind::Scale => self.sync_scale(s),
       Kind::Refold if !self.applied => {
         let b = sel_bodies(s);
         if b != self.bodies {
@@ -2073,7 +2340,7 @@ impl Dialog {
           self.dirty = true;
         }
       }
-      Kind::NewComponent | Kind::Material => {
+      Kind::NewComponent => {
         let b = sel_bodies(s);
         if b != self.bodies {
           self.comps = b.iter().map(|x| s.design.component_of(BodyId(*x)).map(|c| c.id.0)).collect();
@@ -2118,6 +2385,10 @@ impl Dialog {
       }
       Kind::Move => self.sync_move(s),
       Kind::RectPattern => self.pattern_sync(s),
+      Kind::Mirror if self.editing.is_none() => self.mirror_sync(s),
+      Kind::CircPattern if self.editing.is_none() => self.circ_sync(s),
+      Kind::Interference => self.interference_sync(s),
+      Kind::Section => self.section_sync(s),
       Kind::Combine | Kind::Mirror | Kind::CircPattern if !self.applied || !self.picks() => {
         let mut b: Vec<u32> = Vec::new();
         for x in &s.selection {
@@ -2140,7 +2411,14 @@ impl Dialog {
 
   /// Draws the dialog. Returns false when it closed.
   pub fn show(&mut self, app: &mut App, ctx: &egui::Context) -> bool {
+    self.body_pick_priority(app);
     self.sync_selection(&app.s);
+    // an origin plane or axis picked in the browser: Mirror's plane, Circular Pattern's axis
+    if let Some(item) = crate::origin::picked(app)
+      && self.take_origin(item)
+    {
+      crate::origin::clear(app);
+    }
     self.hole_sync(app);
     self.redefine_sync(app);
     if self.kind == Kind::PickPlane
@@ -2181,7 +2459,7 @@ impl Dialog {
     let mut cancel = false;
     let title = self.heading();
     // FILLET's selection table needs the extra width, as in Fusion
-    let width = if self.kind == Kind::Fillet { 360.0 } else { 300.0 };
+    let width = if matches!(self.kind, Kind::Fillet | Kind::Loft) { 360.0 } else { 300.0 };
     // docked at the canvas's top-right corner when it opens and again after the window is
     // resized; in between it stays where it was dragged
     let dock = panels::dialog_dock(app.canvas, app.s.edit_sketch.is_some());
@@ -2202,10 +2480,22 @@ impl Dialog {
         panels::dialog_header(ui, self.kind.icon(), &title, width);
         egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 10, bottom: 8 }).show(ui, |ui| {
           ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
-          egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
-            self.fields(app, ui);
-          });
-          if let Some(e) = &self.error {
+          if self.kind.palette() {
+            egui::ScrollArea::vertical().max_height(560.0).auto_shrink([false, true]).show(ui, |ui| {
+              if self.kind == Kind::Material {
+                crate::material_ui::material_palette(app, ui, &mut self.palette);
+              } else {
+                crate::material_ui::appearance_palette(app, ui, &mut self.palette);
+              }
+            });
+          } else {
+            self.tab_strip(ui);
+            egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
+              self.fields(app, ui);
+            });
+          }
+          // a failed preview's message is in the error toast instead, as Fusion shows it
+          if let Some(e) = self.error.as_ref().filter(|_| !self.failed()) {
             ui.add_space(6.0);
             ui.label(RichText::new(format!("⚠ {e}")).color(theme::ERROR));
           } else if let Some(n) = self.summary.as_ref().filter(|_| self.applied) {
@@ -2228,7 +2518,7 @@ impl Dialog {
               theme::GROUP_LABEL,
             );
             if !self.kind.reports() {
-              if self.picks() && self.editing.is_none() {
+              if self.picks() && !self.picks_fixed() {
                 self.live_checkbox(ui, &mut app.s);
               }
               ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2253,6 +2543,10 @@ impl Dialog {
     // typing no value box took (a dialog without one) is dropped
     ctx.data_mut(|d| d.remove::<String>(egui::Id::new(TYPING)));
     self.live_check();
+    if let Some(k) = self.switch.take() {
+      self.switch_pattern(app, k);
+      return true;
+    }
     if self.dirty {
       self.preview(&mut app.s);
     }
@@ -2266,12 +2560,23 @@ impl Dialog {
       ok = false;
       keep = !self.redefine_ok(app);
     }
+    if ok && matches!(self.kind, Kind::Interference | Kind::Section) {
+      // nothing to apply: OK closes, Section Analysis keeping its cut in the browser
+      if ok_enabled {
+        if self.kind == Kind::Section {
+          self.keep_section(app);
+        }
+        keep = false;
+      }
+      ok = false;
+    }
     if ok {
       if !self.applied {
         self.preview(&mut app.s);
       }
       if self.applied && self.error.is_none() {
         keep = false;
+        self.end_edit(&mut app.s, true);
         app.s.selection.clear();
         // select the traced shapes (not their holes), ready to extrude
         if let (Some(r), Some(sketch)) = (self.trace.as_ref().and_then(|t| t.result.as_ref()), app.s.edit_sketch) {
@@ -2299,14 +2604,17 @@ impl Dialog {
         }
       } else if !self.applied && self.error.is_none() {
         self.error = Some(self.missing_input().into());
-      } else if self.applied {
-        // keep the failing feature in the timeline (red), like Fusion
-        keep = false;
       }
+      // a failing preview (OK greyed, from the marking menu or with Preview off) keeps the
+      // dialog open, as Fusion's greyed OK does
     }
     if cancel {
       self.cancel(&mut app.s);
       keep = false;
+      // Cancel closes with nothing selected, as OK, Escape and the marking menu's Cancel do
+      if !self.kind.reports() {
+        app.s.selection.clear();
+      }
     }
     keep && !self.closed
   }
@@ -2341,21 +2649,41 @@ impl Dialog {
     if let Some(p) = self.place_prompt() {
       return Some(p.into());
     }
+    if self.kind == Kind::Inspect {
+      return Some(MEASURE_PROMPT.into());
+    }
+    if self.wants_cut_plane() {
+      return Some(section::CUT_PLANE_HINT.into());
+    }
     if !self.ready() {
       return Some(match self.kind {
         Kind::Extrude => "Select sketch profiles or planar faces to extrude".into(),
+        Kind::Revolve if self.sketch.is_some() => "Select the axis to revolve the profile around".into(),
         Kind::Revolve => "Select sketch profiles or planar faces to revolve".into(),
         Kind::Fillet => "Select edges, faces, or features to fillet".into(),
         Kind::Chamfer => "Select edges or faces to chamfer".into(),
         Kind::Shell => "Select faces to remove or bodies to shell".into(),
         Kind::Loft => "Select profiles or planar faces".into(),
-        Kind::Sweep if self.sketch.is_none() => "Select sketch profiles or planar faces to sweep".into(),
+        Kind::Sweep if self.profiles.is_empty() => "Specify a sweep type or select an object to sweep".into(),
         Kind::Sweep => "Select path".into(),
         Kind::Combine if self.bodies.is_empty() => "Select target body".into(),
+        Kind::Mirror if self.choice == "features" && self.mirror_features.is_empty() => {
+          "Select features to mirror".into()
+        }
+        Kind::Mirror if self.choice != "features" && self.bodies.is_empty() => "Select bodies to mirror".into(),
+        Kind::Mirror => "Select mirror plane".into(),
+        Kind::CircPattern if self.bodies.is_empty() => {
+          "Select solid or surface bodies in the canvas or browser to pattern".into()
+        }
+        Kind::CircPattern => "Select axis".into(),
         Kind::Combine => "Select tool bodies".into(),
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
+        Kind::Draft if self.pick_row == 0 || self.plane.is_null() => "Select pull direction".into(),
         Kind::Draft => "Select faces to draft".into(),
         Kind::RedefinePlane => redefine::HINT.into(),
+        Kind::OffsetFace => "Select face(s) to offset".into(),
+        Kind::Scale if self.bodies.is_empty() => "Select bodies or sketches to scale".into(),
+        Kind::Scale => "Select point".into(),
         // one prompt for the whole pick, as Fusion words it
         Kind::SkScale => {
           "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
@@ -2370,6 +2698,14 @@ impl Dialog {
     if self.kind == Kind::SkOffset {
       return Some("Modify offset distance or side settings".into());
     }
+    // Mirror's prompt once both picks are in, whatever the pointer is over, as Fusion words it
+    if self.kind == Kind::Mirror && self.editing.is_none() {
+      return Some("Hold Ctrl to modify object selection or mirror plane".into());
+    }
+    // so does Draft's, once its picks are made
+    if self.kind == Kind::Draft {
+      return Some("Specify draft angle".into());
+    }
     if hovering && self.selects() {
       return Some("Hold Ctrl to modify selection".into());
     }
@@ -2382,7 +2718,8 @@ impl Dialog {
       Kind::OffsetPlane => "Specify offset distance",
       Kind::Hole => "Specify hole diameter and depth",
       Kind::Draft => "Specify draft angle",
-      Kind::PressPull => "Specify distance",
+      Kind::PressPull | Kind::OffsetFace => "Specify distance",
+      Kind::Scale => "Specify scale factor",
       Kind::Loft | Kind::Sweep | Kind::Combine => "Specify operation",
       Kind::RectPattern | Kind::CircPattern => "Specify quantity and distance",
       Kind::Move => "Specify distance or angle",
@@ -2411,7 +2748,6 @@ impl Dialog {
           | Kind::Flange
           | Kind::NewComponent
           | Kind::Project
-          | Kind::Material
           | Kind::Mirror
           | Kind::RectPattern
           | Kind::CircPattern
@@ -2425,32 +2761,50 @@ impl Dialog {
           | Kind::SkCircPattern
           | Kind::SkRectPattern
           | Kind::SkScale
+          | Kind::Scale
       )
   }
 
   /// Is OK live? Greyed while the dialog lacks its input, as in Fusion: Extrude until a profile
-  /// is picked, the others until what they need (`ready`) is there.
-  fn ok_enabled(&self) -> bool {
+  /// is picked, the others until what they need (`ready`) is there; and while the live preview
+  /// fails (a fillet too big for its edges), until a value that works is typed.
+  pub(crate) fn ok_enabled(&self) -> bool {
+    let input = match self.kind {
+      Kind::Extrude if !self.picks_fixed() => !self.profiles.is_empty(),
+      // OK waits for Compute, and Section Analysis for its cut plane
+      Kind::Interference => self.report.is_some(),
+      Kind::Section => !self.plane.is_null(),
+      // an offset of 0.00 sits on its curve, a fillet or shell of 0.00 has no size: OK waits
+      // for a value
+      _ => self.ready() && !self.waits_for_value(),
+    };
+    input && !self.failed()
+  }
+
+  /// Is the dialog's value still at 0.00 (or half typed), where Fusion previews nothing and OK
+  /// waits: Sketch Offset's and Offset Face's distance, Draft's angle, a new fillet's radius or
+  /// shell's thickness.
+  fn waits_for_value(&self) -> bool {
     match self.kind {
-      Kind::Extrude if self.editing.is_none() => !self.profiles.is_empty(),
-      // an offset of 0.00 sits on its curve: OK waits for a distance
-      Kind::SkOffset => self.ready() && self.offset_set(),
-      _ => self.ready(),
+      Kind::SkOffset | Kind::OffsetFace => !self.offset_set(),
+      Kind::Draft => !self.draft_angle_set(),
+      Kind::Fillet if self.editing.is_none() && self.solid.fillet_type != "full_round" => !length_set(&self.radius),
+      Kind::Shell if self.editing.is_none() => !length_set(&self.radius),
+      _ => false,
     }
   }
 
-  /// Sketch Offset: has the distance left 0.00 (a value the arrow, the box or the row set)? A
-  /// distance naming a user parameter counts as set; a half-typed one (".", "-") doesn't.
+  /// Sketch Offset, Offset Face: has the distance left 0.00 (a value the arrow, the box or the
+  /// row set)? A distance naming a user parameter counts as set; a half-typed one (".", "-")
+  /// doesn't.
   fn offset_set(&self) -> bool {
-    match fox_engine::expr::eval(&self.distance, fox_engine::expr::Kind::Length, &fox_engine::expr::Empty) {
-      Ok(v) => v.abs() >= 1e-9,
-      Err(_) => !self.distance.trim().trim_matches(['.', '-', '+', ' ']).is_empty(),
-    }
+    length_set(&self.distance)
   }
 
   fn missing_input(&self) -> &'static str {
     match self.kind {
       Kind::Form(f) => self.form.missing(f).unwrap_or("missing input"),
+      Kind::Revolve if self.sketch.is_some() => "select the axis to revolve the profile around",
       Kind::Extrude | Kind::Revolve => "select a profile",
       Kind::Fillet => "select edges or faces",
       Kind::Chamfer => "select edges",
@@ -2464,7 +2818,11 @@ impl Dialog {
       Kind::RectPattern => self.pattern_missing(),
       Kind::Fold => "pick a sketch with a bend line",
       Kind::OffsetPlane => "select a plane",
-      Kind::PressPull | Kind::Draft => "select faces",
+      Kind::PressPull | Kind::OffsetFace => "select faces",
+      Kind::Draft if self.plane.is_null() => "select the pull direction",
+      Kind::Draft => "select faces to draft",
+      Kind::Scale if self.bodies.is_empty() => "select bodies to scale",
+      Kind::Scale => "select the point to scale about",
       Kind::Flange if self.choice == "edge" => "select sheet edges",
       Kind::Flange => "select a profile",
       Kind::Hem | Kind::Rip => "select edges",
@@ -2475,7 +2833,6 @@ impl Dialog {
         "select the moving component, then the one it's jointed to, then a face, edge or point for the joint"
       }
       Kind::ComponentProps => "pick a component in the browser",
-      Kind::Material => "select a body of a component",
       Kind::SkFillet => "select two lines or arcs that meet",
       Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "select two lines",
       Kind::SkMirror if self.curves.is_empty() => "select sketch objects to mirror",
@@ -2499,76 +2856,14 @@ impl Dialog {
   }
 
   fn fields(&mut self, app: &mut App, ui: &mut egui::Ui) {
-    let creating = self.editing.is_none();
+    let creating = !self.picks_fixed();
     self.construct_rows(ui);
     match self.kind {
       // Create Sketch has no dialog (`show` returns before drawing one): the planes to pick are
       // drawn in the viewport (`viewport::plane_picker`) with the cursor hint
       Kind::PickPlane => {}
       Kind::Extrude => self.extrude_rows(ui),
-      Kind::Revolve => {
-        ui.label("Profiles");
-        let n = self.profiles.len();
-        if self.editing.is_some() {
-          ui.label("(unchanged)");
-        } else if n == 0 {
-          sel_chip(ui, self.accent(), "Select (all regions)", false);
-        } else {
-          sel_chip(ui, self.accent(), &format!("{n} selected"), true);
-        }
-        ui.end_row();
-        ui.label("Axis");
-        let lines = self.sketch_lines(app);
-        let current = self.axis.clone();
-        egui::ComboBox::from_id_salt("axis")
-          .selected_text(axis_label(&current))
-          .show_ui(ui, |ui| {
-            for a in ["x", "y", "z"] {
-              if ui.selectable_label(current == a, axis_label(a)).clicked() {
-                self.axis = a.into();
-                self.dirty = true;
-              }
-            }
-            for (id, label) in lines {
-              let key = format!("line:{id}");
-              if ui.selectable_label(current == key, label).clicked() {
-                self.axis = key;
-                self.dirty = true;
-              }
-            }
-            // construction axes, and an edge picked in the viewport
-            for id in app.s.model.axes.keys() {
-              let key = format!("axis:{}", id.0);
-              let name = app.s.design.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| axis_label(&key));
-              if ui.selectable_label(current == key, name).clicked() {
-                self.axis = key;
-                self.dirty = true;
-              }
-            }
-            if !self.solid.axis_edge.is_null() && ui.selectable_label(current == "edge", axis_label("edge")).clicked() {
-              self.axis = "edge".into();
-              self.dirty = true;
-            }
-          })
-          .response
-          .on_hover_text("Or pick a straight edge, sketch line or construction axis in the canvas");
-        ui.end_row();
-        ui.label("Direction");
-        self.combo(ui, "rev_dir", &REVOLVE_DIRECTIONS, true);
-        ui.end_row();
-        self.revolve_type_rows(ui);
-        if self.extent == "two_sides" {
-          ui.label("Angle 2");
-          if value_edit(ui, &mut self.angle2).changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-        }
-        ui.label("Operation");
-        self.combo(ui, "op", &OPS, false);
-        ui.end_row();
-        self.comp_name_row(ui);
-      }
+      Kind::Revolve => self.revolve_fields(ui),
       Kind::Fillet => {
         self.fillet_rows(app, ui, creating);
         self.setback_row(ui, creating);
@@ -2576,12 +2871,16 @@ impl Dialog {
       Kind::Chamfer => self.chamfer_rows(app, ui, creating),
       Kind::Shell => self.shell_rows(ui, creating),
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => self.primitive_rows(ui, creating),
+      Kind::Mirror if creating => self.mirror_rows(app, ui),
+      Kind::CircPattern if creating => self.circ_rows(ui),
       Kind::OffsetPlane | Kind::Mirror => {
         ui.label("Plane");
         if self.kind == Kind::OffsetPlane && creating {
           self.offset_plane_chip(ui, &mut app.s);
         } else if creating {
           self.plane_choice(ui);
+        } else if self.kind == Kind::Mirror {
+          sel_chip(ui, self.accent(), "1 selected", true);
         } else {
           ui.label("(unchanged)");
         }
@@ -2647,7 +2946,12 @@ impl Dialog {
           }
         }
       }
-      Kind::RectPattern => self.pattern_fields(app, ui),
+      Kind::RectPattern => {
+        if creating {
+          self.pattern_type_row(ui);
+        }
+        self.pattern_fields(app, ui)
+      }
       Kind::CircPattern => {
         ui.label("Bodies");
         sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
@@ -2695,14 +2999,18 @@ impl Dialog {
       }
       Kind::Move => self.move_fields(app, ui),
       Kind::Inspect => self.inspect(app, ui),
-      Kind::Appearance => self.appearance(app, ui),
+      // the palettes draw outside the grid (see `show`)
+      Kind::Appearance | Kind::Material => {}
       Kind::RedefinePlane => self.redefine_rows(app, ui),
       Kind::ExportDxf => self.dxf_rows(app, ui),
-      Kind::Section => section_fields(app, ui),
+      Kind::Section => self.section_fields(app, ui),
       Kind::Analysis(kind) => analysis_fields(app, ui, kind),
       Kind::Form(f) => {
         let mut dirty = false;
+        let op = self.operation().to_string();
         self.form_fields(f, app, ui, &mut dirty);
+        self.path_type_switch(f);
+        self.form_cut_rows(ui, &op);
         if dirty && (!self.picks() || self.applied) {
           self.dirty = true;
         }
@@ -2914,9 +3222,18 @@ impl Dialog {
           ui.label(*label);
           let cur = v.as_str().unwrap_or("");
           let mut sel: &'static str = options.iter().find(|(k, _, _)| *k == cur).map(|(k, _, _)| *k).unwrap_or("");
-          let choices: Vec<icon_row::Choice> =
-            options.iter().map(|(k, icon, name)| icon_row::choice(k, *icon, name)).collect();
-          if icon_row::icon_row(ui, &mut sel, &choices, "") {
+          let mut why = "";
+          let choices: Vec<icon_row::Choice> = options
+            .iter()
+            .map(|(k, icon, name)| match crate::forms::greyed_option(f, key, k) {
+              Some(w) => {
+                why = w;
+                icon_row::greyed(k, *icon, name)
+              }
+              None => icon_row::choice(k, *icon, name),
+            })
+            .collect();
+          if icon_row::icon_row(ui, &mut sel, &choices, why) {
             *dirty = true;
           }
           if *key == "filter" {
@@ -3136,44 +3453,8 @@ impl Dialog {
       ("screw", "Screw"),
     ];
     match self.kind {
-      Kind::Loft => {
-        ui.label("Profiles");
-        chip(ui, self.sections.len(), "profiles");
-        ui.end_row();
-        for (i, (sk, _)) in self.sections.iter().enumerate() {
-          ui.label(RichText::new(format!("  Section {}", i + 1)).color(theme::MUTED));
-          ui.label(app.s.design.feature(FeatureId(*sk)).map(|f| f.name.clone()).unwrap_or_default());
-          ui.end_row();
-        }
-        Self::check(ui, "Ruled (straight between sections)", &mut self.flag, dirty);
-        Self::check(ui, "Closed (back to the first)", &mut self.flag2, dirty);
-        self.loft_rows(app, ui, dirty);
-        Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
-        newcomp::comp_name_field(ui, self.editing.is_none(), self.op, &mut self.comp_name, dirty);
-      }
-      Kind::Sweep => {
-        ui.label("Profile");
-        chip(ui, self.profiles.len(), "selected");
-        ui.end_row();
-        ui.label("Path");
-        let list = Self::sketches(app, self.sketch);
-        let cur = self.path.and_then(|p| list.iter().find(|(id, _)| *id == p)).map(|(_, n)| n.clone());
-        egui::ComboBox::from_id_salt("path").selected_text(cur.unwrap_or("Pick a sketch".into())).width(140.0).show_ui(
-          ui,
-          |ui| {
-            for (id, n) in &list {
-              if ui.selectable_label(self.path == Some(*id), n).clicked() {
-                self.path = Some(*id);
-                *dirty = true;
-              }
-            }
-          },
-        );
-        ui.end_row();
-        self.sweep_rows(app, ui, dirty);
-        Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
-        newcomp::comp_name_field(ui, self.editing.is_none(), self.op, &mut self.comp_name, dirty);
-      }
+      Kind::Loft => self.loft_fields(app, ui, dirty),
+      Kind::Sweep => self.sweep_fields(app, ui, dirty),
       Kind::Hole => self.hole_fields(app, ui, dirty),
       Kind::PressPull => {
         ui.label("Faces");
@@ -3182,18 +3463,9 @@ impl Dialog {
         self.offset_type_row(ui);
         Self::field(ui, "Distance", &mut self.distance, dirty);
       }
-      Kind::Draft => {
-        ui.label("Faces");
-        chip(ui, self.faces.len(), "selected");
-        ui.end_row();
-        ui.label("Pull direction");
-        let before = self.plane_label.clone();
-        self.plane_choice(ui);
-        *dirty |= before != self.plane_label;
-        ui.end_row();
-        Self::field(ui, "Angle", &mut self.angle, dirty);
-        Self::check(ui, "Flip", &mut self.flip, dirty);
-      }
+      Kind::Draft => self.draft_rows(ui, dirty),
+      Kind::Scale => self.scale_rows(ui, dirty),
+      Kind::OffsetFace => self.offset_face_rows(ui, dirty),
       Kind::SplitBody => {
         ui.label("Bodies to split");
         sel_chip(ui, accent, &self.bodies_label(), !self.bodies.is_empty());
@@ -3506,57 +3778,7 @@ impl Dialog {
         Self::field(ui, "Offset", &mut self.distance, dirty);
         Self::check(ui, "Flip", &mut self.flip, dirty);
       }
-      Kind::Material => {
-        ui.label("Component");
-        let n = self.comps.iter().flatten().count();
-        chip(ui, n.min(1), "component");
-        ui.end_row();
-        ui.label("Material");
-        let cur = self.name.clone();
-        egui::ComboBox::from_id_salt("mat").selected_text(&cur).width(140.0).show_ui(ui, |ui| {
-          for (m, _) in fox_engine::model::assembly::MATERIALS {
-            if ui.selectable_label(cur == *m, *m).clicked() {
-              self.name = m.to_string();
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-      }
-      Kind::Interference => {
-        let rows = self.report.as_ref().and_then(Value::as_array).cloned().unwrap_or_default();
-        ui.label("Result");
-        ui.label(if rows.is_empty() { "No interference".to_string() } else { format!("{} overlaps", rows.len()) });
-        ui.end_row();
-        for r in rows {
-          let ids: Vec<u32> = r
-            .get("bodies")
-            .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|v| v.as_u64().map(|v| v as u32)).collect())
-            .unwrap_or_default();
-          let names: Vec<String> = ids.iter().map(|b| app.s.body_name(BodyId(*b))).collect();
-          if ui.link(names.join(" ↔ ")).clicked() {
-            app.s.selection = ids.iter().map(|b| Sel::Body { body: BodyId(*b) }).collect();
-          }
-          ui.label(format!("{:.3} mm³", r.get("volume_mm3").and_then(Value::as_f64).unwrap_or(0.0)));
-          ui.end_row();
-        }
-        ui.label("");
-        if panels::secondary_button(ui, "Compute").clicked() {
-          self.refresh_report(&mut app.s);
-        }
-        ui.end_row();
-        // adds each overlap as a static body (in a new component when ticked)
-        ui.label("");
-        ui.checkbox(&mut self.flag, "Create components");
-        ui.end_row();
-        ui.label("");
-        let overlap = self.report.as_ref().and_then(Value::as_array).is_some_and(|a| !a.is_empty());
-        if ui.add_enabled(overlap, egui::Button::new("Create Bodies")).clicked() {
-          self.create_interference(&mut app.s);
-        }
-        ui.end_row();
-      }
+      Kind::Interference => self.interference_fields(app, ui),
       Kind::CenterOfMass => {
         let r = self.report.clone().unwrap_or(Value::Null);
         let c: Vec<f64> = r
@@ -4627,7 +4849,8 @@ impl Dialog {
   }
 
   fn bodies_label(&self) -> String {
-    if self.bodies.is_empty() { "all bodies".into() } else { format!("{} selected", self.bodies.len()) }
+    // nothing picked is nothing to copy, as in Fusion (no "all bodies" default)
+    if self.bodies.is_empty() { "Select".into() } else { format!("{} selected", self.bodies.len()) }
   }
 
   fn sketch_lines(&self, app: &App) -> Vec<(u32, String)> {
@@ -4645,22 +4868,33 @@ impl Dialog {
   }
 }
 
+/// The pointer's prompt while Measure is open, as Fusion's.
+pub(crate) const MEASURE_PROMPT: &str = "Select objects to measure.";
+
 /// Measure's length units: name and millimetres per unit.
 pub(crate) const MEASURE_UNITS: [(&str, f64); 5] =
   [("mm", 1.0), ("cm", 10.0), ("m", 1000.0), ("in", 25.4), ("ft", 304.8)];
 
-/// How Measure shows its numbers: decimal places and length unit (kept between uses, as in Fusion).
+/// How Measure shows its numbers: decimal places, the length unit (the document's) and the
+/// Secondary Units every value is also given in (kept between uses, as in Fusion).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeasureFmt {
   pub precision: usize,
-  /// Index into [`MEASURE_UNITS`].
+  /// Index into [`MEASURE_UNITS`]: the document's unit.
   pub unit: usize,
+  /// Secondary Units, an index into [`MEASURE_UNITS`]; None (Fusion's default) shows one unit.
+  pub secondary: Option<usize>,
 }
 
 impl Default for MeasureFmt {
   fn default() -> Self {
-    MeasureFmt { precision: 3, unit: 0 }
+    MeasureFmt { precision: 3, unit: 0, secondary: None }
   }
+}
+
+/// A Precision choice as Fusion's drop-down shows it: "0", "0.1", "0.12", "0.123", ...
+pub(crate) fn precision_label(p: usize) -> String {
+  if p == 0 { "0".into() } else { format!("0.{}", &"12345678"[..p.min(8)]) }
 }
 
 impl MeasureFmt {
@@ -4675,19 +4909,36 @@ impl MeasureFmt {
     if s.trim_start_matches('-').chars().all(|c| c == '0' || c == '.') { s.trim_start_matches('-').into() } else { s }
   }
 
+  /// `v` (in mm to the `power`) in unit `i`, written as Fusion writes it: "0.663 in^2".
+  fn in_unit(&self, i: usize, v: f64, power: i32) -> String {
+    let (u, k) = MEASURE_UNITS[i.min(MEASURE_UNITS.len() - 1)];
+    let suffix = match power {
+      2 => "^2",
+      3 => "^3",
+      _ => "",
+    };
+    format!("{} {u}{suffix}", self.num(v / k.powi(power)))
+  }
+
+  /// In the document's unit, then in the Secondary Units when they're set (and differ).
+  fn both(&self, v: f64, power: i32) -> String {
+    let main = self.in_unit(self.unit, v, power);
+    match self.secondary {
+      Some(s) if s != self.unit => format!("{main} ({})", self.in_unit(s, v, power)),
+      _ => main,
+    }
+  }
+
   pub fn len(&self, mm: f64) -> String {
-    let (u, k) = self.unit();
-    format!("{} {u}", self.num(mm / k))
+    self.both(mm, 1)
   }
 
   pub fn area(&self, mm2: f64) -> String {
-    let (u, k) = self.unit();
-    format!("{} {u}²", self.num(mm2 / (k * k)))
+    self.both(mm2, 2)
   }
 
   pub fn volume(&self, mm3: f64) -> String {
-    let (u, k) = self.unit();
-    format!("{} {u}³", self.num(mm3 / (k * k * k)))
+    self.both(mm3, 3)
   }
 
   pub fn angle(&self, deg: f64) -> String {
@@ -4695,104 +4946,128 @@ impl MeasureFmt {
   }
 }
 
-/// One line of Measure's results; a heading names what was measured.
+/// One line of Measure's results.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Readout {
   pub label: String,
   pub value: String,
-  pub heading: bool,
 }
 
 fn row(label: &str, value: String) -> Readout {
-  Readout { label: label.into(), value, heading: false }
+  Readout { label: label.into(), value }
 }
 
-fn heading(label: &str, value: String) -> Readout {
-  Readout { label: label.into(), value, heading: true }
+/// One collapsible section of Measure's results, as Fusion's: "Selection 1" (and "Selection 2")
+/// with a grey line saying what was picked, and, between two picks, "Results".
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MeasureSection {
+  pub title: String,
+  /// The grey line under the title ("Face selected"); empty for Results.
+  pub note: String,
+  pub rows: Vec<Readout>,
 }
 
-/// Measure's readouts for a `measure` result: the distance, deltas and angle between two picks,
-/// or one pick's own numbers (a face's area, an edge's length, a vertex's position, a body's
-/// volume).
-pub(crate) fn measure_rows(r: &Value, f: &MeasureFmt) -> Vec<Readout> {
-  let num = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64);
-  let v3 = |v: &Value, k: &str| -> Option<[f64; 3]> {
-    let a = v.get(k)?.as_array()?;
-    Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+/// Measure's sections for a `measure` result: for two picks first Results, only the distance
+/// (and the angle between planes or lines), as Fusion's; then each pick's own numbers (a face's
+/// area and loop length, an edge's length, a vertex's position, a body's volume).
+pub(crate) fn measure_sections(r: &Value, f: &MeasureFmt) -> Vec<MeasureSection> {
+  let selection = |n: usize, e: &Value| {
+    let (note, rows) = entity_readouts(e, f);
+    MeasureSection { title: format!("Selection {n}"), note, rows }
   };
-  let xyz = |out: &mut Vec<Readout>, p: [f64; 3]| {
-    for (i, axis) in ["X", "Y", "Z"].iter().enumerate() {
-      out.push(row(axis, f.len(p[i])));
-    }
-  };
-  let mut out = Vec::new();
-  if let Some(d) = num(r, "distance") {
-    out.push(heading("Distance", f.len(d)));
-    if let Some(dl) = v3(r, "delta") {
-      for (i, axis) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
-        out.push(row(axis, f.len(dl[i].abs())));
-      }
-    }
-    if let Some(a) = num(r, "angle_deg") {
-      out.push(row("Angle", f.angle(a)));
-    }
-    return out;
+  let Some(d) = r.get("distance").and_then(Value::as_f64) else { return vec![selection(1, r)] };
+  let mut rows = vec![row("Distance", f.len(d))];
+  if let Some(a) = r.get("angle_deg").and_then(Value::as_f64) {
+    rows.push(row("Angle", f.angle(a)));
   }
-  let words = |s: &str| {
-    let mut c = s.chars();
-    c.next().map(|x| x.to_uppercase().chain(c).collect::<String>()).unwrap_or_default()
+  let mut out = vec![MeasureSection { title: "Results".into(), note: String::new(), rows }];
+  out.extend(["a", "b"].iter().filter_map(|k| r.get(*k)).enumerate().map(|(i, e)| selection(i + 1, e)));
+  out
+}
+
+fn v3(v: &Value, k: &str) -> Option<[f64; 3]> {
+  let a = v.get(k)?.as_array()?;
+  Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+}
+
+/// One picked entity's grey line ("Face selected") and numbers.
+fn entity_readouts(r: &Value, f: &MeasureFmt) -> (String, Vec<Readout>) {
+  let num = |k: &str| r.get(k).and_then(Value::as_f64);
+  let mut out = Vec::new();
+  let radius = |out: &mut Vec<Readout>| {
+    if let Some(x) = num("radius") {
+      out.push(row("Radius", f.len(x)));
+    }
+    if let Some(x) = num("diameter") {
+      out.push(row("Diameter", f.len(x)));
+    }
   };
-  match r.get("kind").and_then(Value::as_str) {
+  let what = match r.get("kind").and_then(Value::as_str) {
     Some("face") => {
-      out.push(heading("Face", words(r.get("surface").and_then(Value::as_str).unwrap_or(""))));
-      if let Some(a) = num(r, "area_mm2") {
+      if let Some(a) = num("area_mm2") {
         out.push(row("Area", f.area(a)));
       }
-      if let Some(x) = num(r, "radius") {
-        out.push(row("Radius", f.len(x)));
+      if let Some(l) = num("loop_length") {
+        out.push(row("Loop Length", f.len(l)));
       }
-      if let Some(x) = num(r, "diameter") {
-        out.push(row("Diameter", f.len(x)));
-      }
+      radius(&mut out);
+      "Face"
     }
     Some("edge") => {
-      out.push(heading("Edge", words(r.get("curve").and_then(Value::as_str).unwrap_or(""))));
-      if let Some(l) = num(r, "length") {
+      if let Some(l) = num("length") {
         out.push(row("Length", f.len(l)));
       }
-      if let Some(x) = num(r, "radius") {
-        out.push(row("Radius", f.len(x)));
-      }
-      if let Some(x) = num(r, "diameter") {
-        out.push(row("Diameter", f.len(x)));
-      }
+      radius(&mut out);
+      "Edge"
     }
     Some("point") => {
-      out.push(heading("Vertex", "Position".into()));
       if let Some(p) = v3(r, "at") {
-        xyz(&mut out, p);
+        for (i, axis) in ["X Position", "Y Position", "Z Position"].iter().enumerate() {
+          out.push(row(axis, f.len(p[i])));
+        }
       }
+      "Vertex"
     }
     Some("body") => {
-      out.push(heading("Body", r.get("name").and_then(Value::as_str).unwrap_or("").into()));
-      if let Some(v) = num(r, "volume_mm3") {
+      if let Some(v) = num("volume_mm3") {
         out.push(row("Volume", f.volume(v)));
       }
-      if let Some(a) = num(r, "area_mm2") {
+      if let Some(a) = num("area_mm2") {
         out.push(row("Area", f.area(a)));
       }
+      let (u, k) = f.unit();
       if let Some(d) = v3(r, "size") {
-        let (u, k) = f.unit();
         out.push(row("Size", format!("{} × {} × {} {u}", f.num(d[0] / k), f.num(d[1] / k), f.num(d[2] / k))));
       }
       if let Some(c) = v3(r, "center_of_mass") {
-        out.push(heading("Center of mass", String::new()));
-        xyz(&mut out, c);
+        out.push(row("Center of Mass", format!("{}, {}, {} {u}", f.num(c[0] / k), f.num(c[1] / k), f.num(c[2] / k))));
       }
+      "Body"
     }
-    _ => {}
+    _ => return (String::new(), out),
+  };
+  (format!("{what} selected"), out)
+}
+
+/// A collapsible section's title row in a dialog's grid, as Fusion's: a triangle and the title,
+/// open by default; a click folds it. Returns whether it is open.
+fn section_header(ui: &mut egui::Ui, id: egui::Id, title: &str) -> bool {
+  let open = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
+  let galley = ui.painter().layout_no_wrap(title.to_string(), egui::FontId::proportional(12.5), theme::TEXT);
+  let (rect, resp) = ui.allocate_exact_size(egui::vec2(galley.size().x + 16.0, 18.0), egui::Sense::click());
+  let c = egui::pos2(rect.left() + 5.0, rect.center().y);
+  let tri = if open {
+    vec![c + egui::vec2(-4.0, -2.0), c + egui::vec2(4.0, -2.0), c + egui::vec2(0.0, 3.0)]
+  } else {
+    vec![c + egui::vec2(-2.0, -4.0), c + egui::vec2(3.0, 0.0), c + egui::vec2(-2.0, 4.0)]
+  };
+  ui.painter().add(egui::Shape::convex_polygon(tri, theme::TEXT, egui::Stroke::NONE));
+  ui.painter().galley(egui::pos2(rect.left() + 14.0, rect.center().y - galley.size().y / 2.0), galley, theme::TEXT);
+  if resp.clicked() {
+    ui.ctx().data_mut(|d| d.insert_temp(id, !open));
   }
-  out
+  ui.end_row();
+  open
 }
 
 /// What Measure measures: the first two selected bodies, faces, edges and vertices, or (with
@@ -4815,8 +5090,12 @@ fn measure_picks(app: &App) -> (Vec<Value>, bool) {
 }
 
 impl Dialog {
-  /// Measure's panel: selection filter, precision and units, then the readouts with copy buttons.
+  /// Measure's panel, as Fusion's: Selection Filter (three icon toggles), Precision, Secondary
+  /// Units, Clear Selection and Show Snap Points, then a collapsible section per pick and, for
+  /// two, the Results between them (a value's right-click copies it).
   fn inspect(&mut self, app: &mut App, ui: &mut egui::Ui) {
+    use crate::select::Priority;
+    use icon_row::{choice, icon_row};
     app.measure = None;
     // Measure picks vertices too, while it's open
     if self.saved_filter.is_none() {
@@ -4824,41 +5103,58 @@ impl Dialog {
       app.sel_filter.vertices = true;
     }
     ui.label("Selection Filter");
-    ui.horizontal(|ui| {
-      use crate::select::Priority;
-      let whole = matches!(app.sel_priority, Priority::Body | Priority::Component);
-      if ui.selectable_label(whole, "Body").on_hover_text("Pick bodies").clicked() {
-        app.sel_priority = Priority::Body;
-      }
-      if ui.selectable_label(!whole, "Face/Edge/Vertex").on_hover_text("Pick faces, edges and vertices").clicked() {
-        app.sel_priority = Priority::Face;
-      }
-    });
+    const FILTERS: [icon_row::Choice; 3] = [
+      choice("face", Icon::FilterFaces, "Select Face/Edge/Vertex"),
+      choice("body", Icon::FilterBodies, "Select Body"),
+      choice("component", Icon::Component, "Select Component"),
+    ];
+    let mut cur: &'static str = match app.sel_priority {
+      Priority::Body => "body",
+      Priority::Component => "component",
+      Priority::Face | Priority::Edge => "face",
+    };
+    if icon_row(ui, &mut cur, &FILTERS, "") {
+      app.sel_priority = match cur {
+        "body" => Priority::Body,
+        "component" => Priority::Component,
+        _ => Priority::Face,
+      };
+    }
     ui.end_row();
+    // values read in the document's unit
+    let doc = app.s.design.units.symbol();
+    app.measure_fmt.unit = MEASURE_UNITS.iter().position(|(u, _)| *u == doc).unwrap_or(0);
     let fmt = &mut app.measure_fmt;
     ui.label("Precision");
-    egui::ComboBox::from_id_salt("measure-precision")
-      .selected_text(if fmt.precision == 0 { "0".to_string() } else { format!("0.{}", "0".repeat(fmt.precision)) })
-      .show_ui(ui, |ui| {
-        for p in 0..=6 {
-          let text = if p == 0 { "0".to_string() } else { format!("0.{}", "0".repeat(p)) };
-          ui.selectable_value(&mut fmt.precision, p, text);
-        }
-      });
-    ui.end_row();
-    ui.label("Units");
-    egui::ComboBox::from_id_salt("measure-units").selected_text(MEASURE_UNITS[fmt.unit].0).show_ui(ui, |ui| {
-      for (i, (u, _)) in MEASURE_UNITS.iter().enumerate() {
-        ui.selectable_value(&mut fmt.unit, i, *u);
+    egui::ComboBox::from_id_salt("measure-precision").selected_text(precision_label(fmt.precision)).show_ui(ui, |ui| {
+      for p in 0..=6 {
+        ui.selectable_value(&mut fmt.precision, p, precision_label(p));
       }
     });
+    ui.end_row();
+    ui.label("Secondary Units");
+    let shown = fmt.secondary.map_or("None", |i| MEASURE_UNITS[i.min(MEASURE_UNITS.len() - 1)].0);
+    egui::ComboBox::from_id_salt("measure-units").selected_text(shown).show_ui(ui, |ui| {
+      ui.selectable_value(&mut fmt.secondary, None, "None");
+      for (i, (u, _)) in MEASURE_UNITS.iter().enumerate() {
+        ui.selectable_value(&mut fmt.secondary, Some(i), *u);
+      }
+    });
+    ui.end_row();
+    ui.label("Clear Selection");
+    if crate::icons::icon_button(ui, Icon::Undo, 24.0, "Clear Selection", false, Some(theme::ACCENT)).clicked() {
+      app.s.selection.clear();
+    }
+    ui.end_row();
+    ui.label("Show Snap Points");
+    let mut off = false;
+    ui.add_enabled_ui(false, |ui| ui.checkbox(&mut off, ""))
+      .inner
+      .on_disabled_hover_text("FissionOxide doesn't show snap points yet");
     ui.end_row();
     let fmt = app.measure_fmt;
     let (picks, hovering) = measure_picks(app);
     if picks.is_empty() {
-      ui.label("");
-      ui.label(RichText::new("Select a body, face, edge or vertex — two to measure between them").color(theme::MUTED));
-      ui.end_row();
       return;
     }
     let p = if picks.len() == 2 { json!({"a": picks[0], "b": picks[1]}) } else { json!({"a": picks[0]}) };
@@ -4881,106 +5177,67 @@ impl Dialog {
         app.measure = Some((a, b, fmt.len(d)));
       }
     }
-    let rows = measure_rows(&r, &fmt);
-    ui.label(RichText::new(if hovering { "Results (hover)" } else { "Results" }).color(theme::GROUP_LABEL));
-    if ui.small_button("Copy all").on_hover_text("Copy every result to the clipboard").clicked() {
-      let text: Vec<String> = rows.iter().map(|r| format!("{}: {}", r.label, r.value)).collect();
-      ui.ctx().copy_text(text.join("\n"));
-      app.status = Some(("Copied the measurements".into(), false));
-    }
-    ui.end_row();
-    for (i, r) in rows.iter().enumerate() {
-      if r.heading {
-        ui.label(RichText::new(&r.label).strong());
-      } else {
+    for (i, sec) in measure_sections(&r, &fmt).iter().enumerate() {
+      if !section_header(ui, ui.id().with(("measure-section", i)), &sec.title) {
+        continue;
+      }
+      if !sec.note.is_empty() {
+        // what the pointer is over reads as a preview until it is picked
+        let note = if hovering { sec.note.replace("selected", "under the pointer") } else { sec.note.clone() };
+        ui.label(RichText::new(note).color(theme::MUTED));
+        ui.end_row();
+      }
+      for (j, r) in sec.rows.iter().enumerate() {
         ui.label(&r.label);
-      }
-      ui.horizontal(|ui| {
-        let v = if r.heading { RichText::new(&r.value).strong() } else { RichText::new(&r.value) };
-        ui.label(v);
-        if !r.value.is_empty()
-          && ui.push_id(i, |ui| ui.small_button("Copy")).inner.on_hover_text("Copy to clipboard").clicked()
-        {
-          ui.ctx().copy_text(r.value.clone());
-          app.status = Some((format!("Copied {}", r.value), false));
-        }
-      });
-      ui.end_row();
-    }
-  }
-
-  /// Fusion's Appearance panel: Apply To (bodies or faces), the appearances In This Design, and
-  /// the library. Swatches drag onto the model, or a click applies one to the selection.
-  fn appearance(&mut self, app: &mut App, ui: &mut egui::Ui) {
-    ui.label("Apply To");
-    ui.horizontal(|ui| {
-      if ui.selectable_label(!self.appearance_faces, "Bodies/Components").clicked() {
-        self.appearance_faces = false;
-      }
-      if ui.selectable_label(self.appearance_faces, "Faces").clicked() {
-        self.appearance_faces = true;
-      }
-    });
-    ui.end_row();
-    let lib = appearance_library(app);
-    let used = in_this_design(app, &lib);
-    let faces = self.appearance_faces;
-    let mut apply: Option<(String, [u8; 3])> = None;
-    for (title, list) in [("In This Design", used), ("Library", lib.iter().map(|(n, c)| (n.clone(), *c, 0)).collect())]
-    {
-      for (i, (name, color, n)) in list.into_iter().enumerate() {
-        ui.label(if i == 0 { RichText::new(title).color(theme::GROUP_LABEL) } else { RichText::new("") });
-        let label = if n > 0 { format!("{name}  ({n})") } else { name.clone() };
-        if swatch_row(ui, (title, i), &label, &name, color, faces) {
-          apply = Some((name, color));
-        }
+        let v = ui.push_id((i, j), |ui| ui.add(egui::Label::new(&r.value).sense(egui::Sense::click()))).inner;
+        v.context_menu(|ui| {
+          if ui.button("Copy").clicked() {
+            ui.ctx().copy_text(r.value.clone());
+            app.status = Some((format!("Copied {}", r.value), false));
+            ui.close();
+          }
+        });
         ui.end_row();
       }
     }
-    ui.label("");
-    ui.label(
-      RichText::new("Drag a swatch onto a body or face, or click one to apply it to the selection")
-        .small()
-        .color(theme::MUTED),
-    );
-    ui.end_row();
-    if let Some((name, color)) = apply {
-      let sel = app.s.selection.clone();
-      if !apply_appearance(app, &name, color, faces, &sel) {
-        let what = if faces { "faces" } else { "bodies" };
-        app.status = Some((format!("Select {what} first, or drag the swatch onto the model"), false));
-      }
-    }
   }
 
-  /// Puts back what the dialog changed in the app while open (Measure's selection filter).
+  /// The palettes' state (tests set the search, tab and favorites).
+  #[cfg(test)]
+  pub(crate) fn palette_mut(&mut self) -> &mut crate::material_ui::Palette {
+    &mut self.palette
+  }
+
+  /// Puts back what the dialog changed in the app while open (Measure's selection filter and picks).
   pub(crate) fn leave(&mut self, app: &mut App) {
+    // an edit closed some other way keeps what it shows and rolls forward
+    self.end_edit(&mut app.s, true);
     if let Some((priority, vertices)) = self.saved_filter.take() {
       app.sel_priority = priority;
       app.sel_filter.vertices = vertices;
     }
+    // Measure's picks are its own: closing it lets them go, as in Fusion
+    if self.kind == Kind::Inspect {
+      app.s.selection.clear();
+      app.measure = None;
+    }
+    // Section Analysis's live cut goes (OK kept a copy in the browser)
+    if self.kind == Kind::Section {
+      app.section = None;
+    }
   }
 }
 
-/// A swatch dragged from the Appearance panel onto the canvas.
+/// A swatch dragged from the Appearance or Physical Material palette (or the Material Browser)
+/// onto the canvas.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SwatchDrag {
   pub name: String,
   pub color: [u8; 3],
   /// Apply to the face under the pointer rather than its body.
   pub faces: bool,
-}
-
-/// The appearance library (name, colour), as the engine knows it.
-pub(crate) fn appearance_library(app: &mut App) -> Vec<(String, [u8; 3])> {
-  let Ok(v) = app.s.execute("appearances", &json!({})) else { return Vec::new() };
-  let rgb = |c: &Value| -> Option<[u8; 3]> {
-    let a = c.as_array()?;
-    Some([a.first()?.as_u64()? as u8, a.get(1)?.as_u64()? as u8, a.get(2)?.as_u64()? as u8])
-  };
-  v.as_array()
-    .map(|a| a.iter().filter_map(|x| Some((x.get("name")?.as_str()?.to_string(), rgb(x.get("color")?)?))).collect())
-    .unwrap_or_default()
+  /// A physical material (applied to the body's component) rather than an appearance.
+  pub material: bool,
 }
 
 /// What bodies show without an appearance of their own: Fusion's default, Steel - Satin.
@@ -5044,85 +5301,6 @@ pub(crate) fn apply_appearance(app: &mut App, name: &str, color: [u8; 3], faces:
   }
   p["bodies"] = json!(bodies);
   app.run("body.appearance", p).is_some()
-}
-
-/// One swatch of the Appearance panel: drags as a [`SwatchDrag`]; returns whether it was clicked.
-fn swatch_row(
-  ui: &mut egui::Ui,
-  salt: impl std::hash::Hash + std::fmt::Debug,
-  label: &str,
-  name: &str,
-  color: [u8; 3],
-  faces: bool,
-) -> bool {
-  let size = egui::vec2(ui.available_width().clamp(120.0, 180.0), 20.0);
-  let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-  let resp = ui.interact(rect, ui.id().with(("swatch", salt)), egui::Sense::click_and_drag());
-  resp.dnd_set_drag_payload(SwatchDrag { name: name.to_string(), color, faces });
-  let p = ui.painter();
-  if resp.hovered() {
-    p.rect_filled(rect, 2.0, theme::HOVER);
-  }
-  let fill = egui::Color32::from_rgb(color[0], color[1], color[2]);
-  let sw = egui::Rect::from_center_size(egui::pos2(rect.min.x + 10.0, rect.center().y), egui::vec2(14.0, 14.0));
-  p.rect(sw, 2.0, fill, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-  p.text(
-    egui::pos2(sw.max.x + 6.0, rect.center().y),
-    egui::Align2::LEFT_CENTER,
-    label,
-    egui::FontId::proportional(12.5),
-    theme::TEXT,
-  );
-  if resp.dragged()
-    && let Some(at) = ui.ctx().pointer_latest_pos()
-  {
-    // the swatch follows the pointer
-    let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("swatch-drag"));
-    let r = egui::Rect::from_center_size(at + egui::vec2(14.0, 14.0), egui::vec2(18.0, 18.0));
-    ui.ctx().layer_painter(layer).rect(r, 3.0, fill, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-  }
-  resp.on_hover_text("Drag onto a body or face, or click to apply to the selection").clicked()
-}
-
-/// The section analysis settings, edited in place (the view updates as they change).
-fn section_fields(app: &mut App, ui: &mut egui::Ui) {
-  let mut on = app.section.is_some();
-  let mut sec = app.section.clone().unwrap_or(json!({"plane": "xz", "offset": 0.0, "flip": false}));
-  ui.label("");
-  ui.checkbox(&mut on, "Show section");
-  ui.end_row();
-  ui.label("Plane");
-  let cur = sec["plane"].clone();
-  let mut options: Vec<(Value, String)> = [("xy", "XY plane"), ("xz", "XZ plane"), ("yz", "YZ plane")]
-    .iter()
-    .map(|(k, l)| (json!(k), l.to_string()))
-    .collect();
-  for id in app.s.model.planes.keys() {
-    options.push((json!({"feature": id.0}), app.s.design.feature(*id).map(|f| f.name.clone()).unwrap_or_default()));
-  }
-  let shown = options.iter().find(|(k, _)| *k == cur).map(|(_, l)| l.clone()).unwrap_or("Picked face".into());
-  egui::ComboBox::from_id_salt("section-plane").selected_text(shown).width(140.0).show_ui(ui, |ui| {
-    for (k, l) in &options {
-      if ui.selectable_label(*k == cur, l).clicked() {
-        sec["plane"] = k.clone();
-      }
-    }
-  });
-  ui.end_row();
-  ui.label("Offset");
-  let u = app.s.design.units;
-  let off = sec["offset"].as_f64().unwrap_or(0.0);
-  let mut shown = u.from_mm(off);
-  if ui.add(egui::DragValue::new(&mut shown).speed(0.5 / u.mm()).suffix(format!(" {}", u.symbol()))).changed() {
-    sec["offset"] = json!(shown * u.mm());
-  }
-  ui.end_row();
-  ui.label("");
-  let mut flip = sec["flip"].as_bool().unwrap_or(false);
-  ui.checkbox(&mut flip, "Flip (keep the other side)");
-  sec["flip"] = json!(flip);
-  ui.end_row();
-  app.section = on.then_some(sec);
 }
 
 /// Surface analysis settings: the pull direction and draft angle where they apply.
@@ -5269,6 +5447,12 @@ fn sel_only_bodies(s: &Session) -> Vec<u32> {
 
 fn sel_curves(s: &Session) -> Vec<u32> {
   s.selection.iter().filter_map(|x| if let Sel::SketchCurve { curve, .. } = x { Some(curve.0) } else { None }).collect()
+}
+
+/// Scale's point when a body is picked first: the body's centre, as Fusion fills the Point row
+/// on the first pick.
+fn body_centre(s: &Session, body: u32) -> Option<[f64; 3]> {
+  manip::centre(s, &[body]).map(|c| [c.x, c.y, c.z].map(|v| (v * 1e4).round() / 1e4))
 }
 
 /// The command Press Pull (Q) runs for what is picked, as in Fusion: Extrude on a sketch
@@ -5484,6 +5668,15 @@ pub fn type_into(ctx: &egui::Context, text: String) {
   ctx.data_mut(|d| d.insert_temp(egui::Id::new(TYPING), text));
 }
 
+/// Has a length field left 0.00? A value naming a user parameter counts as set; a half-typed one
+/// (".", "-") doesn't.
+fn length_set(e: &str) -> bool {
+  match fox_engine::expr::eval(e, fox_engine::expr::Kind::Length, &fox_engine::expr::Empty) {
+    Ok(v) => v.abs() >= 1e-9,
+    Err(_) => !e.trim().trim_matches(['.', '-', '+', ' ']).is_empty(),
+  }
+}
+
 /// Takes the typing aimed at the open dialog, if any (the floating value box draws before the
 /// dialog, so it gets first call).
 pub(crate) fn take_typing(ctx: &egui::Context) -> Option<String> {
@@ -5496,9 +5689,12 @@ impl Dialog {
   /// of Fillet and Chamfer, Sketch Scale's factor. None for dialogs without an arrow.
   pub fn value_box_field(&mut self) -> Option<&mut String> {
     match self.kind {
-      Kind::Extrude | Kind::OffsetPlane | Kind::PressPull | Kind::SkOffset => Some(&mut self.distance),
+      Kind::Extrude | Kind::OffsetPlane | Kind::PressPull | Kind::OffsetFace | Kind::SkOffset | Kind::Section => {
+        Some(&mut self.distance)
+      }
       Kind::Fillet | Kind::Chamfer => Some(&mut self.radius),
       Kind::SkScale => Some(&mut self.a),
+      Kind::Scale if self.choice != "non_uniform" => Some(&mut self.a),
       _ => None,
     }
   }
@@ -5671,7 +5867,8 @@ mod tests {
     // a command without its own wording asks for its missing input as a sentence
     assert_eq!(Dialog::blank(Kind::Hem).prompt(false).as_deref(), Some("Select edges"));
     // one with nothing to select or specify has no prompt
-    assert_eq!(Dialog::blank(Kind::Inspect).prompt(false), None);
+    assert_eq!(Dialog::blank(Kind::CenterOfMass).prompt(false), None);
+    assert_eq!(Dialog::blank(Kind::Inspect).prompt(false).as_deref(), Some("Select objects to measure."));
   }
 
   /// E opens Extrude with no profile picked, so nothing is previewed and no arrow shows, when
@@ -5705,6 +5902,39 @@ mod tests {
     d.cancel(&mut app.s);
   }
 
+  /// `ui:manip:zero-default-value`: Fillet and Shell start at 0.00 after the first pick, as in
+  /// Fusion: nothing previewed, no complaint and OK waiting until a value is typed (an edited
+  /// fillet keeps its radius); in inches the box reads "0 in".
+  #[test]
+  fn fillet_and_shell_start_at_zero() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    let body = app.s.model.bodies[0].id;
+    let top = app.s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let volume = |app: &App| app.s.model.bodies[0].shape.mass().unwrap().volume;
+    let before = volume(&app);
+    for (kind, sel) in [(Kind::Fillet, Sel::Edge { body, edge: 1 }), (Kind::Shell, Sel::Face { body, face: top })] {
+      app.s.selection = vec![sel];
+      let mut d = Dialog::open(&mut app, kind);
+      assert_eq!(d.radius, "0 mm", "{kind:?}");
+      assert!(d.ready() && !d.ok_enabled(), "{kind:?}: OK waits for a value");
+      d.preview(&mut app.s);
+      assert!(!d.applied && d.error.is_none(), "{kind:?}: nothing previewed at 0, nothing wrong");
+      assert!((volume(&app) - before).abs() < 1e-9);
+      d.radius = ".".into();
+      assert!(!d.ok_enabled(), "{kind:?}: half typed");
+      d.radius = "1 mm".into();
+      assert!(d.ok_enabled());
+      d.preview(&mut app.s);
+      assert!(d.applied && d.error.is_none(), "{kind:?}: {:?}", d.error);
+      assert!(volume(&app) < before);
+      d.cancel(&mut app.s);
+    }
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    app.s.selection = vec![Sel::Edge { body, edge: 1 }];
+    assert_eq!(Dialog::open(&mut app, Kind::Fillet).radius, "0 in");
+  }
+
   /// A Fillet preview keeps the body's own colour: only the picked edge draws in the selection
   /// blue, as Fusion's command picks look.
   #[test]
@@ -5715,6 +5945,7 @@ mod tests {
     let body = app.s.model.bodies[0].id;
     app.s.selection = vec![Sel::Edge { body, edge: 1 }];
     let mut d = Dialog::open(&mut app, Kind::Fillet);
+    d.radius = "2 mm".into();
     d.preview(&mut app.s);
     assert!(d.applied, "{:?}", d.error);
     let (sc, picks) = SceneBuilder::default().build(&app.s, &ViewOptions::default());
@@ -6161,6 +6392,7 @@ mod tests {
     run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 3}));
     let mut d = Dialog::blank(Kind::Sweep);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     d.path = Some(path);
     apply(&mut s, &mut d);
     assert_eq!(s.model.bodies.len(), 1);
@@ -6288,10 +6520,8 @@ mod tests {
       apply(&mut s, &mut d);
     }
     let comp = |s: &Session, b: u32| s.design.component_of(BodyId(b)).map(|c| c.id.0);
-    let mut d = Dialog::blank(Kind::Material);
-    d.comps = vec![comp(&s, arm)];
-    d.name = "Aluminum".into();
-    apply(&mut s, &mut d);
+    let arm_comp = comp(&s, arm);
+    run(&mut s, "component.material", json!({"component": arm_comp, "material": "Aluminum"}));
     let mut d = Dialog::blank(Kind::Joint);
     d.choice = "rigid";
     d.origins = vec![
@@ -6606,7 +6836,10 @@ mod tests {
     let mut d = form(&mut s, &PLANE_THREE_POINTS, vec![], &[("c", json!(["0", "0", "10"]))]);
     apply(&mut s, &mut d);
     d.applied = false;
-    let mut d = form(&mut s, &SCALE, vec![Sel::Body { body: b }], &[("factor", json!("0.5"))]);
+    let mut d = Dialog::blank(Kind::Scale);
+    d.bodies = vec![b.0];
+    d.point = Some([0.0; 3]);
+    d.a = "0.5".into();
     apply(&mut s, &mut d);
     assert!((s.model.bodies[0].shape.mass().unwrap().volume - 500.0).abs() < 1e-6);
     d.applied = false;
@@ -7220,34 +7453,49 @@ mod tests {
     let edge = body.edges().iter().find(|e| (e.length - 30.0).abs() < 1e-6).unwrap().id;
     let mm = MeasureFmt::default();
 
-    // a face: its area; an edge: its length; a vertex: its position
+    // a face: "Selection 1", "Face selected", its area and loop length, as Fusion's
     let r = s.execute("measure", &json!({"a": {"type": "face", "body": b.0, "face": face}})).unwrap();
-    let rows = measure_rows(&r, &mm);
-    assert_eq!(labels(&rows)[..2], [("Face", "Plane"), ("Area", "200.000 mm²")]);
-    assert!(rows[0].heading && !rows[1].heading);
+    let secs = measure_sections(&r, &mm);
+    assert_eq!(secs.len(), 1);
+    assert_eq!((secs[0].title.as_str(), secs[0].note.as_str()), ("Selection 1", "Face selected"));
+    assert_eq!(labels(&secs[0].rows), [("Area", "200.000 mm^2"), ("Loop Length", "60.000 mm")]);
+    // an edge: its length; a vertex: its position
     let r = s.execute("measure", &json!({"a": {"type": "edge", "body": b.0, "edge": edge}})).unwrap();
-    assert_eq!(labels(&measure_rows(&r, &mm))[1], ("Length", "30.000 mm"));
+    let secs = measure_sections(&r, &mm);
+    assert_eq!(secs[0].note, "Edge selected");
+    assert_eq!(labels(&secs[0].rows)[0], ("Length", "30.000 mm"));
     let r = s.execute("measure", &json!({"a": {"type": "vertex", "body": b.0, "edge": edge, "end": true}})).unwrap();
-    let rows = measure_rows(&r, &mm);
-    assert_eq!(rows[0].label, "Vertex");
-    assert_eq!(rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["Vertex", "X", "Y", "Z"]);
-    assert_eq!(labels(&rows)[3], ("Z", "30.000 mm"));
+    let secs = measure_sections(&r, &mm);
+    assert_eq!(secs[0].note, "Vertex selected");
+    assert_eq!(
+      secs[0].rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(),
+      ["X Position", "Y Position", "Z Position"]
+    );
+    assert_eq!(labels(&secs[0].rows)[2], ("Z Position", "30.000 mm"));
     // a body: its volume, in other units and precision
-    let cm1 = MeasureFmt { precision: 1, unit: 1 };
+    let cm1 = MeasureFmt { precision: 1, unit: 1, secondary: None };
     let r = s.execute("measure", &json!({"a": {"body": b.0}})).unwrap();
-    let rows = measure_rows(&r, &cm1);
-    assert!(labels(&rows).contains(&("Volume", "6.0 cm³")), "{rows:?}");
-    assert!(labels(&rows).contains(&("Area", "22.0 cm²")), "{rows:?}");
+    let rows = &measure_sections(&r, &cm1)[0].rows;
+    assert!(labels(rows).contains(&("Volume", "6.0 cm^3")), "{rows:?}");
+    assert!(labels(rows).contains(&("Area", "22.0 cm^2")), "{rows:?}");
+    // Secondary Units add the value in a second unit
+    let both = MeasureFmt { precision: 3, unit: 3, secondary: Some(0) };
+    assert_eq!(both.area(645.16), "1.000 in^2 (645.160 mm^2)");
+    assert_eq!(MeasureFmt { secondary: Some(3), ..both }.len(25.4), "1.000 in", "the same unit once");
 
-    // two picks: distance, deltas and angle
+    // two picks: Results with the distance and angle (no deltas), then a section each
     let r = s
       .execute("measure", &json!({"a": {"body": b.0, "face": faces[0]}, "b": {"body": b.0, "face": faces[1]}}))
       .unwrap();
-    let inch = MeasureFmt { precision: 2, unit: 3 };
-    let rows = measure_rows(&r, &inch);
-    assert_eq!(labels(&rows)[0], ("Distance", "1.18 in"));
-    assert!(labels(&rows).contains(&("Angle", "180.00 deg")), "{rows:?}");
-    assert_eq!(MeasureFmt { precision: 0, unit: 0 }.len(-0.2), "0 mm");
+    let inch = MeasureFmt { precision: 2, unit: 3, secondary: None };
+    let secs = measure_sections(&r, &inch);
+    let titles: Vec<&str> = secs.iter().map(|x| x.title.as_str()).collect();
+    assert_eq!(titles, ["Results", "Selection 1", "Selection 2"]);
+    assert_eq!(secs[2].note, "Face selected");
+    assert_eq!(labels(&secs[0].rows), [("Distance", "1.18 in"), ("Angle", "180.00 deg")]);
+    assert_eq!(MeasureFmt { precision: 0, ..MeasureFmt::default() }.len(-0.2), "0 mm");
+    // Fusion's Precision list
+    assert_eq!((0..=4).map(precision_label).collect::<Vec<_>>(), ["0", "0.1", "0.12", "0.123", "0.1234"]);
   }
 
   #[test]
@@ -7265,8 +7513,13 @@ mod tests {
     app.s.selection = vec![Sel::Edge { body: b, edge }, Sel::Body { body: b }];
     assert!(show_once(&mut app, &mut d));
     assert!(app.measure.is_some(), "two picks draw the distance line");
+    // values read in the document's unit
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    assert!(show_once(&mut app, &mut d));
+    assert_eq!(MEASURE_UNITS[app.measure_fmt.unit].0, "in");
     d.leave(&mut app);
     assert!(!app.sel_filter.vertices);
+    assert!(app.s.selection.is_empty() && app.measure.is_none(), "closing Measure lets its picks go");
   }
 
   #[test]
@@ -7281,7 +7534,8 @@ mod tests {
     assert!(d.kind.reports());
     assert!(show_once(&mut app, &mut d));
 
-    let lib = appearance_library(&mut app);
+    let lib: Vec<(String, [u8; 3])> =
+      crate::material_ui::appearances(&mut app).into_iter().map(|s| (s.name, s.color)).collect();
     assert!(lib.len() >= 16 && lib.iter().any(|(n, _)| n == "Copper"));
     // a new body shows the default appearance
     assert_eq!(in_this_design(&app, &lib), [("Steel - Satin".to_string(), [205, 200, 190], 1)]);
@@ -7438,8 +7692,9 @@ mod tests {
     let mut app = App::with_session(Session::default());
     app.s.execute("box", &json!({"width": 20, "depth": 20, "height": 10})).unwrap();
     let b = app.s.model.bodies[0].id;
-    let top = face(&app.s, 0, |f| f.normal.z > 0.9)["face"].as_u64().unwrap() as u32;
-    app.s.selection = vec![Sel::Face { body: b, face: top }];
+    // a side face (the box's top edits its Height, see `press_owner`)
+    let side = face(&app.s, 0, |f| f.normal.x > 0.9)["face"].as_u64().unwrap() as u32;
+    app.s.selection = vec![Sel::Face { body: b, face: side }];
     let d = Dialog::open(&mut app, Kind::PressPull);
     assert_eq!((d.kind, d.faces.len(), d.choice), (Kind::PressPull, 1, "automatic"));
     assert_eq!(d.command().unwrap().0, "press_pull");

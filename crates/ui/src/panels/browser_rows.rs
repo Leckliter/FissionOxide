@@ -25,19 +25,13 @@ pub(crate) fn user_name() -> String {
 
 /// Whether the design has never been saved (no hub version, no file).
 pub(crate) fn unsaved(app: &App) -> bool {
-  app.s.hub.is_none() && app.s.path.is_none()
+  crate::documents::unsaved(&app.s)
 }
 
 /// The design's name as the tab and title show it: the file's stem, else the design name.
 /// The document's name: its file's stem once saved, else the design's name.
 pub(crate) fn doc_name(app: &App) -> String {
-  app
-    .s
-    .path
-    .as_ref()
-    .and_then(|p| p.file_stem())
-    .map(|n| n.to_string_lossy().to_string())
-    .unwrap_or_else(|| app.s.design.name.clone())
+  crate::documents::doc_name(&app.s)
 }
 
 /// The design's version: the hub's, else v1 for a file.
@@ -48,16 +42,6 @@ fn version(app: &App) -> u32 {
 /// The root browser row: "(Unsaved)" until the design is saved, then "Name v1", as in Fusion.
 pub(crate) fn root_label(app: &App) -> String {
   if unsaved(app) { "(Unsaved)".into() } else { format!("{} v{}", doc_name(app), version(app)) }
-}
-
-/// The document tab: "Untitled" (with a lock) until saved, then "Name v1", starred when dirty.
-pub(crate) fn tab_label(app: &App) -> String {
-  if unsaved(app) {
-    doc_name(app)
-  } else {
-    let star = if app.s.dirty { "*" } else { "" };
-    format!("{} v{}{star}", doc_name(app), version(app))
-  }
 }
 
 /// The window title, as Fusion's "Untitled* (user) - Autodesk Fusion".
@@ -410,7 +394,8 @@ pub(crate) fn run_origin_folder_cmd(app: &mut App, cmd: RowCmd) {
 
 /// The Origin folder's children, as Fusion's: O, X, Y, Z, XY, XZ, YZ, each with its own eye
 /// (greyed while the folder is hidden). A click selects the item (status "XZ Plane") whether or
-/// not it shows; a double-click on a plane sketches on it. Hovering a row highlights nothing.
+/// not it shows; a double-click on a plane sketches on it. Hovering a row lights its item in
+/// the canvas as hovering the item there does.
 pub(crate) fn origin_children(app: &mut App, ui: &mut egui::Ui, folder: egui::Id) {
   for item in OriginItem::ALL {
     let picked = origin::picked(app) == Some(item);
@@ -428,6 +413,9 @@ pub(crate) fn origin_children(app: &mut App, ui: &mut egui::Ui, folder: egui::Id
     );
     if ev.eye {
       origin::toggle_eye(app, item);
+    }
+    if ev.response.as_ref().is_some_and(|r| r.hovered()) {
+      app.row_hover = Some(origin::RowHover::Origin(item));
     }
     if let Some(r) = &ev.response
       && !app.origin_shown
@@ -697,20 +685,20 @@ mod tests {
   fn root_labels_follow_fusion() {
     let mut app = App::with_session(Session::default());
     assert_eq!(root_label(&app), "(Unsaved)");
-    assert_eq!(tab_label(&app), "Untitled");
+    assert_eq!(crate::documents::tab_label(&app.s), "Untitled");
     let user = user_name();
     assert_eq!(window_title(&app), format!("Untitled ({user}) - FissionOxide"));
     app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
     assert!(app.s.dirty);
     assert_eq!(window_title(&app), format!("Untitled* ({user}) - FissionOxide"));
-    assert_eq!(tab_label(&app), "Untitled", "the tab shows the lock, not a star, until saved");
+    assert_eq!(crate::documents::tab_label(&app.s), "Untitled", "the tab shows the lock, not a star, until saved");
     // saved to a file: the name and version show, the tab stars its unsaved changes
     app.s.path = Some(std::path::PathBuf::from("/tmp/Bracket.fox"));
     assert_eq!(root_label(&app), "Bracket v1");
-    assert_eq!(tab_label(&app), "Bracket v1*");
+    assert_eq!(crate::documents::tab_label(&app.s), "Bracket v1*");
     assert_eq!(window_title(&app), format!("Bracket v1* ({user}) - FissionOxide"));
     app.s.dirty = false;
-    assert_eq!(tab_label(&app), "Bracket v1");
+    assert_eq!(crate::documents::tab_label(&app.s), "Bracket v1");
   }
 
   #[test]

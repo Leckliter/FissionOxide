@@ -1,0 +1,22 @@
+{
+  "ui:mesh:mesh-body-kind": "ui-mesh-body-and-insert",
+  "ui:mesh:insert-mesh-dialog": "ui-mesh-body-and-insert",
+  "ui:mesh:insert-timeline-item": "ui-mesh-body-and-insert",
+  "ui:mesh:body-context-menu": "ui-mesh-body-and-insert",
+  "ui:mesh:open-mesh-warning": "ui-mesh-body-and-insert",
+  "ui:mesh:reduce-dialog": "ui-mesh-modify-dialogs",
+  "ui:mesh:smooth-dialog": "ui-mesh-modify-dialogs",
+  "ui:mesh:plane-cut-dialog": "ui-mesh-modify-dialogs",
+  "ui:mesh:convert-mesh-dialog": "ui-mesh-modify-dialogs",
+  "ui:mesh:ribbon-quick-buttons": "ui-mesh-modify-dialogs",
+  "ui:mesh:remesh-dialog": "ui-mesh-new-modify",
+  "ui:mesh:shell-dialog": "ui-mesh-new-modify",
+  "ui:mesh:combine-dialog": "ui-mesh-new-modify",
+  "ui:mesh:separate-dialog": "ui-mesh-new-modify",
+  "ui:mesh:scale-mesh-dialog": "ui-mesh-new-modify",
+  "ui:mesh:tessellate-dialog": "ui-mesh-prepare-create",
+  "ui:mesh:repair-dialog": "ui-mesh-prepare-create",
+  "ui:mesh:face-groups-dialogs": "ui-mesh-prepare-create",
+  "ui:mesh:section-sketch-dialog": "ui-mesh-prepare-create",
+  "ui:mesh:direct-edit-environment": "ui-mesh-prepare-create"
+}

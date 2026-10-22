@@ -75,6 +75,7 @@ pub fn command_label(name: &str, p: &Value) -> Option<String> {
   let ty = p.get("type").and_then(Value::as_str).unwrap_or("");
   let label = match name {
     "design.units" if has("unit") => "Change Units",
+    "design.type" if has("type") => "Convert Design Type",
     "sketch.create" => "Create Sketch",
     "sketch.line" => "Line",
     "sketch.rect" if has("center") => "Center Rectangle",

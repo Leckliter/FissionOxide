@@ -247,7 +247,7 @@ pub(crate) fn shell(s: &mut Session, p: &Value) -> CmdResult {
 
 /// The picked `{body, face}` faces and every face joined to them across a smooth edge (Fusion's
 /// tangent chain), e.g. a box's side faces and the rounds between them. Other picks pass through.
-fn tangent_faces(s: &Session, picked: Vec<Value>) -> Vec<Value> {
+pub(crate) fn tangent_faces(s: &Session, picked: Vec<Value>) -> Vec<Value> {
   let mut out = picked.clone();
   for v in &picked {
     let (Some(b), Some(f)) = (v.get("body").and_then(Value::as_u64), v.get("face").and_then(Value::as_u64)) else {

@@ -772,6 +772,11 @@ fn hub_versions_milestones_and_history() {
   let vs = run(&mut s, "hub.versions", json!({"item": up["item"]}));
   let orig = vs["versions"][0]["original"].as_str().unwrap();
   assert!(orig.starts_with("v1-") && orig.ends_with(".orig.step"), "{orig}");
+  // and downloading it in the original's format gives that file back, byte for byte
+  let back = root.join("back.step");
+  let r = run(&mut s, "hub.download", json!({"item": up["item"], "path": back}));
+  assert_eq!(r["original"], true, "{r}");
+  assert_eq!(std::fs::read(&back).unwrap(), std::fs::read(&step).unwrap());
   // trash and restore
   run(&mut s, "hub.item.delete", json!({}));
   assert!(s.hub.is_none());
@@ -1025,6 +1030,24 @@ fn body_topology_lists_faces_and_edges() {
   let only = run(&mut s, "body.topology", json!({"body": body, "faces": false}));
   assert!(only.get("faces").is_none() && only["edges"].is_array());
   assert!(s.execute("body.topology", &json!({"body": 999})).is_err());
+}
+
+#[test]
+fn appearance_and_material_libraries_sort_into_fusion_folders() {
+  let mut s = Session::default();
+  let lib = run(&mut s, "appearances", json!({}));
+  let folder = |name: &str| lib.as_array().unwrap().iter().find(|a| a["name"] == name).unwrap()["folder"].clone();
+  assert_eq!(folder("Steel - Satin"), "Metal");
+  assert_eq!(folder("ABS (Red)"), "Plastic");
+  assert_eq!(folder("Wood - Oak"), "Wood");
+  assert_eq!(folder("Glass - Clear"), "Glass");
+  for a in lib.as_array().unwrap() {
+    assert!(crate::features::APPEARANCE_FOLDERS.contains(&a["folder"].as_str().unwrap()), "{a}");
+  }
+  use fox_model::assembly::{MATERIAL_FOLDERS, MATERIALS, material_folder};
+  assert!(MATERIALS.iter().all(|(m, _)| MATERIAL_FOLDERS.contains(&material_folder(m))));
+  assert_eq!(material_folder("Steel"), "Metal");
+  assert_eq!(material_folder("PLA"), "Plastic");
 }
 
 #[test]

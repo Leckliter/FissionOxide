@@ -449,10 +449,8 @@ impl Ctx<'_> {
       FeatureKind::InsertDesign { name, breps, translate, sub: Some(sub), .. } if sub.flexible && sub.has_joints() => {
         self.insert_flexible(id, name, breps, translate, sub)
       }
-      FeatureKind::InsertDesign { name, breps, translate, .. } => {
-        if breps.is_empty() {
-          return Err(format!("{name} has no bodies to insert"));
-        }
+      FeatureKind::InsertDesign { breps, translate, .. } => {
+        // an empty one is an assembly's new external component: an empty design, linked
         let v = DVec3::new(self.len(&translate[0])?, self.len(&translate[1])?, self.len(&translate[2])?);
         for b in breps.iter() {
           let s = Shape::from_brep(b).map_err(ke)?.translated(v).map_err(ke)?;

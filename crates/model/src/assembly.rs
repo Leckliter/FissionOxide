@@ -59,6 +59,30 @@ pub const MATERIALS: &[(&str, f64)] = &[
   ("Rubber", 1.10),
 ];
 
+/// The folders of Fusion's physical material library (Fusion Material Library), in its order.
+pub const MATERIAL_FOLDERS: &[&str] = &[
+  "Ceramic",
+  "Electronics",
+  "Fabric",
+  "Flooring",
+  "Gas",
+  "Glass",
+  "Liquid",
+  "Metal",
+  "Miscellaneous",
+  "Plastic",
+  "Wood",
+];
+
+/// The library folder (one of [`MATERIAL_FOLDERS`]) a material of [`MATERIALS`] sits in.
+pub fn material_folder(material: &str) -> &'static str {
+  match material {
+    "Wood" => "Wood",
+    "ABS Plastic" | "PLA" | "Nylon" | "Polycarbonate" | "Acrylic" | "Rubber" => "Plastic",
+    _ => "Metal",
+  }
+}
+
 /// Density (g/cm³) of a material name (case-insensitive); unknown/empty = steel.
 pub fn density(material: &str) -> f64 {
   MATERIALS.iter().find(|(n, _)| n.eq_ignore_ascii_case(material.trim())).map(|(_, d)| *d).unwrap_or(7.85)

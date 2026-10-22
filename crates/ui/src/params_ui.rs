@@ -12,6 +12,7 @@ use fox_engine::model::{FeatureId, LengthUnit, ParamKind};
 use serde_json::json;
 
 use crate::App;
+use crate::icons::Icon;
 use crate::theme;
 
 /// A parameter row: a user parameter or one of a feature's expressions.
@@ -292,48 +293,51 @@ enum Act {
   Export,
 }
 
-/// Change Parameters, as Fusion's: a centred modal titled PARAMETERS.
+/// Change Parameters, as Fusion's: a centred modal titled PARAMETERS with an X at the top
+/// right, over a window it doesn't dim.
 pub fn window(app: &mut App, ctx: &egui::Context) {
   if !app.show_params {
     return;
   }
   let mut close = false;
   let frame = egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::same(8));
-  egui::Modal::new(egui::Id::new(MODAL_ID)).frame(frame).backdrop_color(Color32::from_black_alpha(60)).show(
-    ctx,
-    |ui| {
-      ui.set_width(SIZE.x);
-      ui.set_height(SIZE.y);
+  egui::Modal::new(egui::Id::new(MODAL_ID)).frame(frame).backdrop_color(Color32::TRANSPARENT).show(ctx, |ui| {
+    ui.set_width(SIZE.x);
+    ui.set_height(SIZE.y);
+    ui.horizontal(|ui| {
+      ui.label(RichText::new("PARAMETERS").strong());
+      ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), egui::Sense::click());
+        if resp.hovered() {
+          ui.painter().rect_filled(r, 2.0, Color32::from_gray(228));
+        }
+        crate::icons::draw(ui.painter(), r.shrink(5.0), Icon::Close, theme::ICON_INK);
+        if resp.on_hover_text("Close").clicked() {
+          close = true;
+        }
+      });
+    });
+    ui.separator();
+    contents(app, ui);
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
       ui.horizontal(|ui| {
-        ui.label(RichText::new("PARAMETERS").strong());
+        let (r, _) = ui.allocate_exact_size(vec2(18.0, 24.0), egui::Sense::hover());
+        ui.painter().circle_stroke(r.center(), 7.0, Stroke::new(1.2, theme::GROUP_LABEL));
+        ui.painter().text(
+          r.center(),
+          egui::Align2::CENTER_CENTER,
+          "i",
+          egui::FontId::proportional(11.0),
+          theme::GROUP_LABEL,
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-          if ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Close").clicked() {
+          if crate::panels::primary_button(ui, "OK", theme::ACCENT).clicked() {
             close = true;
           }
         });
       });
-      ui.separator();
-      contents(app, ui);
-      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-        ui.horizontal(|ui| {
-          let (r, _) = ui.allocate_exact_size(vec2(18.0, 24.0), egui::Sense::hover());
-          ui.painter().circle_stroke(r.center(), 7.0, Stroke::new(1.2, theme::GROUP_LABEL));
-          ui.painter().text(
-            r.center(),
-            egui::Align2::CENTER_CENTER,
-            "i",
-            egui::FontId::proportional(11.0),
-            theme::GROUP_LABEL,
-          );
-          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if crate::panels::primary_button(ui, "OK", theme::ACCENT).clicked() {
-              close = true;
-            }
-          });
-        });
-      });
-    },
-  );
+    });
+  });
   if !close && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
     close = true;
   }
@@ -365,7 +369,7 @@ pub fn compute(app: &mut App) {
 
 fn contents(app: &mut App, ui: &mut egui::Ui) {
   let unit = app.s.design.units;
-  let doc = crate::panels::doc_name(app);
+  let doc = crate::panels::root_label(app);
   let panel = app.params_ui.clone();
   let users: Vec<Row> = sorted(&panel, user_rows(&app.s).into_iter().filter(|r| shown(&panel, r, "")).collect());
   let groups: Vec<Group> = model_groups(&app.s)
@@ -392,25 +396,24 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing.y = 0.0;
     let t = Table { left: ui.max_rect().left(), unit };
     header(app, ui, &t);
-    section(ui, "params-favorites", "Favorites", true, filtering, |ui| {
-      for r in &favorites {
-        row(app, ui, &t, r, "fav");
-      }
-    });
-    section(ui, "params-user", "User Parameters", true, filtering, |ui| {
-      for r in &users {
-        row(app, ui, &t, r, "user");
-      }
-      if let Some(mut n) = app.params_ui.new.take() {
-        app.params_ui.new = if new_row(app, ui, &t, &mut n) { None } else { Some(n) };
-      }
-    });
-    section(ui, "params-model", "Model Parameters", true, filtering, |ui| {
-      // Fusion lists the document, then each feature with parameters
-      section(ui, "params-doc", &doc, true, filtering, |ui| {
+    // Favorites and User Parameters are plain headings, always open; Model Parameters folds
+    heading(ui, "Favorites", None);
+    for r in &favorites {
+      row(app, ui, &t, r, "fav");
+    }
+    heading(ui, "User Parameters", Some(Icon::Params));
+    for r in &users {
+      row(app, ui, &t, r, "user");
+    }
+    if let Some(mut n) = app.params_ui.new.take() {
+      app.params_ui.new = if new_row(app, ui, &t, &mut n) { None } else { Some(n) };
+    }
+    section(ui, "params-model", "Model Parameters", None, true, filtering, |ui| {
+      // Fusion lists the document ("(Unsaved)" until saved), folded, then each feature
+      section(ui, "params-doc", &doc, Some(Icon::Component), false, filtering, |ui| {
         for g in &groups {
           let id = format!("params-feature-{}", g.feature.0);
-          section(ui, &id, &g.name, false, filtering, |ui| {
+          section(ui, &id, &g.name, None, false, filtering, |ui| {
             for r in &g.rows {
               row(app, ui, &t, r, "model");
             }
@@ -424,7 +427,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
 /// Fusion's toolbar row: ƒx and favourites filters, the star, the filter box, add, copy, delete,
 /// import and export, and Automatic Compute.
 fn toolbar(app: &mut App, ui: &mut egui::Ui, selected: Option<Row>) {
-  use crate::icons::{Icon, icon_button};
+  use crate::icons::icon_button;
   let mut act: Option<Act> = None;
   let user_picked = selected.as_ref().is_some_and(|r| r.source == Source::User);
   ui.horizontal(|ui| {
@@ -571,13 +574,41 @@ pub fn import(app: &mut App, text: &str) {
   app.status = Some((format!("Imported {n} parameters"), false));
 }
 
-/// A collapsible group; open while the filter is in use.
-fn section(ui: &mut egui::Ui, id: &str, title: &str, open: bool, filtering: bool, body: impl FnOnce(&mut egui::Ui)) {
-  let mut h = egui::CollapsingHeader::new(RichText::new(title).strong()).id_salt(id).default_open(open);
-  if filtering {
-    h = h.open(Some(true));
+/// A section's name with its icon, if any.
+fn title_row(ui: &mut egui::Ui, title: &str, icon: Option<Icon>) {
+  if let Some(icon) = icon {
+    let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
+    crate::icons::draw_color(ui.painter(), r, icon);
   }
-  h.show(ui, body);
+  ui.label(RichText::new(title).strong());
+}
+
+/// A section that doesn't fold (Fusion's Favorites and User Parameters): its name with no arrow.
+fn heading(ui: &mut egui::Ui, title: &str, icon: Option<Icon>) {
+  ui.horizontal(|ui| {
+    ui.set_min_height(ROW_H);
+    // lined up with the folding sections' names
+    ui.add_space(ui.spacing().indent);
+    title_row(ui, title, icon);
+  });
+}
+
+/// A collapsible group; open while the filter is in use.
+fn section(
+  ui: &mut egui::Ui,
+  id: &str,
+  title: &str,
+  icon: Option<Icon>,
+  open: bool,
+  filtering: bool,
+  body: impl FnOnce(&mut egui::Ui),
+) {
+  let mut state =
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(id), open);
+  if filtering {
+    state.set_open(true);
+  }
+  state.show_header(ui, |ui| title_row(ui, title, icon)).body(body);
 }
 
 /// The column headings; the Parameter column's arrow sorts the rows.
@@ -848,6 +879,47 @@ mod tests {
       ..Default::default()
     };
     ctx.run_ui(raw, |ui| window(app, ui.ctx())).drop_without_applying_deltas();
+  }
+
+  /// `ui:dialogs:parameters-dialog-details`: Fusion's PARAMETERS has a painted X (no glyph),
+  /// leaves the window behind undimmed, shows Favorites and User Parameters as plain headings and
+  /// lists the document as "(Unsaved)", folded, under Model Parameters.
+  #[test]
+  fn the_dialog_is_undimmed_with_fusions_sections() {
+    let mut app = App::with_session(session());
+    app.show_params = true;
+    let ctx = egui::Context::default();
+    let screen = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0));
+    let mut texts = Vec::new();
+    let mut backdrop = false;
+    for _ in 0..2 {
+      let raw = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+      let out = ctx.run_ui(raw, |ui| window(&mut app, ui.ctx()));
+      texts.clear();
+      fn walk(s: &egui::Shape, texts: &mut Vec<String>, backdrop: &mut bool, screen: Rect) {
+        match s {
+          egui::Shape::Text(t) => texts.push(t.galley.text().to_string()),
+          egui::Shape::Rect(r) => *backdrop |= r.rect.contains_rect(screen) && r.fill.a() > 0,
+          egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, texts, backdrop, screen)),
+          _ => {}
+        }
+      }
+      backdrop = false;
+      for c in &out.shapes {
+        walk(&c.shape, &mut texts, &mut backdrop, screen);
+      }
+      out.drop_without_applying_deltas();
+    }
+    assert!(!backdrop, "the window behind isn't dimmed");
+    assert!(!texts.iter().any(|t| t == "✕"), "the close is a painted X: {texts:?}");
+    for t in ["Favorites", "User Parameters", "Model Parameters", "(Unsaved)"] {
+      assert!(texts.iter().any(|x| x == t), "{t}: {texts:?}");
+    }
+    assert!(!texts.iter().any(|t| t == "Untitled"), "{texts:?}");
+    // the document row starts folded: no feature under it shows
+    assert!(!texts.iter().any(|t| t.starts_with("Extrude") || t.starts_with("Sketch")), "{texts:?}");
+    // the user parameter shows without unfolding anything
+    assert!(texts.iter().any(|t| t == "w"), "{texts:?}");
   }
 
   #[test]

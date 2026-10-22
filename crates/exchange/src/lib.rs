@@ -95,7 +95,7 @@ formats! {
   "step", "STEP", ["step", "stp"], Brep, true, true, "AP214 assemblies with instances, names and face colours";
   "iges", "IGES", ["iges", "igs"], Brep, true, true, "Trimmed surfaces / solids";
   "brep", "OpenCASCADE BRep", ["brep"], Brep, true, true, "Lossless OCCT text B-rep";
-  "stl", "STL mesh", ["stl"], Mesh, true, true, "Binary or ASCII; imported meshes become faceted bodies";
+  "stl", "STL mesh", ["stl"], Mesh, true, true, "Binary or ASCII; inserts as a mesh body (Convert Mesh makes it a solid)";
   "obj", "OBJ mesh", ["obj"], Mesh, true, true, "Wavefront OBJ";
   "3mf", "3MF", ["3mf"], Mesh, true, true, "3D Manufacturing Format (3D printing)";
   "ply", "PLY mesh", ["ply"], Mesh, true, true, "ASCII or binary";

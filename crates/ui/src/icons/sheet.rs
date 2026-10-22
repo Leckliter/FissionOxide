@@ -4,7 +4,7 @@
 
 use egui::{Rect, epaint::Primitive, pos2, vec2};
 
-use super::{Icon, draw_color};
+use super::{Icon, Tint, draw_color, draw_tinted};
 
 const ALL: &[Icon] = &[
   Icon::Sketch,
@@ -120,6 +120,24 @@ const ALL: &[Icon] = &[
   Icon::PlaneAlt,
   Icon::Axis,
   Icon::CPoint,
+  Icon::PlaneAngle,
+  Icon::PlaneTangent,
+  Icon::Midplane,
+  Icon::PlanePerpendicular,
+  Icon::PlaneTwoEdges,
+  Icon::PlaneThreePoints,
+  Icon::PlaneAlongPath,
+  Icon::AxisCylinder,
+  Icon::AxisNormal,
+  Icon::AxisTwoPlanes,
+  Icon::AxisTwoPoints,
+  Icon::AxisEdge,
+  Icon::PointVertex,
+  Icon::PointTwoEdges,
+  Icon::PointThreePlanes,
+  Icon::PointCenter,
+  Icon::PointEdgePlane,
+  Icon::PointAlongPath,
   Icon::Interference,
   Icon::Section,
   Icon::CurvComb,
@@ -141,6 +159,8 @@ const ALL: &[Icon] = &[
   Icon::InsertSvg,
   Icon::InsertDxf,
   Icon::InsertMesh,
+  Icon::MeshBody,
+  Icon::MeshFeature,
   Icon::InsertComponent,
   Icon::Fastener,
   Icon::DuplicateJoints,
@@ -303,9 +323,15 @@ const ALL: &[Icon] = &[
   Icon::EmbossRaise,
   Icon::EmbossSink,
   Icon::ThreadsLibrary,
+  Icon::PathPattern,
+  Icon::OriginSimple,
+  Icon::OriginBetween,
+  Icon::OriginTwoEdge,
+  Icon::DraftFixedPlane,
+  Icon::DraftPartingLine,
 ];
 
-fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {
+fn render(icons: &[Icon], tint: Option<Tint>, cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {
   let rows = icons.len().div_ceil(cols);
   let size = vec2(cols as f32 * cell, rows as f32 * cell);
   let ctx = egui::Context::default();
@@ -317,7 +343,11 @@ fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image:
     p.rect_filled(Rect::from_min_size(pos2(0.0, 0.0), size), 0.0, crate::theme::TOOLBAR);
     for (i, &ic) in icons.iter().enumerate() {
       let c = pos2((i % cols) as f32 * cell + cell / 2.0, (i / cols) as f32 * cell + cell / 2.0);
-      draw_color(&p, Rect::from_center_size(c, vec2(icon, icon)), ic);
+      let r = Rect::from_center_size(c, vec2(icon, icon));
+      match tint {
+        Some(t) => draw_tinted(&p, r, ic, t),
+        None => draw_color(&p, r, ic),
+      }
     }
   });
   let mut tex = None;
@@ -390,6 +420,16 @@ fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image:
 fn icon_sheet() {
   let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
   // toolbar size (27 px) at 1x and 2x, as the app shows them
-  render(ALL, 40.0, 27.0, 16, 1.0).save(dir.join("icon-sheet.png")).unwrap();
-  render(ALL, 40.0, 27.0, 16, 2.0).save(dir.join("icon-sheet@2x.png")).unwrap();
+  render(ALL, None, 40.0, 27.0, 16, 1.0).save(dir.join("icon-sheet.png")).unwrap();
+  render(ALL, None, 40.0, 27.0, 16, 2.0).save(dir.join("icon-sheet@2x.png")).unwrap();
+}
+
+/// The SURFACE ribbon's buttons in their orange, as the toolbar shows them.
+#[test]
+#[ignore = "writes target/icon-sheet-surface.png for review"]
+fn surface_icon_sheet() {
+  let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+  let surface =
+    [Icon::Patch, Icon::Extrude, Icon::Revolve, Icon::Sweep, Icon::Stitch, Icon::Unstitch, Icon::Trim, Icon::Extend];
+  render(&surface, Some(Tint::Orange), 40.0, 27.0, 8, 4.0).save(dir.join("icon-sheet-surface.png")).unwrap();
 }

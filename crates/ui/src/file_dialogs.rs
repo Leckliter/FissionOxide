@@ -177,7 +177,12 @@ pub(crate) fn name_field(ui: &mut egui::Ui, text: &mut String, first: &mut bool)
 
 /// Whether one of the modal windows (Save, Open, Export, a sketch's Export DXF) shows: the app's shortcuts wait.
 pub(crate) fn modal_open(app: &App) -> bool {
-  app.data.save.is_some() || app.files.open.is_some() || app.files.export.is_some() || app.export_dxf.is_some()
+  app.data.save.is_some()
+    || app.files.open.is_some()
+    || app.files.export.is_some()
+    || app.docs.modal_open()
+    || app.inserts.modal_open()
+    || app.export_dxf.is_some()
 }
 
 /// Escape closes the docked 3D PRINT dialog, the Image Options window and the data panel's
@@ -213,7 +218,7 @@ fn s(v: &Value, k: &str) -> String {
 }
 
 /// A row of the Open window's tree or table, filled when selected and tinted on hover.
-fn row(ui: &mut egui::Ui, selected: bool) -> (egui::Rect, egui::Response) {
+pub(crate) fn row(ui: &mut egui::Ui, selected: bool) -> (egui::Rect, egui::Response) {
   let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), egui::Sense::click());
   if selected {
     ui.painter().rect_filled(rect, 0.0, Color32::from_rgb(214, 232, 250));
@@ -223,7 +228,7 @@ fn row(ui: &mut egui::Ui, selected: bool) -> (egui::Rect, egui::Response) {
   (rect, r)
 }
 
-fn row_text(ui: &egui::Ui, rect: egui::Rect, x: f32, text: &str, color: Color32) {
+pub(crate) fn row_text(ui: &egui::Ui, rect: egui::Rect, x: f32, text: &str, color: Color32) {
   let font = egui::FontId::proportional(13.0);
   ui.painter().text(pos2(rect.left() + x, rect.center().y), egui::Align2::LEFT_CENTER, text, font, color);
 }
