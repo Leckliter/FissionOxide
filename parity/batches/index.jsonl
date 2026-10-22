@@ -113,7 +113,7 @@
 {"name": "ui-shortcut-extra-keys", "items": 7, "status": "done", "pr": "ae04315", "fixer": "cloud task_add32e58 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-shortcut-sketch-scope", "items": 4, "status": "done", "pr": "c0d8bff", "fixer": "cloud task_3bc6cfa5 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-appbar-home-updates", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_68daf170 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-documents-window-tabs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_0d1b70a8 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-documents-window-tabs", "items": 5, "status": "done", "pr": "acc137c", "fixer": "cloud task_0d1b70a8 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-marking-menu-targets", "items": 8, "status": "done", "pr": "f4ed9f7", "fixer": "cloud task_af4df33d (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-preferences-pages", "items": 9, "status": "fixing", "pr": null, "fixer": "cloud task_9f140052 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-sketch", "items": 8, "status": "done", "pr": "e74fc0d", "fixer": "cloud task_83e62b33 (requested 2026-10-22 by the coordinator)"}
