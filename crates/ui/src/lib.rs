@@ -81,6 +81,8 @@ mod sim_ui;
 mod sketch_modify;
 mod theme;
 mod thread_form;
+#[cfg(test)]
+mod timeline_tests;
 mod tips;
 mod toolbox;
 mod trace;
@@ -178,8 +180,8 @@ pub struct App {
   pub nav_mode: Option<NavMode>,
   /// Toolbar tab; opening a sketch switches to the contextual SKETCH tab.
   pub tab: panels::Tab,
-  /// Timeline playback: time of the next step.
-  playing: Option<f64>,
+  /// Timeline playback (Play) in progress.
+  pub(crate) playing: Option<panels::Playback>,
   /// Last repeatable command, for the marking menu's Repeat.
   last_cmd: Option<panels::Cmd>,
   /// Recently started commands, newest first (the S toolbox's recent row).

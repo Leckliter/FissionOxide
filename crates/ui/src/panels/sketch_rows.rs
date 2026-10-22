@@ -30,7 +30,7 @@ pub(crate) fn drawn(app: &App, fid: FeatureId) -> bool {
 }
 
 /// The sketches the browser lists (a sketch made to place a single hole isn't one of the user's:
-/// Fusion shows none).
+/// Fusion shows none; one after the timeline marker is gone until the marker passes it).
 fn listed(app: &App) -> Vec<(FeatureId, String)> {
   let placed = crate::dialogs::placement_sketches(&app.s);
   app
@@ -38,7 +38,9 @@ fn listed(app: &App) -> Vec<(FeatureId, String)> {
     .design
     .features
     .iter()
-    .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && !placed.contains(&f.id))
+    .filter(|f| {
+      matches!(f.kind, FeatureKind::Sketch { .. }) && !placed.contains(&f.id) && !super::rolled_back(app, f.id)
+    })
     .map(|f| (f.id, f.name.clone()))
     .collect()
 }
@@ -295,8 +297,6 @@ pub(super) fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
       theme::ERROR
     } else if st.warning.is_some() {
       theme::WARNING
-    } else if st.rolled_back {
-      theme::MUTED
     } else {
       theme::TEXT
     };
