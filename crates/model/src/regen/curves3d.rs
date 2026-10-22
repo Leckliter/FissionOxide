@@ -68,7 +68,7 @@ impl Ctx<'_> {
       }
     }
     let ids: Vec<CurveId> = if r.curves.is_empty() {
-      sk.sketch.curves.iter().filter(|c| !c.construction).map(|c| c.id).collect()
+      sk.sketch.curves.iter().filter(|c| !c.reference()).map(|c| c.id).collect()
     } else {
       r.curves.clone()
     };

@@ -206,9 +206,11 @@ impl Sketch {
           CurveKind::QuinticSpline { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
         }
       };
+      let (construction, centerline) = (c.construction, c.centerline);
       let id = self.add_curve(kind)?;
-      if c.construction {
-        self.set_construction(id, true)?;
+      if let Some(c) = self.curve_mut(id) {
+        c.construction = construction;
+        c.centerline = centerline;
       }
       out.push(id);
     }

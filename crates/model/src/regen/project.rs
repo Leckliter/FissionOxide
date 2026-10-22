@@ -15,7 +15,7 @@ impl Ctx<'_> {
     let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
     let mut sources = Vec::new();
     for c in &sk.sketch.curves {
-      if !(curves.is_empty() && !c.construction || curves.contains(&c.id)) {
+      if !(curves.is_empty() && !c.reference() || curves.contains(&c.id)) {
         continue;
       }
       let segs = sk.sketch.curve_segs(c.id);

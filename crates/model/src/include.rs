@@ -116,7 +116,7 @@ pub fn path_segs(sk: &SketchResult, curves: &[CurveId]) -> Result<Option<Vec<Seg
       }
     }
   }
-  for c in sk.sketch.curves.iter().filter(|c| pick(c.id, c.construction)) {
+  for c in sk.sketch.curves.iter().filter(|c| pick(c.id, c.reference())) {
     if matches!(c.kind, CurveKind::Circle { .. } | CurveKind::Ellipse { .. }) {
       if curves.is_empty() {
         continue;

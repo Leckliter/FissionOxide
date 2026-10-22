@@ -43,7 +43,7 @@ fn quad(z: f32, half: f32, color: [u8; 4], id: u32) -> Mesh {
 }
 
 fn line(points: Vec<[f32; 3]>, id: u32, width: f32, on_top: bool, dashed: bool) -> Polyline {
-  Polyline { points, color: [35, 38, 44, 255], width, id, on_top, dashed, behind: false }
+  Polyline { points, color: [35, 38, 44, 255], width, id, on_top, dashed, dash_dot: false, behind: false }
 }
 
 fn scene() -> Scene {
@@ -321,7 +321,8 @@ fn hidden_curves_are_dashed_along_their_whole_length() {
   let (dashed, cpu_dashed) = ink(&mut r, VisualStyle::HiddenLine);
   let ratio = dashed as f64 / solid as f64;
   eprintln!("solid {solid}, dashed {dashed} (CPU {cpu_dashed})");
-  assert!((0.3..0.7).contains(&ratio), "dashed / solid = {ratio:.2}");
+  // Fusion's pattern: 9 px dashes with 3 px gaps (fox_render::dash_gap)
+  assert!((0.55..0.9).contains(&ratio), "dashed / solid = {ratio:.2}");
   assert!((dashed as f64 - cpu_dashed as f64).abs() < solid as f64 * 0.15);
   r.destroy(&h.gl);
 }

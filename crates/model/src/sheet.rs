@@ -191,7 +191,7 @@ fn tangents(s: &Seg) -> Option<(P2, P2)> {
 pub fn open_path(sketch: &Sketch, curves: &[CurveId]) -> Result<Vec<Seg>, String> {
   let mut segs = Vec::new();
   for c in &sketch.curves {
-    if !(curves.is_empty() && !c.construction || curves.contains(&c.id)) {
+    if !(curves.is_empty() && !c.reference() || curves.contains(&c.id)) {
       continue;
     }
     match &c.kind {

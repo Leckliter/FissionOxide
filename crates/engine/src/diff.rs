@@ -146,6 +146,7 @@ pub fn draw(d: &DiffView, scene: &mut Scene) {
         highlight_color: color,
         colors: Vec::new(),
         analyze: false,
+        unlit: false,
       });
     }
     for e in &p.edges {
@@ -156,6 +157,7 @@ pub fn draw(d: &DiffView, scene: &mut Scene) {
         id: NO_ID,
         on_top: false,
         dashed: false,
+        dash_dot: false,
         behind: false,
       });
     }

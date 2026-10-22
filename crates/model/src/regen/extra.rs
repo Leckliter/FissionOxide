@@ -210,7 +210,7 @@ impl Ctx<'_> {
         let n = sk.plane.normal();
         let mut lines = Vec::new();
         for c in &sk.sketch.curves {
-          if !(curves.is_empty() && !c.construction || curves.contains(&c.id)) {
+          if !(curves.is_empty() && !c.reference() || curves.contains(&c.id)) {
             continue;
           }
           if let CurveKind::Line { a, b } = &c.kind
@@ -1415,7 +1415,7 @@ pub(super) fn sketch_wires(
 ) -> Result<Vec<Shape>, String> {
   let mut out = Vec::new();
   for c in &sketch.curves {
-    if !(curves.is_empty() && !c.construction || curves.contains(&c.id)) {
+    if !(curves.is_empty() && !c.reference() || curves.contains(&c.id)) {
       continue;
     }
     for seg in sketch.curve_segs(c.id) {

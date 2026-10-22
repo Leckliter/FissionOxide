@@ -62,7 +62,8 @@ pub struct MeshChunk {
   /// that wouldn't save enough repeats the one before it.
   pub lods: [(Range<usize>, f32); 2],
 }
-/// Floats per line segment: start, end, colour bits, id bits, width (px), depth bias, dashed,
+/// Floats per line segment: start, end, colour bits, id bits, width (px), depth bias, dashed
+/// (0 solid, 1 dashed, 2 dash-dot),
 /// and how far along its polyline it starts (world units, for the dash pattern).
 pub const LINE_STRIDE: usize = 12;
 /// Floats per marker: position, colour bits, id bits, radius (px).
@@ -376,7 +377,15 @@ pub fn lines(lines: &[Polyline]) -> Instances {
     let part = &mut parts[group_of(l.on_top, l.id)];
     // lines win depth ties against the faces they lie on (the grid loses them)
     let bias = if l.behind { 2e-5 } else { -2e-5 };
-    let (width, dashed) = (line_width_px(l.width), if l.dashed { 1.0 } else { 0.0 });
+    // 0 solid, 1 dashed, 2 dash-dot (see `fox_render::dash_gap`)
+    let dashed = if !l.dashed {
+      0.0
+    } else if l.dash_dot {
+      2.0
+    } else {
+      1.0
+    };
+    let width = line_width_px(l.width);
     let mut along = 0.0f32;
     for s in l.points.windows(2) {
       let (a, b) = (s[0], s[1]);
@@ -551,6 +560,7 @@ mod tests {
       id,
       on_top: false,
       dashed: false,
+      dash_dot: false,
       behind: false,
     };
     let i = lines(&[seg(0.0, 1), seg(50.0, 0), seg(100.0, 2)]);
@@ -605,6 +615,7 @@ mod tests {
       id,
       on_top,
       dashed: false,
+      dash_dot: false,
       behind: false,
     };
     let i = lines(&[l(true, 3), l(false, 0), l(false, 8)]);

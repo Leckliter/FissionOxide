@@ -97,7 +97,10 @@ impl Sketch {
     let mut radii: Vec<(CurveId, f64)> = Vec::new();
     for (old, new) in s.curves.iter().zip(&curves) {
       let (Some(a), Some(b)) = (self.curve(*old), fresh.curve(*new)) else { return false };
-      if std::mem::discriminant(&a.kind) != std::mem::discriminant(&b.kind) || a.construction != b.construction {
+      if std::mem::discriminant(&a.kind) != std::mem::discriminant(&b.kind)
+        || a.construction != b.construction
+        || a.centerline != b.centerline
+      {
         return false;
       }
       let (pa, pb) = (crate::curve_points(&a.kind), crate::curve_points(&b.kind));

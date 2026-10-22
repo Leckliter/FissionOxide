@@ -414,7 +414,7 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64, Cur
   // Curve pieces before splitting, with the curve each came from
   let mut pieces: Vec<(Seg, CurveId)> = Vec::new();
   let mut circles: Vec<([f64; 2], f64, CurveId)> = Vec::new();
-  for c in sketch.curves.iter().filter(|c| !c.construction).take(MAX_EDGES) {
+  for c in sketch.curves.iter().filter(|c| !c.reference()).take(MAX_EDGES) {
     let id = c.id;
     match &c.kind {
       CurveKind::Line { a, b } => {

@@ -3917,8 +3917,15 @@ mod row_menu_tests {
     assert_eq!(linetype_state(&app, sk), (false, false));
     app.toggle_construction();
     assert_eq!(linetype_state(&app, sk), (true, false));
+    app.toggle_construction();
+    // a centerline lights the Centerline toggle alone; X on it keeps the centerline flag and
+    // lights both, as in Fusion; X again leaves a plain centerline
     app.toggle_centerline();
+    assert_eq!(linetype_state(&app, sk), (false, true));
+    app.toggle_construction();
     assert_eq!(linetype_state(&app, sk), (true, true));
+    app.toggle_construction();
+    assert_eq!(linetype_state(&app, sk), (false, true));
     app.toggle_centerline();
     assert_eq!(linetype_state(&app, sk), (false, false));
   }

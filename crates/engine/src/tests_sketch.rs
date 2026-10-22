@@ -425,10 +425,11 @@ fn spun_profile_flips_to_the_other_side() {
   assert!(xs.iter().all(|x| *x <= 1e-9) && xs.iter().any(|x| (x + 20.0).abs() < 1e-6), "{xs:?}");
 }
 
-/// The Centerline linetype: a centerline is construction drawn dash-dot; turning it off makes
-/// the curve normal again, and Normal/Construction off clears it too.
+/// The Centerline linetype is independent of the construction flag, as Fusion's Linetype
+/// toggles are: a centerline is reference geometry (it forms no profile) drawn dash-dot, and
+/// Normal/Construction on it keeps the flag and draws it with even dashes.
 #[test]
-fn centerline_is_construction_and_toggles_back() {
+fn centerline_is_reference_geometry_independent_of_construction() {
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   let sk = s.edit_sketch.unwrap();
@@ -436,15 +437,24 @@ fn centerline_is_construction_and_toggles_back() {
   let curve = |s: &Session| s.design.sketch(sk).unwrap().curve(fox_sketch::CurveId(line as u32)).unwrap().clone();
   run(&mut s, "sketch.centerline", json!({"curves": [line]}));
   let c = curve(&s);
-  assert!(c.centerline && c.construction, "{c:?}");
+  assert!(c.centerline && !c.construction && c.reference(), "{c:?}");
   run(&mut s, "sketch.centerline", json!({"curves": [line]}));
   let c = curve(&s);
-  assert!(!c.centerline && !c.construction, "{c:?}");
+  assert!(!c.centerline && !c.construction && !c.reference(), "{c:?}");
   run(&mut s, "sketch.centerline", json!({"curves": [line], "on": true}));
+  run(&mut s, "sketch.construction", json!({"curves": [line]}));
+  let c = curve(&s);
+  assert!(c.centerline && c.construction, "X keeps the centerline flag: {c:?}");
   run(&mut s, "sketch.construction", json!({"curves": [line], "on": false}));
   let c = curve(&s);
-  assert!(!c.centerline && !c.construction, "{c:?}");
+  assert!(c.centerline && !c.construction, "{c:?}");
   assert_eq!(crate::history::command_label("sketch.centerline", &json!({})).as_deref(), Some("Centerline"));
+  // a centerline bounds no profile
+  run(&mut s, "sketch.rect", json!({"corner1": [0, -10], "corner2": [40, 10]}));
+  let (scene, picks) = crate::scene::SceneBuilder::default().build(&s, &crate::scene::ViewOptions::default());
+  let profiles =
+    scene.meshes.iter().filter(|m| matches!(picks.get(m.tri_ids[0]), Some(crate::scene::Pick::Profile { .. }))).count();
+  assert_eq!(profiles, 1, "the centerline through the rectangle doesn't split it");
 }
 
 /// Intersect sections the bodies with the sketch plane: a box cut half way up gives its four
@@ -578,8 +588,8 @@ fn centre_rectangle_keeps_two_grey_diagonals() {
   assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Horizontal { .. } | ConstraintKind::Vertical { .. })), 4);
   let info = run(&mut s, "sketch.info", json!({}));
   assert_eq!(info["solved"], true, "{info}");
-  // construction geometry draws grey and dashed
-  assert_eq!(crate::scene::SKETCH_CONSTRUCTION[..3], [128, 128, 132]);
+  // construction geometry draws tan and dashed, as Fusion's
+  assert_eq!(crate::scene::SKETCH_CONSTRUCTION[..3], [207, 174, 155]);
 }
 
 #[test]

@@ -64,6 +64,7 @@ fn boss(m: &mut Mesh, lines: &mut Vec<Polyline>, c: [f32; 2], r: f32, h: f32, se
       id: e,
       on_top: false,
       dashed: false,
+      dash_dot: false,
       behind: false,
     });
   }

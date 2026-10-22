@@ -415,7 +415,7 @@ impl Sketch {
         let (n0, n1) = (self.point_on(&e, t0 + u0), self.point_on(&e, t0 + u1));
         self.swap_point(curve, end, n0);
         let second = self.add_curve(arc(n1, end))?;
-        self.set_construction(second, c.construction)?;
+        self.copy_linetype(curve, second)?;
         self.retarget_smooth(curve, second, ep);
         self.add_constraint(ConstraintKind::PointOnCurve { p: n0, curve: o0 })?;
         self.add_constraint(ConstraintKind::PointOnCurve { p: n1, curve: o1 })?;

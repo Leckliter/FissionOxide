@@ -101,13 +101,21 @@ pub struct Point {
 pub struct Curve {
   pub id: CurveId,
   pub kind: CurveKind,
-  /// Construction geometry guides the sketch but never forms profiles.
+  /// Construction geometry guides the sketch but never forms profiles; drawn dashed.
   #[serde(default)]
   pub construction: bool,
-  /// A centerline: construction geometry drawn dash-dot (Fusion's Centerline linetype, the axis
-  /// of a revolve or a mirror). A centerline is always construction.
+  /// Fusion's Centerline linetype (the axis of a revolve or a mirror): reference geometry like
+  /// construction, drawn dash-dot. The two flags are independent, as Fusion's Linetype toggles
+  /// are: a centerline made construction as well keeps its flag and draws dashed.
   #[serde(default)]
   pub centerline: bool,
+}
+
+impl Curve {
+  /// Construction or centerline: reference geometry that never forms a profile.
+  pub fn reference(&self) -> bool {
+    self.construction || self.centerline
+  }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -757,20 +765,29 @@ impl Sketch {
     Ok(())
   }
 
+  /// Makes a curve construction geometry or normal again; a centerline keeps its flag either
+  /// way, as in Fusion.
   pub fn set_construction(&mut self, id: CurveId, construction: bool) -> Result<(), SketchError> {
     let c = self.curve_mut(id).ok_or(SketchError::NoCurve(id))?;
     c.construction = construction;
-    if !construction {
-      c.centerline = false;
-    }
     Ok(())
   }
 
-  /// Makes a curve a centerline (construction, drawn dash-dot) or a normal curve again.
+  /// Makes a curve a centerline (reference geometry drawn dash-dot) or not; its construction
+  /// flag is left alone.
   pub fn set_centerline(&mut self, id: CurveId, centerline: bool) -> Result<(), SketchError> {
     let c = self.curve_mut(id).ok_or(SketchError::NoCurve(id))?;
     c.centerline = centerline;
-    c.construction = centerline;
+    Ok(())
+  }
+
+  /// Copies a curve's linetype (construction and centerline flags) onto another.
+  pub fn copy_linetype(&mut self, from: CurveId, to: CurveId) -> Result<(), SketchError> {
+    let (construction, centerline) =
+      self.curve(from).map(|c| (c.construction, c.centerline)).ok_or(SketchError::NoCurve(from))?;
+    let c = self.curve_mut(to).ok_or(SketchError::NoCurve(to))?;
+    c.construction = construction;
+    c.centerline = centerline;
     Ok(())
   }
 

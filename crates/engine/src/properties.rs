@@ -390,6 +390,7 @@ fn sketch_curve(s: &Session, sketch: FeatureId, curve: fox_sketch::CurveId) -> C
   out.insert("sketch".into(), json!(feature_name(s, sketch)));
   out.insert("curve".into(), json!(kind));
   out.insert("construction".into(), json!(c.construction));
+  out.insert("centerline".into(), json!(c.centerline));
   let mut put_point = |key: &str, q: Option<[f64; 2]>| {
     if let Some(q) = q {
       out.insert(format!("{key}_2d"), json!(q));

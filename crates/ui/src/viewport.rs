@@ -2987,6 +2987,8 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
 
 /// Constraint glyph ink: Fusion's grey.
 const GLYPH_INK: Color32 = Color32::from_rgb(105, 105, 110);
+/// The dashed reference line an angle is measured from: Fusion's darker orange.
+const ANGLE_REFERENCE: Color32 = Color32::from_rgb(182, 125, 93);
 /// A hovered glyph's box fill and ink, as sampled in Fusion.
 pub(crate) const GLYPH_HOVER_FILL: Color32 = Color32::from_rgb(189, 215, 226);
 pub(crate) const GLYPH_HOVER_INK: Color32 = Color32::from_rgb(68, 69, 69);
@@ -3050,41 +3052,65 @@ pub(crate) fn grid_label_positions(step: f64, size: f64) -> Vec<f64> {
   (-n..=n).filter(|i| i % 5 == 0).map(|i| i as f64 * step).collect()
 }
 
-/// The sketch grid's coordinate labels along both axes in the design's unit, as Fusion prints
-/// them (-2.5 ... 2.5 in), and a small marker at the origin.
-fn grid_labels(app: &App, painter: &egui::Painter, view: &View) {
-  let Some((_, plane)) = sketch_plane(app) else { return };
+/// A grid label as laid out: its text (a bare number in the design's unit), the point on its
+/// axis it is centred across, whether it sits along the sketch's X axis (just above it) or its
+/// Y axis (just left of it), and the screen directions of the sketch's X and Y axes.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct GridLabel {
+  pub text: String,
+  pub at: Pos2,
+  pub x_axis: bool,
+  pub right: Vec2,
+  pub up: Vec2,
+}
+
+/// The sketch grid's coordinate labels, as Fusion prints them: one on every major line of the
+/// grid that is on screen, along both axes, a bare number with no unit symbol and none at the
+/// origin. Each label reads along the sketch's Y axis (rotated 90° when the sketch is faced).
+pub(crate) fn grid_label_layout(app: &App, view: &View) -> Vec<GridLabel> {
+  let Some((_, plane)) = sketch_plane(app) else { return Vec::new() };
   let step = app.grid.step().unwrap_or_else(|| fox_engine::scene::grid_step(&app.s));
   let size = app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0);
-  let positions = grid_label_positions(step, size);
   let unit = app.s.design.units;
-  let ink = Color32::from_gray(120);
-  let font = egui::FontId::proportional(11.0);
   let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
-  let last = positions.last().copied().unwrap_or(0.0);
-  for &t in &positions {
-    let mut text = unit.number(t);
-    // the unit's symbol once per axis, on the outermost label
-    if t == last {
-      text = format!("{text} {}", unit.symbol());
+  let Some(o) = to_screen([0.0, 0.0]) else { return Vec::new() };
+  // the axes' directions on screen, from a step along each
+  let dir = |p: [f64; 2], fallback: Vec2| {
+    to_screen(p).map(|q| (q - o).normalized()).filter(|d| d.is_finite() && *d != Vec2::ZERO).unwrap_or(fallback)
+  };
+  let right = dir([step, 0.0], Vec2::new(1.0, 0.0));
+  let up = dir([0.0, step], Vec2::new(0.0, -1.0));
+  let mut out = Vec::new();
+  for t in grid_label_positions(step, size) {
+    if t == 0.0 {
+      continue;
     }
-    // along the sketch's X axis (below the axis) and its Y axis (left of the axis); zero once
-    if let Some(p) = to_screen([t, 0.0])
-      && view.rect.contains(p)
-    {
-      painter.text(p + Vec2::new(0.0, 4.0), egui::Align2::CENTER_TOP, &text, font.clone(), ink);
-    }
-    if t != 0.0
-      && let Some(p) = to_screen([0.0, t])
-      && view.rect.contains(p)
-    {
-      painter.text(p + Vec2::new(-5.0, 0.0), egui::Align2::RIGHT_CENTER, &text, font.clone(), ink);
+    let text = unit.number(t);
+    for (p, x_axis) in [([t, 0.0], true), ([0.0, t], false)] {
+      if let Some(at) = to_screen(p)
+        && view.rect.contains(at)
+      {
+        out.push(GridLabel { text: text.clone(), at, x_axis, right, up });
+      }
     }
   }
-  if let Some(o) = to_screen([0.0, 0.0])
-    && view.rect.contains(o)
-  {
-    painter.circle_stroke(o, 3.5, Stroke::new(1.0, Color32::from_gray(90)));
+  out
+}
+
+/// Paints [`grid_label_layout`]: grey text rotated to read along the sketch's Y axis, each X
+/// label just above its axis and each Y label just left of its axis, centred on its line.
+fn grid_labels(app: &App, painter: &egui::Painter, view: &View) {
+  let ink = Color32::from_gray(120);
+  let font = egui::FontId::proportional(11.0);
+  const GAP: f32 = 3.0;
+  for l in grid_label_layout(app, view) {
+    let galley = painter.layout_no_wrap(l.text, font.clone(), ink);
+    let size = galley.size();
+    let angle = l.up.y.atan2(l.up.x);
+    // the text runs along `up`, its height across it
+    let centre = if l.x_axis { l.at + l.up * (GAP + size.x / 2.0) } else { l.at - l.right * (GAP + size.y / 2.0) };
+    painter
+      .add(egui::epaint::TextShape::new(centre, galley, ink).with_angle_and_anchor(angle, egui::Align2::CENTER_CENTER));
   }
 }
 
@@ -3902,10 +3928,11 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
       (Tool::Line, Field::Length, _) => hud_length_shape(last, cur, off, wpp, &to_screen),
       (Tool::EdgePolygon, Field::Length, _) => along(last, cur),
       (Tool::MidpointLine, Field::Length, _) => along([2.0 * last[0] - cur[0], 2.0 * last[1] - cur[1]], cur),
-      // the angle's arc starts from a dashed horizontal reference at the line's start
+      // the angle's arc starts from a dashed horizontal reference at the line's start, in
+      // Fusion's darker orange for a dimension's reference
       (Tool::Line | Tool::MidpointLine, Field::Angle, _) => {
         hud_angle_shape(last, cur, wpp, &to_screen).map(|(s, r)| {
-          painter.extend(egui::Shape::dashed_line(&r, Stroke::new(1.0, Color32::from_gray(128)), 6.0, 4.0));
+          painter.extend(egui::Shape::dashed_line(&r, Stroke::new(1.0, ANGLE_REFERENCE), 9.0, 3.0));
           s
         })
       }
@@ -5058,6 +5085,42 @@ mod tests {
     assert_eq!(grid_label_positions(10.0, 100.0), vec![-100.0, -50.0, 0.0, 50.0, 100.0]);
     // a tiny model still gets a 2-step grid: only the origin is a major line
     assert_eq!(grid_label_positions(10.0, 1.0), vec![0.0]);
+  }
+
+  /// As Fusion prints them: a bare number on every major line along both axes that is on
+  /// screen, no "0" at the origin and no unit symbol, reading along the sketch's Y axis (straight
+  /// up when the sketch is faced), the X labels above their axis and the Y labels left of it.
+  #[test]
+  fn grid_labels_are_bare_numbers_on_both_axes() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)), ppp: 1.0, w: 800, h: 600 };
+    // right after Create Sketch, before the camera's flight, and once it faces the sketch
+    for faced in [false, true] {
+      if faced {
+        app.cam = app.view_now();
+        app.cam_move = None;
+      }
+      let labels = grid_label_layout(&app, &view);
+      let texts = |x_axis: bool| -> Vec<String> {
+        labels.iter().filter(|l| l.x_axis == x_axis).map(|l| l.text.clone()).collect()
+      };
+      assert!(!texts(true).is_empty() && !texts(false).is_empty(), "both axes are labelled: {labels:?}");
+      assert!(labels.iter().all(|l| l.text != "0" && !l.text.contains("mm")), "{labels:?}");
+      if faced {
+        // the ±100 lines are off screen at this zoom
+        assert_eq!(texts(true), ["-50", "50"]);
+        assert_eq!(texts(true), texts(false), "the same values along both axes");
+        for l in &labels {
+          assert!((l.up - Vec2::new(0.0, -1.0)).length() < 1e-3, "{l:?}");
+          assert!((l.right - Vec2::new(1.0, 0.0)).length() < 1e-3, "{l:?}");
+        }
+        // X labels sit on the X axis (same height as the origin), Y labels on the Y axis
+        let o = view.to_screen(&app.cam, DVec3::ZERO).unwrap();
+        assert!(labels.iter().filter(|l| l.x_axis).all(|l| (l.at.y - o.y).abs() < 1e-3), "{labels:?}");
+        assert!(labels.iter().filter(|l| !l.x_axis).all(|l| (l.at.x - o.x).abs() < 1e-3), "{labels:?}");
+      }
+    }
   }
 
   /// Fusion's prompts for Rectangle, and the curve-picking tools count picks, not points.

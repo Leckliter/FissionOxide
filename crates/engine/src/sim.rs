@@ -963,6 +963,7 @@ pub fn draw(scene: &mut fox_render::Scene, picks: &mut crate::scene::PickTable, 
     highlight_color: [0, 0, 0, 0],
     colors,
     analyze: false,
+    unlit: false,
   });
   if v.mesh || values.is_none() {
     // element edges of the boundary
@@ -976,6 +977,7 @@ pub fn draw(scene: &mut fox_render::Scene, picks: &mut crate::scene::PickTable, 
           id: 0,
           on_top: false,
           dashed: false,
+          dash_dot: false,
           behind: false,
         });
       }

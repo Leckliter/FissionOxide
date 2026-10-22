@@ -74,7 +74,7 @@ void main() {
   vec3 h = safe_norm(u_key + view);
   float spec = pow(max(dot(n, h), 0.0), 40.0) * 0.12;
   vec3 c;
-  if (u_mode == 4) {
+  if (u_mode == 4 || u_mode == 5) {
     c = base;
   } else if (u_mode == 0) {
     c = base * (0.5 + diff) + vec3(spec);
@@ -210,8 +210,15 @@ layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_id;
 ID_COLOR
 void main() {
-  bool dashed = v_dashed > 0.5 || u_hidden == 1;
-  if (dashed && mod(floor(max(v_along, 0.0) / 6.0), 2.0) > 0.5) discard;
+  // fox_render::dash_gap: 9 px dashes with 3 px gaps; a centerline a 9 px dash, a 3 px gap, a
+  // 6 px dash and a 3 px gap
+  float along = max(v_along, 0.0);
+  if (v_dashed > 1.5) {
+    float t = mod(along, 21.0);
+    if ((t >= 9.0 && t < 12.0) || t >= 18.0) discard;
+  } else if ((v_dashed > 0.5 || u_hidden == 1) && mod(along, 12.0) >= 9.0) {
+    discard;
+  }
   o_color = u_hidden == 1 ? vec4(v_color.rgb, v_color.a * u_hidden_alpha) : v_color;
   o_id = id_color(v_id);
 }
@@ -337,6 +344,7 @@ struct GpuMesh {
   highlight_color: [u8; 4],
   vertex_colors: bool,
   analyze: bool,
+  unlit: bool,
 }
 
 struct GpuInstances {
@@ -630,6 +638,7 @@ impl Renderer {
         g.highlight = m.highlight;
         g.highlight_color = m.highlight_color;
         g.analyze = m.analyze;
+        g.unlit = m.unlit;
       }
     } else {
       for m in self.meshes.drain(..) {
@@ -873,6 +882,8 @@ impl Renderer {
         }
         let (mode, param) = match self.analysis.filter(|_| m.analyze) {
           _ if paper && m.analyze => (4, [0.0; 4]),
+          // unlit in its own colour (a sketch profile)
+          _ if m.unlit => (5, [0.0; 4]),
           None => (0, [0.0; 4]),
           Some(Analysis::Zebra { stripes }) => (1, [stripes, 0.0, 0.0, 0.0]),
           Some(Analysis::Draft { pull, angle }) => {
@@ -1262,6 +1273,7 @@ fn upload_mesh(gl: &Gl, m: &fox_render::Mesh) -> Result<GpuMesh, String> {
       highlight_color: m.highlight_color,
       vertex_colors: !m.colors.is_empty(),
       analyze: m.analyze,
+      unlit: m.unlit,
     })
   }
 }

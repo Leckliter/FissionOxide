@@ -282,7 +282,7 @@ fn find_duplicates(sketch: &mut Sketch, tol: f64, construction: bool) -> Result<
   let mut items: Vec<Item> = sketch
     .curves
     .iter()
-    .filter(|c| (construction || !c.construction) && !owned(sketch, c.id))
+    .filter(|c| (construction || !c.reference()) && !owned(sketch, c.id))
     .filter_map(|c| {
       Some(Item { id: c.id, kind: discriminant(&c.kind), class: class(&c.kind), geo: geo(&c.kind, &pos)?, gone: false })
     })
@@ -584,8 +584,9 @@ fn clean(sketch: &mut Sketch, links: &mut Vec<SketchLink>, o: &Options) -> Resul
   }
 
   if o.construction_to_normal {
-    for c in sketch.curves.iter_mut().filter(|c| c.construction) {
+    for c in sketch.curves.iter_mut().filter(|c| c.reference()) {
       c.construction = false;
+      c.centerline = false;
       r.construction += 1;
     }
   }
@@ -902,6 +903,7 @@ fn convert_spline(
       Piece::Arc { mid, .. } => sketch.add_arc_3pt(PtSpec::Point(a), pts[*mid], PtSpec::Point(b))?,
     };
     sketch.set_construction(c, curve.construction)?;
+    sketch.set_centerline(c, curve.centerline)?;
     made.push(c);
     from = to;
   }

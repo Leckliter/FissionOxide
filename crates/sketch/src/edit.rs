@@ -762,8 +762,9 @@ impl Sketch {
         }
       };
       let nid = self.add_curve(kind)?;
-      if c.construction {
-        self.set_construction(nid, true)?;
+      if let Some(n) = self.curve_mut(nid) {
+        n.construction = c.construction;
+        n.centerline = c.centerline;
       }
       out.push(nid);
     }

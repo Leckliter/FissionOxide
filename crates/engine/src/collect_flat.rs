@@ -54,6 +54,9 @@ fn append(dst: &mut Sketch, src: &Sketch) -> Result<(), CmdError> {
     if c.construction {
       dst.set_construction(id, true).map_err(|e| CmdError::new(e.to_string()))?;
     }
+    if c.centerline {
+      dst.set_centerline(id, true).map_err(|e| CmdError::new(e.to_string()))?;
+    }
   }
   Ok(())
 }

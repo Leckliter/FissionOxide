@@ -31,10 +31,11 @@ pub const EDGE_SELECT_HALO: [u8; 4] = [214, 235, 255, 255];
 /// Body edges: a 1 px light grey silhouette on the body, a 2 px black line under the pointer.
 pub const EDGE_COLOR: [u8; 4] = [179, 178, 173, 255];
 pub const EDGE_HOVER_COLOR: [u8; 4] = [10, 10, 10, 255];
-/// A visible sketch's closed profiles seen from outside the sketch: Fusion's light blue.
-pub const PROFILE_COLOR: [u8; 4] = [178, 208, 240, 255];
-/// The profiles of the sketch being edited: Fusion's pale blue-white.
-pub const PROFILE_COLOR_EDIT: [u8; 4] = [226, 237, 250, 255];
+/// A visible sketch's closed profiles, seen from outside the sketch and in it alike: Fusion's
+/// pale blue, drawn unlit so it reads the same from every angle.
+pub const PROFILE_COLOR: [u8; 4] = [230, 245, 250, 255];
+/// The profiles of the sketch being edited: the same pale blue.
+pub const PROFILE_COLOR_EDIT: [u8; 4] = PROFILE_COLOR;
 /// A profile under the cursor is lightened like a face (with a black outline); a selected one
 /// fills in the selection blue with a red outline, as Extrude shows them.
 pub const PROFILE_HOVER: [u8; 4] = lighten(PROFILE_COLOR, HOVER_LIGHTEN);
@@ -43,13 +44,18 @@ pub const PROFILE_OUTLINE_HOVER: [u8; 4] = EDGE_HOVER_COLOR;
 pub const PROFILE_OUTLINE_SELECTED: [u8; 4] = [220, 40, 40, 255];
 /// A sketch curve under the pointer seen from outside its sketch: thicker and a darker blue.
 pub const SKETCH_HOVER: [u8; 4] = [24, 96, 200, 255];
-pub const SKETCH_FREE: [u8; 4] = [30, 110, 235, 255];
+/// An unconstrained curve in the sketch being edited: Fusion's blue.
+pub const SKETCH_FREE: [u8; 4] = [6, 150, 214, 255];
 pub const SKETCH_FIXED: [u8; 4] = [20, 20, 24, 255];
 /// Geometry held by Fix constraints: Fusion's green (no lock glyph).
 pub const SKETCH_FIXED_GREEN: [u8; 4] = [120, 170, 20, 255];
-/// Construction geometry: grey dashed, as Fusion draws it.
-pub const SKETCH_CONSTRUCTION: [u8; 4] = [128, 128, 132, 255];
-pub const SKETCH_IDLE: [u8; 4] = [60, 70, 90, 255];
+/// Construction geometry and centerlines: Fusion's tan, dashed (even dashes for construction,
+/// dash-dot for a centerline, see `fox_render::dash_gap`).
+pub const SKETCH_CONSTRUCTION: [u8; 4] = [207, 174, 155, 255];
+/// A previewed copy of a curve and a spline's handle legs: a thin grey line.
+pub const SKETCH_GUIDE: [u8; 4] = [128, 128, 132, 255];
+/// A visible sketch's curves seen from outside the sketch: Fusion's lighter blue.
+pub const SKETCH_IDLE: [u8; 4] = [71, 173, 213, 255];
 /// A sketch curve under the cursor and a selected one in the sketch being edited, as Fusion
 /// draws them: both about 4 px wide, the hover a darker, more saturated blue than a free curve
 /// and the selection a vivid blue.
@@ -59,6 +65,8 @@ pub const SKETCH_SELECTED: [u8; 4] = [3, 123, 253, 255];
 /// ring under the cursor, and a light-blue fill inside the dark ring once selected.
 pub const SKETCH_POINT: [u8; 4] = [50, 50, 50, 255];
 pub const SKETCH_POINT_SELECTED: [u8; 4] = [125, 158, 213, 255];
+/// The sketch origin in the sketch being edited: a small hollow grey circle, as Fusion's.
+pub const SKETCH_ORIGIN: [u8; 4] = [120, 120, 124, 255];
 /// The canvas behind the sketch being edited: Fusion clears it to white.
 pub const SKETCH_BACKGROUND: [u8; 4] = [255, 255, 255, 255];
 /// A sketch curve's width in the sketch, plain and under the cursor or selected.
@@ -414,7 +422,16 @@ impl SceneBuilder {
           if selected.contains(&pick) {
             scene.lines.push(halo(&points, id, false));
           }
-          scene.lines.push(Polyline { points, color, width, id, on_top: false, dashed: false, behind: false });
+          scene.lines.push(Polyline {
+            points,
+            color,
+            width,
+            id,
+            on_top: false,
+            dashed: false,
+            dash_dot: false,
+            behind: false,
+          });
         }
       }
     }
@@ -460,6 +477,8 @@ impl SceneBuilder {
         // lift slightly off the plane so coplanar faces don't fight
         let lift = r.plane.normal().as_vec3() * 0.002;
         let mut pm = mesh_of(m, vec![id; m.indices.len() / 3], color, None);
+        // Fusion shades a profile the same from every angle
+        pm.unlit = true;
         for p in pm.positions.iter_mut() {
           *p = (fox_kernel::glam::Vec3::from(*p) + lift).to_array();
         }
@@ -472,7 +491,16 @@ impl SceneBuilder {
             }
             pts.push(pts[0]);
             let points = pts.iter().map(|p| (r.plane.to_world(*p).as_vec3() + lift).to_array()).collect();
-            scene.lines.push(Polyline { points, color, width: 1.0, id, on_top: false, dashed: false, behind: false });
+            scene.lines.push(Polyline {
+              points,
+              color,
+              width: 1.0,
+              id,
+              on_top: false,
+              dashed: false,
+              dash_dot: false,
+              behind: false,
+            });
           }
         }
       }
@@ -520,6 +548,7 @@ impl SceneBuilder {
         id: 0,
         on_top: false,
         dashed: true,
+        dash_dot: false,
         behind: false,
       });
     }
@@ -537,6 +566,7 @@ impl SceneBuilder {
         id: 0,
         on_top: false,
         dashed: true,
+        dash_dot: false,
         behind: false,
       });
     }
@@ -561,6 +591,7 @@ impl SceneBuilder {
         id: 0,
         on_top: false,
         dashed: false,
+        dash_dot: false,
         behind: false,
       });
     }
@@ -577,6 +608,7 @@ impl SceneBuilder {
           id: 0,
           on_top: true,
           dashed: false,
+          dash_dot: false,
           behind: false,
         });
       }
@@ -684,6 +716,7 @@ fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Optio
         id: 0,
         on_top: false,
         dashed: false,
+        dash_dot: false,
         behind: true,
       });
     }
@@ -699,6 +732,7 @@ fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Optio
       id: 0,
       on_top: false,
       dashed: false,
+      dash_dot: false,
       behind: true,
     });
   }
@@ -751,8 +785,9 @@ fn sketch_lines(
   // a curve's colour and width: in its sketch a selected curve draws Fusion's vivid blue about
   // 4 px wide and a hovered one a darker blue as wide; outside the sketch a selected curve is
   // bright blue over a halo and a hovered one a thicker darker blue, picked over the face it
-  // lies on
-  let look = |pick: Pick, idle: [u8; 4], construction: bool| -> ([u8; 4], f32, bool) {
+  // lies on. `reference` (construction or a centerline) draws tan, dashed, and keeps its
+  // dashes in every state.
+  let look = |pick: Pick, idle: [u8; 4], reference: bool| -> ([u8; 4], f32, bool) {
     if selected.contains(&pick) {
       if editing { (SKETCH_SELECTED, SKETCH_CURVE_WIDTH_HOT, false) } else { (EDGE_SELECT_COLOR, 1.0, true) }
     } else if hover == Some(pick) && !editing {
@@ -763,22 +798,30 @@ fn sketch_lines(
       (HOVER_COLOR, if editing { SKETCH_CURVE_WIDTH } else { 1.0 }, false)
     } else if !editing {
       (SKETCH_IDLE, 1.0, false)
-    } else if construction {
+    } else if reference {
       (SKETCH_CONSTRUCTION, SKETCH_CURVE_WIDTH, false)
     } else {
       (idle, SKETCH_CURVE_WIDTH, false)
     }
   };
-  let push = |scene: &mut Scene, points: Vec<[f32; 3]>, (color, width, haloed): ([u8; 4], f32, bool), id, dashed| {
+  // the linetype as drawn: construction dashed, a centerline dash-dot, a centerline that is
+  // construction as well dashed (Fusion keeps the flag and shows even dashes)
+  let push = |scene: &mut Scene,
+              points: Vec<[f32; 3]>,
+              (color, width, haloed): ([u8; 4], f32, bool),
+              id,
+              (construction, centerline): (bool, bool)| {
     if haloed {
       scene.lines.push(halo(&points, id, editing));
     }
-    scene.lines.push(Polyline { points, color, width, id, on_top: editing, dashed, behind: false });
+    let dashed = construction || centerline;
+    let dash_dot = centerline && !construction;
+    scene.lines.push(Polyline { points, color, width, id, on_top: editing, dashed, dash_dot, behind: false });
   };
   let fixed = if editing { fixed_curves(sk) } else { Default::default() };
   for c in &sk.curves {
     // the palette's Construction Geometries and Projected Geometries options
-    if !show.construction && c.construction || !show.projected && projected.contains(&c.id) {
+    if !show.construction && c.reference() || !show.projected && projected.contains(&c.id) {
       continue;
     }
     let pts = curve_polyline(sk, &c.kind);
@@ -796,17 +839,18 @@ fn sketch_lines(
     let id = if pickable { picks.id(pick) } else { 0 };
     if preview.contains(&c.id.0) && !selected.contains(&pick) {
       // a previewed copy: a thin grey outline until OK draws it blue
-      push(scene, pts.into_iter().map(w).collect(), (SKETCH_CONSTRUCTION, 1.0, false), id, false);
+      push(scene, pts.into_iter().map(w).collect(), (SKETCH_GUIDE, 1.0, false), id, (false, false));
       continue;
     }
-    push(scene, pts.into_iter().map(w).collect(), look(pick, idle, c.construction), id, c.construction);
+    let linetype = (c.construction, c.centerline);
+    push(scene, pts.into_iter().map(w).collect(), look(pick, idle, c.reference()), id, linetype);
   }
   // included 3D geometry, at its world position (projected geometry to the palette)
   for c in sk.curves3d.iter().filter(|c| show.projected && (show.construction || !c.construction)) {
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
     let points = c.kind.polyline(48).into_iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
     let id = if pickable { picks.id(pick) } else { 0 };
-    push(scene, points, look(pick, SKETCH_FIXED, false), id, c.construction);
+    push(scene, points, look(pick, SKETCH_FIXED, c.construction), id, (c.construction, false));
   }
   if editing {
     // spline tangent handles and Bézier handles: a thin line from the curve to each handle
@@ -831,11 +875,12 @@ fn sketch_lines(
         if let (Some(e), Some(h)) = (sk.pos(e), sk.pos(h)) {
           scene.lines.push(Polyline {
             points: vec![w(e), w(h)],
-            color: SKETCH_CONSTRUCTION,
+            color: SKETCH_GUIDE,
             width: 1.0,
             id: 0,
             on_top: true,
             dashed: true,
+            dash_dot: false,
             behind: false,
           });
         }
@@ -845,8 +890,8 @@ fn sketch_lines(
   // sketch points: a filled dark dot at every curve end (line ends, corners, fit points) and an
   // open circle for a free point or a centre; a hollow ring under the cursor and a light-blue
   // fill inside a dark ring once selected. A visible sketch shows them outside the sketch too,
-  // where they pick ahead of body vertices. A text's glyph points are its own business: only
-  // its anchor is shown.
+  // all as small open circles, where they pick ahead of body vertices. A text's glyph points
+  // are its own business: only its anchor is shown.
   let glyph_points: std::collections::HashSet<PointId> =
     sk.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
   let filled = filled_points(sk);
@@ -857,8 +902,9 @@ fn sketch_lines(
     let id = if pickable { picks.id(pick) } else { 0 };
     let on_top = editing;
     if p.id == fox_sketch::ORIGIN {
+      // a small hollow grey circle, as Fusion marks the origin of the sketch being edited
       if editing {
-        scene.markers.push(Marker { at, color: [200, 60, 40, 255], size: 3.0, id, on_top, hollow: false });
+        scene.markers.push(Marker { at, color: SKETCH_ORIGIN, size: 3.0, id, on_top, hollow: true });
       }
     } else if selected.contains(&pick) {
       // a dark ring around a light-blue disc: the ring is the larger dot underneath
@@ -867,7 +913,7 @@ fn sketch_lines(
     } else if hover == Some(pick) || hover_more.contains(&pick) {
       scene.markers.push(Marker { at, color: SKETCH_POINT, size: 4.0, id, on_top, hollow: true });
     } else {
-      let hollow = !filled.contains(&p.id);
+      let hollow = !editing || !filled.contains(&p.id);
       scene.markers.push(Marker { at, color: SKETCH_POINT, size: 3.0, id, on_top, hollow });
     }
   }
@@ -1019,12 +1065,22 @@ fn mesh_of(m: &TriMesh, tri_ids: Vec<u32>, color: [u8; 4], hover: Option<u32>) -
     highlight_color: hover_of(color),
     colors: Vec::new(),
     analyze: false,
+    unlit: false,
   }
 }
 
 /// The pale halo under a selected edge or curve: one pixel wider on each side, the same pick.
 fn halo(points: &[[f32; 3]], id: u32, on_top: bool) -> Polyline {
-  Polyline { points: points.to_vec(), color: EDGE_SELECT_HALO, width: 3.0, id, on_top, dashed: false, behind: false }
+  Polyline {
+    points: points.to_vec(),
+    color: EDGE_SELECT_HALO,
+    width: 3.0,
+    id,
+    on_top,
+    dashed: false,
+    dash_dot: false,
+    behind: false,
+  }
 }
 
 /// Cuts away the triangles (and parts of triangles) in front of a section plane (on its
@@ -1537,7 +1593,16 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
 /// Toolpaths (cutting moves blue, rapids dashed orange) and the stock box of their setup.
 fn toolpath_lines(scene: &mut Scene, s: &Session) {
   let line = |scene: &mut Scene, pts: Vec<[f32; 3]>, color: [u8; 4], dashed: bool, width: f32| {
-    scene.lines.push(Polyline { points: pts, color, width, id: 0, on_top: false, dashed, behind: false });
+    scene.lines.push(Polyline {
+      points: pts,
+      color,
+      width,
+      id: 0,
+      on_top: false,
+      dashed,
+      dash_dot: false,
+      behind: false,
+    });
   };
   if let Some((id, _)) = s.toolpaths_of
     && let Some(st) = s.design.cam.iter().find(|c| c.id == id)
@@ -1599,7 +1664,7 @@ fn cut_lines(scene: &mut Scene, s: &Session) {
       crate::CutLineKind::Sheet => ([120, 130, 150, 255], true, 1.0),
     };
     let points = l.points.iter().map(|p| p.as_vec3().to_array()).collect();
-    scene.lines.push(Polyline { points, color, width, id: 0, on_top: false, dashed, behind: false });
+    scene.lines.push(Polyline { points, color, width, id: 0, on_top: false, dashed, dash_dot: false, behind: false });
   }
 }
 
@@ -1623,6 +1688,7 @@ fn simulated_stock(scene: &mut Scene, s: &Session) {
     highlight_color: [0, 0, 0, 0],
     colors: m.colors,
     analyze: false,
+    unlit: false,
   });
 }
 

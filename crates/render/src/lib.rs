@@ -290,6 +290,9 @@ pub struct Mesh {
   pub colors: Vec<[u8; 4]>,
   /// Shown with the scene's surface analysis (bodies, not sketch profiles).
   pub analyze: bool,
+  /// Drawn in its colour without lighting (a sketch profile, which Fusion shades the same from
+  /// every angle).
+  pub unlit: bool,
 }
 
 impl Mesh {
@@ -321,8 +324,11 @@ pub struct Polyline {
   pub id: u32,
   /// Drawn on top of everything (sketch geometry in sketch mode).
   pub on_top: bool,
-  /// Dashed (construction geometry).
+  /// Dashed (construction geometry): 9 px dashes with 3 px gaps, see [`dash_gap`].
   pub dashed: bool,
+  /// Dash-dot (a sketch centerline): a long and a short dash in turn, see [`dash_gap`]. Only
+  /// read while `dashed` is set.
+  pub dash_dot: bool,
   /// Pushed back in depth so coincident faces/profiles cover it (the ground grid).
   #[doc(hidden)]
   pub behind: bool,
@@ -796,6 +802,7 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
     vertex_colors: false,
     analysis: scene.analysis.filter(|_| m.analyze),
     paper: m.analyze && style.line_drawing(),
+    unlit: m.unlit,
   };
   for m in scene.meshes.iter().filter(|m| !m.transparent()) {
     if m.analyze && !style.shaded() && !style.line_drawing() {
@@ -865,6 +872,7 @@ pub fn silhouette_lines(scene: &Scene, cam: &Camera, height: u32) -> Vec<Polylin
           id,
           on_top: false,
           dashed: false,
+          dash_dot: false,
           behind: false,
         });
       }
@@ -931,7 +939,7 @@ fn draw_depth(f: &mut Frame, m: &Mesh, vp: &DMat4) {
 
 /// The parts of an edge behind the surfaces, faint, thin and dashed; depth and ids are left alone.
 fn draw_hidden(f: &mut Frame, l: &Polyline, vp: &DMat4, opacity: f32) {
-  let ghost = Polyline { width: 1.0, dashed: true, ..l.clone() };
+  let ghost = Polyline { width: 1.0, dashed: true, dash_dot: false, ..l.clone() };
   let alpha = (l.color[3] as f32 * opacity) as u32;
   let mut hidden: Vec<usize> = Vec::new();
   let (w, h) = (f.width as i64, f.height as i64);
@@ -1045,6 +1053,8 @@ struct Shade {
   analysis: Option<Analysis>,
   /// Flat and unlit (the line-drawing styles' surfaces).
   paper: bool,
+  /// Unlit in its own colour ([`Mesh::unlit`]).
+  unlit: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1136,7 +1146,7 @@ fn raster_tri(
       let base =
         if shade.vertex_colors { v[0].col * b0 as f32 + v[1].col * b1 as f32 + v[2].col * b2 as f32 } else { base };
       let c = match shade.analysis {
-        _ if shade.paper => base,
+        _ if shade.paper || shade.unlit => base,
         None => base * (0.5 + diff) + Vec3::splat(spec),
         Some(Analysis::Zebra { stripes }) => {
           // stripes of a striped environment reflected in the surface
@@ -1182,6 +1192,19 @@ fn draw_polyline(f: &mut Frame, l: &Polyline, vp: &DMat4) {
   rasterize_line(l, vp, w, h, &mut |x, y, z| plot(f, x, y, z, l.color, l.id, l.on_top));
 }
 
+/// Whether a dashed line is in a gap `along` pixels from its start. Fusion's construction
+/// pattern is a 9 px dash and a 3 px gap; its centerline pattern (`dash_dot`) a 9 px dash, a
+/// 3 px gap, a 6 px dash and a 3 px gap. The GL line shader repeats this arithmetic.
+pub fn dash_gap(along: f64, dash_dot: bool) -> bool {
+  let along = along.max(0.0);
+  if dash_dot {
+    let t = along % 21.0;
+    (9.0..12.0).contains(&t) || t >= 18.0
+  } else {
+    along % 12.0 >= 9.0
+  }
+}
+
 /// Every pixel a polyline covers (with its depth, biased as [`Polyline::behind`] asks), in
 /// order; dashes are left out.
 fn rasterize_line(l: &Polyline, vp: &DMat4, width: u32, height: u32, put: &mut dyn FnMut(i64, i64, f32)) {
@@ -1216,7 +1239,7 @@ fn rasterize_line(l: &Polyline, vp: &DMat4, width: u32, height: u32, put: &mut d
     let half = (l.width.clamp(1.0, 6.0) as f64 - 1.0) / 2.0;
     for s in 0..=steps {
       let t = s as f64 / steps as f64;
-      if l.dashed && ((dash_phase + t * len) / 6.0) as i64 % 2 == 1 {
+      if l.dashed && dash_gap(dash_phase + t * len, l.dash_dot) {
         continue;
       }
       let x = x0 + (x1 - x0) * t;
@@ -1302,6 +1325,7 @@ mod tests {
       highlight_color: [0; 4],
       colors: vec![],
       analyze: false,
+      unlit: false,
     }
   }
 
@@ -1367,6 +1391,7 @@ mod tests {
         id: 3,
         on_top: false,
         dashed: false,
+        dash_dot: false,
         behind: false,
       }],
       ..Default::default()
@@ -1394,6 +1419,7 @@ mod tests {
       id: 3,
       on_top: false,
       dashed: false,
+      dash_dot: false,
       behind: false,
     };
     let scene = Scene {
@@ -1559,6 +1585,17 @@ mod tests {
       assert_eq!(&f.rgba[(100 * 200 + 100) * 4..(100 * 200 + 100) * 4 + 3], &[255, 255, 255], "{style:?}");
       assert_eq!(f.pick(100.0, 100.0, 0, |_| true), 1);
     }
+  }
+
+  /// Fusion's dash patterns: 9 on, 3 off for construction; 9 on, 3 off, 6 on, 3 off for a
+  /// centerline.
+  #[test]
+  fn dash_patterns_follow_fusion() {
+    let row =
+      |dash_dot: bool| (0..24).map(|x| if dash_gap(x as f64, dash_dot) { ' ' } else { '#' }).collect::<String>();
+    assert_eq!(row(false), "#########   #########   ");
+    assert_eq!(row(true), "#########   ######   ###");
+    assert!(!dash_gap(-1.0, false));
   }
 
   #[test]

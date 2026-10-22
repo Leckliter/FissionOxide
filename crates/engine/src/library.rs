@@ -146,7 +146,7 @@ fn read_part(s: &Session, part: &Path) -> Result<Sketch, CmdError> {
 /// part origin at 0, 0), thinned to about [`OUTLINE_POINTS`] points.
 fn outline(sk: &Sketch) -> Vec<Vec<[f64; 2]>> {
   let mut lines: Vec<Vec<[f64; 2]>> = Vec::new();
-  for c in sk.curves.iter().filter(|c| !c.construction) {
+  for c in sk.curves.iter().filter(|c| !c.reference()) {
     for seg in sk.curve_segs(c.id) {
       let mut pts = Vec::new();
       seg.flatten(&mut pts);

@@ -235,8 +235,8 @@ fn constrained_sketch_curves_draw_black_and_free_ones_blue() {
   assert_eq!(colour(&pinned), scene::SKETCH_FIXED_GREEN, "Fix holds a circle's radius too");
 }
 
-/// A sketch's closed profiles shade light blue seen from outside the sketch and pale blue-white
-/// while it is edited, as Fusion's do; a selected profile fills blue.
+/// A sketch's closed profiles shade Fusion's pale blue, unlit so the shade is the same from
+/// outside the sketch and in it; a selected profile fills blue.
 #[test]
 fn profiles_shade_blue_outside_and_pale_inside_the_sketch() {
   let mut s = Session::default();
@@ -250,17 +250,21 @@ fn profiles_shade_blue_outside_and_pale_inside_the_sketch() {
       .iter()
       .find(|m| matches!(m.tri_ids.first().and_then(|id| picks.get(*id)), Some(scene::Pick::Profile { .. })))
       .expect("the profile is shaded");
+    assert!(m.unlit, "a profile shades the same from every angle");
     m.color
   };
   assert_eq!(profile_color(&mut b, &s), scene::PROFILE_COLOR_EDIT);
   run(&mut s, "sketch.finish", json!({}));
   assert_eq!(profile_color(&mut b, &s), scene::PROFILE_COLOR);
+  assert_eq!(scene::PROFILE_COLOR, scene::PROFILE_COLOR_EDIT);
+  assert_eq!(scene::PROFILE_COLOR[..3], [230, 245, 250]);
   s.selection = vec![crate::Sel::Profile { sketch: crate::model::FeatureId(sk), index: 0 }];
   assert_eq!(profile_color(&mut b, &s), scene::PROFILE_SELECTED);
 }
 
 /// A free sketch point draws as an open circle; a curve's ends draw filled, as do points two
-/// curves share or a constraint ties (Fusion's look); the origin stays a filled dot.
+/// curves share or a constraint ties (Fusion's look); the origin is a small hollow grey ring.
+/// Outside the sketch every point is an open circle.
 #[test]
 fn sketch_points_draw_hollow_until_joined() {
   let mut s = Session::default();
@@ -275,8 +279,52 @@ fn sketch_points_draw_hollow_until_joined() {
   let points: Vec<_> =
     scene.markers.iter().filter(|m| matches!(picks.get(m.id), Some(Pick::SketchPoint { .. }))).collect();
   assert_eq!(points.len(), 5, "origin, three line ends, one point");
-  assert_eq!(points.iter().filter(|m| m.hollow).count(), 1, "only the free point is open");
-  assert!(points.iter().all(|m| m.color == scene::SKETCH_POINT || m.color == [200, 60, 40, 255]), "dark-grey dots");
+  assert_eq!(points.iter().filter(|m| m.hollow).count(), 2, "only the free point and the origin are open");
+  assert!(points.iter().all(|m| m.color == scene::SKETCH_POINT || m.color == scene::SKETCH_ORIGIN), "dark-grey dots");
+  let origin = points.iter().find(|m| m.color == scene::SKETCH_ORIGIN).expect("the origin is marked");
+  assert!(origin.hollow);
+  run(&mut s, "sketch.finish", json!({}));
+  let (scene, picks) = SceneBuilder::default().build(&s, &ViewOptions::default());
+  let points: Vec<_> =
+    scene.markers.iter().filter(|m| matches!(picks.get(m.id), Some(Pick::SketchPoint { .. }))).collect();
+  assert_eq!(points.len(), 4, "no origin mark outside the sketch");
+  assert!(points.iter().all(|m| m.hollow && m.color == scene::SKETCH_POINT), "{points:?}");
+}
+
+/// Fusion's linetypes as drawn: construction geometry tan with even dashes, a centerline tan
+/// dash-dot, a centerline made construction as well even dashes again; selected, a centerline
+/// keeps its dash-dot in the selection blue. A plain curve is solid, Fusion's blue.
+#[test]
+fn linetypes_draw_dashed_and_dash_dot_in_tan() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let sk = s.edit_sketch.unwrap();
+  let line = |s: &mut Session, y: i32| {
+    let r = run(s, "sketch.line", json!({"points": [[0, y], [40, y]]}));
+    fox_sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32)
+  };
+  let (plain, construction, centerline, both) = (line(&mut s, 0), line(&mut s, 10), line(&mut s, 20), line(&mut s, 30));
+  run(&mut s, "sketch.construction", json!({"curves": [construction.0, both.0]}));
+  run(&mut s, "sketch.centerline", json!({"curves": [centerline.0, both.0]}));
+  let look = |s: &Session, curve: fox_sketch::CurveId| {
+    let (scene, picks) = SceneBuilder::default().build(s, &ViewOptions::default());
+    let l = scene.lines.iter().find(|l| picks.get(l.id) == Some(Pick::SketchCurve { sketch: sk, curve })).unwrap();
+    (l.color, l.dashed, l.dash_dot)
+  };
+  assert_eq!(look(&s, plain), (scene::SKETCH_FREE, false, false));
+  assert_eq!(look(&s, construction), (scene::SKETCH_CONSTRUCTION, true, false));
+  assert_eq!(look(&s, centerline), (scene::SKETCH_CONSTRUCTION, true, true));
+  assert_eq!(look(&s, both), (scene::SKETCH_CONSTRUCTION, true, false));
+  assert_eq!(scene::SKETCH_CONSTRUCTION[..3], [207, 174, 155]);
+  assert_eq!(scene::SKETCH_FREE[..3], [6, 150, 214]);
+  s.selection = vec![crate::Sel::SketchCurve { sketch: sk, curve: centerline }];
+  assert_eq!(look(&s, centerline), (scene::SKETCH_SELECTED, true, true));
+  // outside the sketch the curves draw Fusion's lighter blue, the linetypes still dashed
+  s.selection.clear();
+  run(&mut s, "sketch.finish", json!({}));
+  assert_eq!(look(&s, plain), (scene::SKETCH_IDLE, false, false));
+  assert_eq!(look(&s, centerline), (scene::SKETCH_IDLE, true, true));
+  assert_eq!(scene::SKETCH_IDLE[..3], [71, 173, 213]);
 }
 
 /// In a sketch a selected curve draws wide in Fusion's selection blue and a hovered one wide in
@@ -338,11 +386,12 @@ fn sketch_points_show_hover_ring_and_selected_fill_inside_and_outside_the_sketch
   assert!(
     scene.markers.iter().any(|m| picks.get(m.id) == Some(Pick::SketchPoint { sketch: sk, point: fox_sketch::ORIGIN }))
   );
-  // outside the sketch (still visible: nothing consumed it) the dots stay, pickable, without the origin
+  // outside the sketch (still visible: nothing consumed it) the points stay, pickable, as small
+  // open circles, without the origin
   s.selection.clear();
   run(&mut s, "sketch.finish", json!({}));
   let (scene, picks) = SceneBuilder::default().build(&s, &ViewOptions::default());
-  assert_eq!(marks(&scene, &picks, a), vec![(3.0, false, scene::SKETCH_POINT)]);
+  assert_eq!(marks(&scene, &picks, a), vec![(3.0, true, scene::SKETCH_POINT)]);
   assert!(
     !scene.markers.iter().any(|m| picks.get(m.id) == Some(Pick::SketchPoint { sketch: sk, point: fox_sketch::ORIGIN }))
   );

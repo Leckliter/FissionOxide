@@ -216,7 +216,7 @@ impl Goal {
 /// The segments a size is measured on: the normal curves of `curves`, or all of them when they
 /// are all construction geometry.
 fn measured_segs(sk: &Sketch, curves: &[CurveId]) -> Vec<Seg> {
-  let normal: Vec<CurveId> = curves.iter().copied().filter(|c| sk.curve(*c).is_some_and(|c| !c.construction)).collect();
+  let normal: Vec<CurveId> = curves.iter().copied().filter(|c| sk.curve(*c).is_some_and(|c| !c.reference())).collect();
   let use_ = if normal.is_empty() { curves } else { &normal };
   use_.iter().flat_map(|c| sk.curve_segs(*c)).collect()
 }

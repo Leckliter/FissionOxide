@@ -567,7 +567,7 @@ pub(crate) fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
     if c.kind.is_freeform() {
       if exact {
         for p in sk.beziers(c.id) {
-          out.push((Entity::Bezier { p }, c.construction));
+          out.push((Entity::Bezier { p }, c.reference()));
         }
         continue;
       }
@@ -607,7 +607,7 @@ pub(crate) fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
         }),
         _ => Entity::Spline(Spline::from_beziers(&sk.beziers(c.id))),
       };
-      out.push((e, c.construction));
+      out.push((e, c.reference()));
       continue;
     }
     let e = match c.kind {
@@ -632,7 +632,7 @@ pub(crate) fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
         }
       }
     };
-    out.push((e, c.construction));
+    out.push((e, c.reference()));
   }
   for p in &sk.points {
     if p.id != fox_sketch::ORIGIN && !on_curve.contains(&p.id) {

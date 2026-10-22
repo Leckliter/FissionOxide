@@ -171,7 +171,7 @@ impl Ctx<'_> {
         } else {
           let mut lines = Vec::new();
           for c in &sk.sketch.curves {
-            if !(curves.is_empty() && !c.construction || curves.contains(&c.id)) {
+            if !(curves.is_empty() && !c.reference() || curves.contains(&c.id)) {
               continue;
             }
             for seg in sk.sketch.curve_segs(c.id) {

@@ -192,7 +192,7 @@ impl Sketch {
     let mine: Vec<(CurveId, CurveKind)> = curves
       .iter()
       .filter_map(|id| self.curve(*id))
-      .filter(|c| !c.construction)
+      .filter(|c| !c.reference())
       .filter(|c| matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. } | CurveKind::Circle { .. }))
       .map(|c| (c.id, c.kind.clone()))
       .collect();
@@ -237,7 +237,7 @@ impl Sketch {
 
     // where curves meet: how many (non-construction) curves of the whole sketch use each point
     let mut users: HashMap<PointId, Vec<CurveId>> = HashMap::new();
-    for c in self.curves.iter().filter(|c| !c.construction) {
+    for c in self.curves.iter().filter(|c| !c.reference()) {
       for (p, _) in ends(self, &c.kind) {
         users.entry(p).or_default().push(c.id);
       }
@@ -301,7 +301,7 @@ impl Sketch {
       if !free {
         continue;
       }
-      for c in self.curves.iter().filter(|c| !c.construction) {
+      for c in self.curves.iter().filter(|c| !c.reference()) {
         if self.curve_points(c.id).contains(&p) {
           continue;
         }
