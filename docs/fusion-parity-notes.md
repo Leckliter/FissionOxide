@@ -461,3 +461,14 @@ selection chips and grow rows after the picks, its primitives start with a plane
 base, and Operation turns to Cut over a body; FissionOxide's open with every row, preset planes
 and axes, sketch dropdowns and "(empty = ...)" fields, and preview at once. 22 rows in four batches
 (`parity/batches/map-wave23.json`), three match rows, six sketch and vertex keys verified.
+
+## 2026-10-22, prober 9: SOLID > MODIFY
+
+Every MODIFY entry in both apps, Draft completed and edited (report
+`parity/reports/2026-10-22-solid-modify.md`). The entries, order and shortcut hints match; Fusion
+has no Direct Edit submenu, fewer separators and Simplify in a different order. As in CREATE,
+Fusion's dialogs open with chips and grow value rows after the picks; FissionOxide presets planes
+and non-zero values, enables OK early, picks faces where Fusion picks bodies, keeps its picks
+selected after Cancel, cannot edit a Draft, and has no Silhouette Split, Replace with Primitives
+or Manage Materials. 24 rows in six batches (`parity/batches/map-wave24.json`), including the
+reopened `ui:toolbar:responsive-collapse` (MODIFY keeps 6 icons at 907 px against 4); one match row.

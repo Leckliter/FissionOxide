@@ -1,44 +1,44 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 09:10, session "Parity prober 8" (two areas)
+## Last stop: 2026-10-22, 09:55, session "Parity prober 9"
 
-Finished this session: "Origin planes/axes visibility, construction geometry display, sketch
-visibility" (report `parity/reports/2026-10-22-origin-construction.md`, `map-wave22.json`, batches
-`ui-origin-display` and `ui-construction-display`) and "Create: New Component, Revolve, Sweep,
-Loft, ..." (report `parity/reports/2026-10-22-solid-create.md`, `map-wave23.json`, batches
-`ui-primitive-dialogs`, `ui-sweep-loft-revolve`, `ui-rib-emboss-thread`,
-`ui-pattern-mirror-misc`). All six are `ready` in `index.jsonl` with no fixer yet. Earlier probers
-covered the chrome, canvas, sketch areas and the first-pass feature dialogs (reports in
-`parity/reports/`); waves 13 to 21 have fixers.
+Finished this session: "Modify: Draft, Scale, Combine, ..." (Design workspace: solid; report
+`parity/reports/2026-10-22-solid-modify.md`, `map-wave24.json`, batches
+`ui-modify-menu-tooltips`, `ui-draft-scale-dialogs`, `ui-combine-split-dialogs`,
+`ui-align-remove-simplify`, `ui-material-appearance`, `ui-dialog-selection-state`). All six are
+`ready` in `index.jsonl` with no fixer yet. Prober 8's six wave-22/23 batches have fixers. Not
+started: "Manipulators for every feature".
 
 ## Next prober: start here
 
-1. Next `todo` in `coverage.md`, from the top: "Modify: Draft, Scale, Combine, Offset Face,
-   Replace Face, Split Face, Split Body, Silhouette Split, Align, Delete, Remove, Simplify, Physical
-   Material, Appearance, Manage Materials, Change Parameters, Compute All, Direct Edit" (Design
-   workspace: solid). Mark it `in progress`, commit, probe. Expect the same pattern as CREATE:
-   Fusion dialogs open with selection chips and add rows after the picks (see the solid-create
-   report's "How Fusion's Create dialogs behave").
-2. Re-verify in the app the keys marked `fixing-merged` that belong to your area (141 rows carry
-   that status; most are sketch keys from fixed batches). Still not re-checked from the last list:
-   `ui:sketch:horizontal-conflict`, `ui:sketch:dimension-label-and-hover` (hover part),
-   `ui:sketch:tangent-arc-snap-marker`, `ui:toolbar:responsive-collapse` (narrow FissionOxide to
-   920 px and count the icons), `ui:canvas:vertex-marker-style` (in Fusion the pointer landed on a
-   construction plane; hide Plane1 first).
-3. Rebuild before probing: the running binary is `main` at `0c453dd1`; commits after it are not in
-   it. Kill `fissionoxide.exe` first (the link step fails while it runs); the build takes about
-   3 minutes.
+1. Next `todo` in `coverage.md`, from the top: "Manipulators for every feature: arrows, rings,
+   floating value boxes, drag behaviour, snapping" (Design workspace: solid). Mark it
+   `in progress`, commit, probe. Fusion shows a manipulator and a focused floating box once a
+   dialog's picks are complete (Extrude, Draft's arrow plus angle ring, Scale's arrow, Offset
+   Face's arrow, the primitives); FissionOxide has few. Drag each, type into the box, Tab, and
+   compare snapping and the value readout. Then "Edit Feature for every feature".
+2. Re-verify in the app the `fixing-merged` keys of your area. Still not re-checked from the
+   older list: `ui:sketch:horizontal-conflict`, `ui:sketch:dimension-label-and-hover` (hover
+   part), `ui:sketch:tangent-arc-snap-marker`, `ui:canvas:vertex-marker-style` (use a
+   native-resolution crop; `zoom` is too small). Fixers of waves 22-24 will add more.
+3. Rebuild before probing: the running binary is `main` at `ffa348e2`; kill `fissionoxide.exe`
+   first, `cargo build --release -p fissionoxide` takes about 2 minutes.
 
-Where the documents stand: Fusion has two tabs. "Untitled*" is the earlier probers' design;
-"Untitled(1)*" (active) is this session's: Origin hidden (expanded in the browser), Plane1
-(offset 1 in from XZ), Sketch1 (a rectangle on XY), Bodies from Box, Cylinder, Sphere, Torus and
-Coil, and an empty base feature at the end of the timeline. Window restored at screenshot x
-0..907, y 82..733. FissionOxide (built `0c453dd1`) is in a new design: Origin on, Plane1 (25 mm
-over XY), Body1 (20 mm box at the origin), Body2 (cylinder at X 45), Sketch1 (empty, on Plane1),
-Sketch2 (a rectangle on XZ), Sketch3 (empty, on XY). Window at screenshot x 8..1011, y 82..785,
-Data Panel closed. Both apps are left of the overlay.
+Where the documents stand: Fusion "Untitled(1)*" (active) as prober 8 left it plus a Draft (5 deg
+on the box's +X face) at the end of the timeline; window at screenshot x 0..907, y 82..733.
+FissionOxide (built `ffa348e2`) is in a new design: Body1 (20 mm box at the origin), Body2 (20 mm
+box at X 40), Draft1 (3 deg on Body1's +X face), Data Panel closed, window at screenshot
+x 8..915, y 82..785 (narrowed to Fusion's width for the ribbon re-check). Both are left of the
+overlay.
 
 ## Traps
+- FissionOxide's taskbar button moves: this session it was at (572,804) on first launch
+  and (535,804) afterwards, next to Fusion's (497,804). A click on the wrong one brought another
+  app forward; take a screenshot after each switch.
+- A right-edge drag on FissionOxide took only with `left_click_drag` from the exact edge pixel
+  (x 1100, y 650); `left_mouse_down` / `mouse_move` on the edge or corner did nothing.
+- Escape on an open dropdown in a Fusion dialog cancels the dialog (Scale); close dropdowns by
+  clicking the field again.
 - Fusion's ribbon tooltip needs the pointer to rest on the icon from a cold start: move onto the
   canvas for half a second between buttons. Its panel can overflow the window's right edge.
 - Fusion's row options are checkboxes (Pin to Toolbar, Pin to Shortcuts); a replayed batch toggles
