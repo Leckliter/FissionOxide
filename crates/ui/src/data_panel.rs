@@ -277,9 +277,15 @@ impl DataPanel {
     (self.project.clone(), self.folder.clone())
   }
 
-  /// A modal window of the panel's (Upload, Move, Copy) is open and takes the keys.
+  /// A modal window of the panel's (Upload, Move, Copy) is open.
   pub fn modal_open(&self) -> bool {
     self.upload.is_some() || self.dest.is_some()
+  }
+
+  /// The panel takes the keys: a modal window is open, or a name is edited in place (egui drops
+  /// the editor's focus on Escape before the frame, so Escape must reach the editor itself).
+  pub fn takes_keys(&self) -> bool {
+    self.modal_open() || self.edit.is_some()
   }
 }
 

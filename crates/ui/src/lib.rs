@@ -945,9 +945,9 @@ impl App {
   }
 
   fn shortcuts(&mut self, ctx: &egui::Context) {
-    if self.key_capture.is_some() || self.preferences.open || self.show_params || self.data.modal_open() {
-      // Change Keyboard Shortcut and the Preferences, Parameters, Upload, Move and Copy modals
-      // take the keys
+    if self.key_capture.is_some() || self.preferences.open || self.show_params || self.data.takes_keys() {
+      // Change Keyboard Shortcut, the Preferences, Parameters, Upload, Move and Copy modals and
+      // the data panel's inline name editor take the keys
       return;
     }
     // Esc closes an open menu (File, Help, a panel's drop-down, a right-click menu) before it
