@@ -73,7 +73,7 @@
 {"name": "ui-draft-scale-dialogs", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_fbb41230 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-combine-split-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_9635415e (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-align-remove-simplify", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_10b85414 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-material-appearance", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_4e643365 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-material-appearance", "items": 3, "status": "done", "pr": "351dceb", "fixer": "cloud task_4e643365 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-dialog-selection-state", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_7ce0d07b (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-edit-feature-errors", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_e354b219 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-extrude-manipulator", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_d7232407 (requested 2026-10-22 by the coordinator)"}
