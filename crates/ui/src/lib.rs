@@ -923,6 +923,9 @@ impl App {
     for p in files {
       if p.extension().is_some_and(|e| e.eq_ignore_ascii_case(fox_plugin::package::EXTENSION)) {
         plugins_ui::offer_file(self, &p);
+      } else if let Some(u) = self.data.upload.as_mut() {
+        // dropped on the Upload window: uploaded with the others when Upload is clicked
+        u.files.push(p);
       } else if self.data.open {
         let (project, folder) = self.data.location();
         if let Some(r) = self.run("hub.upload", json!({"path": p, "project": project, "folder": folder}))
@@ -942,8 +945,9 @@ impl App {
   }
 
   fn shortcuts(&mut self, ctx: &egui::Context) {
-    if self.key_capture.is_some() || self.preferences.open || self.show_params {
-      // Change Keyboard Shortcut and the Preferences and Parameters modals take the keys
+    if self.key_capture.is_some() || self.preferences.open || self.show_params || self.data.modal_open() {
+      // Change Keyboard Shortcut and the Preferences, Parameters, Upload, Move and Copy modals
+      // take the keys
       return;
     }
     // Esc closes an open menu (File, Help, a panel's drop-down, a right-click menu) before it

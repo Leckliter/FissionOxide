@@ -89,9 +89,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         let (r, _) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::hover());
         logo::paint(ui.painter(), r.shrink(2.0));
         ui.add_space(4.0);
-        if bar_icon(ui, Icon::DataPanel, if app.data.open { "Hide Data Panel" } else { "Show Data Panel" }, true)
-          .clicked()
-        {
+        if bar_icon(ui, Icon::DataPanel, crate::data_panel::BUTTON_TIP, true).clicked() {
           app.data.toggle();
         }
         ui.add_space(6.0);
