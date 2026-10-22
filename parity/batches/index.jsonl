@@ -66,7 +66,7 @@
 {"name": "ui-origin-display", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_99c1f3b0 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-construction-display", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_84272e49 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-primitive-dialogs", "items": 6, "status": "done", "pr": "a1388ce", "fixer": "cloud task_89459e77 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-sweep-loft-revolve", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_28b804e8 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-sweep-loft-revolve", "items": 4, "status": "done", "pr": "f8897ef", "fixer": "cloud session_01BiavQyPVY1ivsBnuTCwwnA (requested 2026-10-22)"}
 {"name": "ui-rib-emboss-thread", "items": 6, "status": "done", "pr": "c12d36c", "fixer": "cloud session_01TVQaTUzwYTy9sQ6Qv2ywhd (requested 2026-10-22)"}
 {"name": "ui-pattern-mirror-misc", "items": 6, "status": "done", "pr": "a5ac71d", "fixer": "cloud session_019ittuH1iJEcjum9vWapYVJ (requested 2026-10-22)"}
 {"name": "ui-modify-menu-tooltips", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_09b73edb (requested 2026-10-22 by the coordinator)"}
