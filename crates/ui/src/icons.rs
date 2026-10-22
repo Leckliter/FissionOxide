@@ -240,6 +240,10 @@ pub enum Icon {
   FlatPattern,
   Unfold,
   SmRules,
+  /// A sheet metal component (the browser root once the design has sheet metal).
+  SheetComponent,
+  /// A sheet metal body.
+  SheetBody,
   CornerClosure,
   Rip,
   Refold,
@@ -2133,6 +2137,18 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
         k.line((0.04, y), (0.74, y), Ink);
       }
       k.block(0.5, 0.62, 0.86, 0.96, 0.12, Light, Fill, Dark);
+    }
+    Icon::SheetComponent => {
+      k.block(0.1, 0.38, 0.66, 0.9, 0.26, White, White, Light);
+      k.thick((0.3, 0.52), (0.3, 0.76), Blue, 2.4);
+      k.thick((0.3, 0.76), (0.56, 0.76), Blue, 2.4);
+    }
+    Icon::SheetBody => {
+      // a plate with a flange bent up at its back
+      k.solid(&[(0.08, 0.66), (0.62, 0.66), (0.92, 0.42), (0.38, 0.42)], Light);
+      k.solid(&[(0.08, 0.66), (0.62, 0.66), (0.62, 0.78), (0.08, 0.78)], Fill);
+      k.solid(&[(0.62, 0.66), (0.92, 0.42), (0.92, 0.54), (0.62, 0.78)], Dark);
+      k.solid(&[(0.38, 0.42), (0.92, 0.42), (0.92, 0.1), (0.38, 0.1)], Fill);
     }
     Icon::CornerClosure => {
       k.solid(&[(0.06, 0.2), (0.46, 0.5), (0.46, 0.94), (0.06, 0.64)], Blue);

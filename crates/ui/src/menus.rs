@@ -558,7 +558,7 @@ const SHEET_MORE: &[E] = &[
 
 const SHEET_MODIFY: &[E] = &[
   c("Unfold", Icon::Unfold, D(Kind::Unfold)),
-  c("Sheet Metal Rules", Icon::SmRules, D(Kind::SheetRules)),
+  c("Sheet Metal Rules", Icon::SmRules, Cmd::SheetRules),
   c("Corner Closure", Icon::CornerClosure, D(Kind::Form(&forms::CORNER_CLOSURE))),
   c("Join by bend", Icon::Fold, D(Kind::Form(&forms::JOIN_BY_BEND))).p(),
   c("Rip", Icon::Rip, D(Kind::Rip)),

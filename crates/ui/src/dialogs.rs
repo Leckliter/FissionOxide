@@ -1226,7 +1226,7 @@ impl Dialog {
       d.load_drawing(s);
     }
     if matches!(kind, Kind::Flange | Kind::ConvertSheet) {
-      d.rules = s.design.sheet_metal_rules.iter().map(|r| r.name.clone()).collect();
+      d.rules = crate::sheet_rules_ui::rule_choices(s);
     }
     // Fusion finishes the sketch when a feature starts from it
     if (matches!(

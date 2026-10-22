@@ -82,6 +82,7 @@ mod scale_to_ui;
 mod select;
 mod service_ui;
 mod sheet;
+mod sheet_rules_ui;
 mod sim_ui;
 mod sketch_modify;
 mod theme;
@@ -367,6 +368,8 @@ pub struct App {
   pub files: file_dialogs::Files,
   /// Change Active Units or Convert Design Type, docked at the right (see `doc_dialogs`).
   pub(crate) doc_dialog: Option<doc_dialogs::DocDialog>,
+  /// The SHEET METAL RULES palette, its windows and the rule library (see `sheet_rules_ui`).
+  pub(crate) sheet_rules: sheet_rules_ui::SheetRulesUi,
   /// Create Base Feature's mode: the ribbon shows BASE FEATURE SOLID / SURFACE and a green
   /// FINISH BASE FEATURE button until it is finished (see [`config_ui::start_base`]).
   pub base_mode: bool,
@@ -456,6 +459,7 @@ impl App {
     notifications::post(&mut app, notifications::whats_new_notice());
     app.prefs = customize::Prefs::load();
     app.preferences = preferences::Preferences::load();
+    app.sheet_rules = sheet_rules_ui::SheetRulesUi::load();
     preferences::apply(&mut app, Some(&cc.egui_ctx));
     // back on the hub server it was connected to last time
     if app.s.store_root.is_none()
@@ -648,6 +652,7 @@ impl App {
       show_perf: false,
       files: file_dialogs::Files::default(),
       doc_dialog: None,
+      sheet_rules: sheet_rules_ui::SheetRulesUi::default(),
       base_mode: false,
       sections: Vec::new(),
       analysis_hidden: false,
@@ -1458,6 +1463,9 @@ impl App {
       // New Storyboard or Transform Components closed
     } else if asm_component::close(self) || insert_window::escape(self) {
       // New Component (an assembly's) or INSERT DXF closed
+    } else if self.sheet_rules.switch.is_some() {
+      // Switch Rule closes, changing nothing
+      sheet_rules_ui::close_switch(self);
     } else if self.other.is_some() {
       // the Select Other list closes, keeping the selection
       self.other = None;
@@ -2049,6 +2057,7 @@ impl App {
     doc_dialogs::show(self, &ctx);
     anim_ui::show_dialog(self, &ctx);
     asm_component::show(self, &ctx);
+    sheet_rules_ui::show(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
       self.after_dialog_frame(d, keep);

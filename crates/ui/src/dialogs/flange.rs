@@ -435,8 +435,8 @@ impl Dialog {
     }
   }
 
-  /// The Sheet Metal Rule drop-down: the design's rules, the one used shown (the default when
-  /// none is named).
+  /// The Sheet Metal Rule drop-down: the design's rules then the library's, the one used shown
+  /// (the default when none is named).
   fn sheet_rule_row(&mut self, app: &App, ui: &mut egui::Ui) {
     ui.label("Sheet Metal Rule");
     let default = app.s.design.sheet_rule("").map(|r| r.name).unwrap_or_default();
@@ -593,7 +593,7 @@ pub(super) fn edit_dialog(app: &App, kind: &FeatureKind) -> Option<Dialog> {
     }
     _ => return None,
   };
-  d.rules = app.s.design.sheet_metal_rules.iter().map(|r| r.name.clone()).collect();
+  d.rules = crate::sheet_rules_ui::rule_choices(&app.s);
   Some(d)
 }
 

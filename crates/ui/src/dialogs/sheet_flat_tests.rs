@@ -14,6 +14,7 @@ use crate::panels::{Cmd, RowCmd, Tab};
 /// A base flange with one edge flange (one bend).
 fn sheet() -> App {
   let mut app = App::with_session(Session::default());
+  app.run("sheet.rule", json!({"name": "Steel", "thickness": 1}));
   app.run("sketch.create", json!({"plane": "xy"}));
   app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [80, 40]}));
   app.finish_sketch();

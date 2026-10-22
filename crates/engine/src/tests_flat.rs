@@ -18,6 +18,7 @@ fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
 /// A base flange 80 x 40 with a 15 mm edge flange on its back edge, and its bottom face.
 fn sheet() -> (Session, Value) {
   let mut s = Session::default();
+  run(&mut s, "sheet.rule", json!({"name": "Steel", "thickness": 1}));
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [80, 40]}));
   run(&mut s, "sketch.finish", json!({}));

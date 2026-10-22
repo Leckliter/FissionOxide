@@ -433,6 +433,8 @@ pub(crate) enum Cmd {
   Anim(crate::anim_ui::AnimCmd),
   /// Fabrication: check a cut file for a cutting service, with the cut estimate.
   CutCheck,
+  /// SHEET METAL > MODIFY > Sheet Metal Rules: the SHEET METAL RULES palette.
+  SheetRules,
   /// SELECT > Selection Tools: Select By Name, Select By Boundary, Select By Size, Seed And
   /// Boundary (each opens a small dialog).
   SelTool(crate::select::SelTool),
@@ -653,6 +655,7 @@ impl Cmd {
       Cmd::Anim(a) => a.info(),
       Cmd::Insert(t) => crate::insert_window::info(t),
       Cmd::InsertDxf => (Icon::InsertDxf, "Insert DXF", "Insert a 2D DXF file into a sketch"),
+      Cmd::SheetRules => (Icon::SmRules, "Sheet Metal Rules", "Thickness, bend radius and reliefs of sheet metal"),
       Cmd::CutCheck => (
         Icon::Interference,
         "Cut Service Check",
@@ -815,6 +818,7 @@ impl Cmd {
       Cmd::Render(r) => r.run(app),
       Cmd::Anim(a) => a.run(app),
       Cmd::CutCheck => crate::service_ui::open(app),
+      Cmd::SheetRules => crate::sheet_rules_ui::open_palette(app),
       Cmd::SelTool(t) => crate::select::open_tool(app, t),
       Cmd::BaseFeature(start) => crate::config_ui::base_mode(app, start),
       Cmd::Insert(target) => crate::insert_window::open(app, target),
@@ -1615,7 +1619,8 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   // the root row: "(Unsaved)" until saved, an eye for the whole component, Fusion's menu
   let root_label = browser_rows::root_label(app);
   let root_visible = browser_rows::root_visible(app);
-  let ev = tree_row(ui, root, 0, Some(true), Some(root_visible), Icon::Component, &root_label, false, theme::TEXT);
+  let root_icon = crate::sheet_rules_ui::root_icon(app);
+  let ev = tree_row(ui, root, 0, Some(true), Some(root_visible), root_icon, &root_label, false, theme::TEXT);
   if ev.eye {
     browser_rows::root_show_hide(app);
   }
@@ -1670,6 +1675,8 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       });
     }
   }
+  // the sheet metal rule, once the design has sheet metal
+  crate::sheet_rules_ui::browser_row(app, ui);
   // the sheet metal flat pattern, under the Rule row
   browser_flat::row(app, ui);
   // Named Views
@@ -2233,6 +2240,8 @@ pub(crate) fn body_icon(app: &App, body: BodyId) -> Icon {
     Icon::MeshBody
   } else if app.s.body_is_surface(body) {
     Icon::SurfaceBody
+  } else if app.s.model.body(body).is_some_and(|b| b.sheet.is_some()) {
+    Icon::SheetBody
   } else {
     Icon::Body
   }
