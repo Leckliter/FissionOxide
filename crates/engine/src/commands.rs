@@ -68,7 +68,7 @@ cmds! {
   "hub.search" => "Find items by name, version description or milestone", "{query}";
   "hub.activity" => "Activity feed", "{project?, item?, limit?}";
   "hub.upload" => "Upload a file: designs and importable formats become designs, others (e.g. .f3d) are stored as files", "{path, project?, folder?, name?}";
-  "hub.download" => "Write an item version to a file; the extension picks the format (.foxz includes history)", "{item?, version?, path, ...export options}";
+  "hub.download" => "Write an item version to a file; the extension picks the format (.foxz includes history; a translated upload gives back its original file in that file's extension)", "{item?, version?, path, ...export options}";
   "compute_all" => "Recompute the whole timeline from scratch", "{}";
   "undo" => "Undo", "{}";
   "redo" => "Redo", "{}";
@@ -317,7 +317,7 @@ cmds! {
   "contact_set.enable" => "Turn a contact set on or off", "{contact_set, enabled?}";
   "contact_set.delete" => "Delete a contact set", "{contact_set}";
   "contact_set.list" => "List the contact sets", "{}";
-  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version; a configured source inserts the named configuration", "{item (id, or a unique design name), version?, configuration?, name?, translate?: [x,y,z], link?: bool}";
+  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version; a configured source inserts the named configuration", "{item (id, or a unique design name), version?, configuration?, name?, translate?: [x,y,z], link?: bool, empty?: bool (allow a design without bodies: an assembly's external component)}";
   "component.configuration" => "Switch which configuration of its source design a linked component uses (null: the design as modelled); without 'configuration' lists the source's configurations", "{component, configuration?: name | null}";
   "component.links" => "Inserted components: source item, version, configuration and whether a newer version is in the hub", "{}";
   "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
@@ -514,6 +514,7 @@ cmds! {
   "select.by_boundary" => "Select the faces enclosed by a closed chain of edges of one body (the smaller side); default the selected edges", "{edges?: [{body, edge}]}";
   "select.seed_boundary" => "Select the faces connected to a seed face without crossing the boundary edges; defaults: the selected face and edges", "{seed?: {body, face}, edges?: [{body, edge}]}";
   "sketch.plane" => "Redefine Sketch Plane: put a sketch on another plane or planar face made before it (its curves keep their sketch coordinates); the features after it recompute", "{sketch, plane}";
+  "design.type" => "Fusion's design type: part, assembly or hybrid (which toolbar tabs show); no type reads it", "{type?: part|assembly|hybrid}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

@@ -5,6 +5,7 @@
 //! ViewCube, sketch palette and command dialogs floating over it; the timeline at the bottom. The UI is thin: every action goes through [`Session::execute`] commands.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod asm_component;
 mod assembly_forms;
 mod cam_ui;
 mod canvas_ui;
@@ -19,6 +20,9 @@ mod cut_ui;
 mod data_panel;
 mod dialogs;
 mod doc_dialogs;
+mod documents;
+#[cfg(test)]
+mod documents_tests;
 mod ecad_ui;
 mod error_dialog;
 mod explode_ui;
@@ -39,6 +43,7 @@ mod help;
 mod icons;
 #[cfg(test)]
 mod input_tests;
+mod insert_window;
 mod library_ui;
 mod logo;
 mod manip_arrow;
@@ -343,6 +348,12 @@ pub struct App {
   pub(crate) sections: Vec<dialogs::KeptSection>,
   /// The Analysis folder's eye is off: no kept analysis shows.
   pub(crate) analysis_hidden: bool,
+  /// The document tabs: the designs open besides the shown one, and the "+"'s chooser.
+  pub docs: documents::Documents,
+  /// Fusion's Insert window and the INSERT DXF dialog.
+  pub(crate) inserts: insert_window::Inserts,
+  /// New Component in an Assembly Design (an external design), while open.
+  pub(crate) asm_component: Option<asm_component::AsmComponent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -598,6 +609,9 @@ impl App {
       base_mode: false,
       sections: Vec::new(),
       analysis_hidden: false,
+      docs: documents::Documents::default(),
+      inserts: insert_window::Inserts::default(),
+      asm_component: None,
     }
   }
 
@@ -720,6 +734,8 @@ impl App {
 
   /// Switches to another session, keeping the hub location.
   fn replace_session(&mut self, mut s: Session) {
+    // an open design with unsaved changes keeps its tab; this one opens in a new tab
+    documents::keep_unsaved(self);
     s.store_root = self.s.store_root.clone();
     let revision = self.s.revision;
     self.s = s;
@@ -754,8 +770,15 @@ impl App {
   /// Opens a design (latest or a given version) from the data panel.
   pub fn open_hub_item(&mut self, item: &str, version: Option<u32>) {
     self.cancel_dialog();
+    let kept = documents::keep_unsaved(self);
     let revision = self.s.revision;
-    if let Some(r) = self.run("hub.open", json!({"item": item, "version": version})) {
+    let opened = self.run("hub.open", json!({"item": item, "version": version}));
+    if opened.is_none()
+      && let Some(back) = kept
+    {
+      documents::drop_new_tab(self, back);
+    }
+    if let Some(r) = opened {
       self.swapped_session(revision);
       self.dialog = None;
       self.tool = Tool::Select;
@@ -843,19 +866,34 @@ impl App {
 
   // ---- file actions ----
 
+  /// Replaces the shown document with a new empty Part Design (closing the last tab). The "+"
+  /// and Create New add a tab instead ([`documents::new_document`]).
   pub fn new_design(&mut self) {
+    self.new_design_of(fox_engine::model::DesignType::Part, None);
+  }
+
+  /// Replaces the shown document with a new empty design of type `ty`, in `unit` (default: the
+  /// Preferences' default units).
+  pub(crate) fn new_design_of(
+    &mut self,
+    ty: fox_engine::model::DesignType,
+    unit: Option<fox_engine::model::LengthUnit>,
+  ) {
     let root = self.s.store_root.clone();
     let revision = self.s.revision;
     self.s = Session::default();
     // Preferences: new designs in the default units (General) and without a timeline (Design),
     // in a fresh session so the settings aren't undo steps
-    let units = self.preferences.values.units;
+    let units = unit.map(|u| u.symbol()).unwrap_or(self.preferences.values.units.key());
     let mut set = false;
-    if units != preferences::Units::Mm {
-      set |= self.s.execute("design.units", &json!({"unit": units.key()})).is_ok();
+    if units != "mm" {
+      set |= self.s.execute("design.units", &json!({"unit": units})).is_ok();
     }
     if !self.preferences.values.capture_history {
       set |= self.s.execute("design.history", &json!({"capture": false})).is_ok();
+    }
+    if !ty.is_part() {
+      set |= self.s.execute("design.type", &json!({"type": ty.key()})).is_ok();
     }
     if set {
       self.s = Session::new(self.s.design.clone());
@@ -868,6 +906,7 @@ impl App {
     self.nav_mode = None;
     self.cam = Camera::default();
     self.fitted_once = false;
+    self.tab = if ty == fox_engine::model::DesignType::Assembly { panels::Tab::Assembly } else { panels::Tab::Solid };
   }
 
   /// File ▸ Open... (Ctrl+O): Fusion's Open window, with the projects and "Open from my
@@ -1107,7 +1146,7 @@ impl App {
       self.open_dialog();
     }
     if pressed(Key::N, Modifiers::COMMAND) {
-      self.new_design();
+      documents::new_document(self, fox_engine::model::DesignType::Part, None);
     }
     if pressed(Key::Escape, Modifiers::NONE) {
       self.escape();
@@ -1346,6 +1385,8 @@ impl App {
     } else if self.doc_dialog.is_some() {
       // Change Active Units or Convert Design Type closes, changing nothing
       doc_dialogs::close(self);
+    } else if asm_component::close(self) || insert_window::escape(self) {
+      // New Component (an assembly's) or INSERT DXF closed
     } else if self.other.is_some() {
       // the Select Other list closes, keeping the selection
       self.other = None;
@@ -1877,6 +1918,7 @@ impl App {
     notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
     doc_dialogs::show(self, &ctx);
+    asm_component::show(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
       if keep && self.dialog.is_none() {
@@ -1891,6 +1933,8 @@ impl App {
     data_panel::save_window(self, &ctx);
     file_dialogs::windows(self, &ctx);
     dialogs::save_window(self, &ctx);
+    documents::windows(self, &ctx);
+    insert_window::windows(self, &ctx);
     updates::window(self, &ctx);
     capture::windows(self, &ctx);
     navbar::ground_offset_window(self, &ctx);

@@ -149,6 +149,7 @@ pub(crate) struct Group {
 
 use crate::form_ui::{self, Act as FormAct};
 use crate::forms;
+use crate::insert_window::Target;
 use crate::select::{Priority, SelTool};
 use Cmd::Dialog as D;
 
@@ -311,16 +312,16 @@ const INSPECT: &[E] = &[
 ];
 
 const INSERT: &[E] = &[
-  x("Decal", Icon::Decal),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
   c("Canvas", Icon::Canvas, Cmd::Canvas),
-  c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
-  c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
-  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
+  c("Insert SVG", Icon::InsertSvg, Cmd::Insert(Target::Svg)),
+  c("Insert DXF", Icon::InsertDxf, Cmd::InsertDxf),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
   // greyed until the design is saved, as Fusion's
   c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent).saved(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
-  x("Insert Derive", Icon::Derive),
+  c("Insert Derive", Icon::Derive, Cmd::Insert(Target::Derive)),
   x("Insert McMaster-Carr Component", Icon::McMaster).off(),
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
@@ -466,7 +467,7 @@ const SURFACE_MODIFY: &[E] = &[
 ];
 
 const MESH_CREATE: &[E] = &[
-  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
   x("Tessellate", Icon::Tessellate).g(),
   E::Sep,
   x("Create Mesh Section Sketch", Icon::MeshSection).g(),
@@ -582,6 +583,93 @@ macro_rules! shared_groups {
 }
 
 const SHARED: [Group; 6] = shared_groups!();
+
+// ---------------------------------------------------------------- Assembly Design
+
+// an Assembly Design's ASSEMBLY tab, in Fusion's order
+const ASM_INSERT: &[E] = &[
+  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
+  x("Insert Fastener", Icon::Fastener).off(),
+  x("Duplicate With Joints", Icon::DuplicateJoints).off(),
+  c("Insert Derive", Icon::Derive, Cmd::Insert(Target::Derive)),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
+  c("Canvas", Icon::Canvas, Cmd::Canvas),
+  E::Sep,
+  x("Add To Assembly", Icon::AddToAssembly),
+  E::Sep,
+  x("Insert McMaster-Carr Component", Icon::McMaster).off(),
+];
+
+const ASM_CREATE: &[E] = &[
+  c("New Component", Icon::Component, D(Kind::NewComponent)),
+  c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
+  E::Sub("Pattern", PATTERN),
+  x("Create Linked PCB", Icon::InsertComponent),
+  x("Derive", Icon::Derive),
+];
+
+const ASM_RELATIONSHIPS: &[E] = &[
+  x("Constrain Components", Icon::Coincident),
+  c("Align Constraint", Icon::Align, D(Kind::Form(&forms::ALIGN))),
+  x("Angle Constraint", Icon::AngleDim),
+  x("Center Constraint", Icon::Concentric),
+  x("Tangent Constraint", Icon::Tangent),
+  E::Sep,
+  c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
+  c("As-built Joint", Icon::JointOrigin, D(Kind::AsBuiltJoint)).k("Shift+J"),
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
+  c("Rigid Group", Icon::Component, D(Kind::Form(&assembly_forms::RIGID_GROUP))),
+];
+
+const ASM_MOTION: &[E] = &[
+  c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
+  c("Motion Link", Icon::DriveJoint, D(Kind::Form(&assembly_forms::MOTION_LINK))),
+  c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
+];
+
+const ASM_MODIFY: &[E] = &[
+  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
+  c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
+  c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
+  c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
+  E::Sep,
+  c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
+  E::Sep,
+  c("Change Parameters", Icon::Params, Cmd::Params),
+  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
+  c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
+  E::Sep,
+  x("Manage Materials", Icon::ManageMaterials),
+  E::Sep,
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
+];
+
+const ASM_CONTACT: &[E] = &[x("Enable Contact Sets", Icon::Interference), x("Enable All Contact", Icon::Interference)];
+
+const ASSEMBLY: [Group; 6] = [
+  Group { label: "INSERT", quick: &["Insert Component", "Insert Derive", "Canvas"], menu: ASM_INSERT },
+  Group { label: "CREATE", quick: &["New Component", "Create Sketch"], menu: ASM_CREATE },
+  Group {
+    label: "RELATIONSHIPS",
+    quick: &["Constrain Components", "Joint", "As-built Joint", "Rigid Group"],
+    menu: ASM_RELATIONSHIPS,
+  },
+  Group { label: "MOTION", quick: &["Drive Joints", "Motion Link", "Motion Study"], menu: ASM_MOTION },
+  Group { label: "MODIFY", quick: &["Move/Copy", "Align", "Bill of Materials"], menu: ASM_MODIFY },
+  Group { label: "CONTACT", quick: &["Enable Contact Sets"], menu: ASM_CONTACT },
+];
+
+// the ASSEMBLY tab ends with CONFIGURE, CONSTRUCT, INSPECT and SELECT (INSERT comes first)
+const ASSEMBLY_SHARED: [Group; 4] = [
+  Group {
+    label: "CONFIGURE",
+    quick: &["Configure", "Display Configuration Table", "Create Configuration Rules"],
+    menu: CONFIGURE,
+  },
+  Group { label: "CONSTRUCT", quick: &["Offset Plane"], menu: CONSTRUCT },
+  Group { label: "INSPECT", quick: &["Measure", "Section Analysis"], menu: INSPECT },
+  Group { label: "SELECT", quick: &["Select"], menu: SELECT },
+];
 
 // as in Fusion, only MESH has an EXPORT panel (elsewhere 3D Print is under UTILITIES > MAKE)
 const MESH_SHARED: [Group; 7] = shared_groups!(Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT });
@@ -736,15 +824,15 @@ const SKETCH_CONSTRAINTS: &[E] = &[
 // the sketch tab's INSERT has no Insert Component
 const SKETCH_INSERT: &[E] = &[
   c("Trace Image", Icon::TraceImage, D(Kind::TraceImage)),
-  x("Decal", Icon::Decal),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
   c("Canvas", Icon::Canvas, Cmd::Canvas),
-  c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
-  c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
+  c("Insert SVG", Icon::InsertSvg, Cmd::Insert(Target::Svg)),
+  c("Insert DXF", Icon::InsertDxf, Cmd::InsertDxf),
   c("Sketch Library...", Icon::SketchLibrary, Cmd::SketchLibrary),
-  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
-  x("Insert Derive", Icon::Derive),
+  c("Insert Derive", Icon::Derive, Cmd::Insert(Target::Derive)),
   x("Insert McMaster-Carr Component", Icon::McMaster).off(),
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
@@ -1214,6 +1302,7 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Generative => (&GENERATIVE, &[]),
     Tab::Render => (&RENDER, &[]),
     Tab::Turning => (&TURNING, &[]),
+    Tab::Assembly => (&ASSEMBLY, &ASSEMBLY_SHARED),
   }
 }
 
@@ -1237,7 +1326,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 14] = [
+const ALL_TABS: [Tab; 15] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
@@ -1252,6 +1341,7 @@ const ALL_TABS: [Tab; 14] = [
   Tab::Generative,
   Tab::Render,
   Tab::Turning,
+  Tab::Assembly,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that
@@ -2300,5 +2390,101 @@ mod tests {
     for (i, (label, icon)) in icons.iter().enumerate() {
       assert!(!icons[i + 1..].iter().any(|(_, o)| o == icon), "{label}'s {icon:?} is shared");
     }
+  }
+
+  #[test]
+  fn an_assembly_design_has_fusions_assembly_tab() {
+    let (own, shared) = groups(Tab::Assembly);
+    let labels: Vec<&str> = own.iter().chain(shared.iter()).map(|g| g.label).collect();
+    assert_eq!(
+      labels,
+      [
+        "INSERT",
+        "CREATE",
+        "RELATIONSHIPS",
+        "MOTION",
+        "MODIFY",
+        "CONTACT",
+        "CONFIGURE",
+        "CONSTRUCT",
+        "INSPECT",
+        "SELECT"
+      ]
+    );
+    let names = |g: &str| -> Vec<&str> {
+      own
+        .iter()
+        .find(|x| x.label == g)
+        .unwrap()
+        .menu
+        .iter()
+        .filter_map(|e| match e {
+          E::I(i) => Some(i.label),
+          E::Sub(l, _) => Some(*l),
+          _ => None,
+        })
+        .collect()
+    };
+    assert_eq!(
+      names("INSERT"),
+      [
+        "Insert Component",
+        "Insert Fastener",
+        "Duplicate With Joints",
+        "Insert Derive",
+        "Decal",
+        "Canvas",
+        "Add To Assembly",
+        "Insert McMaster-Carr Component"
+      ]
+    );
+    assert_eq!(names("CREATE"), ["New Component", "Create Sketch", "Pattern", "Create Linked PCB", "Derive"]);
+    assert_eq!(
+      names("RELATIONSHIPS"),
+      [
+        "Constrain Components",
+        "Align Constraint",
+        "Angle Constraint",
+        "Center Constraint",
+        "Tangent Constraint",
+        "Joint",
+        "As-built Joint",
+        "Joint Origin",
+        "Rigid Group"
+      ]
+    );
+    assert_eq!(names("MOTION"), ["Drive Joints", "Motion Link", "Motion Study"]);
+    assert_eq!(
+      names("MODIFY"),
+      [
+        "Move/Copy",
+        "Align",
+        "Delete",
+        "Remove",
+        "Bill of Materials",
+        "Change Parameters",
+        "Physical Material",
+        "Appearance",
+        "Manage Materials",
+        "Compute All"
+      ]
+    );
+    assert_eq!(names("CONTACT"), ["Enable Contact Sets", "Enable All Contact"]);
+    assert_eq!(cmd_of(Tab::Assembly, "RELATIONSHIPS", "Joint"), Some(D(Kind::Joint)));
+    assert_eq!(cmd_of(Tab::Assembly, "CREATE", "New Component"), Some(D(Kind::NewComponent)));
+  }
+
+  #[test]
+  fn insert_entries_open_the_insert_window() {
+    use crate::insert_window::Target;
+    for tab in [Tab::Solid, Tab::Sketch] {
+      let group = "INSERT";
+      assert_eq!(cmd_of(tab, group, "Decal"), Some(Cmd::Insert(Target::Decal)), "{tab:?}");
+      assert_eq!(cmd_of(tab, group, "Insert SVG"), Some(Cmd::Insert(Target::Svg)));
+      assert_eq!(cmd_of(tab, group, "Insert DXF"), Some(Cmd::InsertDxf));
+      assert_eq!(cmd_of(tab, group, "Insert Mesh"), Some(Cmd::Insert(Target::Mesh)));
+      assert_eq!(cmd_of(tab, group, "Insert Derive"), Some(Cmd::Insert(Target::Derive)));
+    }
+    assert_eq!(cmd_of(Tab::Mesh, "CREATE", "Insert Mesh"), Some(Cmd::Insert(Target::Mesh)));
   }
 }
