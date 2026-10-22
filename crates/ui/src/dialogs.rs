@@ -952,7 +952,8 @@ impl Dialog {
       }
       Kind::Project => {
         d.flag = true;
-        d.choice = "bodies";
+        // Fusion's Selection Filter opens on Specified Entities (faces and edges)
+        d.choice = "specified";
       }
       Kind::Extrude => {
         // extruding from a face sketch defaults to Join, like Fusion
@@ -1651,6 +1652,16 @@ impl Dialog {
   pub(crate) fn use_origin_plane(&mut self, s: &mut Session, plane: &str) {
     self.plane = json!(plane);
     self.plane_label = format!("{} plane", plane.to_uppercase());
+    self.refresh_manip(s);
+    self.preview(s);
+  }
+
+  /// Puts the dialog on any plane reference (an origin plane's name, `{feature}` for a
+  /// construction plane, `{body, face}` for a planar face) and re-previews (a sketch row's
+  /// Offset Plane, on the sketch's plane).
+  pub(crate) fn use_plane(&mut self, s: &mut Session, plane: Value, label: String) {
+    self.plane = plane;
+    self.plane_label = label;
     self.refresh_manip(s);
     self.preview(s);
   }
@@ -2371,6 +2382,7 @@ impl Dialog {
       Kind::Flange if self.choice == "edge" => "select sheet edges",
       Kind::Flange => "select a profile",
       Kind::Hem | Kind::Rip => "select edges",
+      Kind::Project if self.choice != "bodies" => "select geometry to project",
       Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
       Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
       Kind::AsBuiltJoint => {
@@ -3814,8 +3826,8 @@ impl Dialog {
         let what = if self.faces.is_empty() { "body" } else { "face" };
         chip(ui, self.bodies.len().min(1), what);
         ui.end_row();
-        // Fusion's Selection Filter: whole bodies, or faces and edges
-        let mut filter: &'static str = if self.choice == "faces" { "faces" } else { "bodies" };
+        // Fusion's Selection Filter: specified entities (faces and edges), or whole bodies
+        let mut filter: &'static str = if self.choice == "bodies" { "bodies" } else { "specified" };
         ui.label("Selection Filter");
         if self.filter_row(app, ui, &mut filter) {
           self.choice = filter;
@@ -3840,12 +3852,13 @@ impl Dialog {
     ui.end_row();
   }
 
-  /// Fusion's Selection Filter row (bodies, or faces and edges) as two icon toggles; while the
-  /// dialog is open the choice decides what a click on the model picks. Returns true on a change.
+  /// Fusion's Selection Filter row (Specified Entities, then Bodies) as two icon toggles; while
+  /// the dialog is open the choice decides what a click on the model picks. Returns true on a
+  /// change.
   fn filter_row(&mut self, app: &mut App, ui: &mut egui::Ui, cur: &mut &'static str) -> bool {
     use icon_row::{choice, icon_row};
     const FILTERS: [icon_row::Choice; 2] =
-      [choice("bodies", Icon::FilterBodies, "Bodies"), choice("faces", Icon::FilterFaces, "Faces and edges")];
+      [choice("specified", Icon::FilterFaces, "Specified Entities"), choice("bodies", Icon::FilterBodies, "Bodies")];
     let changed = icon_row(ui, cur, &FILTERS, "");
     self.filter_row_apply(app, cur);
     changed
@@ -3857,7 +3870,7 @@ impl Dialog {
     if self.saved_filter.is_none() {
       self.saved_filter = Some((app.sel_priority, app.sel_filter.vertices));
     }
-    app.sel_priority = if *cur == "faces" { Priority::Face } else { Priority::Body };
+    app.sel_priority = if *cur == "bodies" { Priority::Body } else { Priority::Face };
   }
 
   /// A check box FissionOxide can't act on yet, drawn greyed with the reason as its tooltip.
@@ -5951,7 +5964,7 @@ mod tests {
     app.run("box", json!({"width": 20, "depth": 20, "height": 10})).unwrap();
     app.run("sketch.create", json!({"plane": "xy"})).unwrap();
     let d = Dialog::open(&mut app, Kind::Project);
-    assert!((d.choice, d.flag) == ("bodies", true) && !d.ready());
+    assert!((d.choice, d.flag) == ("specified", true) && !d.ready());
     let mut d = d;
     d.bodies = vec![app.s.model.bodies[0].id.0];
     assert!(d.ready());
@@ -5962,6 +5975,33 @@ mod tests {
     assert!(!d.form.filter_faces(&crate::forms::SK_INTERSECT));
     d.form.values[2] = json!("faces");
     assert!(d.form.filter_faces(&crate::forms::SK_INTERSECT));
+  }
+
+  /// PROJECT's Selection Filter: Specified Entities (faces and edges) first and lit, then
+  /// Bodies, which picks whole bodies until the dialog closes; the prompt follows the filter.
+  #[test]
+  fn project_filter_starts_on_specified_entities_and_bodies_pick_bodies() {
+    use crate::select::Priority;
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 20, "depth": 20, "height": 10})).unwrap();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let body = app.s.model.bodies[0].id;
+    let mut d = Dialog::open(&mut app, Kind::Project);
+    assert_eq!((d.choice, d.missing_input()), ("specified", "select geometry to project"));
+    assert_eq!(chip_text(d.bodies.len().min(1), "body"), "Select");
+    let mut f = d.choice;
+    d.filter_row_apply(&mut app, &mut f);
+    assert_eq!(app.sel_priority, Priority::Face, "specified entities pick faces and edges");
+    let mut f = "bodies";
+    d.filter_row_apply(&mut app, &mut f);
+    d.choice = f;
+    assert_eq!((app.sel_priority, d.missing_input()), (Priority::Body, "select a body"));
+    // a body pick fills the Geometry chip with the body
+    app.s.selection = vec![Sel::Body { body }];
+    d.sync_selection(&app.s);
+    assert!(d.bodies == [body.0] && d.faces.is_empty(), "{:?} {:?}", d.bodies, d.faces);
+    d.leave(&mut app);
+    assert_eq!(app.sel_priority, Priority::Face, "the filter is put back on close");
   }
 
   /// Previews the dialog's command and checks it applied without an error.
@@ -7159,7 +7199,7 @@ mod tests {
     };
     let saved = app.cam;
     let name = app.save_named_view().unwrap();
-    assert_eq!(name, "Named View 1");
+    assert_eq!(name, "NamedView");
     assert!(app.s.dirty, "named views save with the design");
     app.cam = fox_engine::render::Camera::default();
     app.restore_named_view(&name);

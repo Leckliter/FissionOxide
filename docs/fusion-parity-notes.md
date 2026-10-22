@@ -440,3 +440,59 @@ The Grid and Snaps menu, Grid Settings and Set Increments in both apps (report
 until Layout Grid is on, greys the lock until then, keeps Incremental Move on, and opens docked
 Adaptive / Fixed dialogs where FissionOxide shows the grid by default and uses submenus with
 values. 3 rows in one batch (`parity/batches/map-wave21.json`), one match row.
+
+## 2026-10-22, prober 8: origin and construction display
+
+The browser's Origin folder, an Offset Plane and Create Sketch's plane chooser in both apps
+(report `parity/reports/2026-10-22-origin-construction.md`). Hover and selection colours of the
+origin planes and axes are verified. Fusion draws each origin plane in the positive quadrant of
+its axes, see-through and depth-tested with the axes on top, keeps them in an open sketch, and
+picks infinite planes with a grid preview in Create Sketch; FissionOxide centres near-opaque
+squares over everything and hides them in a sketch. Construction planes are an invisible dashed
+outline in FissionOxide, without eyes, V or the full row menu; Fusion's Offset Plane now opens a
+CONSTRUCTION GEOMETRY dialog. 11 rows in two batches (`parity/batches/map-wave22.json`), two match
+rows, three verified.
+
+## 2026-10-22, prober 8 (continued): SOLID > CREATE dialogs
+
+Every CREATE entry's dialog in both apps, several to their preview (report
+`parity/reports/2026-10-22-solid-create.md`). The CREATE list matches. Fusion's dialogs open with
+selection chips and grow rows after the picks, its primitives start with a plane pick and a drawn
+base, and Operation turns to Cut over a body; FissionOxide's open with every row, preset planes
+and axes, sketch dropdowns and "(empty = ...)" fields, and preview at once. 22 rows in four batches
+(`parity/batches/map-wave23.json`), three match rows, six sketch and vertex keys verified.
+
+## 2026-10-22, prober 9: SOLID > MODIFY
+
+Every MODIFY entry in both apps, Draft completed and edited (report
+`parity/reports/2026-10-22-solid-modify.md`). The entries, order and shortcut hints match; Fusion
+has no Direct Edit submenu, fewer separators and Simplify in a different order. As in CREATE,
+Fusion's dialogs open with chips and grow value rows after the picks; FissionOxide presets planes
+and non-zero values, enables OK early, picks faces where Fusion picks bodies, keeps its picks
+selected after Cancel, cannot edit a Draft, and has no Silhouette Split, Replace with Primitives
+or Manage Materials. 24 rows in six batches (`parity/batches/map-wave24.json`), including the
+reopened `ui:toolbar:responsive-collapse` (MODIFY keeps 6 icons at 907 px against 4); one match row.
+
+## 2026-10-22, prober 10: feature manipulators, Edit Feature, feature errors
+
+Extrude, Fillet, Shell, Offset Face and Draft manipulators in both apps, read from
+native-resolution crops while hovering, dragging and tabbing, then Edit Feature on Extrude,
+Fillet and Box and a failing fillet (report `parity/reports/2026-10-22-manipulators.md`). The
+floating value box, live preview while typing, Enter as OK and the failed timeline icon match.
+Fusion draws 3D blue arrows with a dashed drag track, a separate disc-on-arc taper and draft handle,
+a grey dimension in the preview, moves the box with Tab, keeps the box clear of its arrow, rolls the
+timeline back while editing, greys OK on a failing value and shows a "1 error(s)" toast with a
+status-bar badge. 16 rows in three batches (`parity/batches/map-wave25.json`), four match rows,
+five keys verified.
+
+## 2026-10-22, prober 11: Edit Feature finished; Construct, Inspect, Insert, Assemble, Select started
+
+Chamfer, Mirror, Hole, Move, Combine and Press Pull made and double-clicked in both apps, a chamfer
+made to fail, then its toast, Error window, right-click menu, Suppress, Unsuppress and Roll here;
+then the CONSTRUCT, CONFIGURE, INSPECT, INSERT, ASSEMBLE and SELECT lists, Offset Plane, Axis Through
+Cylinder and Measure (report `parity/reports/2026-10-22-edit-construct.md`). Fusion edits every
+feature in its creation dialog titled "EDIT FEATURE"; FissionOxide cannot edit Hole, Mirror, Combine
+or Press Pull (and, from the code, most other kinds), has no Error window or Review warning, and
+lists every assembly command in a Part Design document where Fusion offers only "Add To Assembly".
+18 rows in three batches (`parity/batches/map-wave26.json`), three match rows, three Select menu keys
+verified.

@@ -201,6 +201,21 @@ pub fn targets(s: &Session, p: Pick, priority: Priority) -> Vec<Sel> {
   }
 }
 
+/// The bodies the pointer lights as a whole: a face, edge or vertex under it while the
+/// selection priority (or a dialog's Selection Filter) picks bodies or components. Fusion lights
+/// the whole body then, not the face under the pointer.
+pub(crate) fn hover_bodies(app: &App) -> Vec<BodyId> {
+  match app.hover {
+    Some(p) if pick_body(&p).is_some() && matches!(app.sel_priority, Priority::Body | Priority::Component) => {
+      targets(&app.s, p, app.sel_priority)
+        .into_iter()
+        .filter_map(|x| if let Sel::Body { body } = x { Some(body) } else { None })
+        .collect()
+    }
+    _ => Vec::new(),
+  }
+}
+
 /// Selects (or with `add`, toggles) what a click on `p` picks.
 pub fn pick(app: &mut App, p: Pick, add: bool) {
   let items = targets(&app.s, p, app.sel_priority);

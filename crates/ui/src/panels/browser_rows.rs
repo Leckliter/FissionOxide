@@ -488,10 +488,24 @@ pub(crate) fn units_menu() -> Vec<Option<RowItem>> {
   vec![row_item(Icon::Measure, "Change Active Units", RowCmd::ChangeUnits)]
 }
 
-/// Runs a Units row menu command: Change Active Units opens the row's units popup.
-pub(crate) fn run_units_cmd(ctx: &egui::Context, cmd: RowCmd) {
+/// Runs a Units row menu command: Change Active Units opens its docked dialog.
+pub(crate) fn run_units_cmd(app: &mut App, cmd: RowCmd) {
   if cmd == RowCmd::ChangeUnits {
-    egui::Popup::open_id(ctx, crate::units::popup_id());
+    crate::doc_dialogs::open_units(app);
+  }
+}
+
+// ---------------------------------------------------------------- the Part Design row
+
+/// The Part Design row's menu: Convert Design Type, as Fusion's.
+pub(crate) fn design_type_menu() -> Vec<Option<RowItem>> {
+  vec![row_item(Icon::Pencil, "Convert Design Type", RowCmd::ConvertDesignType)]
+}
+
+/// Runs a Part Design row menu command: Convert Design Type opens its docked dialog.
+pub(crate) fn run_design_type_cmd(app: &mut App, cmd: RowCmd) {
+  if cmd == RowCmd::ConvertDesignType {
+    crate::doc_dialogs::open_convert(app);
   }
 }
 
@@ -688,12 +702,14 @@ mod tests {
   }
 
   #[test]
-  fn units_row_menu_opens_the_units_popup() {
-    let ctx = egui::Context::default();
+  fn units_and_part_design_menus_open_their_dialogs() {
+    let mut app = App::with_session(Session::default());
     assert_eq!(labels(&units_menu()), ["Change Active Units"]);
-    assert!(!egui::Popup::is_id_open(&ctx, crate::units::popup_id()));
-    run_units_cmd(&ctx, RowCmd::ChangeUnits);
-    assert!(egui::Popup::is_id_open(&ctx, crate::units::popup_id()));
+    run_units_cmd(&mut app, RowCmd::ChangeUnits);
+    assert!(crate::doc_dialogs::units_open(&app));
+    assert_eq!(labels(&design_type_menu()), ["Convert Design Type"]);
+    run_design_type_cmd(&mut app, RowCmd::ConvertDesignType);
+    assert!(crate::doc_dialogs::convert_open(&app));
   }
 
   #[test]

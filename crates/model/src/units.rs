@@ -38,6 +38,18 @@ impl LengthUnit {
     }
   }
 
+  /// The mass unit that goes with this length unit, as Fusion's Document Settings row names it
+  /// ("Units: in, ouncemass"): ounces with inches, pounds with feet, grams and kilograms with the
+  /// metric units.
+  pub fn mass_symbol(self) -> &'static str {
+    match self {
+      LengthUnit::Mm | LengthUnit::Cm => "g",
+      LengthUnit::M => "kg",
+      LengthUnit::In => "ouncemass",
+      LengthUnit::Ft => "lbmass",
+    }
+  }
+
   /// The unit's name, as Fusion's unit list shows it.
   pub fn label(self) -> &'static str {
     match self {

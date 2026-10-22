@@ -21,7 +21,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [done (2026-10-21)] Marking menus on empty canvas, face, edge; todo: body, vertex, sketch point, construction geometry, timeline feature, in-sketch
 - [done (2026-10-21); not exercised: the look of each visual style and environment, each effect toggled, object visibility toggles, the ground plane offset value] Display settings: every visual style, environment, effects, object visibility, ground plane, full screen
 - [done (2026-10-21); not exercised: Snap to Grid while sketching, lock while zooming, Fixed fields, Incremental Move during a drag] Grid and snaps: layout grid in 3D and sketch, lock, snap, grid settings, incremental move
-- [todo] Origin planes/axes visibility, construction geometry display, sketch visibility
+- [done (2026-10-22); not exercised: construction axes and points, Origin Plane Names, sketch row eyes beyond the Sketches folder] Origin planes/axes visibility, construction geometry display, sketch visibility
 
 ## Design workspace: sketch
 - [done (2026-10-21)] Create Sketch flow, rectangle, circle, line, trim, offset, polygon, dimension edit, Horizontal
@@ -35,11 +35,11 @@ user meets them. Add areas when you find ones that are missing; never delete one
 
 ## Design workspace: solid
 - [done (2026-10-21)] Extrude, Fillet, Chamfer, Shell, Press Pull, Move, Hole dialogs (first pass)
-- [todo] Create: New Component, Revolve, Sweep, Loft, Rib, Web, Emboss, Thread, Box/Cylinder/Sphere/Torus/Coil/Pipe, patterns, Mirror, Thicken, Boundary Fill, Base Feature, Joint Origin
-- [todo] Modify: Draft, Scale, Combine, Offset Face, Replace Face, Split Face, Split Body, Silhouette Split, Align, Delete, Remove, Simplify, Physical Material, Appearance, Manage Materials, Change Parameters, Compute All, Direct Edit
-- [todo] Manipulators for every feature: arrows, rings, floating value boxes, drag behaviour, snapping
-- [todo] Edit Feature for every feature; feature errors and warnings in the timeline
-- [todo] Configure, Construct (every plane/axis/point), Inspect (measure, interference, curvature, section, zebra, draft, CoG, CO2), Insert (decal, canvas, SVG, DXF, mesh, STEP, McMaster), Assemble (components, joints, motion, enable contact), Select menu
+- [done (2026-10-22); dialogs as they open (and Box, Cylinder, Sphere, Torus, Coil, Pipe, Revolve, Thread, Mirror, Circular Pattern after their picks); not exercised: the post-pick rows of Sweep, Loft, Rib, Web, Emboss, Thicken, Boundary Fill, Joint Origin, Pattern on Path, each result's timeline icon, undo name and right-click menu, Create Form, Derive, Create PCB; New Component lives under ASSEMBLE] Create: New Component, Revolve, Sweep, Loft, Rib, Web, Emboss, Thread, Box/Cylinder/Sphere/Torus/Coil/Pipe, patterns, Mirror, Thicken, Boundary Fill, Base Feature, Joint Origin
+- [done (2026-10-22); dialogs as they open and after their first picks, Draft completed and edited; not exercised: Delete, Bill of Materials, Parting Line draft, Non Uniform scale, Combine Cut/Intersect, other Split Face types, completing Replace Face / Split Body / Align, results and right-click menus except Draft, drag-to-apply materials; Direct Edit has no Fusion menu entry with history on (see Timeline)] Modify: Draft, Scale, Combine, Offset Face, Replace Face, Split Face, Split Body, Silhouette Split, Align, Delete, Remove, Simplify, Physical Material, Appearance, Manage Materials, Change Parameters, Compute All, Direct Edit
+- [done (2026-10-22); Extrude, Fillet, Shell, Offset Face, Draft compared; not exercised: Revolve, Chamfer, Scale, Offset Plane, Hole, patterns, the primitives (open batch ui-primitive-dialogs), Incremental Move while dragging] Manipulators for every feature: arrows, rings, floating value boxes, drag behaviour, snapping
+- [done (2026-10-22); Extrude, Fillet, Box, Cylinder, Chamfer, Mirror, Hole, Move, Combine and Press Pull edited in both apps, a failed chamfer's toast, Error window, menu, Suppress / Unsuppress and Roll here; not exercised: Revolve, Shell, Scale, pattern and sketch edits side by side, a yellow warning (none could be made), the More Info target] Edit Feature for every feature; feature errors and warnings in the timeline
+- [in progress (2026-10-22, prober 11: CONSTRUCT, CONFIGURE, INSPECT, INSERT, ASSEMBLE and SELECT lists, Offset Plane, Axis Through Cylinder and Measure compared; next: every Construct method in Fusion's single dialog, every Inspect and Insert dialog, Assemble in an assembly document)] Configure, Construct (every plane/axis/point), Inspect (measure, interference, curvature, section, zebra, draft, CoG, CO2), Insert (decal, canvas, SVG, DXF, mesh, STEP, McMaster), Assemble (components, joints, motion, enable contact), Select menu
 
 ## Other tabs and workspaces
 - [todo] SURFACE tab: every create/modify command and dialog

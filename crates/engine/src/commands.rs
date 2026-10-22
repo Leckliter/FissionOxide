@@ -691,6 +691,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "sketch.finish" => {
       if let Some(id) = s.edit_sketch.take() {
+        // as in Fusion, a sketch a feature uses goes back to hidden when it is finished, even
+        // if it was shown (its eye greys; clicking it shows the sketch again)
+        if crate::scene::sketch_consumed(s, id)
+          && let Some(f) = s.design.feature_mut(id)
+          && f.visible == Some(true)
+        {
+          f.visible = None;
+          s.revision += 1;
+        }
         s.finish_sketch_step(id);
       }
       Ok(json!({}))

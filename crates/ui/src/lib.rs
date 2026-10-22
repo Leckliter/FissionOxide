@@ -18,8 +18,13 @@ mod customize;
 mod cut_ui;
 mod data_panel;
 mod dialogs;
+mod doc_dialogs;
 mod ecad_ui;
 mod explode_ui;
+mod file_dialogs;
+#[cfg(test)]
+mod file_dialogs_tests;
+mod file_menu;
 mod form_ui;
 mod forms;
 mod gen_ui;
@@ -48,6 +53,7 @@ mod plugins_ui;
 mod preferences;
 mod props_ui;
 mod render_ui;
+mod ribbon_tip;
 mod scale_to_ui;
 mod select;
 mod service_ui;
@@ -212,6 +218,9 @@ pub struct App {
   pub(crate) hidden_profiles: Vec<fox_engine::model::FeatureId>,
   /// Sketches whose dimensions show outside Edit Sketch (the browser's Show Dimensions).
   pub(crate) shown_dims: Vec<fox_engine::model::FeatureId>,
+  /// What the browser's Sketches folder and sketch rows hide (the folder's eye, Hide Projected
+  /// and Hide Construction Geometries).
+  pub(crate) sketch_rows: panels::SketchRowState,
   /// The data panel (projects, designs, versions).
   pub data: data_panel::DataPanel,
   /// The drawing open in the Drawing workspace; None = the Design workspace.
@@ -294,6 +303,14 @@ pub struct App {
   pub render: render_ui::RenderUi,
   /// The sketch Fillet, Chamfer and Blend Curve tools' last values (they have no dialog).
   pub modify: sketch_modify::Prefs,
+  /// File ▸ View ▸ Hide / Show Command Toolbar.
+  pub show_toolbar: bool,
+  /// File ▸ View ▸ Show Performance Overlay.
+  pub show_perf: bool,
+  /// File ▸ Open... and File ▸ Export..., while open.
+  pub files: file_dialogs::Files,
+  /// Change Active Units or Convert Design Type, docked at the right (see `doc_dialogs`).
+  pub(crate) doc_dialog: Option<doc_dialogs::DocDialog>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -303,6 +320,8 @@ enum RenameTarget {
   Component(u32),
   /// A timeline group.
   Group(u32),
+  /// A named view, by its place in the design's list.
+  NamedView(u32),
 }
 
 /// Everything that changes the rendered image.
@@ -322,6 +341,8 @@ struct RenderKey {
   visible: Vec<(u32, bool)>,
   profiles_of: Vec<fox_engine::model::FeatureId>,
   hidden_profiles: Vec<fox_engine::model::FeatureId>,
+  /// The Sketches folder's eye and the sketches drawn without projected or construction curves.
+  sketch_rows: panels::SketchRowState,
   /// Section and analysis settings.
   view: Value,
   /// Body vertices drawn (the Vertices selection filter).
@@ -485,6 +506,7 @@ impl App {
       pending_export: None,
       hidden_profiles: Vec::new(),
       shown_dims: Vec::new(),
+      sketch_rows: Default::default(),
       data: data_panel::DataPanel::default(),
       sel_priority: select::Priority::Face,
       sel_filter: select::Filters::default(),
@@ -523,6 +545,10 @@ impl App {
       render_components: explode_ui::RenderComponents::default(),
       render: render_ui::RenderUi::default(),
       modify: sketch_modify::Prefs::default(),
+      show_toolbar: true,
+      show_perf: false,
+      files: file_dialogs::Files::default(),
+      doc_dialog: None,
     }
   }
 
@@ -670,6 +696,8 @@ impl App {
     self.ctx_menu.peek_sketches.clear();
     self.ctx_menu.isolate = None;
     self.data.save = None;
+    // the Export window was for the old design
+    self.files.export = None;
   }
 
   /// Opens a design (latest or a given version) from the data panel.
@@ -791,8 +819,14 @@ impl App {
     self.fitted_once = false;
   }
 
-  /// Open from this computer: designs, or any importable file as a new design.
+  /// File ▸ Open... (Ctrl+O): Fusion's Open window, with the projects and "Open from my
+  /// computer...".
   pub fn open_dialog(&mut self) {
+    file_dialogs::open(self);
+  }
+
+  /// Open from this computer: designs, or any importable file as a new design.
+  pub fn open_from_computer(&mut self) {
     if let Some(p) = data_panel::pick_importable("Open", false).into_iter().next() {
       self.open_path(&p);
     }
@@ -812,7 +846,7 @@ impl App {
     } else {
       self.s.design.name.clone()
     };
-    self.data.save = Some(data_panel::SaveForm { name, as_new, project, folder, ..Default::default() });
+    self.data.save = Some(data_panel::SaveForm { name, as_new, project, folder, first: true, ..Default::default() });
   }
 
   /// Save to a file on this computer (.fox, or .foxz archive).
@@ -931,6 +965,9 @@ impl App {
     for p in files {
       if p.extension().is_some_and(|e| e.eq_ignore_ascii_case(fox_plugin::package::EXTENSION)) {
         plugins_ui::offer_file(self, &p);
+      } else if let Some(u) = self.data.upload.as_mut() {
+        // dropped on the Upload window: uploaded with the others when Upload is clicked
+        u.files.push(p);
       } else if self.data.open {
         let (project, folder) = self.data.location();
         if let Some(r) = self.run("hub.upload", json!({"path": p, "project": project, "folder": folder}))
@@ -950,8 +987,9 @@ impl App {
   }
 
   fn shortcuts(&mut self, ctx: &egui::Context) {
-    if self.key_capture.is_some() || self.preferences.open || self.show_params {
-      // Change Keyboard Shortcut and the Preferences and Parameters modals take the keys
+    if self.key_capture.is_some() || self.preferences.open || self.show_params || self.data.takes_keys() {
+      // Change Keyboard Shortcut, the Preferences, Parameters, Upload, Move and Copy modals and
+      // the data panel's inline name editor take the keys
       return;
     }
     // Esc closes an open menu (File, Help, a panel's drop-down, a right-click menu) before it
@@ -985,8 +1023,9 @@ impl App {
       return;
     }
     use egui::{Key, Modifiers};
-    // commands with two or more modifiers first: Ctrl+S would take Ctrl+Alt+S too
-    if self.command_keys(ctx, true) {
+    // File ▸ View's Ctrl+Alt keys, then commands with two or more modifiers: Ctrl+S would take
+    // Ctrl+Alt+S too
+    if file_menu::view_keys(self, ctx) || self.command_keys(ctx, true) {
       return;
     }
     let pressed = |k: Key, m: Modifiers| ctx.input_mut(|i| i.consume_key(m, k));
@@ -1244,7 +1283,10 @@ impl App {
   /// Escape over the canvas: ends whatever is open, innermost first (a pop-up list, a tool's
   /// unfinished shape, the tool, the dialog, the selection).
   pub(crate) fn escape(&mut self) {
-    if self.other.is_some() {
+    if self.doc_dialog.is_some() {
+      // Change Active Units or Convert Design Type closes, changing nothing
+      doc_dialogs::close(self);
+    } else if self.other.is_some() {
       // the Select Other list closes, keeping the selection
       self.other = None;
     } else if self.sel_tool.is_some() {
@@ -1505,12 +1547,16 @@ impl App {
   /// Returns the new view's name.
   pub(crate) fn save_named_view(&mut self) -> Option<String> {
     let c = self.view_now();
+    // Fusion names it "NamedView" (then "NamedView(1)", ...) and prints nothing
+    let views = &self.s.design.named_views;
+    let name = std::iter::once("NamedView".to_string())
+      .chain((1..).map(|i| format!("NamedView({i})")))
+      .find(|n| !views.iter().any(|v| v.name == *n))?;
     let r = self.run(
       "view.named.save",
-      json!({"target": c.target, "yaw": c.yaw, "pitch": c.pitch, "distance": c.distance, "fov": c.fov, "ortho": c.ortho}),
+      json!({"name": name, "target": c.target, "yaw": c.yaw, "pitch": c.pitch, "distance": c.distance, "fov": c.fov, "ortho": c.ortho}),
     )?;
     let name = r.get("name").and_then(Value::as_str)?.to_string();
-    self.status = Some((format!("Saved the view as '{name}'"), false));
     Some(name)
   }
 
@@ -1692,7 +1738,9 @@ impl App {
       self.draw_busy(ui, &ctx);
       return;
     }
-    if self.data.save.is_none() && self.electronics.is_none() {
+    // Escape closes the 3D PRINT dialog, Image Options and the data panel's prompts first
+    let escaped = file_dialogs::escape(self, &ctx);
+    if !escaped && !file_dialogs::modal_open(self) && self.electronics.is_none() {
       // typed values go to the heads-up box or dialog before shortcuts see the keys
       viewport::route_typing(self, &ctx);
       self.shortcuts(&ctx);
@@ -1708,7 +1756,9 @@ impl App {
     plugins_ui::sync(self);
     preferences::recovery_tick(self, now());
     panels::app_bar(self, ui);
-    panels::toolbar(self, ui);
+    if self.show_toolbar {
+      panels::toolbar(self, ui);
+    }
     if self.drawing.is_none() && self.electronics.is_none() {
       panels::timeline(self, ui);
     }
@@ -1746,6 +1796,7 @@ impl App {
       panels::sketch_palette(self, &ctx);
       marking::show(self, &ctx);
       sim_ui::show(self, &ctx);
+      file_menu::perf_overlay(self, &ctx);
     }
     toolbox::show(self, &ctx);
     panels::canvas_status(self, &ctx);
@@ -1754,6 +1805,7 @@ impl App {
     panels::warning_toast(self, &ctx);
     notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
+    doc_dialogs::show(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
       if keep && self.dialog.is_none() {
@@ -1766,6 +1818,7 @@ impl App {
       params_ui::window(self, &ctx);
     }
     data_panel::save_window(self, &ctx);
+    file_dialogs::windows(self, &ctx);
     updates::window(self, &ctx);
     capture::windows(self, &ctx);
     navbar::ground_offset_window(self, &ctx);
@@ -1800,7 +1853,9 @@ impl App {
   /// viewport image dimmed with a progress note, and a cover that takes all input.
   fn draw_busy(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
     panels::app_bar(self, ui);
-    panels::toolbar(self, ui);
+    if self.show_toolbar {
+      panels::toolbar(self, ui);
+    }
     if self.drawing.is_none() {
       panels::timeline(self, ui);
     }
