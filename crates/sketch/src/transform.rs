@@ -96,6 +96,9 @@ impl Sketch {
         | ConstraintKind::HorizontalDistance { a, b, .. }
         | ConstraintKind::VerticalDistance { a, b, .. } => moved.contains(a) && moved.contains(b),
         ConstraintKind::PointLineDistance { p, line, .. } => moved.contains(p) && line_moved(self, *line),
+        ConstraintKind::ChamferDistance { p, line, other, .. } => {
+          moved.contains(p) && line_moved(self, *line) && line_moved(self, *other)
+        }
         ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => curves.contains(curve),
         _ => false,
       };

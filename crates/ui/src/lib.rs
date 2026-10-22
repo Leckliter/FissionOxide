@@ -47,6 +47,7 @@ mod select;
 mod service_ui;
 mod sheet;
 mod sim_ui;
+mod sketch_modify;
 mod theme;
 mod tips;
 mod toolbox;
@@ -261,6 +262,8 @@ pub struct App {
   pub(crate) render_components: explode_ui::RenderComponents,
   /// The Render workspace.
   pub render: render_ui::RenderUi,
+  /// The sketch Fillet, Chamfer and Blend Curve tools' last values (they have no dialog).
+  pub modify: sketch_modify::Prefs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -478,6 +481,7 @@ impl App {
       library_ui: library_ui::LibraryUi::default(),
       render_components: explode_ui::RenderComponents::default(),
       render: render_ui::RenderUi::default(),
+      modify: sketch_modify::Prefs::default(),
     }
   }
 
@@ -948,6 +952,10 @@ impl App {
         viewport::settle_dim_edit(self);
       } else if self.nav_mode.is_some() {
         self.nav_mode = None;
+      } else if self.tstate.applied.is_some() {
+        // the fillet or chamfer just applied stays; its value box closes and the tool ends
+        sketch_modify::finish(self);
+        self.tool = Tool::Select;
       } else if !self.tstate.is_empty() {
         // an unfinished spline is discarded (Enter or its check mark commits it); with the
         // Select tool a stray pick state never keeps the selection

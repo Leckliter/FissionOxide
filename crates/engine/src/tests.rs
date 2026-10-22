@@ -1345,3 +1345,29 @@ fn sketch_offset_two_sides_takes_a_second_distance() {
   // a zero second distance is refused like a zero distance
   assert!(s.execute("sketch.offset", &json!({"curves": [line], "distance": 2, "distance2": 0})).is_err());
 }
+
+/// Fusion's sketch chamfer warns that constraints were removed (the corner's coincidence) and
+/// carries two distance dimensions; one at an apparent intersection removes nothing.
+#[test]
+fn sketch_chamfer_warns_of_removed_constraints_and_adds_its_dimensions() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let c: Vec<u64> = serde_json::from_value(
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [20, 10]}))["curves"].clone(),
+  )
+  .unwrap();
+  let r = run(&mut s, "sketch.chamfer", json!({"curves": [c[0], c[1]], "distance": 2}));
+  assert_eq!(r["removed"], 1);
+  assert_eq!(r["warning"], "Constraints and/or dimensions were removed during operation.");
+  let info = run(&mut s, "sketch.info", json!({}));
+  let dims = info["constraints"].as_array().unwrap().iter().filter(|c| c["kind"]["type"] == "chamfer_distance").count();
+  assert_eq!(dims, 2, "{}", info["constraints"]);
+  // two lines that don't touch: nothing to remove, no warning
+  let a = run(&mut s, "sketch.line", json!({"points": [[50, 0], [70, 0]]}))["curves"][0].as_u64().unwrap();
+  let b = run(&mut s, "sketch.line", json!({"points": [[80, 5], [80, 20]]}))["curves"][0].as_u64().unwrap();
+  let r = run(&mut s, "sketch.chamfer", json!({"curves": [a, b], "distance": 2}));
+  assert!(r.get("warning").is_none(), "{r}");
+  // a fillet doesn't warn (Fusion's doesn't)
+  let r = run(&mut s, "sketch.fillet", json!({"curves": [c[2], c[3]], "radius": 2}));
+  assert!(r.get("warning").is_none(), "{r}");
+}

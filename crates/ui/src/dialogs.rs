@@ -75,6 +75,8 @@ pub enum Kind {
   Bom,
   CenterOfMass,
   // sketch modify (run on the sketch being edited)
+  /// The sketch Fillet and Chamfer dialogs: no longer in the menus (Fusion runs them as
+  /// dialog-less tools, see `crate::sketch_modify`); still usable by the dialog tests.
   SkFillet,
   SkChamfer,
   SkChamfer2,
@@ -284,7 +286,7 @@ impl Kind {
       Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected (or all) bodies"),
       Kind::SkFillet => ("Fillet", "Round the corner where two lines or arcs meet"),
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
-      Kind::SkChamfer2 => ("Distance-Distance Chamfer", "Bevel a corner by two distances"),
+      Kind::SkChamfer2 => ("Two Distance Chamfer", "Bevel a corner by two distances"),
       Kind::SkChamferAngle => {
         ("Distance and Angle Chamfer", "Bevel a corner by a distance along the first line and an angle from it")
       }

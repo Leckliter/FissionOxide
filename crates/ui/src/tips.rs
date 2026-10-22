@@ -234,19 +234,22 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // SKETCH CHAMFER
     (_, "Equal Distance Chamfer") => (
-      "Bevels a sketch corner by the same distance along both lines.",
-      "Click the corner where two lines meet, or each line, then set the distance. A straight line \
-       replaces the corner and both lines are trimmed back.",
-    ),
-    (_, "Distance-Distance Chamfer") => (
-      "Bevels a sketch corner by a different distance along each line.",
-      "Click the two lines, then set a distance for each. The first distance goes on the first line you \
-       pick.",
+      "Creates a chamfer at the vertex, intersection, or apparent intersection of two lines in a \
+       sketch, based on an equal distance to each side.",
+      "Select a vertex or two lines, then specify the distance value for the chamfer. The chamfer is applied at once with the \
+       last value; the floating box and arrow beside it change it, and Enter commits and ends the tool.",
     ),
     (_, "Distance and Angle Chamfer") => (
-      "Bevels a sketch corner by a distance and an angle.",
-      "Click the two lines, then set the distance along the first one and the angle of the bevel from \
-       it. Use it when a drawing gives the chamfer as, say, 2 mm at 30 degrees.",
+      "Creates a chamfer at the vertex, intersection, or apparent intersection of two lines in a \
+       sketch, based on a single distance and an angle.",
+      "Select a vertex or two lines, then specify the distance and angle values for the chamfer. The chamfer is applied at once with the \
+       last value; the floating box and arrow beside it change it, and Enter commits and ends the tool.",
+    ),
+    (_, "Two Distance Chamfer") => (
+      "Creates a chamfer at the vertex, intersection, or apparent intersection of two lines in a \
+       sketch, based on a different distance to each side.",
+      "Select a vertex or two lines, then specify the two distance values for the chamfer. The chamfer is applied at once with the \
+       last value; the floating box and arrow beside it change it, and Enter commits and ends the tool.",
     ),
 
     // SKETCH MODIFY

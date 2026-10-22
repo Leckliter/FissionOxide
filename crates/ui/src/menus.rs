@@ -643,13 +643,13 @@ const SKETCH_CREATE: &[E] = &[
 ];
 
 const SK_CHAMFER: &[E] = &[
-  c("Equal Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer)),
-  c("Distance-Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer2)),
-  c("Distance and Angle Chamfer", Icon::SkChamfer, D(Kind::SkChamferAngle)),
+  c("Equal Distance Chamfer", Icon::SkChamfer, T(Tool::Chamfer)),
+  c("Distance and Angle Chamfer", Icon::SkChamferAngle, T(Tool::ChamferAngle)),
+  c("Two Distance Chamfer", Icon::SkChamfer2, T(Tool::Chamfer2)),
 ];
 
 const SKETCH_MODIFY: &[E] = &[
-  c("Fillet", Icon::SkFillet, D(Kind::SkFillet)),
+  c("Fillet", Icon::SkFillet, T(Tool::Fillet)),
   E::Sub("Chamfer", SK_CHAMFER),
   c("Blend Curve", Icon::BlendCurve, T(Tool::Blend)),
   c("Offset", Icon::SkOffset, D(Kind::SkOffset)).k("O"),

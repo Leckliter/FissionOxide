@@ -502,6 +502,9 @@ impl Sketch {
     let line = self.add_curve(CurveKind::Line { a: n1, b: n2 })?;
     self.drop_if_unused(c.near1);
     self.drop_if_unused(c.near2);
+    // Fusion's chamfer carries a distance dimension along each line from the corner it cut off
+    self.add_constraint(ConstraintKind::ChamferDistance { p: n1, line: l1, other: l2, value: Dim::new(d1) })?;
+    self.add_constraint(ConstraintKind::ChamferDistance { p: n2, line: l2, other: l1, value: Dim::new(d2) })?;
     Ok(line)
   }
 
@@ -1155,6 +1158,48 @@ mod tests {
     let a = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
     let b = line(&mut s, [0.0, 5.0], [10.0, 5.0]);
     assert!(s.chamfer(a, b, 1.0, 1.0).is_err());
+  }
+
+  /// Fusion's chamfer carries a distance dimension along each line from the corner it cut off;
+  /// editing one moves that end of the chamfer along its line.
+  #[test]
+  fn chamfer_distance_dimensions_drive_the_chamfer() {
+    let mut s = Sketch::new();
+    let lines = s.add_rectangle([0.0, 0.0], [40.0, 20.0]).unwrap();
+    let (bottom, right) = (lines[0], lines[1]);
+    let chamfer = s.chamfer(bottom, right, 3.0, 5.0).unwrap();
+    let dims: Vec<(PointId, CurveId, CurveId, f64)> = s
+      .constraints
+      .iter()
+      .filter_map(|c| match &c.kind {
+        ConstraintKind::ChamferDistance { p, line, other, value } => Some((*p, *line, *other, value.value)),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(dims.len(), 2);
+    assert_eq!((dims[0].1, dims[0].2, dims[0].3), (bottom, right, 3.0));
+    assert_eq!((dims[1].1, dims[1].2, dims[1].3), (right, bottom, 5.0));
+    assert_eq!(s.pos(dims[0].0).unwrap(), [37.0, 0.0]);
+    assert_eq!(s.pos(dims[1].0).unwrap(), [40.0, 5.0]);
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    // the dimension is satisfied as made, and drives the end when changed
+    let id = s.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::ChamferDistance { .. })).unwrap().id;
+    s.set_dim(id, Dim::new(8.0)).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    // the free rectangle gives a little too, so measure as the dimension does: from the end
+    // along the bottom line to where the bottom and right lines meet
+    let line = |c: CurveId| {
+      let pts = s.curve_points(c);
+      (s.pos(pts[0]).unwrap(), s.pos(pts[1]).unwrap())
+    };
+    let ((a0, a1), (b0, _)) = (line(bottom), line(right));
+    let (p, q) = (s.pos(dims[0].0).unwrap(), s.pos(dims[1].0).unwrap());
+    assert!(a0[1].abs() < 1e-6 && a1[1].abs() < 1e-6 && p[1].abs() < 1e-6, "the bottom stays horizontal");
+    assert!(((b0[0] - p[0]) - 8.0).abs() < 1e-6, "{p:?} {b0:?}");
+    assert!(((q[1] - a0[1]) - 5.0).abs() < 1e-6, "the other leg keeps its 5: {q:?}");
+    assert!(matches!(s.curve(chamfer).map(|c| &c.kind), Some(CurveKind::Line { .. })));
   }
 
   #[test]

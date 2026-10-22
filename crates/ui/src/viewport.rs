@@ -70,12 +70,37 @@ pub enum Tool {
   Circle2T,
   Circle3T,
   Blend,
+  /// Sketch Fillet: a pick-pick tool (no dialog), applied on the second pick.
+  Fillet,
+  /// Equal Distance Chamfer.
+  Chamfer,
+  /// Distance and Angle Chamfer.
+  ChamferAngle,
+  /// Two Distance Chamfer.
+  Chamfer2,
 }
 
 impl Tool {
   /// Tools that click curves (where on the curve matters) rather than place points.
   pub fn picks_curves(self) -> bool {
-    matches!(self, Tool::Trim | Tool::Extend | Tool::Break | Tool::Circle2T | Tool::Circle3T | Tool::Blend)
+    matches!(
+      self,
+      Tool::Trim
+        | Tool::Extend
+        | Tool::Break
+        | Tool::Circle2T
+        | Tool::Circle3T
+        | Tool::Blend
+        | Tool::Fillet
+        | Tool::Chamfer
+        | Tool::ChamferAngle
+        | Tool::Chamfer2
+    )
+  }
+
+  /// The chamfer tools, in the order of Fusion's Feature Options row.
+  pub fn is_chamfer(self) -> bool {
+    matches!(self, Tool::Chamfer | Tool::ChamferAngle | Tool::Chamfer2)
   }
 }
 
@@ -126,6 +151,8 @@ pub enum Drag {
   },
   /// Dragging the conic's rho arrow (see [`conic_rho_manip`]).
   ConicRho,
+  /// Dragging the arrow of an applied sketch fillet or chamfer (see [`crate::sketch_modify`]).
+  ToolManip,
 }
 
 /// Clicks collected by the active sketch tool (sketch coordinates).
@@ -141,7 +168,7 @@ pub struct ToolState {
   /// Dimension command waiting for its value.
   pending_dim: Option<serde_json::Value>,
   /// Curves picked so far by a curve-picking tool, with where each was clicked.
-  curves: Vec<(u32, [f64; 2])>,
+  pub(crate) curves: Vec<(u32, [f64; 2])>,
   /// Heads-up value boxes of the shape being drawn.
   hud: HeadsUp,
   /// Center Point Arc: the cursor's last angle around the centre and the signed sweep it has
@@ -157,6 +184,8 @@ pub struct ToolState {
   /// Where a curve-picking tool's last click made its result: nothing is hovered until the
   /// pointer leaves that spot, so the result draws like any other curve.
   hover_hold: Option<Pos2>,
+  /// Fillet / Chamfer: the one just applied, while its value box and arrow show.
+  pub(crate) applied: Option<crate::sketch_modify::Applied>,
 }
 
 /// Fusion's rho for a new conic curve.
@@ -246,11 +275,23 @@ fn hud_step(app: &App) -> usize {
 
 impl ToolState {
   pub fn is_empty(&self) -> bool {
-    self.pts.is_empty() && self.dim_picks.is_empty() && self.dim_place.is_none() && self.curves.is_empty()
+    self.pts.is_empty()
+      && self.dim_picks.is_empty()
+      && self.dim_place.is_none()
+      && self.curves.is_empty()
+      && self.applied.is_none()
+  }
+
+  /// The curves a curve-picking tool has picked so far.
+  pub(crate) fn picked_curves(&self) -> Vec<u32> {
+    self.curves.iter().map(|c| c.0).collect()
   }
 }
 
 pub fn reset_tool_state(app: &mut App) {
+  // a pick-pick tool's first pick was selected (drawn bold blue): it isn't any more
+  crate::sketch_modify::unselect_picks(app);
+  app.tstate.applied = None;
   app.tstate.pts.clear();
   app.tstate.dim_picks.clear();
   app.tstate.dim_place = None;
@@ -308,7 +349,7 @@ fn track_arc_wind(app: &mut App, resp: &egui::Response, view: &View) {
 }
 
 /// Viewport geometry for one frame: maps between egui points, frame pixels and the world.
-struct View {
+pub(crate) struct View {
   rect: Rect,
   ppp: f32,
   w: u32,
@@ -320,7 +361,7 @@ impl View {
     (((p.x - self.rect.min.x) * self.ppp) as f64, ((p.y - self.rect.min.y) * self.ppp) as f64)
   }
 
-  fn to_screen(&self, cam: &render::Camera, p: DVec3) -> Option<Pos2> {
+  pub(crate) fn to_screen(&self, cam: &render::Camera, p: DVec3) -> Option<Pos2> {
     let (x, y, z) = cam.project(p, self.w, self.h)?;
     if !(-1.0..=1.0).contains(&z) {
       return None;
@@ -328,7 +369,7 @@ impl View {
     Some(Pos2::new(self.rect.min.x + x as f32 / self.ppp, self.rect.min.y + y as f32 / self.ppp))
   }
 
-  fn ray(&self, cam: &render::Camera, p: Pos2) -> (DVec3, DVec3) {
+  pub(crate) fn ray(&self, cam: &render::Camera, p: Pos2) -> (DVec3, DVec3) {
     let (x, y) = self.to_px(p);
     cam.ray(x, y, self.w, self.h)
   }
@@ -418,6 +459,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   offset_follow(app, &resp, &view);
   tool_preview(app, &painter, &resp, &view);
   trim_preview(app, &painter, &resp, &view);
+  crate::sketch_modify::preview(app, &painter, &resp, &view);
+  consumed |= crate::sketch_modify::manipulator(app, &resp, &painter, &view, &ctx);
   dim_place_preview(app, &painter, &resp, &view);
   consumed |= spline_accept(app, ui, &painter, &view);
   consumed |= conic_rho_manip(app, &resp, &painter, &view);
@@ -796,7 +839,7 @@ fn view_params(app: &App) -> serde_json::Value {
 
 // ---------------------------------------------------------------- clicks & tools
 
-fn sketch_plane(app: &App) -> Option<(FeatureId, Plane)> {
+pub(crate) fn sketch_plane(app: &App) -> Option<(FeatureId, Plane)> {
   let sk = app.s.edit_sketch?;
   Some((sk, app.s.model.sketches.get(&sk)?.plane))
 }
@@ -934,7 +977,7 @@ fn round_to(v: f64, step: f64) -> f64 {
   if step > 0.0 { (v / step).round() * step } else { v }
 }
 
-fn grid_step(app: &App, view: &View) -> f64 {
+pub(crate) fn grid_step(app: &App, view: &View) -> f64 {
   let world_per_px = app.cam.view_height() / view.h.max(1) as f64;
   fox_engine::scene::nice_step(world_per_px * 40.0)
 }
@@ -1092,7 +1135,7 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     return;
   }
   if app.tool.picks_curves() {
-    curve_tool_click(app, view, pos, ctx.input(|i| i.modifiers.shift));
+    curve_tool_click(app, view, pos);
     return;
   }
   let Some((p, snapped)) = sketch_cursor(app, view, pos) else { return };
@@ -1961,7 +2004,7 @@ fn offset_follow(app: &mut App, resp: &egui::Response, view: &View) {
 
 /// Break, 2/3-tangent circle and blend: clicks pick curves (a 2-tangent circle's last click sets
 /// its size and place).
-fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
+fn curve_tool_click(app: &mut App, view: &View, pos: Pos2) {
   let Some((sk, plane)) = sketch_plane(app) else { return };
   let (o, d) = view.ray(&app.cam, pos);
   let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
@@ -1979,6 +2022,13 @@ fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
     app.run("sketch.break", params);
     return;
   }
+  if matches!(app.tool, Tool::Fillet | Tool::Blend) || app.tool.is_chamfer() {
+    if crate::sketch_modify::click(app, sk, at, hovered, app.hover) {
+      // the result draws like any other curve until the pointer moves (nothing is hovered)
+      app.tstate.hover_hold = Some(pos);
+    }
+    return;
+  }
   let picked = app.tstate.curves.len();
   // the 2-tangent circle's third click is anywhere: it places the circle
   if app.tool == Tool::Circle2T && picked == 2 {
@@ -1994,21 +2044,12 @@ fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
   app.tstate.curves.push((c, at));
   let picks = app.tstate.curves.clone();
   let curves: Vec<u32> = picks.iter().map(|c| c.0).collect();
-  match (app.tool, picks.as_slice()) {
-    (Tool::Circle3T, [a, b, c]) => {
-      app.tstate.curves.clear();
-      let near = [(a.1[0] + b.1[0] + c.1[0]) / 3.0, (a.1[1] + b.1[1] + c.1[1]) / 3.0];
-      app.run("sketch.tangent_circle", json!({"sketch": sk.0, "curves": curves, "near": near}));
-      // the new circle draws like any other curve until the pointer moves (nothing is hovered)
-      app.tstate.hover_hold = Some(pos);
-    }
-    (Tool::Blend, [a, b]) => {
-      app.tstate.curves.clear();
-      let continuity = if shift { "g2" } else { "g1" };
-      app.run("sketch.blend", json!({"sketch": sk.0, "curves": curves, "near": [a.1, b.1], "continuity": continuity}));
-      app.tstate.hover_hold = Some(pos);
-    }
-    _ => {}
+  if let (Tool::Circle3T, [a, b, c]) = (app.tool, picks.as_slice()) {
+    app.tstate.curves.clear();
+    let near = [(a.1[0] + b.1[0] + c.1[0]) / 3.0, (a.1[1] + b.1[1] + c.1[1]) / 3.0];
+    app.run("sketch.tangent_circle", json!({"sketch": sk.0, "curves": curves, "near": near}));
+    // the new circle draws like any other curve until the pointer moves (nothing is hovered)
+    app.tstate.hover_hold = Some(pos);
   }
 }
 
@@ -2610,7 +2651,18 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     let Some((anchor, key)) = glyph_anchor(&sketch, &c.kind) else { continue };
     let k = glyph_count.entry(key).or_default();
     let Some(at) = to_screen(anchor) else { continue };
-    let at = at + Vec2::new(10.0 + 14.0 * *k as f32, -10.0);
+    // a tangent glyph where a line meets an arc (a fillet) sits on the line just past the arc's
+    // end and outside the shape, as Fusion's does; the rest sit up and right of their anchor
+    let nudge = glyph_nudge(&sketch, &c.kind).and_then(|(along, out)| {
+      let a = to_screen([anchor[0] + along[0], anchor[1] + along[1]])? - at;
+      let o = to_screen([anchor[0] + out[0], anchor[1] + out[1]])? - at;
+      let (a, o) = (a.normalized(), o.normalized());
+      (a.is_finite() && o.is_finite()).then_some(a * 12.0 + o * 9.0)
+    });
+    let at = match nudge {
+      Some(n) => at + n + Vec2::new(14.0 * *k as f32, 0.0),
+      None => at + Vec2::new(10.0 + 14.0 * *k as f32, -10.0),
+    };
     *k += 1;
     let r = Rect::from_center_size(at, Vec2::splat(2.0 * crate::glyphs::HALF + 3.0));
     let resp = ui.interact(r, ui.id().with(("glyph", c.id.0)), Sense::click());
@@ -3153,6 +3205,30 @@ fn glyph_anchor(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], u32)> {
   }
   let p = *k.points().first()?;
   Some((s.pos(p)?, p.0 | 0x8000_0000))
+}
+
+/// For a tangent constraint between a line and an arc that share an end (a sketch fillet): the
+/// unit direction along the line away from the arc, and the direction out of the shape (away
+/// from the arc's centre), both in sketch coordinates; None for other glyphs.
+fn glyph_nudge(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], [f64; 2])> {
+  let ConstraintKind::Tangent { a, b } = k else { return None };
+  let (line, arc) = match (s.curve(*a).map(|c| &c.kind), s.curve(*b).map(|c| &c.kind)) {
+    (Some(CurveKind::Line { .. }), Some(CurveKind::Arc { .. })) => (*a, *b),
+    (Some(CurveKind::Arc { .. }), Some(CurveKind::Line { .. })) => (*b, *a),
+    _ => return None,
+  };
+  let lp = s.curve_points(line);
+  let ap = s.curve_points(arc);
+  let shared = *lp.iter().find(|p| ap[1..].contains(p))?;
+  let other = *lp.iter().find(|p| **p != shared)?;
+  let (j, o, c) = (s.pos(shared)?, s.pos(other)?, s.pos(*ap.first()?)?);
+  let unit = |v: [f64; 2]| {
+    let l = v[0].hypot(v[1]);
+    (l > 1e-9).then(|| [v[0] / l, v[1] / l])
+  };
+  let along = unit([o[0] - j[0], o[1] - j[1]])?;
+  let out = unit([j[0] - c[0], j[1] - c[1]])?;
+  Some((along, out))
 }
 
 /// Rubber-band preview of the shape being drawn.
@@ -4140,9 +4216,23 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
     Tool::Break => "Select curve to break",
     Tool::Blend => {
       if picked == 0 {
-        "Select first curve"
+        "Select first curve or edge"
       } else {
-        "Select second curve"
+        "Select second curve or edge"
+      }
+    }
+    Tool::Fillet => {
+      if picked == 0 {
+        "Select first line or arc"
+      } else {
+        "Select second line or arc"
+      }
+    }
+    Tool::Chamfer | Tool::ChamferAngle | Tool::Chamfer2 => {
+      if picked == 0 {
+        "Select a vertex or two lines to chamfer"
+      } else {
+        "Select a second line"
       }
     }
   })
@@ -4483,12 +4573,7 @@ fn manipulator(
     if let Some(p) = resp.interact_pointer_pos() {
       let (o, d) = view.ray(&app.cam, p);
       // closest point on the arrow's axis to the pointer ray
-      let w0 = m.origin - o;
-      let (aa, bb, cc) = (m.dir.dot(m.dir), m.dir.dot(d), d.dot(d));
-      let (dd, ee) = (m.dir.dot(w0), d.dot(w0));
-      let den = aa * cc - bb * bb;
-      if den.abs() > 1e-12 {
-        let t = (bb * ee - cc * dd) / den;
+      if let Some(t) = axis_param(m.origin, m.dir, o, d) {
         let step = app.increments.linear_step(grid_step(app, view) / 10.0);
         if let Some(dlg) = app.dialog.as_mut() {
           dlg.set_manipulator(t, step);
@@ -4499,6 +4584,29 @@ fn manipulator(
     return true;
   }
   hot || pressed_on_head && ctx.input(|i| i.pointer.primary_down())
+}
+
+/// Draws a manipulator arrow from `a` to its head at `b` (orange while `hot`, else Fusion's
+/// manipulator blue) and returns where its value box or label goes, beside the head.
+pub(crate) fn paint_arrow(painter: &egui::Painter, a: Pos2, b: Pos2, hot: bool) -> Pos2 {
+  let col = if hot { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
+  painter.line_segment([a, b], Stroke::new(2.0, col));
+  let dir2 = (b - a).normalized();
+  let dir2 = if dir2.is_finite() && (b - a).length() > 1.0 { dir2 } else { Vec2::new(0.0, -1.0) };
+  let side = Vec2::new(-dir2.y, dir2.x);
+  let head = [b + dir2 * 12.0, b + side * 6.0, b - side * 6.0];
+  painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
+  b + side * 14.0 + dir2 * 4.0
+}
+
+/// Where along the axis from `origin` along unit `dir` the pointer ray (`o`, `d`) passes
+/// closest: the parameter a dragged arrow head is at.
+pub(crate) fn axis_param(origin: DVec3, dir: DVec3, o: DVec3, d: DVec3) -> Option<f64> {
+  let w0 = origin - o;
+  let (aa, bb, cc) = (dir.dot(dir), dir.dot(d), d.dot(d));
+  let (dd, ee) = (dir.dot(w0), d.dot(w0));
+  let den = aa * cc - bb * bb;
+  (den.abs() > 1e-12).then(|| (bb * ee - cc * dd) / den)
 }
 
 /// The Measure dialog's result: a line between the closest points with the distance.
@@ -4650,6 +4758,17 @@ mod tests {
       out
     };
     assert_eq!(steps(Tool::MidpointLine), ["Select midpoint of line", "Select end of line"]);
+    let picks = |tool: Tool| {
+      let mut st = ToolState::default();
+      let first = sketch_prompt(tool, &st).unwrap();
+      st.curves.push((1, [0.0, 0.0]));
+      [first, sketch_prompt(tool, &st).unwrap()]
+    };
+    assert_eq!(picks(Tool::Fillet), ["Select first line or arc", "Select second line or arc"]);
+    for t in [Tool::Chamfer, Tool::ChamferAngle, Tool::Chamfer2] {
+      assert_eq!(picks(t), ["Select a vertex or two lines to chamfer", "Select a second line"]);
+    }
+    assert_eq!(picks(Tool::Blend), ["Select first curve or edge", "Select second curve or edge"]);
     assert_eq!(steps(Tool::Rect3), ["Place first corner", "Place second corner", "Place third corner"]);
     assert_eq!(steps(Tool::CenterRect), ["Place center point", "Specify size of rectangle"]);
     assert_eq!(
@@ -5655,5 +5774,36 @@ mod tests {
     // nothing to go by (the axis points straight at the camera): up
     assert_eq!(arrow_dir(Vec2::ZERO, Some(Vec2::ZERO)), Vec2::new(0.0, -1.0));
     assert_eq!(arrow_dir(Vec2::ZERO, None), Vec2::new(0.0, -1.0));
+  }
+
+  /// After a fillet the tangent glyphs sit beside each arc end: on the line, past the arc's end,
+  /// outside the shape; the arc's centre is a sketch point (drawn as a small hollow circle).
+  #[test]
+  fn fillet_tangent_glyphs_sit_beside_the_arc_ends() {
+    let (mut app, sk) = sketching(Tool::Select);
+    let r = app.run("sketch.rect", json!({"sketch": sk.0, "corner1": [0, 0], "corner2": [40, 20]})).unwrap();
+    let lines: Vec<u64> = r["curves"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+    app.run("sketch.fillet", json!({"sketch": sk.0, "curves": [lines[0], lines[1]], "radius": 5})).unwrap();
+    let s = app.s.design.sketch(sk).unwrap();
+    let mut seen = 0;
+    for c in &s.constraints {
+      let ConstraintKind::Tangent { .. } = c.kind else { continue };
+      let (at, _) = glyph_anchor(s, &c.kind).unwrap();
+      let (along, out) = glyph_nudge(s, &c.kind).expect("a fillet's tangent glyph is nudged");
+      if (at[1]).abs() < 1e-9 {
+        // the bottom line's end at (35, 0): along the line to the left, out of the shape downward
+        assert!((at[0] - 35.0).abs() < 1e-9, "{at:?}");
+        assert!(along[0] < -0.99 && out[1] < -0.99, "{along:?} {out:?}");
+      } else {
+        // the right line's end at (40, 5): up the line, out of the shape to the right
+        assert!((at[0] - 40.0).abs() < 1e-9 && (at[1] - 5.0).abs() < 1e-9, "{at:?}");
+        assert!(along[1] > 0.99 && out[0] > 0.99, "{along:?} {out:?}");
+      }
+      seen += 1;
+    }
+    assert_eq!(seen, 2);
+    // the arc's centre point is there to draw, not joined to anything: a hollow circle
+    let centre = s.points.iter().find(|p| (p.x - 35.0).abs() < 1e-9 && (p.y - 5.0).abs() < 1e-9).expect("centre");
+    assert!(!fox_engine::scene::joined_points(s).contains(&centre.id));
   }
 }

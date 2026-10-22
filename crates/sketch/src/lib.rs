@@ -392,6 +392,14 @@ pub enum ConstraintKind {
     center: PointId,
     lines: Vec<CurveId>,
   },
+  /// A sketch chamfer's distance, as Fusion dimensions it: from `p` (the chamfer's end on `line`)
+  /// along `line` to where `line` and `other`, extended, meet (the corner the chamfer cut off).
+  ChamferDistance {
+    p: PointId,
+    line: CurveId,
+    other: CurveId,
+    value: Dim,
+  },
 }
 
 impl ConstraintKind {
@@ -404,7 +412,8 @@ impl ConstraintKind {
       | ConstraintKind::PointLineDistance { value, .. }
       | ConstraintKind::Radius { value, .. }
       | ConstraintKind::Diameter { value, .. }
-      | ConstraintKind::Angle { value, .. } => Some(value),
+      | ConstraintKind::Angle { value, .. }
+      | ConstraintKind::ChamferDistance { value, .. } => Some(value),
       _ => None,
     }
   }
@@ -417,7 +426,8 @@ impl ConstraintKind {
       | ConstraintKind::PointLineDistance { value, .. }
       | ConstraintKind::Radius { value, .. }
       | ConstraintKind::Diameter { value, .. }
-      | ConstraintKind::Angle { value, .. } => Some(value),
+      | ConstraintKind::Angle { value, .. }
+      | ConstraintKind::ChamferDistance { value, .. } => Some(value),
       _ => None,
     }
   }
@@ -452,6 +462,7 @@ impl ConstraintKind {
       ConstraintKind::Angle { .. } => "Angle",
       ConstraintKind::Curvature { .. } => "Curvature",
       ConstraintKind::Polygon { .. } => "Polygon",
+      ConstraintKind::ChamferDistance { .. } => "Chamfer distance",
     }
   }
 
@@ -468,7 +479,8 @@ impl ConstraintKind {
       ConstraintKind::Fix { p, .. }
       | ConstraintKind::PointOnCurve { p, .. }
       | ConstraintKind::Midpoint { p, .. }
-      | ConstraintKind::PointLineDistance { p, .. } => vec![*p],
+      | ConstraintKind::PointLineDistance { p, .. }
+      | ConstraintKind::ChamferDistance { p, .. } => vec![*p],
       ConstraintKind::Polygon { center, .. } => vec![*center],
       _ => vec![],
     }
@@ -495,6 +507,7 @@ impl ConstraintKind {
       | ConstraintKind::Symmetric { line, .. }
       | ConstraintKind::PointLineDistance { line, .. } => vec![*line],
       ConstraintKind::Polygon { lines, .. } => lines.clone(),
+      ConstraintKind::ChamferDistance { line, other, .. } => vec![*line, *other],
       _ => vec![],
     }
   }
@@ -1082,6 +1095,9 @@ impl Sketch {
         }
       }
       ConstraintKind::PointLineDistance { line: l, .. } => line(*l, "Point-line distance"),
+      ConstraintKind::ChamferDistance { line: l, other, .. } => {
+        line(*l, "Chamfer distance").and(line(*other, "Chamfer distance"))
+      }
       ConstraintKind::Concentric { a, b } => centred(*a, "Concentric").and(centred(*b, "Concentric")),
       ConstraintKind::Radius { curve, .. } => round(*curve, "Radius"),
       ConstraintKind::FixRadius { curve, radius } => {

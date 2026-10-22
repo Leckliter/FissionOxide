@@ -2442,8 +2442,16 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       p.get("symmetric").and_then(Value::as_bool).unwrap_or(false),
     ),
   };
-  let made = s.edit(move |d| {
+  // Fusion warns when a chamfer drops constraints: the corner's coincidence (a point two lines
+  // share) and anything else on the point the chamfer cut away
+  let warn_removed = name == "sketch.chamfer";
+  let (made, removed) = s.edit(move |d| {
     let sketch = d.sketch_mut(sk)?;
+    let before: Vec<ConstraintId> = sketch.constraints.iter().map(|c| c.id).collect();
+    let corner_shared = match curves.as_slice() {
+      [a, b] => sketch.curve_points(*a).iter().any(|p| sketch.curve_points(*b).contains(p)),
+      _ => false,
+    };
     let pick = |sketch: &Sketch, c: Option<CurveId>, at: [f64; 2]| -> Result<CurveId, CmdError> {
       match c {
         Some(c) => Ok(c),
@@ -2500,10 +2508,16 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     if !sketch.solve().ok() {
       return Err(CmdError::new("the result conflicts with the sketch's constraints"));
     }
-    Ok(made)
+    let dropped = before.iter().filter(|c| sketch.constraint(**c).is_none()).count();
+    Ok((made, if warn_removed { dropped + usize::from(corner_shared) } else { 0 }))
   })?;
   let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
-  Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
+  let mut out = json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles});
+  if removed > 0 {
+    out["removed"] = json!(removed);
+    out["warning"] = json!("Constraints and/or dimensions were removed during operation.");
+  }
+  Ok(out)
 }
 
 /// A parsed `sketch.pattern_rect`: its two directions, each either a vector or a sketch line.

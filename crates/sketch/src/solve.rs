@@ -542,6 +542,21 @@ impl<'a> System<'a> {
     }
   }
 
+  /// A chamfer distance's signed reach: how far `p` lies along `line` from where `line` and
+  /// `other` (extended) meet, positive towards `line`'s end. None while the lines are parallel.
+  fn chamfer_reach(&self, x: &[f64], p: PointId, line: CurveId, other: CurveId) -> Option<f64> {
+    let (a, b) = self.line(x, line);
+    let (c, d) = self.line(x, other);
+    let (u, v) = (unit(sub(b, a)), unit(sub(d, c)));
+    let den = cross(u, v);
+    if den.abs() < 1e-12 {
+      return None;
+    }
+    let t = cross(sub(c, a), v) / den;
+    let corner = [a[0] + u[0] * t, a[1] + u[1] * t];
+    Some(dot(sub(self.p(x, p), corner), u))
+  }
+
   /// The ellipse of an ellipse or elliptical arc at `x`.
   fn ellipse(&self, x: &[f64], id: CurveId) -> Option<crate::Ellipse2> {
     match self.curve(id)? {
@@ -817,6 +832,9 @@ impl<'a> System<'a> {
         let (a, b) = self.line(x, *line);
         sgn(cross(unit(sub(b, a)), sub(self.p(x, *p), a)))
       }
+      ConstraintKind::ChamferDistance { p, line, other, .. } => {
+        sgn(self.chamfer_reach(x, *p, *line, *other).unwrap_or(1.0))
+      }
       ConstraintKind::Tangent { a, b } => {
         if self.is_line(*a) || self.is_line(*b) {
           let (l, r) = if self.is_line(*a) { (*a, *b) } else { (*b, *a) };
@@ -986,6 +1004,9 @@ impl<'a> System<'a> {
       K::PointLineDistance { p, line, value } => {
         let (a, b) = self.line(x, *line);
         vec![sign * cross(unit(sub(b, a)), sub(self.p(x, *p), a)) - value.value]
+      }
+      K::ChamferDistance { p, line, other, value } => {
+        vec![sign * self.chamfer_reach(x, *p, *line, *other).unwrap_or(value.value) - value.value]
       }
       K::Radius { curve, value } => vec![self.round(x, *curve).1 - value.value],
       K::FixRadius { curve, radius } => vec![self.round(x, *curve).1 - radius],

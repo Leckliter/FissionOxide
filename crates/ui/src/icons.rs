@@ -317,6 +317,10 @@ pub enum Icon {
   FilterFaces,
   // Sketch Offset's Flip button: the offset to the other side
   Flip,
+  /// Sketch Distance and Angle Chamfer: the bevel with its angle arc.
+  SkChamferAngle,
+  /// Sketch Two Distance Chamfer: a lopsided bevel with a tick on each leg.
+  SkChamfer2,
 }
 
 #[derive(Clone, Copy)]
@@ -2344,6 +2348,25 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.arrow_head((0.9, 0.36), (1.0, 0.0), 0.13, Blue);
       k.thick((0.5, 0.64), (0.22, 0.64), Ink, 1.0);
       k.arrow_head((0.1, 0.64), (-1.0, 0.0), 0.13, Ink);
+    }
+    Icon::SkChamferAngle => {
+      k.sk(&[(0.12, 0.92), (0.12, 0.5)], Slate);
+      k.sk(&[(0.5, 0.12), (0.92, 0.12)], Slate);
+      k.dashed((0.12, 0.5), (0.12, 0.12), Slate);
+      k.dashed((0.12, 0.12), (0.5, 0.12), Slate);
+      k.sk(&[(0.12, 0.5), (0.5, 0.12)], Coral);
+      // the angle between the bevel and the first line
+      k.ska((0.12, 0.5), 0.2, -FRAC_PI_2, -FRAC_PI_2 + 0.78, Teal);
+    }
+    Icon::SkChamfer2 => {
+      k.sk(&[(0.12, 0.92), (0.12, 0.62)], Slate);
+      k.sk(&[(0.36, 0.12), (0.92, 0.12)], Slate);
+      k.dashed((0.12, 0.62), (0.12, 0.12), Slate);
+      k.dashed((0.12, 0.12), (0.36, 0.12), Slate);
+      k.sk(&[(0.12, 0.62), (0.36, 0.12)], Coral);
+      // a tick on each leg: the two distances differ
+      k.sk(&[(0.04, 0.62), (0.2, 0.62)], Teal);
+      k.sk(&[(0.36, 0.04), (0.36, 0.2)], Teal);
     }
   }
 }

@@ -60,6 +60,10 @@ pub struct Shown {
   /// The box took the keyboard this frame: it just appeared (its value selected, so typing
   /// replaces it) or typing was aimed at it.
   pub focused: bool,
+  /// Enter was pressed while the box had the keyboard (commit).
+  pub enter: bool,
+  /// Escape was pressed while the box had the keyboard.
+  pub escape: bool,
 }
 
 /// Shows the box with its left edge at `at` (beside the arrow's head), editing `text`. `params`
@@ -104,6 +108,11 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut State, at: Pos2, text: &mut 
           crate::units::pin(ui, &mut r, text);
           out.changed |= r.changed();
           state.last = Some(text.clone());
+          if r.has_focus() || r.lost_focus() {
+            let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+            out.enter = enter;
+            out.escape = esc;
+          }
           // the ⋮ is painted: the UI font has no glyph for it
           let menu = ui.menu_button(" ", |ui| {
             if params.is_empty() {

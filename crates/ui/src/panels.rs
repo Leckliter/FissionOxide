@@ -556,6 +556,12 @@ impl Cmd {
         Tool::Blend => {
           (Icon::BlendCurve, "Blend Curve", "Tangent (or curvature) continuous spline joining two curve ends")
         }
+        Tool::Fillet => (Icon::SkFillet, "Fillet", "Round the corner where two lines or arcs meet"),
+        Tool::Chamfer => (Icon::SkChamfer, "Equal Distance Chamfer", "Bevel a corner by one distance"),
+        Tool::ChamferAngle => {
+          (Icon::SkChamferAngle, "Distance and Angle Chamfer", "Bevel a corner by a distance and an angle")
+        }
+        Tool::Chamfer2 => (Icon::SkChamfer2, "Two Distance Chamfer", "Bevel a corner by two distances"),
       },
       Cmd::Construction => (Icon::Construction, "Construction", "Toggle construction linetype (X)"),
       Cmd::Constraint(kind) => {
@@ -2679,6 +2685,45 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
                 }
               }
             });
+          }
+          // Fusion's Feature Options while a chamfer runs (equal distance, distance and angle, two
+          // distance) and while Blend Curve runs (tangent G1, curvature G2)
+          if app.tool.is_chamfer() || app.tool == Tool::Blend {
+            ui.add_space(4.0);
+            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
+            triangle(ui.painter(), r.left_center() + vec2(5.0, 0.0), true, theme::GROUP_LABEL);
+            ui.painter().text(
+              r.left_center() + vec2(16.0, 0.0),
+              egui::Align2::LEFT_CENTER,
+              "Feature Options",
+              egui::FontId::proportional(13.0),
+              theme::TEXT,
+            );
+            if app.tool.is_chamfer() {
+              row(ui, "Chamfer", &mut |ui| {
+                // laid out right to left, so the last listed is the leftmost
+                for (tool, icon, hint) in [
+                  (Tool::Chamfer2, Icon::SkChamfer2, "Two Distance Chamfer"),
+                  (Tool::ChamferAngle, Icon::SkChamferAngle, "Distance and Angle Chamfer"),
+                  (Tool::Chamfer, Icon::SkChamfer, "Equal Distance Chamfer"),
+                ] {
+                  if icons::icon_button(ui, icon, 22.0, hint, app.tool == tool, None).clicked() && app.tool != tool {
+                    // the line already picked carries over to the other kind
+                    crate::sketch_modify::switch_chamfer(app, tool);
+                  }
+                }
+              });
+            } else {
+              row(ui, "Blend Curve", &mut |ui| {
+                for (g2, icon, hint) in
+                  [(true, Icon::Curvature, "Curvature (G2)"), (false, Icon::Tangent, "Tangent (G1)")]
+                {
+                  if icons::icon_button(ui, icon, 22.0, hint, app.modify.blend_g2 == g2, None).clicked() {
+                    app.modify.blend_g2 = g2;
+                  }
+                }
+              });
+            }
           }
           if let Some(r) = app.s.model.sketches.get(&sk) {
             ui.add_space(4.0);
