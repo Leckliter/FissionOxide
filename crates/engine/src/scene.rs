@@ -49,6 +49,10 @@ pub const SKETCH_FREE: [u8; 4] = [6, 150, 214, 255];
 pub const SKETCH_FIXED: [u8; 4] = [20, 20, 24, 255];
 /// Geometry held by Fix constraints: Fusion's green (no lock glyph).
 pub const SKETCH_FIXED_GREEN: [u8; 4] = [120, 170, 20, 255];
+/// Projected geometry (a body's silhouette or edges brought into the sketch): Fusion's purple,
+/// in the sketch and after Finish Sketch alike, with a dark-purple filled dot at each vertex.
+pub const SKETCH_PROJECTED: [u8; 4] = [189, 132, 217, 255];
+pub const SKETCH_PROJECTED_POINT: [u8; 4] = [98, 46, 133, 255];
 /// Construction geometry and centerlines: Fusion's tan, dashed (even dashes for construction,
 /// dash-dot for a centerline, see `fox_render::dash_gap`).
 pub const SKETCH_CONSTRUCTION: [u8; 4] = [207, 174, 155, 255];
@@ -797,7 +801,8 @@ fn sketch_lines(
     } else if peeked || hover_more.contains(&pick) {
       (HOVER_COLOR, if editing { SKETCH_CURVE_WIDTH } else { 1.0 }, false)
     } else if !editing {
-      (SKETCH_IDLE, 1.0, false)
+      // projected geometry stays purple outside its sketch
+      (if idle == SKETCH_PROJECTED { idle } else { SKETCH_IDLE }, 1.0, false)
     } else if reference {
       (SKETCH_CONSTRUCTION, SKETCH_CURVE_WIDTH, false)
     } else {
@@ -829,7 +834,9 @@ fn sketch_lines(
       continue;
     }
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
-    let idle = if report.curve_free(sk, c.id) || text_free.contains(&c.id) {
+    let idle = if projected.contains(&c.id) {
+      SKETCH_PROJECTED
+    } else if report.curve_free(sk, c.id) || text_free.contains(&c.id) {
       SKETCH_FREE
     } else if fixed.contains(&c.id) {
       SKETCH_FIXED_GREEN
@@ -895,8 +902,21 @@ fn sketch_lines(
   let glyph_points: std::collections::HashSet<PointId> =
     sk.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
   let filled = filled_points(sk);
+  // projected geometry's points: dark-purple filled dots, in the sketch and outside it, hidden
+  // with the projected curves by the palette's Projected Geometries option
+  let projected_points: std::collections::HashSet<PointId> = sk
+    .curves
+    .iter()
+    .filter(|c| projected.contains(&c.id))
+    .flat_map(|c| fox_sketch::curve_points(&c.kind))
+    .filter(|p| *p != fox_sketch::ORIGIN)
+    .collect();
   // the palette's Points option: off, no sketch point is drawn (or picked)
-  for p in sk.points.iter().filter(|p| show.points && !glyph_points.contains(&p.id)) {
+  for p in sk
+    .points
+    .iter()
+    .filter(|p| show.points && !glyph_points.contains(&p.id) && (show.projected || !projected_points.contains(&p.id)))
+  {
     let pick = Pick::SketchPoint { sketch: sid, point: p.id };
     let at = w([p.x, p.y]);
     let id = if pickable { picks.id(pick) } else { 0 };
@@ -912,6 +932,8 @@ fn sketch_lines(
       scene.markers.push(Marker { at, color: SKETCH_POINT_SELECTED, size: 3.0, id, on_top, hollow: false });
     } else if hover == Some(pick) || hover_more.contains(&pick) {
       scene.markers.push(Marker { at, color: SKETCH_POINT, size: 4.0, id, on_top, hollow: true });
+    } else if projected_points.contains(&p.id) {
+      scene.markers.push(Marker { at, color: SKETCH_PROJECTED_POINT, size: 3.0, id, on_top, hollow: false });
     } else {
       let hollow = !editing || !filled.contains(&p.id);
       scene.markers.push(Marker { at, color: SKETCH_POINT, size: 3.0, id, on_top, hollow });

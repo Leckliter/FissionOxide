@@ -2969,7 +2969,10 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
       }
       picked = crate::viewport::picked_curves(app);
       if picked.is_empty() {
-        hovered = [app.hover?.to_sel()];
+        // what a click would pick: under the Bodies priority the body ("Body1"), not its face
+        let h = app.hover?;
+        let t = crate::select::targets(&app.s, h, app.sel_priority);
+        hovered = if t.len() == 1 { t } else { vec![h.to_sel()] };
         &hovered[..]
       } else {
         &picked[..]

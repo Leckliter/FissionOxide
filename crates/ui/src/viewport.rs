@@ -756,8 +756,12 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     }
   };
   let vis = app.objects;
+  // under the Bodies priority the body under the pointer lights as a whole, not its face
+  let hover_bodies = crate::select::hover_bodies(app);
+  let mut peek = app.ctx_menu.peek.clone();
+  peek.extend(hover_bodies.iter().filter(|b| !app.ctx_menu.peek.contains(b)));
   ViewOptions {
-    hover: app.hover,
+    hover: if hover_bodies.is_empty() { app.hover } else { None },
     hide_edges: !app.visual_style.edges(),
     hide_grid: !grid_shown(app),
     // the origin axes (dashed, each with its own eye under the Origin folder's) are drawn over
@@ -770,7 +774,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     show_profiles_of: profiles_of,
     hide_profiles_of: app.hidden_profiles.clone(),
     show_vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none() && vis.bodies,
-    peek: app.ctx_menu.peek.clone(),
+    peek,
     peek_faces: app.ctx_menu.peek_faces.clone(),
     peek_sketches: app.ctx_menu.peek_sketches.clone(),
     only_bodies: if vis.bodies {
@@ -818,7 +822,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hidden_profiles: app.hidden_profiles.clone(),
     view: view_params(app),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
-    peek: app.ctx_menu.peek.iter().map(|b| b.0).collect(),
+    peek: app.ctx_menu.peek.iter().chain(&crate::select::hover_bodies(app)).map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
     opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
     peek_faces: app.ctx_menu.peek_faces.iter().map(|(b, f)| (b.0, *f)).collect(),
@@ -2333,7 +2337,11 @@ fn point_line_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 fn select_click(app: &mut App, add: bool) {
   crate::origin::clear(app);
   match app.hover {
-    Some(p) if app.s.edit_sketch.is_some() => crate::panels::toggle_sel(&mut app.s, p.to_sel(), add),
+    // in a sketch, sketch geometry picks as itself; the model under it follows the selection
+    // priority (Project's Bodies filter picks the whole body, as in Fusion)
+    Some(p) if app.s.edit_sketch.is_some() && crate::select::pick_body(&p).is_none() => {
+      crate::panels::toggle_sel(&mut app.s, p.to_sel(), add)
+    }
     Some(p) => crate::select::pick(app, p, add),
     None if !add => app.s.selection.clear(),
     None => {}
@@ -5531,6 +5539,28 @@ mod tests {
   }
 
   /// An app editing a new sketch on XY with `tool` active.
+  /// PROJECT's Bodies filter in a sketch: the body under the pointer lights as a whole (no face
+  /// highlight), the status names it ("Body1") and a click picks the body, not the face.
+  #[test]
+  fn bodies_priority_in_a_sketch_hovers_and_picks_the_whole_body() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 20, "depth": 20, "height": 10})).unwrap();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let body = app.s.model.bodies[0].id;
+    let face = app.s.model.bodies[0].faces()[0].id;
+    app.hover = Some(Pick::Face { body, face });
+    // faces and edges (the default priority): the face lights and reads out
+    assert!(crate::panels::selection_text(&app).unwrap().starts_with("1 Face"));
+    let o = scene_options(&mut app);
+    assert!(o.hover == app.hover && o.peek.is_empty());
+    app.sel_priority = crate::select::Priority::Body;
+    assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("Body1"));
+    let o = scene_options(&mut app);
+    assert!(o.hover.is_none() && o.peek == [body], "{:?} {:?}", o.hover, o.peek);
+    select_click(&mut app, true);
+    assert_eq!(app.s.selection, [Sel::Body { body }]);
+  }
+
   fn sketching(tool: Tool) -> (App, FeatureId) {
     let mut app = App::with_session(Session::default());
     app.run("sketch.create", json!({"plane": "xy"})).unwrap();
