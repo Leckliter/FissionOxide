@@ -116,6 +116,41 @@ pub fn is_remote_hub(root: &std::path::Path) -> bool {
   fox_engine::store::remote::is_remote(root)
 }
 
+/// An open sketch set aside while a 3D command run from it is open (see [`App::launch`]).
+#[derive(Debug, Clone, Copy)]
+struct SuspendedSketch {
+  sketch: fox_engine::model::FeatureId,
+  /// The sketch's view, to come back to.
+  cam: Camera,
+  /// The sketch's own `pre_sketch_cam`, `pre_sketch_tab` and `last_sketch`, restored with it.
+  pre_cam: Option<Camera>,
+  pre_tab: Option<panels::Tab>,
+  last: Option<fox_engine::model::FeatureId>,
+  /// The command is Appearance, which has no OK: closing it always comes back to the sketch.
+  appearance: bool,
+}
+
+/// The sketch commands that draw curves: with the Sketch Palette's Construction linetype on, what
+/// they draw is construction.
+const DRAWN_CURVES: &[&str] = &[
+  "sketch.line",
+  "sketch.rect",
+  "sketch.circle",
+  "sketch.arc",
+  "sketch.polygon",
+  "sketch.slot",
+  "sketch.spline",
+  "sketch.control_spline",
+  "sketch.ellipse",
+  "sketch.conic",
+];
+
+/// Whether a SKETCH toolbar command run with no sketch open starts one (Sketch Dimension, D,
+/// does nothing in 3D in Fusion).
+fn starts_a_sketch(c: panels::Cmd) -> bool {
+  !matches!(c, panels::Cmd::SketchTool(Tool::Dimension) | panels::Cmd::FinishSketch)
+}
+
 pub struct App {
   pub s: Session,
   pub cam: Camera,
@@ -226,6 +261,11 @@ pub struct App {
   /// The ribbon tab the open sketch was started from; finishing it comes back to that tab
   /// (SURFACE stays SURFACE), as in Fusion.
   pub(crate) pre_sketch_tab: Option<panels::Tab>,
+  /// The open sketch a 3D command run from it (E, F, H, Q, A) set aside: the command's Cancel
+  /// or Escape comes back to it, its OK leaves it finished, as in Fusion.
+  suspended_sketch: Option<SuspendedSketch>,
+  /// The sketch command a key started from 3D: it runs once Create Sketch has its plane.
+  pub(crate) sketch_then: Option<panels::Cmd>,
   /// The ViewCube's orientation, Home view and projection mode.
   cube: viewcube::CubeState,
   /// An origin or construction plane selected in the browser (a `sketch.create` plane: "xy" or
@@ -591,6 +631,8 @@ impl App {
       cam_move: None,
       pre_sketch_cam: None,
       pre_sketch_tab: None,
+      suspended_sketch: None,
+      sketch_then: None,
       cube: viewcube::CubeState::default(),
       picked_plane: None,
       export_dxf: None,
@@ -715,6 +757,35 @@ impl App {
 
   /// Runs a command, reporting errors in the status bar. Returns the result on success.
   pub fn run(&mut self, cmd: &str, params: Value) -> Option<Value> {
+    if self.palette.construction_linetype
+      && DRAWN_CURVES.contains(&cmd)
+      && let Some(sk) = self.s.edit_sketch
+    {
+      return self.run_as_construction(sk, cmd, params);
+    }
+    self.run_cmd(cmd, params)
+  }
+
+  /// Runs a curve-drawing command with the palette's Construction linetype on: the curves it adds
+  /// are construction, in the same undo step.
+  fn run_as_construction(&mut self, sk: fox_engine::model::FeatureId, cmd: &str, params: Value) -> Option<Value> {
+    let curves = |app: &App| {
+      app.s.design.sketch(sk).map(|s| s.curves.iter().map(|c| c.id).collect::<Vec<_>>()).unwrap_or_default()
+    };
+    let before = curves(self);
+    let txn = !self.s.in_transaction() && self.s.begin_transaction().is_ok();
+    let v = self.run_cmd(cmd, params);
+    let new: Vec<u32> = curves(self).into_iter().filter(|c| !before.contains(c)).map(|c| c.0).collect();
+    if v.is_some() && !new.is_empty() {
+      let _ = self.s.execute("sketch.construction", &json!({"curves": new, "on": true}));
+    }
+    if txn {
+      let _ = self.s.commit_transaction();
+    }
+    v
+  }
+
+  fn run_cmd(&mut self, cmd: &str, params: Value) -> Option<Value> {
     if self.rebuild.is_some() {
       self.status = Some(("Still computing — wait for it to finish".into(), false));
       return None;
@@ -1292,7 +1363,8 @@ impl App {
     if pressed(Key::V, Modifiers::NONE) {
       self.toggle_visibility();
     }
-    // the toolbar commands' keys: E extrude, L line, … (in a sketch, E finishes it first)
+    // the toolbar commands' keys: E extrude, L line, … (in a sketch, E sets it aside while
+    // Extrude runs; in 3D, L asks for a plane and sketches on it)
     self.command_keys(ctx, false);
     if self.s.edit_sketch.is_some() && pressed(Key::X, Modifiers::NONE) {
       self.toggle_construction();
@@ -1313,12 +1385,30 @@ impl App {
       toolbox::workspace_tabs(self)
     };
     let mut keys: Vec<(egui::Modifiers, egui::Key, panels::Cmd)> = Vec::new();
-    for e in menus::commands(&tabs) {
+    let workspace = menus::commands(&tabs);
+    for e in &workspace {
       let key = menus::key_of(&self.prefs, tips::Scope::of(e.tab), e.label);
       if let Some((m, k)) = customize::parse_combo(key)
         && !keys.iter().any(|(m2, k2, _)| (*m2, *k2) == (m, k))
       {
         keys.push((m, k, e.cmd));
+      }
+    }
+    // with no sketch open, the SKETCH toolbar's keys the workspace doesn't use start their
+    // command on a new sketch (C, L, R, T, P, O), as in Fusion
+    if self.s.edit_sketch.is_none()
+      && self.drawing.is_none()
+      && !(self.generative || self.manufacture || self.render.active || self.form.active)
+    {
+      for e in menus::commands(&[panels::Tab::Sketch]) {
+        let key = menus::key_of(&self.prefs, tips::Scope::Sketch, e.label);
+        if let Some((m, k)) = customize::parse_combo(key)
+          && !keys.iter().any(|(m2, k2, _)| (*m2, *k2) == (m, k))
+          && starts_a_sketch(e.cmd)
+          && !workspace.iter().any(|w| w.cmd == e.cmd)
+        {
+          keys.push((m, k, e.cmd));
+        }
       }
     }
     keys
@@ -1518,13 +1608,84 @@ impl App {
   }
 
   /// Runs a command from a shortcut, the S toolbox or Repeat. A modelling command the sketch
-  /// toolbar doesn't offer finishes the open sketch first, as in Fusion (E in a sketch extrudes
-  /// its profile).
+  /// toolbar doesn't offer sets the open sketch aside while it runs: its Cancel comes back to the
+  /// sketch, its OK leaves the sketch finished, as in Fusion (E in a sketch extrudes its
+  /// profile). A sketch command with no sketch open starts one: on the selected planar face
+  /// straight away, else once a plane is picked, with the command running in it.
   pub(crate) fn launch(&mut self, c: panels::Cmd) {
-    if self.s.edit_sketch.is_some() && self.drawing.is_none() && !menus::offers(panels::Tab::Sketch, c) {
+    if self.drawing.is_none() && self.s.edit_sketch.is_none() && self.sketch_only(c) {
+      self.sketch_first(c);
+      return;
+    }
+    if let Some(sketch) = self.s.edit_sketch
+      && self.drawing.is_none()
+      && !menus::offers(panels::Tab::Sketch, c)
+    {
+      let cam = self.view_now();
+      let (pre_cam, pre_tab, last) = (self.pre_sketch_cam, self.pre_sketch_tab, self.last_sketch);
       self.finish_sketch();
+      c.run(self);
+      // a command that opens no dialog (or one that closed at once) just leaves it finished
+      if self.dialog.is_some() {
+        let appearance = c == panels::Cmd::Dialog(dialogs::Kind::Form(&forms::APPEARANCE));
+        self.suspended_sketch = Some(SuspendedSketch { sketch, cam, pre_cam, pre_tab, last, appearance });
+      }
+      return;
     }
     c.run(self);
+  }
+
+  /// A SKETCH toolbar command the workspace's own toolbars don't have (Line, Circle, Offset, ...),
+  /// which in Fusion starts a sketch when none is open. Sketch Dimension (D) does nothing in 3D.
+  fn sketch_only(&self, c: panels::Cmd) -> bool {
+    starts_a_sketch(c)
+      && menus::offers(panels::Tab::Sketch, c)
+      && !toolbox::workspace_tabs(self).iter().any(|t| menus::offers(*t, c))
+  }
+
+  /// Starts sketch command `c` with no sketch open: Create Sketch on the selected plane or planar
+  /// face with `c` running, else Create Sketch's plane pick ("Select a plane or planar face")
+  /// with `c` to run once the plane is picked.
+  fn sketch_first(&mut self, c: panels::Cmd) {
+    if self.dialog.as_ref().is_some_and(|d| d.kind == dialogs::Kind::PickPlane) {
+      self.sketch_then = Some(c);
+      return;
+    }
+    self.new_sketch();
+    if self.s.edit_sketch.is_some() {
+      c.run(self);
+    } else if self.dialog.as_ref().is_some_and(|d| d.kind == dialogs::Kind::PickPlane) {
+      self.sketch_then = Some(c);
+    }
+  }
+
+  /// After the 3D command a sketch was set aside for closes: Cancel or Escape (nothing new in
+  /// the undo history) undoes the Finish Sketch and comes back to the sketch, its view and the
+  /// SKETCH tab; OK leaves it finished. Appearance has no OK: closing it always comes back.
+  fn resume_sketch(&mut self) {
+    if self.dialog.is_some() {
+      return;
+    }
+    let Some(sus) = self.suspended_sketch.take() else { return };
+    if self.s.edit_sketch.is_some() || self.s.design.sketch(sus.sketch).is_err() {
+      return;
+    }
+    if self.s.last_finished_sketch() == Some(sus.sketch) {
+      self.s.undo();
+      self.s.drop_redo();
+    } else if sus.appearance {
+      self.run("sketch.edit", json!({"sketch": sus.sketch.0}));
+    }
+    if self.s.edit_sketch != Some(sus.sketch) {
+      return;
+    }
+    self.last_sketch = sus.last;
+    self.pre_sketch_cam = sus.pre_cam;
+    self.pre_sketch_tab = sus.pre_tab;
+    self.fly_to(sus.cam);
+    self.tab = panels::Tab::Sketch;
+    self.browser_sketches = Some(true);
+    self.set_tool(Tool::Select);
   }
 
   /// Show/Hide (V), as Fusion's: shows or hides what is selected: bodies (or the bodies of
@@ -1676,6 +1837,10 @@ impl App {
   }
 
   pub fn cancel_dialog(&mut self) {
+    if self.dialog.as_ref().is_some_and(|d| d.kind == dialogs::Kind::PickPlane) {
+      // a sketch key's command goes with the plane pick
+      self.sketch_then = None;
+    }
     if let Some(mut d) = self.dialog.take() {
       d.cancel(&mut self.s);
       d.leave(self);
@@ -1721,6 +1886,7 @@ impl App {
   }
 
   pub fn create_sketch(&mut self, plane: Value) {
+    let then = self.sketch_then.take();
     if self.dialog.as_ref().is_some_and(|d| d.kind == dialogs::Kind::PickPlane) {
       self.cancel_dialog();
     }
@@ -1741,6 +1907,10 @@ impl App {
       self.browser_sketches = Some(true);
       // as in Fusion, no tool is active until one is picked
       self.set_tool(Tool::Select);
+      // unless a sketch key asked for the plane: its command runs in the new sketch
+      if let Some(c) = then {
+        c.run(self);
+      }
     }
   }
 
@@ -1906,6 +2076,9 @@ impl App {
     cam
   }
 
+  /// The Sketch Palette's Construction toggle (X): the selected curves become construction or
+  /// normal curves again; with nothing selected it turns the construction linetype on or off,
+  /// so the next curves are drawn as construction, as in Fusion.
   pub fn toggle_construction(&mut self) {
     let curves: Vec<u32> = self
       .s
@@ -1913,7 +2086,9 @@ impl App {
       .iter()
       .filter_map(|s| if let Sel::SketchCurve { curve, .. } = s { Some(curve.0) } else { None })
       .collect();
-    if !curves.is_empty() {
+    if curves.is_empty() {
+      self.palette.construction_linetype = !self.palette.construction_linetype;
+    } else {
       self.run("sketch.construction", json!({"curves": curves}));
     }
   }
@@ -1994,6 +2169,8 @@ impl App {
       viewport::route_typing(self, &ctx);
       self.shortcuts(&ctx);
     }
+    // a 3D command run from a sketch closed: back to the sketch unless it committed
+    self.resume_sketch();
     // the Manufacture workspace keeps its toolpaths in step with the design
     if self.manufacture && !self.s.design.cam.is_empty() && self.s.toolpaths_of.map(|t| t.1) != Some(self.s.revision) {
       self.cam_generate(false);
@@ -2489,6 +2666,133 @@ mod tests {
     assert!(app.s.edit_sketch.is_none());
     let d = app.dialog.as_ref().unwrap();
     assert_eq!((d.kind, d.sketch), (dialogs::Kind::Extrude, sketch));
+  }
+
+  #[test]
+  fn a_3d_command_from_a_sketch_comes_back_to_it_on_escape() {
+    let ctx = egui::Context::default();
+    let mut app = App::with_session(Session::default());
+    app.cam.yaw = 0.3;
+    app.cam.pitch = 0.4;
+    let before = app.cam;
+    app.create_sketch(json!("xz"));
+    settle_camera(&mut app);
+    let sketch_view = app.cam;
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]})).unwrap();
+    let sketch = app.s.edit_sketch;
+    let mid = app.canvas.center();
+    for k in [egui::Key::E, egui::Key::F, egui::Key::H, egui::Key::Q, egui::Key::A] {
+      press(&mut app, &ctx, k, mid);
+      assert!(app.dialog.is_some() && app.s.edit_sketch.is_none(), "{k:?} opens its 3D command over the sketch");
+      settle_camera(&mut app);
+      assert_eq!(app.cam, before, "{k:?}: the 3D view shows");
+      press(&mut app, &ctx, egui::Key::Escape, mid);
+      app.resume_sketch();
+      assert_eq!(app.s.edit_sketch, sketch, "{k:?}: Escape comes back to the sketch");
+      assert_eq!(app.tab, panels::Tab::Sketch);
+      settle_camera(&mut app);
+      assert_eq!(app.cam, sketch_view, "{k:?}: and to its view");
+      assert!(!app.s.can_redo(), "{k:?}: the history is as it was");
+      assert_eq!(app.s.last_finished_sketch(), None);
+    }
+    // finishing the sketch later still goes back to the view from before it
+    app.finish_sketch();
+    settle_camera(&mut app);
+    assert_eq!(app.cam, before);
+    // OK leaves the sketch finished
+    app.edit_sketch(sketch.unwrap());
+    press(&mut app, &ctx, egui::Key::E, mid);
+    app.cancel_dialog();
+    app.run("extrude", json!({"distance": 5})).unwrap();
+    app.resume_sketch();
+    assert!(app.s.edit_sketch.is_none() && app.suspended_sketch.is_none());
+  }
+
+  #[test]
+  fn sketch_keys_in_3d_ask_for_a_plane_then_run_in_the_new_sketch() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let mid = app.canvas.center();
+    for (k, tool) in
+      [(egui::Key::C, Tool::Circle), (egui::Key::L, Tool::Line), (egui::Key::R, Tool::Rect), (egui::Key::T, Tool::Trim)]
+    {
+      press(&mut app, &ctx, k, mid);
+      assert!(app.s.edit_sketch.is_none());
+      let d = app.dialog.as_ref().expect("the plane pick");
+      assert_eq!(d.kind, dialogs::Kind::PickPlane, "{k:?}");
+      assert_eq!(d.prompt(false).as_deref(), Some(dialogs::PICK_PLANE_HINT));
+      app.create_sketch(json!("xy"));
+      assert!(app.s.edit_sketch.is_some(), "{k:?}");
+      assert_eq!(app.tool, tool, "{k:?} runs in the new sketch");
+      assert_eq!(app.tab, panels::Tab::Sketch);
+      app.finish_sketch();
+    }
+    for (k, kind) in [(egui::Key::P, dialogs::Kind::Project), (egui::Key::O, dialogs::Kind::SkOffset)] {
+      press(&mut app, &ctx, k, mid);
+      app.create_sketch(json!("xy"));
+      assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(kind), "{k:?}");
+      app.cancel_dialog();
+      app.finish_sketch();
+    }
+    // Escape drops the plane pick and its command
+    press(&mut app, &ctx, egui::Key::C, mid);
+    press(&mut app, &ctx, egui::Key::Escape, mid);
+    assert!(app.dialog.is_none() && app.sketch_then.is_none());
+    app.new_sketch();
+    app.create_sketch(json!("xy"));
+    assert_eq!(app.tool, Tool::Select, "Create Sketch alone starts no tool");
+    app.finish_sketch();
+    // D (Sketch Dimension) does nothing in 3D; E is still Extrude
+    press(&mut app, &ctx, egui::Key::D, mid);
+    assert!(app.dialog.is_none() && app.s.edit_sketch.is_none());
+    press(&mut app, &ctx, egui::Key::E, mid);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Extrude));
+  }
+
+  #[test]
+  fn a_sketch_key_with_a_planar_face_selected_sketches_on_it() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let body = &app.s.model.bodies[0];
+    let top = body.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    app.s.selection = vec![Sel::Face { body: body.id, face: top }];
+    let sketches = app.s.model.sketches.len();
+    let mid = app.canvas.center();
+    press(&mut app, &ctx, egui::Key::C, mid);
+    assert_eq!(app.s.model.sketches.len(), sketches + 1, "a new sketch at once");
+    let sk = app.s.edit_sketch.and_then(|e| app.s.model.sketches.get(&e)).unwrap();
+    assert!((sk.plane.origin.z - 5.0).abs() < 1e-9, "on the face: {:?}", sk.plane.origin);
+    assert_eq!(app.tool, Tool::Circle);
+    assert!(app.dialog.is_none() && app.s.selection.is_empty());
+  }
+
+  #[test]
+  fn x_with_nothing_selected_toggles_the_construction_linetype() {
+    let ctx = egui::Context::default();
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.unwrap();
+    let mid = app.canvas.center();
+    press(&mut app, &ctx, egui::Key::X, mid);
+    assert!(app.palette.construction_linetype);
+    press(&mut app, &ctx, egui::Key::Escape, mid);
+    assert!(app.palette.construction_linetype, "it stays on after Escape");
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    let curves = |app: &App| app.s.design.sketch(sk).unwrap().curves.clone();
+    assert!(curves(&app).iter().all(|c| c.construction), "new curves are construction");
+    // in one undo step
+    app.s.undo();
+    assert!(curves(&app).is_empty());
+    press(&mut app, &ctx, egui::Key::X, mid);
+    assert!(!app.palette.construction_linetype);
+    app.run("sketch.circle", json!({"center": [0, 0], "radius": 5})).unwrap();
+    assert!(curves(&app).iter().all(|c| !c.construction));
+    // with a curve selected X toggles the curve, not the linetype
+    let curve = curves(&app)[0].id;
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
+    press(&mut app, &ctx, egui::Key::X, mid);
+    assert!(!app.palette.construction_linetype);
+    assert!(curves(&app)[0].construction);
   }
 
   #[test]

@@ -2988,7 +2988,7 @@ pub(crate) fn profile_count(n: usize) -> String {
 }
 
 /// Whether every selected curve of the sketch is construction, and whether every one is a
-/// centerline (nothing selected: neither).
+/// centerline (nothing selected: whether the Construction linetype is on for new curves).
 fn linetype_state(app: &App, sk: FeatureId) -> (bool, bool) {
   let Ok(sketch) = app.s.design.sketch(sk) else { return (false, false) };
   let curves: Vec<_> = app
@@ -3001,7 +3001,7 @@ fn linetype_state(app: &App, sk: FeatureId) -> (bool, bool) {
     })
     .collect();
   if curves.is_empty() {
-    return (false, false);
+    return (app.palette.construction_linetype, false);
   }
   (curves.iter().all(|c| c.construction), curves.iter().all(|c| c.centerline))
 }

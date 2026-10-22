@@ -122,6 +122,9 @@ fn park(app: &mut App) -> Doc {
   app.anim = crate::anim_ui::AnimUi::default();
   app.form.active = false;
   app.drawing = None;
+  // a sketch set aside for a 3D command, or a sketch key's queued command, stays with the old tab
+  app.suspended_sketch = None;
+  app.sketch_then = None;
   let mut blank = Session::default();
   blank.store_root = app.s.store_root.clone();
   blank.revision = app.s.revision;

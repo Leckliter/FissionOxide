@@ -3030,3 +3030,22 @@ fn manufacture_has_no_timeline_and_new_setup_previews_its_stock() {
   h.app.cam_setups_hidden = true;
   assert!(!crate::viewport::scene_options(&mut h.app).toolpaths);
 }
+
+#[test]
+fn escape_from_extrude_started_in_a_sketch_comes_back_to_the_sketch() {
+  let mut h = Harness::new();
+  h.app.create_sketch(serde_json::json!("xy"));
+  h.app.run("sketch.rect", serde_json::json!({"corner1": [0, 0], "corner2": [10, 10]})).unwrap();
+  let sketch = h.app.s.edit_sketch;
+  h.frame(vec![]);
+  h.frame(vec![key(egui::Key::E), Event::Text("e".into())]);
+  h.frame(vec![]);
+  assert_eq!(h.app.dialog.as_ref().map(|d| d.kind), Some(crate::dialogs::Kind::Extrude));
+  assert!(h.app.s.edit_sketch.is_none());
+  assert_eq!(h.app.tab, crate::panels::Tab::Solid, "the SOLID tab shows");
+  h.frame(vec![key(egui::Key::Escape)]);
+  h.frame(vec![]);
+  assert!(h.app.dialog.is_none());
+  assert_eq!(h.app.s.edit_sketch, sketch, "back in the sketch");
+  assert_eq!(h.app.tab, crate::panels::Tab::Sketch);
+}

@@ -466,6 +466,11 @@ impl Session {
     self.edit_sketch = if undoing && self.design.sketch(id).is_ok() { Some(id) } else { None };
   }
 
+  /// The sketch the last undo step finished, when that step is a Finish Sketch.
+  pub fn last_finished_sketch(&self) -> Option<FeatureId> {
+    self.undo.last().and_then(|s| s.sketch)
+  }
+
   /// Forgets the redo history (used when a dialog's preview step is withdrawn).
   pub fn drop_redo(&mut self) {
     self.redo.clear();
