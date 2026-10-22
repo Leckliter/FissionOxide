@@ -346,6 +346,10 @@ pub struct State {
   pub origin: Vec<Value>,
   /// Parameters that follow from the picks (Plane at Angle's 0° plane).
   derived: Map<String, Value>,
+  /// The dialog tab showing (New Setup's Setup, Stock and Post Process: [`SETUP_PAGES`]).
+  pub page: usize,
+  /// While the rows are drawn: the section they are under is unfolded.
+  pub section_open: bool,
 }
 
 impl State {
@@ -401,6 +405,8 @@ impl State {
       open_edge_row: None,
       origin: Vec::new(),
       derived: Map::new(),
+      page: 0,
+      section_open: true,
     }
   }
 
@@ -658,6 +664,21 @@ impl State {
         }
       }
       "thread" => crate::thread_form::sync(form, self, &before, s),
+      // New Setup: the first body picked is the Model (every body until one is), the others
+      // the Fixture
+      "cam.setup" => {
+        let at = |k: &str| form.inputs.iter().position(|x| x.key() == k);
+        let model: Vec<u32> = match bodies.first() {
+          Some(b) => vec![*b],
+          None => s.model.bodies.iter().map(|b| b.id.0).collect(),
+        };
+        if let Some(j) = at("model") {
+          self.values[j] = json!(model);
+        }
+        if let Some(j) = at("fixtures") {
+          self.values[j] = json!(bodies.get(1..).unwrap_or_default());
+        }
+      }
       // Emboss wraps the profiles around a curved face, as Fusion does: no row for it
       "emboss" => {
         let face = form.inputs.iter().position(|x| x.key() == "face").map(|j| self.values[j].clone());
@@ -805,6 +826,17 @@ impl State {
     let both = || get("side").and_then(Value::as_str) == Some("both");
     let key = form.inputs[i].key();
     match form.cmd {
+      // New Setup: the Operation Type's own rows; a 4/5-axis machine's travel
+      "cam.setup" => {
+        let turning = get("type").and_then(Value::as_str) == Some("turning");
+        match setup_row(form, i) {
+          Some(lathe) if lathe != turning => false,
+          _ if matches!(key, "tilt_min" | "tilt_max" | "pivot") => {
+            set("machine") && get("machine") != Some(&json!("3axis"))
+          }
+          _ => true,
+        }
+      }
       "sketch.text.form" => {
         let on_path = get("type").and_then(Value::as_str) == Some("path");
         let picked = get("path").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
@@ -944,6 +976,7 @@ impl State {
       TRIM_CMD => key == "bodies",
       UNSTITCH_CMD => key == "faces",
       "surface.offset.form" => key == "bodies",
+      "cam.setup" => key == "name",
       _ => false,
     }
   }
@@ -2337,6 +2370,7 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
     "surface.patch.form" | "surface.ruled.form" | "surface.offset.form" => {
       crate::dialogs::surface::form_command(form.cmd, &p)
     }
+    "cam.setup" => ("cam.setup", setup_params(p)),
     "coil.form" => ("coil", coil_params(&p)),
     "pipe.form" => ("pipe", pipe_params(&p)),
     // Mesh Combine's Target Body chip holds one body
@@ -2643,6 +2677,65 @@ const LATHE_POSTS: &[(&str, &str)] =
 /// A lathe tool from the library (0 = the library's first of the kind the operation needs).
 const LATHE_TOOL: Input = Input::Expr { key: "tool_number", label: "Library tool (0 = default)", default: "0" };
 
+/// Fusion's Operation Type: a milling setup, or a lathe's (Fusion's "Turning or mill/turn").
+const SETUP_MILLING: (&str, &str) = ("milling", "Milling");
+const SETUP_TURNING: (&str, &str) = ("turning", "Turning or mill/turn");
+
+/// The New Setup dialog's rows after Operation Type, for both types: [`State::shown`] keeps the
+/// type's own, [`setup_page`] puts each on the Setup, Stock or Post Process tab and
+/// [`setup_section`] under its heading, as Fusion lays the dialog out.
+macro_rules! setup_rows {
+  ($types:expr) => {
+    &[
+      Input::Choice { key: "machine", label: "Machine", options: CAM_MACHINES },
+      Input::Expr { key: "tilt_min", label: "Tilt travel from (°)", default: "-120" },
+      Input::Expr { key: "tilt_max", label: "Tilt travel to (°)", default: "120" },
+      Input::Expr { key: "pivot", label: "Head pivot to tool tip (0 = TCP)", default: "0" },
+      Input::Choice { key: "type", label: "Operation Type", options: $types },
+      // milling: the WCS at the stock box's top corner, the model as it sits
+      Input::Choice { key: "orientation", label: "Orientation", options: &[("model", "Model orientation")] },
+      Input::Choice { key: "wcs_origin", label: "Origin", options: &[("stock_box", "Stock box point")] },
+      Input::Text { key: "stock_point", label: "Stock Point", default: "Box Point" },
+      Input::Check { key: "accessibility", label: "Accessibility Analysis" },
+      // turning: the spindle axis and where Z0 goes
+      Input::Choice {
+        key: "axis",
+        label: "Spindle axis",
+        options: &[("", "Automatic"), ("x", "X"), ("y", "Y"), ("z", "Z"), ("-x", "-X"), ("-y", "-Y"), ("-z", "-Z")],
+      },
+      Input::Choice {
+        key: "origin",
+        label: "Origin",
+        options: &[("front", "Part front face"), ("stock_front", "Stock front"), ("back", "Part back face")],
+      },
+      Input::Bodies { key: "model", label: "Model", required: false },
+      Input::Bodies { key: "fixtures", label: "Fixture", required: false },
+      // Stock: milling's relative size box
+      Input::Choice { key: "stock_mode", label: "Mode", options: &[("relative", "Relative size box")] },
+      Input::Choice {
+        key: "offset_mode",
+        label: "Stock Offset Mode",
+        options: &[("sides_top_bottom", "Add stock to sides and top-bottom")],
+      },
+      Input::Expr { key: "stock_side", label: "Stock Side Offset", default: "1 mm" },
+      Input::Expr { key: "stock_top", label: "Stock Top Offset", default: "1 mm" },
+      Input::Expr { key: "stock_bottom", label: "Stock Bottom Offset", default: "0 mm" },
+      Input::Expr { key: "round_up", label: "Round Up to Nearest", default: "0 mm" },
+      // Stock: turning's bar
+      Input::Expr { key: "stock_side", label: "Bar over the part (radial)", default: "2" },
+      Input::Expr { key: "stock_front", label: "Stock to face off", default: "1" },
+      Input::Expr { key: "chuck_gap", label: "Gap before the chuck", default: "5" },
+      Input::Expr { key: "grip", label: "Bar in the jaws", default: "15" },
+      // Post Process
+      Input::Choice { key: "post", label: "Post-processor", options: CAM_POSTS },
+      Input::Choice { key: "post", label: "Post-processor", options: LATHE_POSTS },
+      Input::Choice { key: "units", label: "G-code units", options: &[("mm", "Millimetres"), ("inch", "Inches")] },
+      // the dialog's title names it (SETUP : SETUP1); the browser renames it
+      Input::Text { key: "name", label: "Name", default: "" },
+    ]
+  };
+}
+
 pub static CAM_SETUP: Form = Form {
   title: "SETUP",
   name: "New Setup",
@@ -2650,49 +2743,95 @@ pub static CAM_SETUP: Form = Form {
   icon: Icon::Box,
   cmd: "cam.setup",
   fixed: &[],
-  inputs: &[
-    Input::Text { key: "name", label: "Name", default: "" },
-    Input::Expr { key: "stock_side", label: "Stock side offset", default: "2" },
-    Input::Expr { key: "stock_top", label: "Stock top offset", default: "1" },
-    Input::Choice { key: "post", label: "Post-processor", options: CAM_POSTS },
-    Input::Choice { key: "units", label: "G-code units", options: &[("mm", "Millimetres"), ("inch", "Inches")] },
-    Input::Bodies { key: "fixtures", label: "Fixtures (vise, clamps)", required: false },
-    Input::Choice { key: "machine", label: "Machine", options: CAM_MACHINES },
-    Input::Expr { key: "tilt_min", label: "Tilt travel from (°)", default: "-120" },
-    Input::Expr { key: "tilt_max", label: "Tilt travel to (°)", default: "120" },
-    Input::Expr { key: "pivot", label: "Head pivot to tool tip (0 = TCP)", default: "0" },
-  ],
+  inputs: setup_rows!(&[SETUP_MILLING, SETUP_TURNING]),
   picks_model: false,
 };
 
+/// TURNING's New Setup: the same dialog, Operation Type set to turning.
 pub static CAM_TURN_SETUP: Form = Form {
   title: "SETUP",
-  name: "New Turning Setup",
+  name: "New Setup",
   hint: "A lathe setup: the bar in the chuck about the part's axis, Z0 on a face, X0 on the axis",
   icon: Icon::Revolve,
   cmd: "cam.setup",
-  fixed: &[("type", "turning")],
-  inputs: &[
-    Input::Text { key: "name", label: "Name", default: "" },
-    Input::Choice {
-      key: "axis",
-      label: "Spindle axis",
-      options: &[("", "Automatic"), ("x", "X"), ("y", "Y"), ("z", "Z"), ("-x", "-X"), ("-y", "-Y"), ("-z", "-Z")],
-    },
-    Input::Expr { key: "stock_side", label: "Bar over the part (radial)", default: "2" },
-    Input::Expr { key: "stock_front", label: "Stock to face off", default: "1" },
-    Input::Expr { key: "chuck_gap", label: "Gap before the chuck", default: "5" },
-    Input::Expr { key: "grip", label: "Bar in the jaws", default: "15" },
-    Input::Choice {
-      key: "origin",
-      label: "Z0",
-      options: &[("front", "Part front face"), ("stock_front", "Stock front"), ("back", "Part back face")],
-    },
-    Input::Choice { key: "post", label: "Post-processor", options: LATHE_POSTS },
-    Input::Choice { key: "units", label: "G-code units", options: &[("mm", "Millimetres"), ("inch", "Inches")] },
-  ],
+  fixed: &[],
+  inputs: setup_rows!(&[SETUP_TURNING, SETUP_MILLING]),
   picks_model: false,
 };
+
+/// The New Setup dialog's tabs.
+pub const SETUP_PAGES: [&str; 3] = ["Setup", "Stock", "Post Process"];
+
+/// Is `form` the New Setup dialog (milling or turning)?
+pub fn is_setup(form: &Form) -> bool {
+  std::ptr::eq(form, &CAM_SETUP) || std::ptr::eq(form, &CAM_TURN_SETUP)
+}
+
+/// The New Setup tab a row sits on (see [`SETUP_PAGES`]).
+pub fn setup_page(key: &str) -> usize {
+  match key {
+    "stock_mode" | "offset_mode" | "stock_side" | "stock_top" | "stock_bottom" | "round_up" | "stock_front"
+    | "chuck_gap" | "grip" => 1,
+    "post" | "units" => 2,
+    _ => 0,
+  }
+}
+
+/// The New Setup heading a row starts, if it starts one: Fusion's Setup tab groups.
+pub fn setup_section(key: &str, turning: bool) -> Option<&'static str> {
+  match key {
+    "machine" => Some("Machine"),
+    "type" => Some("Setup"),
+    "orientation" if !turning => Some("Work Coordinate System (WCS)"),
+    "axis" if turning => Some("Work Coordinate System (WCS)"),
+    "model" => Some("Model"),
+    "fixtures" => Some("Fixture"),
+    _ => None,
+  }
+}
+
+/// Which Operation Type a New Setup row belongs to: Some(true) turning only, Some(false)
+/// milling only, None both. Of two rows with one key, the first is milling's.
+fn setup_row(form: &Form, i: usize) -> Option<bool> {
+  let key = form.inputs[i].key();
+  let again = form.inputs[..i].iter().any(|x| x.key() == key);
+  match key {
+    "axis" | "origin" | "stock_front" | "chuck_gap" | "grip" => Some(true),
+    "stock_side" | "post" => Some(again),
+    "machine" | "tilt_min" | "tilt_max" | "pivot" | "orientation" | "wcs_origin" | "stock_point" | "accessibility"
+    | "stock_mode" | "offset_mode" | "stock_top" | "stock_bottom" | "round_up" => Some(false),
+    _ => None,
+  }
+}
+
+/// `cam.setup`'s parameters from the New Setup rows: the Model's one body (none when it is every
+/// body: the engine machines them all), without the rows only the dialog shows.
+fn setup_params(mut p: Value) -> Value {
+  if let Some(o) = p.as_object_mut() {
+    let model = o.remove("model");
+    if let Some([b]) = model.as_ref().and_then(Value::as_array).map(Vec::as_slice) {
+      o.insert("body".into(), b.clone());
+    }
+    for k in [
+      "orientation",
+      "wcs_origin",
+      "stock_point",
+      "accessibility",
+      "stock_mode",
+      "offset_mode",
+      "stock_bottom",
+      "round_up",
+    ] {
+      o.remove(k);
+    }
+  }
+  p
+}
+
+/// Is the New Setup's Operation Type turning?
+pub fn setup_turning(form: &Form, state: &State) -> bool {
+  form.inputs.iter().position(|x| x.key() == "type").and_then(|i| state.values[i].as_str()) == Some("turning")
+}
 
 pub static CAM_TURN_FACE: Form = Form {
   title: "FACE",
@@ -3525,6 +3664,14 @@ pub static SK_TEXT_EXPLODE: Form = Form {
 
 /// Fills a form from what it edits when it opens (Edit Text: the selected text's values).
 pub fn prefill(form: &Form, state: &mut State, s: &Session) {
+  if is_setup(form) {
+    // Fusion names a new setup Setup1, Setup2, ... (its title shows it)
+    let n = s.design.cam.iter().map(|st| st.id).max().unwrap_or(0) + 1;
+    if let Some(i) = form.inputs.iter().position(|x| x.key() == "name") {
+      state.values[i] = json!(format!("Setup{n}"));
+    }
+    return;
+  }
   if crate::mesh_ui::is_mesh_form(form) {
     crate::mesh_ui::prefill(form, state, s);
     return;
@@ -3990,6 +4137,11 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
       Some("The outline is drawn exactly; a tolerance isn't in FissionOxide yet")
     }
     ("coil.form", "angle") => Some("Tapered coils aren't in FissionOxide yet"),
+    ("cam.setup", "stock_bottom") => Some("The stock's bottom is the part's in FissionOxide: no bottom offset yet"),
+    ("cam.setup", "round_up") => Some("FissionOxide doesn't round the stock's size up yet"),
+    ("cam.setup", "accessibility") => {
+      Some("A setup's accessibility analysis isn't in FissionOxide yet (INSPECT > Accessibility Analysis is)")
+    }
     ("pipe.form", "distance2") => Some("A pipe runs from its path's start in FissionOxide"),
     ("split_face", "split_type") => Some("FissionOxide splits faces with the surface only"),
     ("split_face", "extend") => Some("A splitting plane always extends across the faces in FissionOxide"),

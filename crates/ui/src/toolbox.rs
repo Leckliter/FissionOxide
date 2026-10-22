@@ -46,7 +46,7 @@ pub(crate) fn workspace_tabs(app: &App) -> Vec<Tab> {
     return vec![Tab::Animation];
   }
   if app.manufacture {
-    return vec![Tab::Milling, Tab::Turning];
+    return Tab::MANUFACTURE.to_vec();
   }
   let mut tabs = Vec::new();
   if app.s.edit_sketch.is_some() {

@@ -36,6 +36,7 @@ pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod auto_cut;
 mod body_picks;
+mod cam_setup;
 mod copies;
 mod edit_more;
 mod flange;
@@ -2605,8 +2606,9 @@ impl Dialog {
         };
     let mut cancel = false;
     let title = self.heading();
-    // FILLET's selection table needs the extra width, as in Fusion
-    let width = if matches!(self.kind, Kind::Fillet | Kind::Loft) { 360.0 } else { 300.0 };
+    // FILLET's selection table and SETUP's headings need the extra width, as in Fusion
+    let width =
+      if matches!(self.kind, Kind::Fillet | Kind::Loft) || self.setup_form().is_some() { 360.0 } else { 300.0 };
     // docked at the canvas's top-right corner when it opens and again after the window is
     // resized; in between it stays where it was dragged
     let dock = panels::dialog_dock(app.canvas, app.s.edit_sketch.is_some());
@@ -2637,6 +2639,7 @@ impl Dialog {
             });
           } else {
             self.tab_strip(ui);
+            self.setup_tabs(ui);
             egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
               self.fields(app, ui);
             });
@@ -2805,6 +2808,9 @@ impl Dialog {
     }
     if let Some(t) = self.flange_title() {
       return t.into();
+    }
+    if let Some(t) = self.setup_title() {
+      return t;
     }
     match self.kind {
       Kind::Move => self.move_title().unwrap_or(self.kind.title()),
@@ -3288,8 +3294,12 @@ impl Dialog {
     }
     let text_form = f.cmd == "sketch.text.form";
     let params = if text_form { crate::value_box::params_of(&app.s) } else { Vec::new() };
+    self.setup_rows_begin();
     for (i, input) in f.inputs.iter().enumerate() {
       if !self.form.shown(f, i) || crate::forms::State::hidden(f, i) {
+        continue;
+      }
+      if self.setup_field(f, i, ui) {
         continue;
       }
       if text_form && self.text_form_field(f, i, &params, ui, dirty) {
@@ -3361,6 +3371,9 @@ impl Dialog {
           let text = match n {
             // with the Selection Filter on faces, the picks are the faces
             _ if faces_mode => chip_text(faces_picked, if faces_picked == 1 { "face" } else { "faces" }),
+            // New Setup's Model, as Fusion's chip
+            1 if crate::forms::is_setup(f) => "Body".to_string(),
+            n if n > 1 && crate::forms::is_setup(f) => format!("{n} Bodies"),
             _ if planes > 0 => format!("{} selected", n + planes),
             0 => "Select".to_string(),
             // a mesh dialog's chip counts, as Fusion's "1 selected"
@@ -3596,6 +3609,7 @@ impl Dialog {
       ui.label(RichText::new("click points on the sheet to fill them").small().color(theme::MUTED));
       ui.end_row();
     }
+    self.setup_stock_dimensions(app, ui);
     // the Selection Filter decides what a click on the model picks while the dialog is open
     if let Some(mut f) = filter {
       self.filter_row_apply(app, &mut f);
@@ -7486,6 +7500,67 @@ mod tests {
     apply(&mut s, &mut d);
     let m = s.model.bodies.iter().find(|b| b.id.0 == arm).unwrap().shape.mass().unwrap();
     assert!((m.bbox_min.z - 10.0).abs() < 1e-6, "{:?}", m.bbox_min);
+  }
+
+  /// Fusion's SETUP dialog: "SETUP : SETUP1", the Setup, Stock and Post Process tabs with their
+  /// rows for the Operation Type, the body picked as the Model, and Fusion's stock offsets.
+  #[test]
+  fn new_setup_is_fusions_setup_dialog() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 34, "depth": 20, "height": 10}));
+    let b = s.model.bodies[0].id;
+    let mut d = form(&mut s, &CAM_SETUP, vec![], &[]);
+    prefill(&CAM_SETUP, &mut d.form, &s);
+    assert_eq!(d.heading(), "SETUP : SETUP1");
+    assert_eq!(SETUP_PAGES, ["Setup", "Stock", "Post Process"]);
+    let rows = |d: &Dialog, f: &'static Form, page: usize| -> Vec<&'static str> {
+      f.inputs
+        .iter()
+        .enumerate()
+        .filter(|(i, x)| d.form.shown(f, *i) && !State::hidden(f, *i) && setup_page(x.key()) == page)
+        .map(|(_, x)| x.key())
+        .collect()
+    };
+    assert_eq!(
+      rows(&d, &CAM_SETUP, 0),
+      ["machine", "type", "orientation", "wcs_origin", "stock_point", "accessibility", "model", "fixtures"]
+    );
+    assert_eq!(
+      rows(&d, &CAM_SETUP, 1),
+      ["stock_mode", "offset_mode", "stock_side", "stock_top", "stock_bottom", "round_up"]
+    );
+    assert_eq!(rows(&d, &CAM_SETUP, 2), ["post", "units"]);
+    // the Setup tab's headings
+    let sections: Vec<&str> =
+      ["machine", "type", "orientation", "model", "fixtures"].iter().filter_map(|k| setup_section(k, false)).collect();
+    assert_eq!(sections, ["Machine", "Setup", "Work Coordinate System (WCS)", "Model", "Fixture"]);
+    assert!(greyed(&CAM_SETUP, "stock_bottom").is_some() && greyed(&CAM_SETUP, "round_up").is_some());
+    // the Model is the body, already picked
+    let model = CAM_SETUP.inputs.iter().position(|x| x.key() == "model").unwrap();
+    assert_eq!(d.form.values[model], json!([b.0]));
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!(cmd, "cam.setup");
+    assert_eq!(
+      (p["type"].clone(), p["body"].clone(), p["stock_side"].clone()),
+      (json!("milling"), json!(b.0), json!("1 mm"))
+    );
+    assert!(p.get("orientation").is_none() && p.get("model").is_none() && p.get("axis").is_none());
+    apply(&mut s, &mut d);
+    let st = &s.design.cam[0];
+    assert_eq!((st.name.as_str(), st.body, st.stock_side, st.stock_top), ("Setup1", Some(b), 1.0, 1.0));
+    // a 4/5-axis machine's travel rows show with it
+    let mut d = form(&mut s, &CAM_SETUP, vec![], &[("machine", json!("table_table"))]);
+    assert!(rows(&d, &CAM_SETUP, 0).contains(&"tilt_min"));
+    // Turning: the lathe's rows and posts; TURNING's New Setup starts on it
+    let ty = CAM_SETUP.inputs.iter().position(|x| x.key() == "type").unwrap();
+    d.form.values[ty] = json!("turning");
+    assert_eq!(rows(&d, &CAM_SETUP, 0), ["type", "axis", "origin", "model", "fixtures"]);
+    assert_eq!(rows(&d, &CAM_SETUP, 1), ["stock_side", "stock_front", "chuck_gap", "grip"]);
+    let t = form(&mut s, &CAM_TURN_SETUP, vec![], &[]);
+    assert!(setup_turning(&CAM_TURN_SETUP, &t.form));
+    let (_, p) = t.command().unwrap();
+    assert_eq!((p["type"].clone(), p["post"].clone()), (json!("turning"), json!("fanuc_lathe")));
   }
 
   #[test]

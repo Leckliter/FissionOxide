@@ -31,7 +31,9 @@ impl Scope {
     match tab {
       Tab::Sketch => Scope::Sketch,
       Tab::Drawing => Scope::Drawing,
-      Tab::Milling | Tab::Turning => Scope::Manufacture,
+      Tab::Milling | Tab::Turning | Tab::Additive | Tab::Inspection | Tab::Fabrication | Tab::CamUtilities => {
+        Scope::Manufacture
+      }
       Tab::Form => Scope::Form,
       Tab::Animation => Scope::Animation,
       _ => Scope::Design,

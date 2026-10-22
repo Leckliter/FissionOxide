@@ -47,11 +47,23 @@ pub enum Tab {
   MeshEdit,
   /// The Animation workspace's tab.
   Animation,
+  /// The Manufacture workspace's additive (3D printing) tab.
+  Additive,
+  /// The Manufacture workspace's inspection (probing) tab.
+  Inspection,
+  /// The Manufacture workspace's fabrication (cutting) tab.
+  Fabrication,
+  /// The Manufacture workspace's UTILITIES tab (not the Design workspace's).
+  CamUtilities,
 }
 
 impl Tab {
   const MAIN: [Tab; 7] =
     [Tab::Solid, Tab::Surface, Tab::Mesh, Tab::SheetMetal, Tab::Plastic, Tab::Manage, Tab::Utilities];
+
+  /// The Manufacture workspace's tabs, in Fusion's order.
+  pub(crate) const MANUFACTURE: [Tab; 6] =
+    [Tab::Milling, Tab::Turning, Tab::Additive, Tab::Inspection, Tab::Fabrication, Tab::CamUtilities];
 
   pub(crate) fn label(self) -> &'static str {
     match self {
@@ -73,6 +85,10 @@ impl Tab {
       Tab::Assembly => "ASSEMBLY",
       Tab::MeshEdit => "DIRECT MESH EDITING",
       Tab::Animation => "ANIMATION",
+      Tab::Additive => "ADDITIVE",
+      Tab::Inspection => "INSPECTION",
+      Tab::Fabrication => "FABRICATION",
+      Tab::CamUtilities => "UTILITIES",
     }
   }
 }
@@ -1293,14 +1309,13 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       tabs = vec![Tab::Generative];
       app.tab = Tab::Generative;
     } else if app.manufacture {
-      tabs = vec![Tab::Milling, Tab::Turning];
-      if !matches!(app.tab, Tab::Milling | Tab::Turning) {
+      tabs = Tab::MANUFACTURE.to_vec();
+      if !Tab::MANUFACTURE.contains(&app.tab) {
         app.tab = Tab::Milling;
       }
-    } else if matches!(
-      app.tab,
-      Tab::Drawing | Tab::Milling | Tab::Turning | Tab::Generative | Tab::Render | Tab::Animation
-    ) {
+    } else if Tab::MANUFACTURE.contains(&app.tab)
+      || matches!(app.tab, Tab::Drawing | Tab::Generative | Tab::Render | Tab::Animation)
+    {
       app.tab = Tab::Solid;
     }
     // an Assembly Design has the ASSEMBLY tab in place of the modelling tabs, as in Fusion
@@ -1616,69 +1631,78 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       }
     });
   }
-  // the root row: "(Unsaved)" until saved, an eye for the whole component, Fusion's menu
-  let root_label = browser_rows::root_label(app);
-  let root_visible = browser_rows::root_visible(app);
-  let root_icon = crate::sheet_rules_ui::root_icon(app);
-  let ev = tree_row(ui, root, 0, Some(true), Some(root_visible), root_icon, &root_label, false, theme::TEXT);
-  if ev.eye {
-    browser_rows::root_show_hide(app);
-  }
-  if let Some(r) = ev.response {
-    if r.hovered() {
-      marking::peek(app, Vec::new(), root_label.clone());
+  // the Manufacture workspace's CAM Root: Units, Named Views, Origin, Models and Setups
+  if app.manufacture {
+    if !browser_cam::root(app, ui) {
+      return;
     }
-    r.context_menu(|ui| browser_rows::root_context_menu(app, ui));
-  }
-  if !is_open(ui, root, true) {
-    return;
-  }
-  // Document Settings: expanded to start, with the units and the design type, as in Fusion
-  let ds = egui::Id::new("tree-docsettings");
-  let ev = tree_row(ui, ds, 1, Some(true), None, Icon::Gear, "Document Settings", false, theme::TEXT);
-  if ev.response.is_some_and(|r| r.hovered()) {
-    marking::peek(app, Vec::new(), "Document Settings".into());
-  }
-  if is_open(ui, ds, true) {
-    // while Change Active Units is open the row is highlighted with its pencil, as in Fusion;
-    // hovering it shows no pencil
-    let label = crate::units::row_label(app.s.design.units);
-    let units_open = crate::doc_dialogs::units_open(app);
-    let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, units_open, theme::TEXT);
-    if let Some(r) = &ev.response {
-      let id = egui::Id::new("units-pencil");
-      crate::doc_dialogs::row_pencil(ui, r, 2, &label, id, false, units_open, "Change Active Units");
-      if r.hovered() {
-        marking::peek(app, Vec::new(), label.clone());
-      }
-      r.context_menu(|ui| {
-        browser_rows::folder_context_menu(ui, &browser_rows::units_menu(), |cmd| browser_rows::run_units_cmd(app, cmd));
-      });
+  } else {
+    // the root row: "(Unsaved)" until saved, an eye for the whole component, Fusion's menu
+    let root_label = browser_rows::root_label(app);
+    let root_visible = browser_rows::root_visible(app);
+    let root_icon = crate::sheet_rules_ui::root_icon(app);
+    let ev = tree_row(ui, root, 0, Some(true), Some(root_visible), root_icon, &root_label, false, theme::TEXT);
+    if ev.eye {
+      browser_rows::root_show_hide(app);
     }
-    // the design type (Part Design, Assembly Design, ...): a pencil on hover and a right-click
-    // menu, both Convert Design Type
-    let convert_open = crate::doc_dialogs::convert_open(app);
-    let type_label = app.s.design.design_type.label();
-    let ev = tree_row(ui, ds.with(2), 2, None, None, Icon::Component, type_label, convert_open, theme::TEXT);
-    if let Some(r) = &ev.response {
-      let id = egui::Id::new("design-type-pencil");
-      if crate::doc_dialogs::row_pencil(ui, r, 2, type_label, id, true, convert_open, "Convert Design Type") {
-        crate::doc_dialogs::open_convert(app);
-      }
+    if let Some(r) = ev.response {
       if r.hovered() {
-        marking::peek(app, Vec::new(), type_label.into());
+        marking::peek(app, Vec::new(), root_label.clone());
       }
-      r.context_menu(|ui| {
-        browser_rows::folder_context_menu(ui, &browser_rows::design_type_menu(), |cmd| {
-          browser_rows::run_design_type_cmd(app, cmd)
+      r.context_menu(|ui| browser_rows::root_context_menu(app, ui));
+    }
+    if !is_open(ui, root, true) {
+      return;
+    }
+    // Document Settings: expanded to start, with the units and the design type, as in Fusion
+    let ds = egui::Id::new("tree-docsettings");
+    let ev = tree_row(ui, ds, 1, Some(true), None, Icon::Gear, "Document Settings", false, theme::TEXT);
+    if ev.response.is_some_and(|r| r.hovered()) {
+      marking::peek(app, Vec::new(), "Document Settings".into());
+    }
+    if is_open(ui, ds, true) {
+      // while Change Active Units is open the row is highlighted with its pencil, as in Fusion;
+      // hovering it shows no pencil
+      let label = crate::units::row_label(app.s.design.units);
+      let units_open = crate::doc_dialogs::units_open(app);
+      let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, units_open, theme::TEXT);
+      if let Some(r) = &ev.response {
+        let id = egui::Id::new("units-pencil");
+        crate::doc_dialogs::row_pencil(ui, r, 2, &label, id, false, units_open, "Change Active Units");
+        if r.hovered() {
+          marking::peek(app, Vec::new(), label.clone());
+        }
+        r.context_menu(|ui| {
+          browser_rows::folder_context_menu(ui, &browser_rows::units_menu(), |cmd| {
+            browser_rows::run_units_cmd(app, cmd)
+          });
         });
-      });
+      }
+      // the design type (Part Design, Assembly Design, ...): a pencil on hover and a right-click
+      // menu, both Convert Design Type
+      let convert_open = crate::doc_dialogs::convert_open(app);
+      let type_label = app.s.design.design_type.label();
+      let ev = tree_row(ui, ds.with(2), 2, None, None, Icon::Component, type_label, convert_open, theme::TEXT);
+      if let Some(r) = &ev.response {
+        let id = egui::Id::new("design-type-pencil");
+        if crate::doc_dialogs::row_pencil(ui, r, 2, type_label, id, true, convert_open, "Convert Design Type") {
+          crate::doc_dialogs::open_convert(app);
+        }
+        if r.hovered() {
+          marking::peek(app, Vec::new(), type_label.into());
+        }
+        r.context_menu(|ui| {
+          browser_rows::folder_context_menu(ui, &browser_rows::design_type_menu(), |cmd| {
+            browser_rows::run_design_type_cmd(app, cmd)
+          });
+        });
+      }
     }
+    // the sheet metal rule, once the design has sheet metal
+    crate::sheet_rules_ui::browser_row(app, ui);
+    // the sheet metal flat pattern, under the Rule row
+    browser_flat::row(app, ui);
   }
-  // the sheet metal rule, once the design has sheet metal
-  crate::sheet_rules_ui::browser_row(app, ui);
-  // the sheet metal flat pattern, under the Rule row
-  browser_flat::row(app, ui);
   // Named Views
   let nv = egui::Id::new("tree-views");
   let ev = tree_row(ui, nv, 1, Some(false), None, Icon::Folder, "Named Views", false, theme::TEXT);
@@ -1741,6 +1765,11 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   }
   if is_open(ui, og, false) {
     browser_rows::origin_children(app, ui, og);
+  }
+  if app.manufacture {
+    browser_cam::models(app, ui);
+    browser_cam::setups(app, ui);
+    return;
   }
   browser_analysis::section(app, ui);
   components_section(app, ui);
@@ -4637,6 +4666,7 @@ pub fn toggle_sel(s: &mut Session, item: Sel, add: bool) {
 
 mod browser_analysis;
 mod browser_assembly;
+mod browser_cam;
 mod browser_canvas;
 mod browser_config;
 mod browser_edit;

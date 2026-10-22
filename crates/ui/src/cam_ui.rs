@@ -1,5 +1,7 @@
-//! Manufacture workspace windows: the tool library and the stock simulation's report.
+//! Manufacture workspace windows: the tool library and the stock simulation's report; New
+//! Setup's canvas preview.
 
+use fox_engine::kernel::glam::DVec3;
 use serde_json::{Value, json};
 
 use crate::App;
@@ -247,5 +249,72 @@ pub fn tool_library_window(app: &mut App, ctx: &egui::Context) {
     if reload {
       app.open_tool_library();
     }
+  }
+}
+
+/// The stock box's fill and edges while New Setup is open, Fusion's translucent grey-blue.
+const STOCK_FILL: egui::Color32 = egui::Color32::from_rgba_premultiplied(52, 58, 66, 56);
+const STOCK_EDGE: egui::Color32 = egui::Color32::from_rgba_premultiplied(96, 106, 122, 170);
+/// The WCS triad's arrows: their length on screen (points).
+const TRIAD_PX: f64 = 64.0;
+
+/// The setup New Setup previews: its stock box (milling) and its work origin.
+pub(crate) fn setup_preview_geometry(app: &App) -> Option<(Option<(DVec3, DVec3)>, DVec3)> {
+  if !app.dialog.as_ref().is_some_and(|d| d.setup_previewed()) {
+    return None;
+  }
+  let st = app.s.design.cam.last()?;
+  let origin = fox_engine::model::cam::origin(st, &app.s.model).ok()?;
+  let stock = if st.lathe.is_none() { fox_engine::model::cam::stock(st, &app.s.model).ok() } else { None };
+  Some((stock, origin))
+}
+
+/// While New Setup is open, as Fusion previews it: the stock as a translucent box around the
+/// part and the WCS triad (red X, green Y, blue Z arrows) at its origin, the stock box's corner.
+pub(crate) fn setup_preview(app: &App, painter: &egui::Painter, project: &dyn Fn(DVec3) -> Option<egui::Pos2>) {
+  let Some((stock, origin)) = setup_preview_geometry(app) else { return };
+  if let Some((lo, hi)) = stock {
+    let c = |x: bool, y: bool, z: bool| {
+      DVec3::new(if x { hi.x } else { lo.x }, if y { hi.y } else { lo.y }, if z { hi.z } else { lo.z })
+    };
+    let faces = [
+      [c(false, false, false), c(true, false, false), c(true, true, false), c(false, true, false)],
+      [c(false, false, true), c(true, false, true), c(true, true, true), c(false, true, true)],
+      [c(false, false, false), c(true, false, false), c(true, false, true), c(false, false, true)],
+      [c(false, true, false), c(true, true, false), c(true, true, true), c(false, true, true)],
+      [c(false, false, false), c(false, true, false), c(false, true, true), c(false, false, true)],
+      [c(true, false, false), c(true, true, false), c(true, true, true), c(true, false, true)],
+    ];
+    for f in faces {
+      if let Some(pts) = f.iter().map(|p| project(*p)).collect::<Option<Vec<_>>>() {
+        painter.add(egui::Shape::convex_polygon(pts, STOCK_FILL, egui::Stroke::new(1.0, STOCK_EDGE)));
+      }
+    }
+  }
+  let (right, _, _) = app.cam.basis();
+  let (Some(a), Some(b)) = (project(origin), project(origin + right)) else { return };
+  let per_unit = f64::from((b - a).length());
+  if per_unit < 1e-9 {
+    return;
+  }
+  let reach = TRIAD_PX / per_unit;
+  for (dir, col) in [
+    (DVec3::X, fox_engine::scene::ORIGIN_X_COLOR),
+    (DVec3::Y, fox_engine::scene::ORIGIN_Y_COLOR),
+    (DVec3::Z, fox_engine::scene::ORIGIN_Z_COLOR),
+  ] {
+    let Some(tip) = project(origin + dir * reach) else { continue };
+    let color = egui::Color32::from_rgb(col[0], col[1], col[2]);
+    let d = (tip - a).normalized();
+    if !d.is_finite() {
+      continue;
+    }
+    painter.line_segment([a, tip - d * 8.0], egui::Stroke::new(2.0, color));
+    let n = egui::vec2(-d.y, d.x);
+    painter.add(egui::Shape::convex_polygon(
+      vec![tip, tip - d * 11.0 + n * 4.5, tip - d * 11.0 - n * 4.5],
+      color,
+      egui::Stroke::NONE,
+    ));
   }
 }

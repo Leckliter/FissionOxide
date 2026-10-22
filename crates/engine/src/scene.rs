@@ -214,6 +214,8 @@ pub struct ViewOptions {
   pub curvature: bool,
   /// Draw the generated toolpaths and their setup's stock (the Manufacture workspace).
   pub toolpaths: bool,
+  /// Leave the stock box's outline out of the toolpaths (New Setup shows the stock itself).
+  pub hide_stock: bool,
   /// Draw the previewed 2D cut job (`cut.job.preview`) while it matches the design.
   pub cut: bool,
   /// Draw a simulation study's results (or mesh) instead of its bodies (the Simulation
@@ -780,7 +782,7 @@ impl SceneBuilder {
       }
     }
     if opts.toolpaths {
-      toolpath_lines(&mut scene, s);
+      toolpath_lines(&mut scene, s, !opts.hide_stock);
       simulated_stock(&mut scene, s);
     }
     if opts.cut {
@@ -1815,6 +1817,7 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
     o.slice = true;
   }
   o.toolpaths = p.get("toolpaths").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
+  o.hide_stock = p.get("hide_stock").and_then(serde_json::Value::as_bool).unwrap_or(false);
   o.cut = p.get("cut").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   if let Some(v) = p.get("sim").filter(|v| !v.is_null()) {
     o.sim = Some(crate::sim::view_of(s, v)?);
@@ -1871,7 +1874,7 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
 }
 
 /// Toolpaths (cutting moves blue, rapids dashed orange) and the stock box of their setup.
-fn toolpath_lines(scene: &mut Scene, s: &Session) {
+fn toolpath_lines(scene: &mut Scene, s: &Session, stock: bool) {
   let line = |scene: &mut Scene, pts: Vec<[f32; 3]>, color: [u8; 4], dashed: bool, width: f32| {
     scene.lines.push(Polyline {
       points: pts,
@@ -1884,7 +1887,8 @@ fn toolpath_lines(scene: &mut Scene, s: &Session) {
       behind: false,
     });
   };
-  if let Some((id, _)) = s.toolpaths_of
+  if stock
+    && let Some((id, _)) = s.toolpaths_of
     && let Some(st) = s.design.cam.iter().find(|c| c.id == id)
     && let Ok((lo, hi)) = fox_model::cam::stock(st, &s.model)
   {

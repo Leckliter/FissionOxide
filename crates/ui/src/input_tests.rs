@@ -2996,3 +2996,37 @@ fn surface_create_dialogs_draw_fusions_rows() {
   let t: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
   assert!(!t.iter().any(|x| x == "Orientation"), "{t:?}");
 }
+
+/// The Manufacture workspace, as Fusion's: no timeline, MILLING first of six tabs; New Setup
+/// previews its stock as a translucent box with the WCS triad at the stock's top corner (and no
+/// outline), and the browser's Setups eye hides the toolpaths.
+#[test]
+fn manufacture_has_no_timeline_and_new_setup_previews_its_stock() {
+  use crate::panels::Tab;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 34, "depth": 20, "height": 10}));
+  h.frame(vec![]);
+  let design = h.app.canvas;
+  h.app.manufacture = true;
+  h.frame(vec![]);
+  h.frame(vec![]);
+  assert_eq!(h.app.tab, Tab::Milling);
+  assert!(h.app.canvas.bottom() > design.bottom() + 30.0, "the timeline's room goes to the canvas");
+  h.app.start(crate::dialogs::Kind::Form(&crate::forms::CAM_SETUP));
+  for _ in 0..4 {
+    h.frame(vec![]);
+  }
+  assert_eq!(h.app.dialog.as_ref().unwrap().heading(), "SETUP : SETUP1");
+  let (stock, origin) = crate::cam_ui::setup_preview_geometry(&h.app).expect("the setup is previewed");
+  let (lo, hi) = stock.expect("a milling setup's stock box");
+  assert!((origin - fox_engine::kernel::glam::DVec3::new(lo.x, lo.y, hi.z)).length() < 1e-9, "{origin:?}");
+  assert!(crate::viewport::scene_options(&mut h.app).hide_stock, "no dashed outline under the translucent box");
+  h.app.cancel_dialog();
+  h.frame(vec![]);
+  assert!(crate::cam_ui::setup_preview_geometry(&h.app).is_none());
+  h.app.run("cam.setup", json!({}));
+  h.frame(vec![]);
+  assert!(crate::viewport::scene_options(&mut h.app).toolpaths);
+  h.app.cam_setups_hidden = true;
+  assert!(!crate::viewport::scene_options(&mut h.app).toolpaths);
+}

@@ -98,6 +98,12 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Choose the storyboards, the video resolution and where to save it. The video is rendered from \
        the storyboards' views.",
     ),
+    // MANUFACTURE 3D's Project (ahead of the sketch's Project)
+    (Manufacture, "Project") => (
+      "Projects curves or text down onto the surfaces as a finishing toolpath.",
+      "Pick the curves, sketch or text and a tool; the tool follows them dropped onto the model, at \
+       the depth given. Use it to engrave on curved faces.",
+    ),
     // SKETCH CREATE
     (_, "Line") => (
       "Draws a chain of connected straight lines.",
@@ -654,6 +660,41 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Browse, add and edit tools. Operations pick their tool from here, and its feeds and speeds \
        become their defaults.",
     ),
+    (_, "Create NC Program") => (
+      "Collects operations into an NC program and posts it as G-code.",
+      "Pick the setups or operations, the machine's post-processor and where the file goes; the \
+       program keeps those settings so it can be posted again after a change.",
+    ),
+    (_, "New Folder") => (
+      "Adds a folder to the setup to group its operations.",
+      "Drag operations into it to keep a long setup tidy; generating, simulating or posting the folder \
+       does all of its operations.",
+    ),
+    (_, "New Pattern") => (
+      "Repeats operations along a pattern.",
+      "Pick the operations and a linear, circular, or component pattern; the toolpaths are repeated at \
+       each instance without being recalculated.",
+    ),
+    (_, "Manual NC") => (
+      "Inserts a manual command into the NC program between operations.",
+      "Pick the kind (a comment, a stop, a dwell, a tool break check, a pass-through line, ...) and its \
+       value; it is written where it sits in the browser when the program is posted.",
+    ),
+    (_, "Probe WCS") => (
+      "Probes the part on the machine to set the work coordinate system.",
+      "Pick the faces or edges the probe touches; the machine finds the part and moves the WCS to it \
+       before the operations run.",
+    ),
+    (_, "Insert Manufacturing Data") => (
+      "Brings setups and operations from another document.",
+      "Pick a document with manufacturing data; its setups are copied into this one, ready to point at \
+       this design's model.",
+    ),
+    (_, "Create Manufacturing Model") => (
+      "Makes a copy of the design to machine, which can be changed apart from it.",
+      "Fill holes, add stock or simplify the part in the copy without touching the design; setups then \
+       pick the manufacturing model as their model.",
+    ),
 
     // MANUFACTURE 2D
     (_, "Face") => (
@@ -661,7 +702,7 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick a tool and the stock to leave; passes sweep across the whole top. Usually the first \
        operation of a setup.",
     ),
-    (_, "2D Pocket") => (
+    (_, "2D Offset Roughing (Pocket)") => (
       "Clears pockets down to their flat floors.",
       "Pick the pocket floors or their outlines and a tool; the area is cleared in steps down to the \
        floor. Set step-downs and stock to leave for a finishing pass.",
@@ -671,7 +712,7 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick the edges or faces to follow and a tool; the tool runs round the outline, offset by its \
        radius. Add tabs to hold a part that is cut free of the stock.",
     ),
-    (_, "2D Adaptive Clearing") => (
+    (_, "2D Adaptive Roughing") => (
       "Clears pockets with a light, constant tool engagement.",
       "Pick the pockets and a tool; the toolpath keeps the load on the cutter even, allowing deep cuts \
        at high feed. Follow it with a finishing contour.",
@@ -696,6 +737,16 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick round holes or bosses and a tool smaller than them; the tool spirals down to cut them to an \
        accurate diameter. It's more accurate than a drill for large holes and needs no tool of the \
        exact size.",
+    ),
+    (_, "Circular") => (
+      "Mills round pockets and bosses by circling the tool.",
+      "Pick cylindrical faces; the tool circles down in passes to the depth, cutting the pocket or boss \
+       to size.",
+    ),
+    (_, "2D Chamfer") => (
+      "Chamfers or deburrs edges with a chamfer mill.",
+      "Pick the edges and a chamfer mill; the tool runs along them at the chamfer's width, or just \
+       breaks the edge for deburring.",
     ),
     (_, "Engrave") => (
       "Engraves text and lines with a pointed tool.",
@@ -766,18 +817,73 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick the area and a tool; the rings follow the shape so the stepover is even on slopes as well \
        as flats. Good for an even finish on mixed shapes.",
     ),
-    (_, "Adaptive Clearing") => (
+    (_, "3D Adaptive Roughing") => (
       "Roughs the stock away around the part with a light, constant engagement.",
       "Pick a tool and the stock to leave; the stock is removed level by level while the cutter's load \
        stays steady. Usually the first 3D operation, followed by finishing passes. Rest machining cuts \
        only what earlier, larger tools left.",
+    ),
+    (_, "3D Offset Roughing (Pocket)") => (
+      "Roughs the stock away in levels with passes offset from the part.",
+      "Pick a tool and the stock to leave; each level is cleared with offset passes like a pocket. Use \
+       it where adaptive roughing isn't available.",
+    ),
+    (_, "Flat") => (
+      "Finishes the flat areas of the part.",
+      "Pick the area and a tool; only horizontal faces are machined, each at its own height, leaving \
+       the walls for other passes.",
+    ),
+    (_, "Ramp") => (
+      "Finishes steep walls ramping down instead of stepping.",
+      "Pick the area and a tool; the tool descends around the part continuously, which avoids the marks \
+       of level-by-level passes.",
+    ),
+    (Manufacture, "Horizontal") => (
+      "Clears the flat areas found by the tool, level by level.",
+      "Pick the area and a tool; every flat at a height the tool can reach is cleared. Use it to clean \
+       up floors after roughing.",
+    ),
+    (_, "Spiral") => (
+      "Finishes in a spiral from the centre outwards.",
+      "Pick the area, the centre and a tool; one continuous spiral covers rounded, shallow areas with no \
+       stepping marks.",
+    ),
+    (_, "Radial") => (
+      "Finishes with passes radiating from a centre.",
+      "Pick the area, the centre and a tool; the passes fan out like spokes. Good for round, shallow \
+       areas such as domes.",
+    ),
+    (_, "Morphed Spiral") => (
+      "Finishes in a spiral shaped to the area's outline.",
+      "Pick the area and a tool; the spiral follows the boundary and morphs towards the centre, so the \
+       step-over stays even on irregular shapes.",
+    ),
+    (_, "Blend") => (
+      "Finishes between two guide curves, blending one into the other.",
+      "Pick the two curves and a tool; the passes morph from the first curve to the second over the \
+       faces between them.",
+    ),
+    (_, "Morph") => (
+      "Finishes with passes that morph between two edges of the area.",
+      "Pick the area, the edges to follow and a tool; the passes follow the shape of the area, for an \
+       even finish on long, flowing faces.",
+    ),
+    (_, "Flow") => (
+      "Finishes faces along their own direction, using the side of a tapered tool where it can.",
+      "Pick the faces and a tool; the passes follow the faces' flow lines. Used for blades and \
+       free-form faces.",
+    ),
+    (_, "Geodesic") => (
+      "Finishes with passes a constant distance apart measured over the surface.",
+      "Pick the area and a tool; the step-over is kept along the surface rather than in plan, for an even \
+       finish on steep and shallow areas alike.",
     ),
     (_, "Steep and Shallow") => (
       "Finishes steep areas with level passes and shallow areas with rows.",
       "Pick the area and a tool and set the angle where steep turns to shallow. It combines two \
        finishing strategies in one toolpath.",
     ),
-    (_, "Contour") => (
+    (_, "3D Contour") => (
       "Finishes steep walls with passes at constant heights.",
       "Pick the area and a tool; it cuts around the part level by level. Works best on steep walls; \
        pair it with Parallel or Scallop for the flatter areas.",
@@ -810,39 +916,73 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     ),
 
     // MANUFACTURE TURNING
-    (_, "New Turning Setup") => (
-      "Holds a bar in the lathe's chuck about the part's axis.",
-      "The bar is the part's largest diameter plus the side stock; leave stock in front to face off and \
-       a gap before the chuck to part off in. Z0 goes on the part's front face (or the stock front, or \
-       the back face) and X0 on the spindle axis.",
-    ),
     (_, "Turning Face") => (
       "Faces the front of the bar down to the part.",
       "Uses the library's turning insert unless you pick one; passes a depth apart from the stock front \
        to the part's front face, out past the centre.",
     ),
-    (_, "Profile Roughing") => (
+    (_, "Turning Profile Roughing") => (
       "Roughs the outside down to the part in passes along the axis.",
       "Each pass takes the depth of cut off the diameter, climbs the shoulder it ends at and backs off at \
        45°, leaving the stock to leave for finishing. Undercuts behind a larger diameter are left for \
        grooving.",
     ),
-    (_, "Profile Finishing") => (
+    (_, "Turning Profile Finishing") => (
       "Finishes the front face and the outside in one pass.",
       "Takes the finishing insert (the smallest nose radius in the library) from the centre up the face \
        and along the profile, compensated for the nose radius.",
     ),
-    (_, "Groove") => (
+    (_, "Turning Groove") => (
       "Plunges the grooves and undercuts the profile passes can't reach.",
       "A grooving insert plunges across each groove, overlapping by the step-over and pecking; grooves \
        narrower than the insert are reported.",
+    ),
+    (_, "Turning Groove Roughing") => (
+      "Roughs a groove's width out in plunges with a grooving insert.",
+      "Pick the groove; plunges overlap across it, leaving stock for a finishing pass.",
+    ),
+    (_, "Turning Groove Finishing") => {
+      ("Finishes a groove's walls and floor.", "Pick the groove; the insert follows its profile once, after roughing.")
+    }
+    (_, "Turning Adaptive Roughing") => (
+      "Roughs the profile with a constant load on the insert.",
+      "The toolpath trochoids along the profile so the engagement stays even, allowing deep cuts with \
+       round or button inserts.",
+    ),
+    (_, "Turning Single Groove") => (
+      "Plunges one groove the width of the insert.",
+      "Pick the point where the groove goes; the insert plunges straight in to the depth and back out.",
+    ),
+    (_, "Turning Chamfer") => (
+      "Turns a chamfer on an edge of the part.",
+      "Pick the edge; the insert cuts the chamfer at the size and angle given.",
+    ),
+    (_, "Turning Trace") => (
+      "Runs the insert along curves exactly as drawn.",
+      "Pick the curves; the insert's tip follows them, with no compensation for its shape.",
+    ),
+    (_, "Subspindle Grab") => (
+      "Moves the subspindle up to grab the part.",
+      "Sets where the subspindle moves to and how it clamps, before the part is cut off the bar.",
+    ),
+    (_, "Bar Pull") => (
+      "Pulls more bar out of the chuck for the next part.",
+      "A gripper or the subspindle holds the bar while the chuck opens; set the pull length.",
+    ),
+    (_, "Subspindle Return") => (
+      "Moves the subspindle back after transferring the part.",
+      "Sets where the subspindle returns to, ready to machine the part's back.",
+    ),
+    (_, "Tool Call") => (
+      "Calls a tool to the spindle without cutting.",
+      "Pick the tool; the machine changes to it here, as for an inspection or a manual operation.",
     ),
     (_, "Turning Thread") => (
       "Cuts an outside thread on a cylindrical face.",
       "Pick the face and give the pitch; passes of equal chip area reach the ISO depth (or the depth \
        given) with a spring pass at the end, stopping short of a shoulder.",
     ),
-    (_, "Part Off") => (
+    (_, "Turning Part") => (
       "Parts the finished part off the bar at its back face.",
       "A part-off blade plunges through to the centre in pecks; it must fit in the gap before the chuck.",
     ),
@@ -908,6 +1048,69 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Writes the setup's toolpaths as G-code for the machine.",
       "Pick the post-processor that matches your machine's controller and the output file. Check the \
        code in a simulator before running it.",
+    ),
+    (_, "Simulate with Machine") => (
+      "Simulates the toolpaths on a model of the machine.",
+      "Watch the machine's axes move with the stock being cut; collisions with the machine and its \
+       travel limits are flagged.",
+    ),
+    (_, "Setup Sheet") => (
+      "Writes a sheet for the machinist: the setup, its tools and its operations.",
+      "Opens a document with the stock, the work origin, each operation's tool and its machining time, \
+       ready to print and take to the machine.",
+    ),
+    (_, "Machining Time") => (
+      "Estimates how long the setup's operations take.",
+      "Shows each operation's cutting, rapid and tool change time, from the feeds and the machine's \
+       rapid rate.",
+    ),
+    (_, "Form Mill") => (
+      "Makes a form tool from a sketched profile.",
+      "Pick a closed profile; it is turned into a custom tool whose shape is cut into the part.",
+    ),
+    (_, "Solid Holder") => (
+      "Makes a tool holder from a body in the design.",
+      "Pick a revolved body; it becomes a holder in the tool library, checked for collisions like the \
+       library's own holders.",
+    ),
+    (_, "Machine Library") => (
+      "Opens the machines that setups can use.",
+      "Browse, add and edit machines: their axes, travel limits and post-processor.",
+    ),
+    (_, "Post Library") => {
+      ("Opens the post-processors that write G-code.", "Browse the posts for each controller and add your own.")
+    }
+    (_, "Template Library") => (
+      "Opens the saved operation templates.",
+      "A template keeps operations and their settings so they can be added to another setup in one \
+       step.",
+    ),
+    (_, "Task Manager") => {
+      ("Lists the toolpaths being generated in the background.", "See their progress and stop the ones you don't need.")
+    }
+    (_, "Export Defaults") => (
+      "Saves your operation defaults to a file.",
+      "The values you set as defaults in operation dialogs are written out to share or keep.",
+    ),
+    (_, "Import Defaults") => {
+      ("Loads operation defaults from a file.", "The file's values replace your defaults in the operation dialogs.")
+    }
+    (_, "Reset Defaults") => (
+      "Goes back to the built-in operation defaults.",
+      "Every value you set as a default in the operation dialogs is cleared.",
+    ),
+    (_, "Inspect Surface") => (
+      "Probes points on faces to check them against the model.",
+      "Pick the faces; the probe touches them on the machine and reports how far each point lies from \
+       the model.",
+    ),
+    (_, "Part Alignment") => (
+      "Probes the part to find how it sits on the machine.",
+      "Pick faces to probe; the measured points line the model up with the part before inspecting.",
+    ),
+    (_, "Manual Inspection") => (
+      "Records measurements taken by hand against the model.",
+      "Pick the feature and the gauge; enter what was measured to compare it with the design.",
     ),
     (_, "Delete Setup") => (
       "Deletes the last setup and its operations.",

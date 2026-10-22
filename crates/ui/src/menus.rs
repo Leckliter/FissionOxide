@@ -843,13 +843,14 @@ const SKETCH_MODIFY_MORE: &[E] = &[
   c("Clean Up", Icon::SkCleanup, D(Kind::Form(&forms::SK_CLEANUP))),
 ];
 
-/// A tab's commands that its dropdowns don't show (see [`SKETCH_MODIFY_MORE`] and
-/// [`ASSEMBLE_MORE`]).
+/// A tab's commands that its dropdowns don't show (see [`SKETCH_MODIFY_MORE`], [`ASSEMBLE_MORE`]
+/// and [`CAM_MORE`]).
 fn extra_commands(tab: Tab) -> &'static [&'static [E]] {
   match tab {
     Tab::Sketch => &[SKETCH_MODIFY_MORE, ASSEMBLE_MORE],
     Tab::SheetMetal => &[ASSEMBLE_MORE, SHEET_MORE],
     Tab::Solid | Tab::Surface | Tab::Mesh | Tab::Plastic => &[ASSEMBLE_MORE],
+    Tab::Milling => &[CAM_MORE],
     _ => &[],
   }
 }
@@ -1018,65 +1019,160 @@ const DRAWING: [Group; 8] = [
   Group { label: "FINISH DRAWING", quick: &["Finish Drawing"], menu: FINISH_DRAWING },
 ];
 
+// The Manufacture workspace's panels, entry for entry as Fusion lists them (without the
+// Manufacturing Extension: no MULTI-AXIS panel, no Steep and Shallow).
+
+/// Manufacture commands FissionOxide has that Fusion's panels don't list (the Manufacturing
+/// Extension's, and Fusion's browser and dialog rows): not in the dropdowns, still found by the
+/// S toolbox and the keyboard shortcuts.
+const CAM_MORE: &[E] = &[
+  c("Steep and Shallow", Icon::Zebra, D(Kind::Form(&forms::CAM_STEEP_SHALLOW))),
+  c("Rotary", Icon::Revolve, D(Kind::Form(&forms::CAM_ROTARY))),
+  c("Swarf", Icon::Draft, D(Kind::Form(&forms::CAM_SWARF))),
+  c("Fixtures", Icon::Component, D(Kind::Form(&forms::CAM_FIXTURES))),
+  c("Delete Setup", Icon::Remove, Cmd::CamDelete),
+];
+
+/// SETUP's list, the same on MILLING and TURNING (TURNING's New Setup is a turning setup).
 const CAM_SETUP: &[E] = &[
   c("New Setup", Icon::Box, D(Kind::Form(&forms::CAM_SETUP))),
-  c("Fixtures", Icon::Component, D(Kind::Form(&forms::CAM_FIXTURES))),
+  c("Create NC Program", Icon::ExportDxf, Cmd::CamPost),
   E::Sep,
-  c("Tool Library", Icon::Configure, Cmd::CamTools),
+  x("New Folder", Icon::Folder),
+  x("New Pattern", Icon::Pattern),
+  x("Manual NC", Icon::SkText),
+  x("Probe WCS", Icon::Origin),
+  E::Sep,
+  x("Insert Manufacturing Data", Icon::Import),
+  x("Create Manufacturing Model", Icon::Component),
+];
+
+const CAM_TURN_SETUP: &[E] = &[
+  c("New Setup", Icon::Box, D(Kind::Form(&forms::CAM_TURN_SETUP))),
+  c("Create NC Program", Icon::ExportDxf, Cmd::CamPost),
+  E::Sep,
+  x("New Folder", Icon::Folder),
+  x("New Pattern", Icon::Pattern),
+  x("Manual NC", Icon::SkText),
+  x("Probe WCS", Icon::Origin),
+  E::Sep,
+  x("Insert Manufacturing Data", Icon::Import),
+  x("Create Manufacturing Model", Icon::Component),
+];
+
+/// SETUP on the tabs whose setups FissionOxide can't make yet (additive, inspection,
+/// fabrication): Fusion's list, greyed.
+const CAM_OTHER_SETUP: &[E] = &[
+  x("New Setup", Icon::Box),
+  x("Create NC Program", Icon::ExportDxf),
+  E::Sep,
+  x("New Folder", Icon::Folder),
+  x("New Pattern", Icon::Pattern),
+  x("Manual NC", Icon::SkText),
+  x("Probe WCS", Icon::Origin),
+  E::Sep,
+  x("Insert Manufacturing Data", Icon::Import),
+  x("Create Manufacturing Model", Icon::Component),
 ];
 
 const CAM_2D: &[E] = &[
+  c("2D Adaptive Roughing", Icon::Shell, D(Kind::Form(&forms::CAM_ADAPTIVE))),
+  c("2D Offset Roughing (Pocket)", Icon::Shell, D(Kind::Form(&forms::CAM_POCKET))),
   c("Face", Icon::Extrude, D(Kind::Form(&forms::CAM_FACE))),
-  c("2D Pocket", Icon::Shell, D(Kind::Form(&forms::CAM_POCKET))),
   c("2D Contour", Icon::SkOffset, D(Kind::Form(&forms::CAM_CONTOUR))),
-  c("2D Adaptive Clearing", Icon::Shell, D(Kind::Form(&forms::CAM_ADAPTIVE))),
-  E::Sep,
   x("Slot", Icon::Slot),
   x("Trace", Icon::Line),
   x("Thread", Icon::Thread),
   x("Bore", Icon::Hole),
+  x("Circular", Icon::Circle),
   x("Engrave", Icon::SkText),
+  x("2D Chamfer", Icon::Chamfer),
 ];
 
 const CAM_3D: &[E] = &[
+  c("3D Adaptive Roughing", Icon::Shell, D(Kind::Form(&forms::CAM_ADAPTIVE3D))),
+  x("3D Offset Roughing (Pocket)", Icon::Shell),
+  E::Sep,
+  x("Flat", Icon::Plane),
   c("Parallel", Icon::Zebra, D(Kind::Form(&forms::CAM_PARALLEL))),
   c("Scallop", Icon::Isocurve, D(Kind::Form(&forms::CAM_SCALLOP))),
-  c("Adaptive Clearing", Icon::Shell, D(Kind::Form(&forms::CAM_ADAPTIVE3D))),
-  c("Steep and Shallow", Icon::Zebra, D(Kind::Form(&forms::CAM_STEEP_SHALLOW))),
-  c("Contour", Icon::SkOffset, D(Kind::Form(&forms::CAM_CONTOUR3D))),
+  c("3D Contour", Icon::SkOffset, D(Kind::Form(&forms::CAM_CONTOUR3D))),
+  x("Ramp", Icon::Draft),
   c("Pencil", Icon::Line, D(Kind::Form(&forms::CAM_PENCIL))),
+  x("Horizontal", Icon::Horizontal),
+  x("Spiral", Icon::Coil),
+  x("Radial", Icon::CircPattern),
+  x("Morphed Spiral", Icon::Coil),
+  x("Project", Icon::Project),
+  x("Blend", Icon::BlendCurve),
+  x("Morph", Icon::Loft),
+  x("Flow", Icon::Sweep),
+  x("Geodesic", Icon::Isocurve),
 ];
 
 const CAM_DRILLING: &[E] = &[c("Drill", Icon::Hole, D(Kind::Form(&forms::CAM_DRILL)))];
 
-const CAM_MULTI_AXIS: &[E] = &[
-  c("Rotary", Icon::Revolve, D(Kind::Form(&forms::CAM_ROTARY))),
-  c("Swarf", Icon::Draft, D(Kind::Form(&forms::CAM_SWARF))),
-];
-
-const CAM_TURN_SETUP: &[E] = &[
-  c("New Turning Setup", Icon::Revolve, D(Kind::Form(&forms::CAM_TURN_SETUP))),
-  E::Sep,
-  c("Tool Library", Icon::Configure, Cmd::CamTools),
-];
-
 const CAM_TURNING: &[E] = &[
   c("Turning Face", Icon::Extrude, D(Kind::Form(&forms::CAM_TURN_FACE))),
-  c("Profile Roughing", Icon::Shell, D(Kind::Form(&forms::CAM_TURN_ROUGH))),
-  c("Profile Finishing", Icon::SkOffset, D(Kind::Form(&forms::CAM_TURN_FINISH))),
-  c("Groove", Icon::Slot, D(Kind::Form(&forms::CAM_GROOVE))),
+  c("Turning Profile Roughing", Icon::Shell, D(Kind::Form(&forms::CAM_TURN_ROUGH))),
+  c("Turning Profile Finishing", Icon::SkOffset, D(Kind::Form(&forms::CAM_TURN_FINISH))),
+  x("Turning Groove Roughing", Icon::Slot),
+  x("Turning Groove Finishing", Icon::Slot),
+  x("Turning Adaptive Roughing", Icon::Shell),
+  c("Turning Groove", Icon::Slot, D(Kind::Form(&forms::CAM_GROOVE))),
+  x("Turning Single Groove", Icon::Slot),
   c("Turning Thread", Icon::Thread, D(Kind::Form(&forms::CAM_THREAD))),
-  c("Part Off", Icon::SplitBody, D(Kind::Form(&forms::CAM_PART_OFF))),
+  x("Turning Chamfer", Icon::Chamfer),
+  c("Turning Part", Icon::SplitBody, D(Kind::Form(&forms::CAM_PART_OFF))),
+  x("Turning Trace", Icon::Line),
+];
+
+const CAM_PART_HANDLING: &[E] = &[
+  x("Subspindle Grab", Icon::Move),
+  x("Bar Pull", Icon::Move),
+  x("Subspindle Return", Icon::Move),
+  x("Tool Call", Icon::Configure),
 ];
 
 const CAM_ACTIONS: &[E] = &[
   c("Generate", Icon::Play, Cmd::CamGenerate).k("Ctrl+G"),
   c("Simulate", Icon::MotionStudy, Cmd::CamSimulate),
+  x("Simulate with Machine", Icon::MotionStudy),
   c("Post Process", Icon::ExportDxf, Cmd::CamPost),
-  c("Delete Setup", Icon::Remove, Cmd::CamDelete),
+  x("Setup Sheet", Icon::TitleBlock),
+  x("Machining Time", Icon::Clock),
+];
+
+const CAM_MANAGE: &[E] = &[
+  x("Form Mill", Icon::Revolve),
+  x("Solid Holder", Icon::Cylinder),
+  E::Sep,
+  c("Tool Library", Icon::Configure, Cmd::CamTools),
+  x("Machine Library", Icon::Configure),
+  x("Post Library", Icon::Configure),
+  x("Template Library", Icon::Configure),
+  E::Sep,
+  x("Task Manager", Icon::Clock),
+  E::Sep,
+  x("Export Defaults", Icon::Export),
+  x("Import Defaults", Icon::Import),
+  x("Reset Defaults", Icon::Undo),
+];
+
+const CAM_INSPECT: &[E] = &[
+  c("Measure", Icon::Measure, D(Kind::Inspect)).k("I"),
+  c("Interference", Icon::Interference, D(Kind::Interference)),
+  c("Section Analysis", Icon::Section, D(Kind::Section)),
+];
+
+const CAM_PROBING: &[E] = &[x("Inspect Surface", Icon::CPoint), x("Part Alignment", Icon::Align)];
+
+const CAM_MANUAL: &[E] = &[x("Manual Inspection", Icon::Measure)];
+
+/// FissionOxide's sheet cutting (laser, plasma, waterjet) and its service check.
+const CAM_CUTTING: &[E] = &[
   c("2D Cut (Laser, Plasma, Waterjet)", Icon::ExportDxf, Cmd::Cut2d),
   c("Cut Service Check", Icon::Interference, Cmd::CutCheck),
-  c("All Flat Patterns on One Sheet", Icon::FlatPattern, D(Kind::Form(&forms::COLLECT_FLAT))),
 ];
 
 const GEN_DEFINE: &[E] = &[
@@ -1170,25 +1266,82 @@ const ANIMATION: [Group; 5] = [
   Group { label: "PUBLISH", quick: &["Publish Video"], menu: ANIM_PUBLISH },
 ];
 
+/// The panels every Manufacture tab ends with.
+const CAM_ACTIONS_GROUP: Group =
+  Group { label: "ACTIONS", quick: &["Generate", "Simulate", "Post Process"], menu: CAM_ACTIONS };
+const CAM_MANAGE_GROUP: Group = Group { label: "MANAGE", quick: &["Tool Library"], menu: CAM_MANAGE };
+const CAM_INSPECT_GROUP: Group = Group { label: "INSPECT", quick: &["Measure"], menu: CAM_INSPECT };
+const CAM_SELECT_GROUP: Group = Group { label: "SELECT", quick: &["Select"], menu: SELECT };
+
 /// The Manufacture workspace's MILLING tab.
-const MILLING: [Group; 6] = [
-  Group { label: "SETUP", quick: &["New Setup", "Tool Library"], menu: CAM_SETUP },
-  Group { label: "2D", quick: &["2D Adaptive Clearing", "2D Pocket", "Face", "2D Contour"], menu: CAM_2D },
-  Group { label: "3D", quick: &["Parallel", "Scallop"], menu: CAM_3D },
+const MILLING: [Group; 8] = [
+  Group { label: "SETUP", quick: &["New Setup", "Create NC Program"], menu: CAM_SETUP },
+  Group {
+    label: "2D",
+    quick: &["2D Adaptive Roughing", "2D Offset Roughing (Pocket)", "Face", "2D Contour"],
+    menu: CAM_2D,
+  },
+  Group { label: "3D", quick: &["3D Adaptive Roughing", "Parallel", "Scallop"], menu: CAM_3D },
   Group { label: "DRILLING", quick: &["Drill"], menu: CAM_DRILLING },
-  Group { label: "MULTI-AXIS", quick: &["Rotary", "Swarf"], menu: CAM_MULTI_AXIS },
-  Group { label: "ACTIONS", quick: &["Generate", "Simulate", "Post Process"], menu: CAM_ACTIONS },
+  CAM_ACTIONS_GROUP,
+  CAM_MANAGE_GROUP,
+  CAM_INSPECT_GROUP,
+  CAM_SELECT_GROUP,
 ];
 
 /// The Manufacture workspace's TURNING tab.
-const TURNING: [Group; 3] = [
-  Group { label: "SETUP", quick: &["New Turning Setup", "Tool Library"], menu: CAM_TURN_SETUP },
+const TURNING: [Group; 8] = [
+  Group { label: "SETUP", quick: &["New Setup", "Create NC Program"], menu: CAM_TURN_SETUP },
   Group {
     label: "TURNING",
-    quick: &["Turning Face", "Profile Roughing", "Profile Finishing", "Groove", "Turning Thread", "Part Off"],
+    quick: &["Turning Face", "Turning Profile Roughing", "Turning Profile Finishing", "Turning Groove"],
     menu: CAM_TURNING,
   },
-  Group { label: "ACTIONS", quick: &["Generate", "Simulate", "Post Process"], menu: CAM_ACTIONS },
+  Group { label: "PART HANDLING", quick: &["Subspindle Grab", "Bar Pull"], menu: CAM_PART_HANDLING },
+  Group { label: "DRILLING", quick: &["Drill"], menu: CAM_DRILLING },
+  CAM_ACTIONS_GROUP,
+  CAM_MANAGE_GROUP,
+  CAM_INSPECT_GROUP,
+  CAM_SELECT_GROUP,
+];
+
+/// The Manufacture workspace's ADDITIVE tab.
+const ADDITIVE: [Group; 5] = [
+  Group { label: "SETUP", quick: &["New Setup", "Create NC Program"], menu: CAM_OTHER_SETUP },
+  CAM_ACTIONS_GROUP,
+  CAM_MANAGE_GROUP,
+  CAM_INSPECT_GROUP,
+  CAM_SELECT_GROUP,
+];
+
+/// The Manufacture workspace's INSPECTION tab.
+const INSPECTION: [Group; 7] = [
+  Group { label: "SETUP", quick: &["New Setup", "Create NC Program"], menu: CAM_OTHER_SETUP },
+  Group { label: "PROBING", quick: &["Inspect Surface"], menu: CAM_PROBING },
+  Group { label: "MANUAL", quick: &["Manual Inspection"], menu: CAM_MANUAL },
+  CAM_ACTIONS_GROUP,
+  CAM_MANAGE_GROUP,
+  CAM_INSPECT_GROUP,
+  CAM_SELECT_GROUP,
+];
+
+/// The Manufacture workspace's FABRICATION tab.
+const FABRICATION: [Group; 6] = [
+  Group { label: "SETUP", quick: &["New Setup", "Create NC Program"], menu: CAM_OTHER_SETUP },
+  Group { label: "CUTTING", quick: &["2D Cut (Laser, Plasma, Waterjet)"], menu: CAM_CUTTING },
+  CAM_ACTIONS_GROUP,
+  CAM_MANAGE_GROUP,
+  CAM_INSPECT_GROUP,
+  CAM_SELECT_GROUP,
+];
+
+/// The Manufacture workspace's UTILITIES tab.
+const CAM_UTILITIES: [Group; 5] = [
+  CAM_ACTIONS_GROUP,
+  CAM_MANAGE_GROUP,
+  CAM_INSPECT_GROUP,
+  Group { label: "ADD-INS", quick: &["Scripts and Add-Ins...", "Design and Make Marketplace"], menu: ADD_INS },
+  CAM_SELECT_GROUP,
 ];
 
 const MANAGE: [Group; 1] =
@@ -1476,6 +1629,10 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Turning => (&TURNING, &[]),
     Tab::Assembly => (&ASSEMBLY, &ASSEMBLY_SHARED),
     Tab::MeshEdit => (&MESH_EDIT, &MESH_EDIT_END),
+    Tab::Additive => (&ADDITIVE, &[]),
+    Tab::Inspection => (&INSPECTION, &[]),
+    Tab::Fabrication => (&FABRICATION, &[]),
+    Tab::CamUtilities => (&CAM_UTILITIES, &[]),
   }
 }
 
@@ -1506,7 +1663,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 17] = [
+const ALL_TABS: [Tab; 21] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
@@ -1524,6 +1681,10 @@ const ALL_TABS: [Tab; 17] = [
   Tab::Assembly,
   Tab::MeshEdit,
   Tab::Animation,
+  Tab::Additive,
+  Tab::Inspection,
+  Tab::Fabrication,
+  Tab::CamUtilities,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that
@@ -2884,5 +3045,163 @@ mod tests {
     assert_eq!(names(&MESH[1]), ["Repair", "Generate Face Groups", "Combine Face Groups"]);
     assert_eq!(names(&MESH[2]), ["Remesh", "Reduce"]);
     assert!(matches!(find(MESH_MODIFY, "Plane Cut").and_then(|i| i.cmd), Some(Cmd::Dialog(Kind::PlaneCut))));
+  }
+
+  /// A group's dropdown labels (submenus by their own label).
+  fn menu_labels(tab: Tab, group: &str) -> Vec<&'static str> {
+    let (own, _) = groups(tab);
+    own
+      .iter()
+      .find(|g| g.label == group)
+      .unwrap_or_else(|| panic!("{tab:?} has no {group}"))
+      .menu
+      .iter()
+      .filter_map(|e| match e {
+        E::I(i) => Some(i.label),
+        E::Sub(l, _) => Some(*l),
+        E::Sep => None,
+      })
+      .collect()
+  }
+
+  fn panels(tab: Tab) -> Vec<&'static str> {
+    groups(tab).0.iter().map(|g| g.label).collect()
+  }
+
+  #[test]
+  fn manufacture_tabs_and_panels_are_fusions() {
+    let labels: Vec<&str> = Tab::MANUFACTURE.iter().map(|t| t.label()).collect();
+    assert_eq!(labels, ["MILLING", "TURNING", "ADDITIVE", "INSPECTION", "FABRICATION", "UTILITIES"]);
+    assert_eq!(panels(Tab::Milling), ["SETUP", "2D", "3D", "DRILLING", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]);
+    assert_eq!(
+      panels(Tab::Turning),
+      ["SETUP", "TURNING", "PART HANDLING", "DRILLING", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]
+    );
+    assert_eq!(panels(Tab::Additive), ["SETUP", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]);
+    assert_eq!(panels(Tab::Inspection), ["SETUP", "PROBING", "MANUAL", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]);
+    assert_eq!(panels(Tab::Fabrication), ["SETUP", "CUTTING", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]);
+    assert_eq!(panels(Tab::CamUtilities), ["ACTIONS", "MANAGE", "INSPECT", "ADD-INS", "SELECT"]);
+    // ADDITIVE's SETUP shows two icons and ACTIONS three
+    let quick = |tab: Tab, g: &str| groups(tab).0.iter().find(|x| x.label == g).unwrap().quick.len();
+    assert_eq!((quick(Tab::Additive, "SETUP"), quick(Tab::Additive, "ACTIONS")), (2, 3));
+    for tab in Tab::MANUFACTURE {
+      assert_eq!(Scope::of(tab), Scope::Manufacture, "{tab:?}");
+    }
+  }
+
+  #[test]
+  fn milling_and_turning_dropdowns_are_fusions() {
+    use crate::forms;
+    let setup = [
+      "New Setup",
+      "Create NC Program",
+      "New Folder",
+      "New Pattern",
+      "Manual NC",
+      "Probe WCS",
+      "Insert Manufacturing Data",
+      "Create Manufacturing Model",
+    ];
+    assert_eq!(menu_labels(Tab::Milling, "SETUP"), setup);
+    assert_eq!(menu_labels(Tab::Turning, "SETUP"), setup);
+    assert_eq!(
+      menu_labels(Tab::Milling, "2D"),
+      [
+        "2D Adaptive Roughing",
+        "2D Offset Roughing (Pocket)",
+        "Face",
+        "2D Contour",
+        "Slot",
+        "Trace",
+        "Thread",
+        "Bore",
+        "Circular",
+        "Engrave",
+        "2D Chamfer"
+      ]
+    );
+    assert_eq!(
+      menu_labels(Tab::Milling, "3D"),
+      [
+        "3D Adaptive Roughing",
+        "3D Offset Roughing (Pocket)",
+        "Flat",
+        "Parallel",
+        "Scallop",
+        "3D Contour",
+        "Ramp",
+        "Pencil",
+        "Horizontal",
+        "Spiral",
+        "Radial",
+        "Morphed Spiral",
+        "Project",
+        "Blend",
+        "Morph",
+        "Flow",
+        "Geodesic"
+      ]
+    );
+    assert_eq!(menu_labels(Tab::Milling, "DRILLING"), ["Drill"]);
+    assert_eq!(
+      menu_labels(Tab::Milling, "ACTIONS"),
+      ["Generate", "Simulate", "Simulate with Machine", "Post Process", "Setup Sheet", "Machining Time"]
+    );
+    assert_eq!(
+      menu_labels(Tab::Milling, "MANAGE"),
+      [
+        "Form Mill",
+        "Solid Holder",
+        "Tool Library",
+        "Machine Library",
+        "Post Library",
+        "Template Library",
+        "Task Manager",
+        "Export Defaults",
+        "Import Defaults",
+        "Reset Defaults"
+      ]
+    );
+    assert_eq!(
+      menu_labels(Tab::Turning, "TURNING"),
+      [
+        "Turning Face",
+        "Turning Profile Roughing",
+        "Turning Profile Finishing",
+        "Turning Groove Roughing",
+        "Turning Groove Finishing",
+        "Turning Adaptive Roughing",
+        "Turning Groove",
+        "Turning Single Groove",
+        "Turning Thread",
+        "Turning Chamfer",
+        "Turning Part",
+        "Turning Trace"
+      ]
+    );
+    assert_eq!(
+      menu_labels(Tab::Turning, "PART HANDLING"),
+      ["Subspindle Grab", "Bar Pull", "Subspindle Return", "Tool Call"]
+    );
+    // the commands FissionOxide has stay wired; TURNING's New Setup is a turning setup
+    assert_eq!(cmd_of(Tab::Milling, "SETUP", "New Setup"), Some(D(Kind::Form(&forms::CAM_SETUP))));
+    assert_eq!(cmd_of(Tab::Turning, "SETUP", "New Setup"), Some(D(Kind::Form(&forms::CAM_TURN_SETUP))));
+    assert_eq!(cmd_of(Tab::Milling, "2D", "2D Offset Roughing (Pocket)"), Some(D(Kind::Form(&forms::CAM_POCKET))));
+    assert_eq!(cmd_of(Tab::Milling, "3D", "3D Contour"), Some(D(Kind::Form(&forms::CAM_CONTOUR3D))));
+    assert_eq!(cmd_of(Tab::Turning, "TURNING", "Turning Part"), Some(D(Kind::Form(&forms::CAM_PART_OFF))));
+    assert_eq!(cmd_of(Tab::Milling, "MANAGE", "Tool Library"), Some(Cmd::CamTools));
+    assert_eq!(cmd_of(Tab::Fabrication, "CUTTING", "2D Cut (Laser, Plasma, Waterjet)"), Some(Cmd::Cut2d));
+    // no MULTI-AXIS panel: its commands (and Steep and Shallow, Fixtures, Delete Setup) are off
+    // the dropdowns but still found by the S toolbox
+    for (label, cmd) in [
+      ("Rotary", D(Kind::Form(&forms::CAM_ROTARY))),
+      ("Swarf", D(Kind::Form(&forms::CAM_SWARF))),
+      ("Steep and Shallow", D(Kind::Form(&forms::CAM_STEEP_SHALLOW))),
+      ("Fixtures", D(Kind::Form(&forms::CAM_FIXTURES))),
+      ("Delete Setup", Cmd::CamDelete),
+    ] {
+      assert!(groups(Tab::Milling).0.iter().all(|g| find(g.menu, label).is_none()), "{label}");
+      assert!(commands(&Tab::MANUFACTURE).iter().any(|e| e.label == label && e.cmd == cmd), "{label}");
+    }
   }
 }

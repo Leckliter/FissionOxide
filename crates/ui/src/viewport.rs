@@ -512,6 +512,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   offset_follow(app, &resp, &view);
   tool_preview(app, &painter, &resp, &view);
   sketch_3d_manipulator(app, &painter, &view);
+  crate::cam_ui::setup_preview(app, &painter, &project);
   trim_preview(app, &painter, &resp, &view);
   crate::sketch_modify::preview(app, &painter, &resp, &view);
   consumed |= crate::sketch_modify::manipulator(app, &resp, &painter, &view, &ctx);
@@ -1008,8 +1009,12 @@ fn view_params(app: &App) -> serde_json::Value {
     v["cut_ghost"] = json!(g);
   }
   crate::flat_ui::view_params(app, &mut v);
-  if app.manufacture {
+  if app.manufacture && !app.cam_setups_hidden {
     v["toolpaths"] = json!(app.s.toolpaths_of.map(|t| t.1));
+  }
+  // New Setup shows its stock translucent (see `cam_ui::setup_preview`), not as the outline
+  if crate::cam_ui::setup_preview_geometry(app).is_some() {
+    v["hide_stock"] = json!(true);
   }
   if app.manufacture || app.cut_window.is_some() {
     v["cut"] = json!(app.s.cut_preview.as_ref().map(|c| [c.job as u64, c.revision]));

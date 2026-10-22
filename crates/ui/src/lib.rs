@@ -303,6 +303,8 @@ pub struct App {
   pub(crate) rebuild: Option<(fox_engine::Rebuild, f64)>,
   /// In the Manufacture workspace: the MILLING tab, toolpaths and stock drawn.
   pub manufacture: bool,
+  /// The CAM browser's Setups eye is off: no toolpaths or stock drawn.
+  pub cam_setups_hidden: bool,
   /// The Form workspace's FORM tab, while open.
   pub form: form_ui::FormEdit,
   /// The tool library window, while open.
@@ -619,6 +621,7 @@ impl App {
       analyses: analyses::Analyses::default(),
       rebuild: None,
       manufacture: false,
+      cam_setups_hidden: false,
       form: form_ui::FormEdit::default(),
       tool_library: None,
       gpu: gpu::Gpu::new(None),
@@ -1303,7 +1306,9 @@ impl App {
     let tabs = if self.generative && self.drawing.is_none() {
       vec![panels::Tab::Generative]
     } else if self.manufacture && self.drawing.is_none() {
-      vec![panels::Tab::Milling, panels::Tab::Turning, panels::Tab::Utilities]
+      let mut t = panels::Tab::MANUFACTURE.to_vec();
+      t.push(panels::Tab::Utilities);
+      t
     } else {
       toolbox::workspace_tabs(self)
     };
@@ -2106,7 +2111,8 @@ impl App {
   fn bottom_strip(&mut self, ui: &mut egui::Ui) {
     if self.render.active {
       render_panels::gallery_strip(self, ui);
-    } else {
+    } else if !self.manufacture {
+      // Fusion's Manufacture workspace has no timeline
       panels::timeline(self, ui);
     }
   }
