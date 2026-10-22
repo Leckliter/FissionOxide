@@ -37,13 +37,13 @@ impl Harness {
   }
 
   /// A frame in a window of `size` (the window was resized or maximised).
-  fn frame_in(&mut self, size: egui::Vec2, events: Vec<Event>) {
+  fn frame_in(&mut self, size: egui::Vec2, mut events: Vec<Event>) {
     self.time += 1.0 / 60.0;
+    events.insert(0, Event::ModifiersChanged(self.mods));
     let input = RawInput {
       screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
       time: Some(self.time),
       events,
-      modifiers: self.mods,
       ..Default::default()
     };
     let app = &mut self.app;
