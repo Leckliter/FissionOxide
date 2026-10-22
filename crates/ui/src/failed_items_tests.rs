@@ -33,6 +33,7 @@ fn a_failed_items_menu_is_fusions() {
     labels(&app, id, false),
     vec![
       "Create Selection Set",
+      "--",
       "Edit Feature",
       "Configure",
       "--",
@@ -43,7 +44,6 @@ fn a_failed_items_menu_is_fusions() {
       "Convert to DM Feature",
       "Suppress Features",
       "Review warning",
-      "Create Group",
       "--",
       "Find in Browser",
       "Find in Window",

@@ -120,6 +120,24 @@ pub(crate) fn sketch_menu(app: &App, fid: FeatureId) -> Vec<Option<RowItem>> {
   items
 }
 
+/// Whether a sketch sits on a plane Select Sketch Plane can pick.
+pub(crate) fn has_plane(app: &App, fid: FeatureId) -> bool {
+  sketch_plane(app, fid).is_some()
+}
+
+/// Extrude from a sketch's menu (a browser row or timeline items): every closed profile of the
+/// sketches picked, as Fusion's.
+pub(crate) fn extrude_sketches(app: &mut App, sketches: &[FeatureId]) {
+  app.s.selection = sketches
+    .iter()
+    .flat_map(|f| {
+      let n = app.s.model.sketches.get(f).map_or(0, |r| r.profiles.len());
+      (0..n).map(move |index| Sel::Profile { sketch: *f, index })
+    })
+    .collect();
+  app.start(Kind::Extrude);
+}
+
 /// Runs a sketch row's menu command.
 pub(crate) fn run_sketch_cmd(app: &mut App, fid: FeatureId, name: &str, cmd: RowCmd) {
   let toggle = |v: &mut Vec<FeatureId>| {
@@ -130,12 +148,7 @@ pub(crate) fn run_sketch_cmd(app: &mut App, fid: FeatureId, name: &str, cmd: Row
     }
   };
   match cmd {
-    RowCmd::Extrude => {
-      // every closed profile of the sketch picked, as Fusion's Extrude from the browser
-      let n = app.s.model.sketches.get(&fid).map_or(0, |r| r.profiles.len());
-      app.s.selection = (0..n).map(|index| Sel::Profile { sketch: fid, index }).collect();
-      app.start(Kind::Extrude);
-    }
+    RowCmd::Extrude => extrude_sketches(app, &[fid]),
     RowCmd::OffsetPlane => {
       let Some((plane, label)) = sketch_plane(app, fid) else { return };
       app.s.selection.clear();

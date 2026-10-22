@@ -3097,6 +3097,10 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   };
   let first = noun(&sel[0]);
   let n = sel.len();
+  // picked timeline items read "3 Features", a group counted with its members ("4 Features")
+  if n >= 2 && sel.iter().all(|s| matches!(s, Sel::Feature { .. })) {
+    return Some(format!("{} Features", n + timeline_groups::covered(app)));
+  }
   // two items of different kinds: "1 Face 1 Edge | Min Distance : 0.10 in" (two sketch curves of
   // different kinds stay "Multiple selections | 2")
   if let [a, b] = sel
@@ -3786,8 +3790,8 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
         let groups = timeline_groups::shown(app);
         // a collapsed group's icon stands for each of its features (drag slots skip over it)
         let mut collapsed: Option<(Rect, usize)> = None;
-        // expanded groups: (open folder, last feature) for the bracket under them
-        let mut brackets: Vec<(Rect, usize)> = Vec::new();
+        // expanded groups with their first and last items, for the bracket under them
+        let mut brackets: Vec<(timeline_groups::Shown, usize, usize)> = Vec::new();
         for (i, (id, name, icon, tint, suppressed)) in features.into_iter().enumerate() {
           if let Some((rect, last)) = collapsed {
             if i <= last {
@@ -3800,16 +3804,16 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
             drag = Some(TimelineDrag::Marker { gap: active });
           }
           if let Some(g) = groups.iter().find(|g| hidden.shown(g.first) == i) {
-            let open = timeline_groups::is_open(ui, g.id);
-            let rolled_back = match drag {
-              Some(TimelineDrag::Marker { gap }) => i >= gap,
-              _ => i >= active,
-            };
-            let rect = timeline_groups::group_icon(app, ui, g, open, rolled_back);
             let last = hidden.shown(g.last);
-            if open {
-              brackets.push((rect, last));
+            if timeline_groups::is_open(ui, g.id) {
+              // expanded: its items in the row, no group icon, the bracket under them
+              brackets.push((g.clone(), i, last));
             } else {
+              let rolled_back = match drag {
+                Some(TimelineDrag::Marker { gap }) => i >= gap,
+                _ => i >= active,
+              };
+              let rect = timeline_groups::group_icon(app, ui, g, rolled_back);
               rects.push(rect);
               collapsed = Some((rect, last));
               // the marker inside a collapsed group shows just after it
@@ -3879,7 +3883,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
           }
           let r = if drag.is_none() { r.on_hover_text(hover) } else { r };
           if r.clicked() {
-            let m = ui.input(|i| i.modifiers);
+            let m = click_modifiers(ui, rect);
             timeline_groups::click_feature(app, id, m.shift, m.command || m.ctrl);
           }
           if r.double_clicked() {
@@ -3892,9 +3896,9 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
           }
           r.context_menu(|ui| timeline_menu(app, ui, hidden.item(i), id, &name, icon, suppressed));
         }
-        for (open, last) in brackets {
-          if let Some(end) = rects.get(last) {
-            timeline_groups::bracket(ui, open, *end);
+        for (g, first, last) in brackets {
+          if let (Some(from), Some(to)) = (rects.get(first), rects.get(last)) {
+            timeline_groups::bracket(app, ui, &g, *from, *to);
           }
         }
         if active >= n && marker(ui, marker_dragged).drag_started() {
@@ -3913,6 +3917,22 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
     Some(v) => _ = d.insert_temp(key, v),
     None => d.remove::<TimelineDrag>(key),
   });
+}
+
+/// The modifiers held for a click on `rect`: those its own pointer events carried (a quick
+/// Shift-down, click, Shift-up can be over before the frame ends), with the frame's.
+pub(crate) fn click_modifiers(ui: &egui::Ui, rect: Rect) -> egui::Modifiers {
+  ui.input(|i| {
+    let own = i.events.iter().rev().find_map(|e| match e {
+      egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, modifiers, .. }
+        if rect.contains(*pos) =>
+      {
+        Some(*modifiers)
+      }
+      _ => None,
+    });
+    own.map_or(i.modifiers, |m| m | i.modifiers)
+  })
 }
 
 /// The pink square behind a suppressed timeline item's faded icon.
@@ -3984,10 +4004,19 @@ fn timeline_drop(app: &mut App, d: TimelineDrag, n: usize, active: usize, hidden
 pub(crate) enum TimelineEntry {
   /// Greyed: FissionOxide has no selection sets.
   SelectionSet,
+  /// A sketch's (or every picked sketch's) profiles into Extrude, with its E key.
+  Extrude,
   EditFeature,
+  EditSketch,
   EditProfileSketch(FeatureId),
-  /// Greyed until the design has a configuration table.
+  RedefinePlane,
+  SelectSketchPlane,
+  /// Greyed until the design has a configuration table, and on a multi-selection.
   Configure,
+  /// Two or more picked items into a group.
+  CreateGroup,
+  /// An item next to a group joins it.
+  MoveToGroup,
   Delete,
   Rename,
   RollHere,
@@ -3996,8 +4025,6 @@ pub(crate) enum TimelineEntry {
   Suppress,
   /// A failed or warned feature: opens the Error window.
   ReviewWarning,
-  /// Create Group and Move to Group.
-  Groups,
   FindInBrowser,
   FindInWindow,
 }
@@ -4006,9 +4033,15 @@ impl TimelineEntry {
   pub(crate) fn label(self, suppressed: bool) -> &'static str {
     match self {
       TimelineEntry::SelectionSet => "Create Selection Set",
+      TimelineEntry::Extrude => "Extrude",
       TimelineEntry::EditFeature => "Edit Feature",
+      TimelineEntry::EditSketch => "Edit Sketch",
       TimelineEntry::EditProfileSketch(_) => "Edit Profile Sketch",
+      TimelineEntry::RedefinePlane => "Redefine Sketch Plane",
+      TimelineEntry::SelectSketchPlane => "Select Sketch Plane",
       TimelineEntry::Configure => "Configure",
+      TimelineEntry::CreateGroup => "Create Group",
+      TimelineEntry::MoveToGroup => "Move to Group",
       TimelineEntry::Delete => "Delete",
       TimelineEntry::Rename => "Rename",
       TimelineEntry::RollHere => "Roll Timeline Marker Here",
@@ -4016,137 +4049,254 @@ impl TimelineEntry {
       TimelineEntry::Suppress if suppressed => "Unsuppress Features",
       TimelineEntry::Suppress => "Suppress Features",
       TimelineEntry::ReviewWarning => "Review warning",
-      TimelineEntry::Groups => "Create Group",
       TimelineEntry::FindInBrowser => "Find in Browser",
       TimelineEntry::FindInWindow => "Find in Window",
     }
   }
+
+  /// The key hint Fusion's menu shows beside the entry.
+  pub(crate) fn key(self) -> Option<&'static str> {
+    match self {
+      TimelineEntry::Extrude => Some("E"),
+      TimelineEntry::Delete => Some("Del"),
+      _ => None,
+    }
+  }
 }
 
-/// A timeline item's right-click menu in Fusion's order (`None`: a separator): Create Selection
-/// Set, Edit Feature, Configure | Delete, Rename | Roll Timeline Marker Here, Convert to DM
-/// Feature, Suppress Features, Review warning (a failed or warned item) | Find in Browser, Find
-/// in Window. A suppressed item has no Edit Feature and no Review warning.
-pub(crate) fn timeline_entries(app: &App, id: FeatureId, suppressed: bool) -> Vec<Option<TimelineEntry>> {
+/// The timeline items picked, in pick order.
+pub(crate) fn picked_features(app: &App) -> Vec<FeatureId> {
+  app.s.selection.iter().filter_map(|s| if let Sel::Feature { feature } = s { Some(*feature) } else { None }).collect()
+}
+
+/// The picked timeline items a right-click on `id` acts on: two or more, `id` among them.
+pub(crate) fn multi_pick(app: &App, id: FeatureId) -> Option<Vec<FeatureId>> {
+  let picked = picked_features(app);
+  (picked.len() >= 2 && picked.contains(&id)).then_some(picked)
+}
+
+fn is_sketch(app: &App, id: FeatureId) -> bool {
+  app.s.design.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+}
+
+/// The head of a menu for several items (a multi-selection or a group): Create Selection Set,
+/// then Extrude and Edit Sketch when they are all sketches (else Edit Feature), and Configure.
+pub(crate) fn several_head(app: &App, ids: &[FeatureId]) -> Vec<Option<TimelineEntry>> {
   use TimelineEntry as E;
   let mut v = vec![Some(E::SelectionSet)];
-  if !suppressed {
+  if !ids.is_empty() && ids.iter().all(|f| is_sketch(app, *f)) {
+    v.extend([Some(E::Extrude), Some(E::EditSketch)]);
+  } else {
     v.push(Some(E::EditFeature));
   }
-  if let Some(sk) = marking::profile_sketch(app, id) {
-    v.push(Some(E::EditProfileSketch(sk)));
+  v.push(Some(E::Configure));
+  v
+}
+
+/// A timeline item's right-click menu in Fusion's order (`None`: a separator).
+///
+/// A sketch: Create Selection Set | Extrude (E) | Edit Sketch, Redefine Sketch Plane, Select
+/// Sketch Plane, Configure | Delete (Del), Rename | Roll Timeline Marker Here, Convert to DM
+/// Feature, Suppress Features | Find in Browser, Find in Window. Another feature: Create Selection
+/// Set | Edit Feature, Configure | ... with Review warning after Suppress Features on a failed or
+/// warned item. A suppressed item has no editing entries and no Review warning. Move to Group
+/// ends the middle block next to a group. Two or more picked items (the right-clicked one among
+/// them): Create Selection Set, Extrude and Edit Sketch (all sketches) or Edit Feature, Configure
+/// (greyed) | Create Group | Delete, Rename | Roll Timeline Marker Here, Convert to DM Feature,
+/// Suppress Features.
+pub(crate) fn timeline_entries(app: &App, id: FeatureId, suppressed: bool) -> Vec<Option<TimelineEntry>> {
+  use TimelineEntry as E;
+  if let Some(picked) = multi_pick(app, id) {
+    let mut v = several_head(app, &picked);
+    v.extend([None, Some(E::CreateGroup), None, Some(E::Delete), Some(E::Rename), None, Some(E::RollHere)]);
+    v.extend([Some(E::ConvertToDm), Some(E::Suppress)]);
+    return v;
+  }
+  let mut v = vec![Some(E::SelectionSet), None];
+  if is_sketch(app, id) {
+    if !suppressed {
+      v.extend([Some(E::Extrude), None, Some(E::EditSketch), Some(E::RedefinePlane), Some(E::SelectSketchPlane)]);
+    }
+  } else {
+    if !suppressed {
+      v.push(Some(E::EditFeature));
+    }
+    if let Some(sk) = marking::profile_sketch(app, id) {
+      v.push(Some(E::EditProfileSketch(sk)));
+    }
   }
   v.extend([Some(E::Configure), None, Some(E::Delete), Some(E::Rename), None, Some(E::RollHere)]);
-  if app.s.design.feature(id).is_some_and(|f| !matches!(f.kind, FeatureKind::Sketch { .. })) {
-    v.push(Some(E::ConvertToDm));
-  }
-  v.push(Some(E::Suppress));
+  v.extend([Some(E::ConvertToDm), Some(E::Suppress)]);
   if !suppressed && crate::error_dialog::reviewable(app, id) {
     v.push(Some(E::ReviewWarning));
   }
-  v.extend([Some(E::Groups), None, Some(E::FindInBrowser), Some(E::FindInWindow)]);
+  if let Some(i) = app.s.design.index_of(id)
+    && timeline_groups::move_to_group_target(app, i).is_some()
+  {
+    v.push(Some(E::MoveToGroup));
+  }
+  v.extend([None, Some(E::FindInBrowser), Some(E::FindInWindow)]);
   v
+}
+
+/// The browser node Find in Browser opens at: the item's own (a sketch, a plane, a joint), else
+/// the first body it made or last changed (Extrude1's body after Fillet1 changed it too).
+pub(crate) fn browser_node(app: &App, id: FeatureId) -> Option<Sel> {
+  let sel = Sel::Feature { feature: id };
+  if marking::in_browser(app, &sel) {
+    return Some(sel);
+  }
+  let bodies = marking::feature_bodies(app, id);
+  let body = bodies.first().copied().or_else(|| app.s.feature_made(id).bodies.first().copied())?;
+  Some(Sel::Body { body })
 }
 
 /// A timeline item's right-click menu, as in Fusion (see [`timeline_entries`]).
 fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name: &str, icon: Icon, suppressed: bool) {
-  use TimelineEntry as E;
   for entry in timeline_entries(app, id, suppressed) {
-    let Some(entry) = entry else {
-      ui.separator();
-      continue;
-    };
-    let label = entry.label(suppressed);
     match entry {
-      E::SelectionSet | E::ConvertToDm => {
-        let icon = if entry == E::SelectionSet { Icon::Select } else { Icon::DirectEdit };
-        ui.add_enabled_ui(false, |ui| menu_item(ui, icon, label, None));
+      Some(entry) => timeline_entry(app, ui, entry, i, id, name, icon, suppressed),
+      None => _ = ui.separator(),
+    }
+  }
+}
+
+/// One entry of a timeline item's menu (also a group's, for its head entries): what it does to
+/// the right-clicked item `id` at design index `i`, or to every picked item on a multi-selection.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn timeline_entry(
+  app: &mut App,
+  ui: &mut egui::Ui,
+  entry: TimelineEntry,
+  i: usize,
+  id: FeatureId,
+  name: &str,
+  icon: Icon,
+  suppressed: bool,
+) {
+  use TimelineEntry as E;
+  let label = entry.label(suppressed);
+  let several = multi_pick(app, id);
+  match entry {
+    E::SelectionSet | E::ConvertToDm => {
+      let icon = if entry == E::SelectionSet { Icon::Select } else { Icon::DirectEdit };
+      ui.add_enabled_ui(false, |ui| menu_item(ui, icon, label, None));
+    }
+    E::Extrude => {
+      if menu_item(ui, Icon::Extrude, label, entry.key()).clicked() {
+        ui.close();
+        let sketches: Vec<FeatureId> = several.unwrap_or_else(|| vec![id]);
+        sketch_rows::extrude_sketches(app, &sketches);
       }
-      E::EditFeature => {
-        if menu_item(ui, icon, label, None).clicked() {
-          ui.close();
-          edit_feature(app, id);
+    }
+    E::EditFeature => {
+      if menu_item(ui, icon, label, None).clicked() {
+        ui.close();
+        edit_feature(app, id);
+      }
+    }
+    E::EditSketch => {
+      if menu_item(ui, Icon::Sketch, label, None).clicked() {
+        ui.close();
+        app.edit_sketch(id);
+      }
+    }
+    E::EditProfileSketch(sk) => {
+      if menu_item(ui, Icon::Sketch, label, None).clicked() {
+        ui.close();
+        app.edit_sketch(sk);
+      }
+    }
+    E::RedefinePlane => {
+      if menu_item(ui, Icon::Plane, label, None).clicked() {
+        ui.close();
+        sketch_rows::run_sketch_cmd(app, id, name, RowCmd::RedefinePlane);
+      }
+    }
+    E::SelectSketchPlane => {
+      let on = sketch_rows::has_plane(app, id);
+      if ui.add_enabled_ui(on, |ui| menu_item(ui, Icon::Select, label, None)).inner.clicked() {
+        ui.close();
+        sketch_rows::run_sketch_cmd(app, id, name, RowCmd::SelectSketchPlane);
+      }
+    }
+    // Configure: the feature's suppression becomes a column of the configuration table (greyed
+    // on a multi-selection, as Fusion's)
+    E::Configure => {
+      let first = app.s.design.configurations.list.first().map(|c| c.name.clone()).filter(|_| several.is_none());
+      let r = ui.add_enabled_ui(first.is_some(), |ui| menu_item(ui, Icon::ConfigTable, label, None)).inner;
+      let r = if first.is_some() {
+        r.on_hover_text("Add this feature's suppression to the configuration table")
+      } else if several.is_some() {
+        r
+      } else {
+        r.on_disabled_hover_text("The design has no configuration table")
+      };
+      if r.clicked()
+        && let Some(first) = first
+      {
+        ui.close();
+        app.run("config.set", json!({"configuration": first, "feature": id.0, "suppressed": suppressed}));
+        crate::config_ui::open_table();
+      }
+    }
+    E::CreateGroup | E::MoveToGroup => timeline_groups::feature_menu_item(app, ui, entry, i, id),
+    E::Delete => {
+      if menu_item(ui, Icon::Remove, label, entry.key()).clicked() {
+        ui.close();
+        // the picked items, last first (a feature a deleted one took with it is skipped)
+        for f in several.unwrap_or_else(|| vec![id]).into_iter().rev() {
+          if app.s.design.feature(f).is_some() {
+            app.run("feature.delete", json!({"feature": f.0}));
+          }
         }
       }
-      E::EditProfileSketch(sk) => {
-        if menu_item(ui, Icon::Sketch, label, None).clicked() {
-          ui.close();
-          app.edit_sketch(sk);
+    }
+    E::Rename => {
+      if menu_item(ui, Icon::Params, label, None).clicked() {
+        ui.close();
+        app.rename = Some((RenameTarget::Feature(id.0), name.to_string()));
+      }
+    }
+    E::RollHere => {
+      if menu_item(ui, Icon::History, label, None).clicked() {
+        ui.close();
+        app.run("timeline.marker", json!({"at": i + 1}));
+      }
+    }
+    E::Suppress => {
+      if menu_item(ui, Icon::EyeOff, label, None).clicked() {
+        ui.close();
+        // every picked item follows the right-clicked one
+        for f in several.unwrap_or_else(|| vec![id]) {
+          app.run("feature.suppress", json!({"feature": f.0, "suppressed": !suppressed}));
         }
       }
-      // Configure: the feature's suppression becomes a column of the configuration table
-      E::Configure => {
-        let first = app.s.design.configurations.list.first().map(|c| c.name.clone());
-        let r = ui.add_enabled_ui(first.is_some(), |ui| menu_item(ui, Icon::ConfigTable, label, None)).inner;
-        let r = if first.is_some() {
-          r.on_hover_text("Add this feature's suppression to the configuration table")
-        } else {
-          r.on_disabled_hover_text("The design has no configuration table")
-        };
-        if r.clicked()
-          && let Some(first) = first
-        {
-          ui.close();
-          app.run("config.set", json!({"configuration": first, "feature": id.0, "suppressed": suppressed}));
-          crate::config_ui::open_table();
-        }
+    }
+    E::ReviewWarning => {
+      // menu_item's row with Fusion's red X in the icon slot
+      let r = ui.add(egui::Button::new(format!("       {label}")).min_size(vec2(170.0, 0.0)));
+      let g = Rect::from_center_size(r.rect.left_center() + vec2(13.0, 0.0), Vec2::splat(13.0));
+      crate::error_dialog::error_glyph(ui.painter(), g);
+      if r.clicked() {
+        ui.close();
+        crate::error_dialog::open(ui.ctx());
       }
-      E::Delete => {
-        if menu_item(ui, Icon::Remove, label, Some("Del")).clicked() {
-          ui.close();
-          app.run("feature.delete", json!({"feature": id.0}));
-        }
+    }
+    E::FindInBrowser => {
+      let node = browser_node(app, id);
+      if ui.add_enabled_ui(node.is_some(), |ui| menu_item(ui, Icon::Folder, label, None)).inner.clicked()
+        && let Some(node) = node
+      {
+        ui.close();
+        marking::find_in_browser(app, node);
       }
-      E::Rename => {
-        if menu_item(ui, Icon::Params, label, None).clicked() {
-          ui.close();
-          app.rename = Some((RenameTarget::Feature(id.0), name.to_string()));
-        }
-      }
-      E::RollHere => {
-        if menu_item(ui, Icon::History, label, None).clicked() {
-          ui.close();
-          app.run("timeline.marker", json!({"at": i + 1}));
-        }
-      }
-      E::Suppress => {
-        if menu_item(ui, Icon::EyeOff, label, None).clicked() {
-          ui.close();
-          app.run("feature.suppress", json!({"feature": id.0}));
-        }
-      }
-      E::ReviewWarning => {
-        // menu_item's row with Fusion's red X in the icon slot
-        let r = ui.add(egui::Button::new(format!("       {label}")).min_size(vec2(170.0, 0.0)));
-        let g = Rect::from_center_size(r.rect.left_center() + vec2(13.0, 0.0), Vec2::splat(13.0));
-        crate::error_dialog::error_glyph(ui.painter(), g);
-        if r.clicked() {
-          ui.close();
-          crate::error_dialog::open(ui.ctx());
-        }
-      }
-      E::Groups => timeline_groups::feature_menu_items(app, ui, i, id),
-      // features without a browser node of their own are found by the bodies they made
-      E::FindInBrowser => {
-        let sel = Sel::Feature { feature: id };
-        let node = if marking::in_browser(app, &sel) {
-          Some(sel)
-        } else {
-          marking::feature_bodies(app, id).first().map(|b| Sel::Body { body: *b })
-        };
-        if ui.add_enabled_ui(node.is_some(), |ui| menu_item(ui, Icon::Folder, label, None)).inner.clicked()
-          && let Some(node) = node
-        {
-          ui.close();
-          marking::find_in_browser(app, node);
-        }
-      }
-      E::FindInWindow => {
-        if menu_item(ui, Icon::Fit, label, None).clicked() {
-          ui.close();
-          let bodies = marking::feature_bodies(app, id);
-          marking::find_in_window(app, &bodies, Some(id));
-        }
+    }
+    E::FindInWindow => {
+      if menu_item(ui, Icon::Fit, label, None).clicked() {
+        ui.close();
+        let bodies = marking::feature_bodies(app, id);
+        marking::find_in_window(app, &bodies, Some(id));
       }
     }
   }
