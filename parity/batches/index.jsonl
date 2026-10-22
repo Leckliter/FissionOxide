@@ -120,7 +120,7 @@
 {"name": "ui-leftovers-dialogs", "items": 9, "status": "fixing", "pr": null, "fixer": "cloud task_d7c5cd94 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-chrome", "items": 8, "status": "done", "pr": "01e9e36", "fixer": "cloud task_730cf83a (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-display-handles", "items": 8, "status": "done", "pr": "bcc62f8", "fixer": "cloud task_cc33cf04 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-leftovers-render", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_169f7654 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-leftovers-render", "items": 7, "status": "done", "pr": "4fd4cdc", "fixer": "cloud task_169f7654 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-reverify-sketch-1", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_2752aa8d (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-reverify-sketch-2", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_6af2f6a1 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-reverify-dialogs-1", "items": 8, "status": "ready", "pr": null}
