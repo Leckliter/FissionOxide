@@ -35,6 +35,8 @@ pub(crate) struct Item {
   surface: bool,
   /// Carries Fusion's blue round subscription badge (a command of the paid Fusion subscription).
   paid: bool,
+  /// Its menu row has no icon.
+  bare: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -64,6 +66,7 @@ const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
     needs_saved: false,
     surface: false,
     paid: false,
+    bare: false,
   })
 }
 
@@ -79,6 +82,7 @@ const fn x(label: &'static str, icon: Icon) -> E {
     needs_saved: false,
     surface: false,
     paid: false,
+    bare: false,
   })
 }
 
@@ -132,6 +136,17 @@ impl E {
     match self {
       E::I(mut i) => {
         i.surface = true;
+        E::I(i)
+      }
+      other => other,
+    }
+  }
+
+  /// No icon in the menu (Fusion's Design and Make Marketplace).
+  const fn bare(self) -> E {
+    match self {
+      E::I(mut i) => {
+        i.bare = true;
         E::I(i)
       }
       other => other,
@@ -1150,8 +1165,10 @@ const TURNING: [Group; 3] = [
 const MANAGE: [Group; 1] =
   [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[c("Bill of Materials", Icon::Bom, D(Kind::Bom))] }];
 
-const ADD_INS: &[E] =
-  &[c("Scripts and Add-Ins...", Icon::Scripts, Cmd::Plugins), x("Design and Make Marketplace", Icon::Marketplace)];
+const ADD_INS: &[E] = &[
+  c("Scripts and Add-Ins...", Icon::Scripts, Cmd::Plugins).k("Shift+S"),
+  x("Design and Make Marketplace", Icon::Marketplace).bare(),
+];
 
 const UTILITY: &[E] = &[
   c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
@@ -1188,7 +1205,7 @@ const UTIL_INSPECT: &[E] = &[
 
 const UTILITIES: [Group; 5] = [
   Group { label: "MAKE", quick: &["3D Print"], menu: EXPORT },
-  Group { label: "ADD-INS", quick: &["Scripts and Add-Ins...", "Design and Make Marketplace"], menu: ADD_INS },
+  Group { label: "ADD-INS", quick: &["Scripts and Add-Ins..."], menu: ADD_INS },
   Group { label: "UTILITY", quick: &["Compute All", "Manage Materials"], menu: UTILITY },
   Group {
     label: "INSPECT",
@@ -1536,6 +1553,7 @@ pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -
     needs_saved: false,
     surface: false,
     paid: false,
+    bare: false,
   };
   let key = key_of(prefs, Scope::Sketch, label);
   rich_tip(resp, Scope::Sketch, &it, key)
@@ -1950,7 +1968,9 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
   }
   if let Some(i) = it {
     let ir = Rect::from_center_size(rect.left_center() + vec2(14.0, 0.0), Vec2::splat(17.0));
-    if disabled {
+    if i.bare {
+      // a row without an icon
+    } else if disabled {
       icons::draw(p, ir, i.icon, Color32::from_gray(185));
     } else {
       icons::draw_tinted(p, ir, i.icon, i.tint);
@@ -2221,10 +2241,29 @@ mod tests {
     }
     assert_eq!(cmd_of(Tab::Mesh, "EXPORT", "3D Print"), Some(Cmd::Print3d));
     assert_eq!(cmd_of(Tab::Utilities, "MAKE", "3D Print"), Some(Cmd::Print3d));
+    // both open File > 3D Print's docked dialog, not a Save As
+    let mut app = App::with_session(fox_engine::Session::default());
+    Cmd::Print3d.run(&mut app);
+    assert!(app.capture.print.is_some(), "3D Print opens the 3D PRINT dialog");
     // ASSEMBLE keeps its Part Design place, between INSERT and SELECT
     let (own, shared) = groups(Tab::Solid);
     let order: Vec<&str> = own.iter().chain(shared.iter()).map(|g| g.label).collect();
     assert_eq!(order, ["CREATE", "MODIFY", "CONFIGURE", "CONSTRUCT", "INSPECT", "INSERT", "ASSEMBLE", "SELECT"]);
+  }
+
+  #[test]
+  fn add_ins_lists_scripts_and_add_ins_with_shift_s_and_a_bare_marketplace() {
+    let prefs = Prefs::default();
+    let scope = Scope::of(Tab::Utilities);
+    assert_eq!(key_of(&prefs, scope, "Scripts and Add-Ins..."), "Shift+S");
+    let scripts = find(ADD_INS, "Scripts and Add-Ins...").unwrap();
+    let key = key_of(&prefs, scope, scripts.label);
+    assert_eq!(crate::ribbon_tip::title(scripts.label, key), "Scripts and Add-Ins (Shift+S)", "the tooltip's title");
+    let market = find(ADD_INS, "Design and Make Marketplace").unwrap();
+    assert!(!scripts.bare && market.bare, "only the Marketplace row has no icon");
+    let g = UTILITIES.iter().find(|g| g.label == "ADD-INS").unwrap();
+    let quick: Vec<&str> = quick_items(&prefs, Tab::Utilities, g).iter().map(|i| i.label).collect();
+    assert_eq!(quick, ["Scripts and Add-Ins..."], "one icon on the panel");
   }
 
   #[test]

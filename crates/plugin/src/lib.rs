@@ -67,6 +67,9 @@ pub struct Installed {
   pub error: Option<String>,
   /// Shipped with the app (can be turned off, not removed).
   pub bundled: bool,
+  /// It starts with the app (`record.enabled` is whether it runs now: the two differ after
+  /// [`Plugins::set_running`]).
+  pub startup: bool,
 }
 
 impl Installed {
@@ -183,6 +186,8 @@ pub struct Plugins {
   modules: HashMap<PathBuf, wasmtime::Module>,
   /// Library folders of usable plugins, added to the sketch library.
   libraries: Vec<PathBuf>,
+  /// Plugins started or stopped for this session only, by id (whether they run).
+  running: HashMap<String, bool>,
 }
 
 fn now() -> u64 {
@@ -211,6 +216,7 @@ impl Plugins {
       list: Vec::new(),
       modules: HashMap::new(),
       libraries: Vec::new(),
+      running: HashMap::new(),
     };
     p.reload();
     p
@@ -233,7 +239,7 @@ impl Plugins {
     for r in &self.state.plugins {
       let dir = self.root.join(&r.id).join(&r.version);
       let (manifest, error) = load_manifest(&dir);
-      list.push(Installed { record: r.clone(), dir, manifest, error, bundled: false });
+      list.push(Installed { record: r.clone(), dir, manifest, error, bundled: false, startup: r.enabled });
     }
     for bdir in &self.bundled_dirs {
       let Ok(entries) = std::fs::read_dir(bdir) else { continue };
@@ -262,7 +268,12 @@ impl Plugins {
           installed: 0,
           source: dir.to_string_lossy().into_owned(),
         };
-        list.push(Installed { record, dir, manifest, error, bundled: true });
+        list.push(Installed { record, dir, manifest, error, bundled: true, startup: enabled });
+      }
+    }
+    for p in &mut list {
+      if let Some(on) = self.running.get(&p.record.id) {
+        p.record.enabled = *on;
       }
     }
     self.list = list;
@@ -354,6 +365,7 @@ impl Plugins {
     });
     self.state.plugins.sort_by(|a, b| a.id.cmp(&b.id));
     self.save()?;
+    self.running.remove(&m.id);
     self.append_log(&m.id, &format!("installed version {} ({:?})", m.version, plan));
     self.reload();
     Ok(plan)
@@ -376,12 +388,35 @@ impl Plugins {
     }
     self.state.plugins.retain(|r| r.id != id);
     self.save()?;
+    self.running.remove(id);
     let _ = std::fs::remove_dir_all(self.root.join(id));
     self.reload();
     Ok(())
   }
 
   pub fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<(), String> {
+    self.running.remove(id);
+    self.set_startup(id, enabled)
+  }
+
+  /// Starts or stops a plugin for this session only (Fusion's Run switch); whether it starts
+  /// with the app stays as it is.
+  pub fn set_running(&mut self, id: &str, on: bool) -> Result<(), String> {
+    self.find(id)?;
+    self.running.insert(id.to_string(), on);
+    self.reload();
+    Ok(())
+  }
+
+  /// Whether a plugin starts with the app (Fusion's Run on Startup); whether it runs now stays
+  /// as it is.
+  pub fn set_run_on_startup(&mut self, id: &str, on: bool) -> Result<(), String> {
+    let now = self.find(id)?.record.enabled;
+    self.running.insert(id.to_string(), now);
+    self.set_startup(id, on)
+  }
+
+  fn set_startup(&mut self, id: &str, enabled: bool) -> Result<(), String> {
     if self.find(id)?.bundled {
       self.state.disabled_bundled.retain(|d| d != id);
       self.state.enabled_bundled.retain(|d| d != id);
