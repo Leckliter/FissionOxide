@@ -67,6 +67,7 @@ impl Sketch {
   /// when the solve succeeds; on failure the best attempt is kept only if `keep_on_failure`.
   pub fn solve(&mut self) -> SolveReport {
     self.turn_lines_about_held_ends();
+    self.place_unsatisfied_constraints();
     self.solve_inner(None, true)
   }
 
@@ -1407,7 +1408,7 @@ mod tests {
 
   #[test]
   fn only_concentric_ellipses_of_new_sketches_take_the_sliding_pass() {
-    // an ellipse whose centre a Coincident moves, with no Concentric: one full solve, as before
+    // an ellipse whose centre a Coincident moves, with no Concentric: no sliding pass
     let ellipse_dragged = |behaviours: crate::Behaviours| {
       let mut s = Sketch::new();
       s.behaviours = behaviours;
@@ -1415,13 +1416,14 @@ mod tests {
       s.add_curve(CurveKind::Ellipse { center, major, minor: 4.0 }).unwrap();
       s.add_constraint(ConstraintKind::Coincident { a: center, b: ORIGIN }).unwrap();
       assert!(super::followers(&s, None).is_empty());
-      let mut full = s.clone();
       assert!(s.solve().ok());
-      assert!(full.solve_pass(None, false, false).ok());
-      assert_eq!(positions(&s), positions(&full));
       positions(&s)
     };
-    assert_eq!(ellipse_dragged(crate::Behaviours::current()), ellipse_dragged(crate::Behaviours::legacy()));
+    // a new sketch's placement carries the whole ellipse across before the solve; a legacy one
+    // solves with every point free and moves the centre alone, as on main
+    assert_eq!(ellipse_dragged(crate::Behaviours::current()), vec![[0.0, 0.0], [0.0, 0.0], [10.0, 0.0]]);
+    let legacy = ellipse_dragged(crate::Behaviours::legacy());
+    assert!(dist(legacy[1], [0.0, 0.0]) < 1e-9 && dist(legacy[2], [15.0, 3.0]) < 1e-9, "{legacy:?}");
 
     // a legacy sketch's Concentric ellipse solves with every point free, as on main
     let mut s = Sketch::new();

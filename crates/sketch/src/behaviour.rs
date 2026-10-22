@@ -135,6 +135,12 @@ pub const FUSION_SKETCH_FRAMES: &str = "fusion_sketch_frames";
 /// extruded straight along its normal (each curved face thickened) and added or cut, which leaves
 /// a step beside a neighbour that isn't square to the face.
 pub const OFFSET_FACES_EXTEND: &str = "offset_faces_extend";
+/// Before a solve, a Coincident, Parallel, Perpendicular, Collinear, Concentric or line/circle
+/// Tangent that is not yet satisfied moves its second-picked entity rigidly onto the first (the
+/// less constrained one if that cannot move), as Fusion places a new constraint, instead of the
+/// solver spreading the change over both (see `crate::place`). Without it, the solver takes the
+/// drawn positions as they are.
+pub const PLACE_SECOND_PICK: &str = "place_second_pick";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -160,6 +166,7 @@ pub const CURRENT: &[&str] = &[
   SWEEP_UNIFIED,
   FUSION_SKETCH_FRAMES,
   OFFSET_FACES_EXTEND,
+  PLACE_SECOND_PICK,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

@@ -19,6 +19,7 @@ mod flatlink;
 mod fonts;
 mod freeform;
 mod infer;
+mod place;
 mod profile;
 mod quintic;
 mod smoothend;

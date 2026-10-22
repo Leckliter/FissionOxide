@@ -3193,10 +3193,11 @@ fn glyph_anchor(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], u32)> {
   {
     return Some((s.pos(*p)?, p.0 | 0x8000_0000));
   }
-  // a tangent circle on a line: the glyph sits beside the circle where it touches the line, in
-  // its own row (not with the line's other glyphs at its midpoint)
+  // a tangent pair: the glyph sits where the curves touch, in its own row (not with the line's
+  // other glyphs at its midpoint). For a line and a circle or arc that is the point of the line
+  // nearest the centre, or the line's end nearest the touch when only its extension is tangent
   if let ConstraintKind::Tangent { a, b } = k
-    && let Some(at) = touch_point(s, *a, *b)
+    && let Some(at) = tangent_touch(s, *a, *b).or_else(|| touch_point(s, *a, *b))
   {
     return Some((at, 0x4000_0000 | (a.0 ^ b.0.rotate_left(16))));
   }
@@ -3233,6 +3234,28 @@ fn glyph_nudge(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], [f64; 2])> {
   let along = unit([o[0] - j[0], o[1] - j[1]])?;
   let out = unit([j[0] - c[0], j[1] - c[1]])?;
   Some((along, out))
+}
+
+/// For a Tangent between a line and a circle or arc: the point of the line's segment nearest the
+/// circle's centre (the touch point when the segment reaches it, otherwise the nearer end).
+fn tangent_touch(s: &Sketch, a: CurveId, b: CurveId) -> Option<[f64; 2]> {
+  use fox_engine::sketch::CurveKind;
+  let kind = |id: CurveId| s.curve(id).map(|c| &c.kind);
+  let (line, round) = match (kind(a)?, kind(b)?) {
+    (CurveKind::Line { .. }, CurveKind::Circle { .. } | CurveKind::Arc { .. }) => (a, b),
+    (CurveKind::Circle { .. } | CurveKind::Arc { .. }, CurveKind::Line { .. }) => (b, a),
+    _ => return None,
+  };
+  let pts = s.curve_points(line);
+  let (p0, p1) = (s.pos(pts[0])?, s.pos(pts[1])?);
+  let c = s.pos(s.curve_points(round)[0])?;
+  let d = [p1[0] - p0[0], p1[1] - p0[1]];
+  let len2 = d[0] * d[0] + d[1] * d[1];
+  if len2 < 1e-18 {
+    return None;
+  }
+  let t = (((c[0] - p0[0]) * d[0] + (c[1] - p0[1]) * d[1]) / len2).clamp(0.0, 1.0);
+  Some([p0[0] + t * d[0], p0[1] + t * d[1]])
 }
 
 /// Rubber-band preview of the shape being drawn.
@@ -5810,5 +5833,33 @@ mod tests {
     // the arc's centre point is there to draw, not joined to anything: a hollow circle
     let centre = s.points.iter().find(|p| (p.x - 35.0).abs() < 1e-9 && (p.y - 5.0).abs() < 1e-9).expect("centre");
     assert!(!fox_engine::scene::joined_points(s).contains(&centre.id));
+  }
+
+  /// `ui:sketch:tangent-line-circle-motion`: a tangent glyph between a line and a circle it
+  /// doesn't meet sits at the touch point, or at the line's end nearest it when only the line's
+  /// extension touches.
+  #[test]
+  fn tangent_glyph_sits_where_the_line_touches_the_circle() {
+    let (mut app, sk) = sketching(Tool::Select);
+    // a horizontal line, and a circle tangent to its extension beyond its right end
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [40, 0]]})).unwrap();
+    let line = r["curves"][0].as_u64().unwrap();
+    let r = app.run("sketch.circle", json!({"sketch": sk.0, "center": [100, 10], "radius": 10})).unwrap();
+    let circle = r["curves"][0].as_u64().unwrap();
+    app.run("sketch.constrain", json!({"sketch": sk.0, "type": "tangent", "curves": [line, circle]})).unwrap();
+    let s = app.s.design.sketch(sk).unwrap();
+    let c = s.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).unwrap();
+    let (at, key) = glyph_anchor(s, &c.kind).unwrap();
+    assert!((at[0] - 40.0).abs() < 1e-9 && at[1].abs() < 1e-9, "the right end, nearest the touch: {at:?}");
+    let line_id = fox_engine::sketch::CurveId(line as u32);
+    assert_ne!(key, glyph_anchor(s, &ConstraintKind::Horizontal { line: line_id }).unwrap().1, "its own row");
+    // a circle sitting on the segment itself: the glyph is at the touch point
+    let r = app.run("sketch.circle", json!({"sketch": sk.0, "center": [20, 10], "radius": 10})).unwrap();
+    let on = r["curves"][0].as_u64().unwrap();
+    app.run("sketch.constrain", json!({"sketch": sk.0, "type": "tangent", "curves": [on, line]})).unwrap();
+    let s = app.s.design.sketch(sk).unwrap();
+    let c = s.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).last().unwrap();
+    let (at, _) = glyph_anchor(s, &c.kind).unwrap();
+    assert!((at[0] - 20.0).abs() < 1e-9 && at[1].abs() < 1e-9, "{at:?}");
   }
 }

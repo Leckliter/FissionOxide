@@ -140,6 +140,32 @@ fn horizontal_on_a_line_trimmed_to_a_circle_turns_it_about_the_end_on_the_circle
   assert!((sketch.radius(circle).unwrap() - 10.0).abs() < 1e-9);
 }
 
+/// `ui:sketch:coincident-motion`: Coincident through the command keeps the first-picked point's
+/// line where it is and brings the second-picked point's line over rigidly, as Fusion does.
+#[test]
+fn coincident_keeps_the_first_picked_line_and_moves_the_second_rigidly() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.line", json!({"points": [[0, 0], [60, 35]]}));
+  let l1 = r["curves"][0].as_u64().unwrap();
+  let r = run(&mut s, "sketch.line", json!({"points": [[100, 10], [170, 75]]}));
+  let l2 = r["curves"][0].as_u64().unwrap();
+  let sketch = s.design.sketch(s.edit_sketch.unwrap()).unwrap();
+  let a1 = sketch.curve_points(sketch::CurveId(l1 as u32))[1].0;
+  let b0 = sketch.curve_points(sketch::CurveId(l2 as u32))[0].0;
+  let r = run(&mut s, "sketch.constrain", json!({"type": "coincident", "points": [a1, b0]}));
+  assert_eq!(r["dof"], 6, "{r}");
+  let sketch = s.design.sketch(s.edit_sketch.unwrap()).unwrap();
+  let ends = |l: u64| {
+    let p = sketch.curve_points(sketch::CurveId(l as u32));
+    (sketch.pos(p[0]).unwrap(), sketch.pos(p[1]).unwrap())
+  };
+  assert_eq!(ends(l1), ([0.0, 0.0], [60.0, 35.0]), "the first pick stays");
+  let (q0, q1) = ends(l2);
+  assert!((q0[0] - 60.0).abs() < 1e-9 && (q0[1] - 35.0).abs() < 1e-9, "{q0:?}");
+  assert!((q1[0] - 130.0).abs() < 1e-9 && (q1[1] - 100.0).abs() < 1e-9, "same length and angle: {q1:?}");
+}
+
 /// The prober's steps behind `ui:sketch:horizontal-conflict`, on a body's top face: a circle
 /// with a typed diameter, the diameter edited, a line, Trim, Offset, then Horizontal on the
 /// trimmed line.
