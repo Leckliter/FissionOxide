@@ -110,14 +110,9 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
       add_import(s, FeatureKind::Import { file_name: name, breps, meshes: Vec::new() })
     }
     "stl" | "obj" | "ply" | "3mf" => {
-      // 3MF files carry their own unit; the others are unitless: millimetres unless told
-      let scale = if fmt.id == "3mf" { 1.0 } else { mesh_unit_scale(p)? };
-      let mut meshes = fox_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
-      if scale != 1.0 {
-        for m in &mut meshes {
-          m.positions.iter_mut().flatten().for_each(|c| *c *= scale);
-        }
-      }
+      let place = MeshPlacement::of(s, p)?;
+      let mut meshes = read_mesh_file(path, p)?;
+      place.apply(&mut meshes);
       import_meshes(s, name, meshes, p)
     }
     "dxf" | "svg" => import_dxf(s, path, p),
@@ -133,6 +128,82 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
     "f3d" => import_fusion(s, path, p),
     "tsm" => import_tsm(s, name, &std::fs::read_to_string(path)?),
     other => Err(CmdError::new(format!("import of '{other}' is not implemented"))),
+  }
+}
+
+/// A mesh file's meshes in millimetres: 3MF files carry their own unit; the others are unitless,
+/// read in the `units` parameter's (default mm) and turned up (Y to Z) with `flip_up`.
+fn read_mesh_file(path: &Path, p: &Value) -> Result<Vec<Mesh>, CmdError> {
+  let ext = ext_of(path);
+  let scale = if ext == "3mf" { 1.0 } else { mesh_unit_scale(p)? };
+  let mut meshes = fox_exchange::read_mesh(&ext, &std::fs::read(path)?).map_err(ex)?;
+  let flip = p.get("flip_up").and_then(Value::as_bool).unwrap_or(false);
+  for m in &mut meshes {
+    for q in &mut m.positions {
+      q.iter_mut().for_each(|c| *c *= scale);
+      if flip {
+        // Flip Up Direction: the file's +Y becomes +Z (a quarter turn about X)
+        *q = [q[0], -q[2], q[1]];
+      }
+    }
+  }
+  Ok(meshes)
+}
+
+/// The box (mm) a mesh file fills as Insert Mesh reads it with `p`'s `units` and `flip_up`,
+/// before its turns and translation: the INSERT MESH dialog centres, grounds and turns about it.
+pub fn mesh_file_bounds(path: &Path, p: &Value) -> Result<(DVec3, DVec3), CmdError> {
+  let meshes = read_mesh_file(path, p)?;
+  mesh_bounds(&meshes).ok_or_else(|| CmdError::new(format!("{} has no triangles", file_name(path))))
+}
+
+fn mesh_bounds(meshes: &[Mesh]) -> Option<(DVec3, DVec3)> {
+  let pts = meshes.iter().flat_map(|m| m.positions.iter()).map(|q| DVec3::new(q[0] as f64, q[1] as f64, q[2] as f64));
+  pts.fold(None, |b, q| Some(b.map_or((q, q), |(lo, hi): (DVec3, DVec3)| (lo.min(q), hi.max(q)))))
+}
+
+/// Insert Mesh's placement after the unit and Flip Up Direction: turns about the mesh's centre
+/// (`rotate`, X then Y then Z, as Move's), then a translation (`translate`), both expressions.
+struct MeshPlacement {
+  rotate: [f64; 3],
+  translate: DVec3,
+}
+
+impl MeshPlacement {
+  fn of(s: &Session, p: &Value) -> Result<MeshPlacement, CmdError> {
+    let three = |k: &str, kind: fox_expr::Kind| -> Result<[f64; 3], CmdError> {
+      let Some(v) = p.get(k) else { return Ok([0.0; 3]) };
+      let a = v.as_array().filter(|a| a.len() == 3).ok_or_else(|| CmdError::new(format!("'{k}' needs [x, y, z]")))?;
+      let mut out = [0.0; 3];
+      for (o, v) in out.iter_mut().zip(a) {
+        *o = fox_expr::eval(&crate::commands::expr_of(v)?, kind, &s.model.params)?;
+        if !o.is_finite() {
+          return Err(CmdError::new(format!("'{k}' must be finite")));
+        }
+      }
+      Ok(out)
+    };
+    let rotate = three("rotate", fox_expr::Kind::Angle)?;
+    let translate = DVec3::from(three("translate", fox_expr::Kind::Length)?);
+    Ok(MeshPlacement { rotate, translate })
+  }
+
+  fn apply(&self, meshes: &mut [Mesh]) {
+    if self.rotate == [0.0; 3] && self.translate == DVec3::ZERO {
+      return;
+    }
+    let Some((lo, hi)) = mesh_bounds(meshes) else { return };
+    let c = (lo + hi) / 2.0;
+    let [x, y, z] = self.rotate;
+    let q = fox_kernel::glam::DQuat::from_rotation_z(z)
+      * fox_kernel::glam::DQuat::from_rotation_y(y)
+      * fox_kernel::glam::DQuat::from_rotation_x(x);
+    for m in meshes.iter_mut() {
+      for p in &mut m.positions {
+        let v = q * (DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64) - c) + c + self.translate;
+        *p = v.as_vec3().to_array();
+      }
+    }
   }
 }
 

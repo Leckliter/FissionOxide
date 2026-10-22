@@ -482,7 +482,18 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if !consumed && let Some(item) = app.hover_origin {
     consumed = true;
     if resp.clicked() && !app.dialog.as_mut().is_some_and(|d| d.take_origin(item) || d.pick_origin_axis(item)) {
-      crate::origin::pick(app, item);
+      match item.sketch_plane() {
+        // an open Offset Plane takes it as its plane
+        Some(plane) if app.dialog.as_ref().is_some_and(|d| d.takes_plane()) => crate::panels::pick_plane(app, plane),
+        _ => crate::origin::pick(app, item),
+      }
+    }
+  }
+  // and so does one on a construction plane (or Mirror, Offset Plane take it)
+  if !consumed && let Some(id) = app.hover_cplane {
+    consumed = true;
+    if resp.clicked() {
+      crate::panels::pick_plane(app, serde_json::json!({"feature": id.0}));
     }
   }
   let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
@@ -821,8 +832,11 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     peek_sketches: app.ctx_menu.peek_sketches.clone(),
     only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
     opacity: app.ctx_menu.opacity.clone(),
-    // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
+    flat_meshes: app.ctx_menu.flat_shaded.clone(),
+    // Offset Plane's preview is filled over the image (see `offset_plane_overlay`), and so are
+    // the construction planes (see `crate::construction`)
     hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
+    planes_drawn_by_caller: true,
     hover_more: app.glyph_hover.clone(),
     preview_curves: app.dialog.as_ref().map(|d| d.preview_curves().to_vec()).unwrap_or_default(),
     sketch_show: app.palette.show(),
@@ -865,13 +879,14 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     peek: app.ctx_menu.peek.iter().chain(&crate::select::hover_bodies(app)).map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
     opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
+    flat: app.ctx_menu.flat_shaded.iter().map(|b| b.0).collect(),
     peek_faces: app.ctx_menu.peek_faces.iter().map(|(b, f)| (b.0, *f)).collect(),
     peek_sketches: app.ctx_menu.peek_sketches.iter().map(|s| s.0).collect(),
     glyph_hover: app.glyph_hover.clone(),
     palette: app.palette,
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies().iter().map(|b| b.0).collect()).unwrap_or_default(),
     grid_plane: app.grid_preview,
-    quads: crate::origin::plane_quads(app),
+    quads: [crate::origin::plane_quads(app), crate::construction::quads(app)].concat(),
   };
   if crate::gpu::active(app) {
     crate::gpu::set_quads(app, &key.quads);
@@ -4714,9 +4729,10 @@ fn sketch_planes(app: &App) -> Vec<(serde_json::Value, Plane)> {
   out
 }
 
-/// Half the side of a plane's square: the size the scene draws construction planes at.
+/// Half the side of a construction plane's square: its side is twice an origin plane's, as Fusion
+/// draws them (the same on screen whatever the zoom or the model's size).
 pub(crate) fn plane_half_size(app: &App) -> f64 {
-  app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0) * 0.35
+  origin_plane_size(app)
 }
 
 /// How far an origin plane's square reaches from the origin on screen, in points: Fusion keeps
@@ -4810,11 +4826,13 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
     sketching || app.dialog.as_ref().is_some_and(|d| d.wants_plane() || d.wants_cut_plane() || d.wants_pull_plane());
   app.hover_origin = None;
   app.grid_preview = None;
+  app.hover_cplane = None;
   if !picking {
     // with Revolve open only the axes it takes light up: the planes stay shown without getting
-    // in the way of the profiles on them
+    // in the way of the profiles on them; an open Offset Plane takes a plane clicked here
     let takes_axis = app.dialog.as_ref().map(|d| d.takes_origin_axis());
-    if app.dialog.as_ref().is_none_or(|d| d.wants_origin() || d.takes_origin_axis())
+    let offset = app.dialog.as_ref().is_some_and(|d| d.takes_plane());
+    if app.dialog.as_ref().is_none_or(|d| d.wants_origin() || d.takes_origin_axis() || offset)
       && app.drag.is_none()
       && let Some(pos) = resp.hover_pos()
     {
@@ -4822,8 +4840,12 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
       let project = |p| view.to_screen(&cam, p);
       let ray = |p| view.ray(&cam, p);
       app.hover_origin = crate::origin::under(app, pos, &project, &ray)
-        .filter(|i| takes_axis != Some(true) || crate::origin::OriginItem::AXES.contains(i));
-      if app.hover_origin.is_some() {
+        .filter(|i| takes_axis != Some(true) || crate::origin::OriginItem::AXES.contains(i))
+        .filter(|i| !offset || i.plane().is_some());
+      if app.hover_origin.is_none() && app.sel_filter.construction && takes_axis != Some(true) {
+        app.hover_cplane = crate::construction::under(app, pos, &ray);
+      }
+      if app.hover_origin.is_some() || app.hover_cplane.is_some() {
         app.hover = None;
       }
     }
@@ -5307,8 +5329,8 @@ mod tests {
     app.cam.distance *= 3.0;
     let far = origin_plane_size(&app);
     assert!((far / half - 3.0).abs() < 1e-9, "{far} vs {half}");
-    // construction planes keep the model-sized square the scene draws them at
-    assert!((plane_half_size(&app) - 100.0 * 0.35).abs() < 1e-9);
+    // construction planes are twice an origin plane's square, as in Fusion
+    assert!((plane_half_size(&app) - far).abs() < 1e-9);
   }
 
   /// The labelled grid positions are the major lines (every fifth) within the grid's extent.

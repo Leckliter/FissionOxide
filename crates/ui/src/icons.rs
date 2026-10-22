@@ -226,6 +226,10 @@ pub enum Icon {
   MeshBody,
   /// A mesh feature in the timeline (Insert Mesh's "Base Mesh Feature").
   MeshFeature,
+  /// INSERT MESH's Center: a block on the origin's cross.
+  MeshCenter,
+  /// INSERT MESH's Move To Ground: a block coming down onto the ground line.
+  MoveToGround,
   Flange,
   Hem,
   LoftedFlange,
@@ -421,6 +425,12 @@ pub enum Icon {
   // Draft's Type row
   DraftFixedPlane,
   DraftPartingLine,
+  // Hem's Type drop-down: the sheet's end folded back, seen edge-on
+  HemFlat,
+  HemOpen,
+  HemRolled,
+  HemTeardrop,
+  HemRope,
   // Reduce's Remesh Type, Plane Cut's Fill Type and Convert Mesh's Method (see `mesh`)
   RemeshAdaptive,
   RemeshUniform,
@@ -1104,6 +1114,17 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.38, 0.64), 0.1, Some(Blue), None);
     }
     Icon::Body => k.block(0.1, 0.38, 0.66, 0.9, 0.26, Light, Fill, Dark),
+    Icon::MeshCenter => {
+      k.block(0.22, 0.4, 0.66, 0.84, 0.18, BlueLight, Blue, BlueDark);
+      k.line((0.5, 0.04), (0.5, 0.96), Ink);
+      k.line((0.04, 0.6), (0.96, 0.6), Ink);
+    }
+    Icon::MoveToGround => {
+      k.block(0.24, 0.2, 0.64, 0.56, 0.16, BlueLight, Blue, BlueDark);
+      k.thick((0.44, 0.6), (0.44, 0.78), Ink, 1.3);
+      k.arrow_head((0.44, 0.84), (0.0, 1.0), 0.12, Ink);
+      k.thick((0.04, 0.94), (0.96, 0.94), Ink, 1.4);
+    }
     Icon::MeshBody | Icon::MeshFeature => {
       // a yellow block cut into triangles on every face
       let (x0, y0, x1, y1, d) =
@@ -2866,7 +2887,36 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.08, 0.5), (0.92, 0.5), (0.78, 0.9), (0.22, 0.9)], Fill);
       k.thick((0.04, 0.5), (0.96, 0.5), Blue, 1.4);
     }
+    Icon::HemFlat | Icon::HemOpen => {
+      // folded flat onto the sheet, or back with a gap
+      let g = if icon == Icon::HemFlat { 0.08 } else { 0.18 };
+      let mut pts = vec![(0.06, 0.5 + g)];
+      pts.extend(unit_arc((0.74, 0.5), g, -std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2));
+      pts.push((0.3, 0.5 - g));
+      k.band(k.pts(&pts), 3.4);
+    }
+    Icon::HemRolled | Icon::HemTeardrop | Icon::HemRope => {
+      use std::f32::consts::{FRAC_PI_2, PI};
+      // a roll round the sheet's end: three quarters, a teardrop closing on the sheet, a full rope
+      let (c, r) = ((0.62, 0.48), 0.24);
+      let mut pts = vec![(0.06, 0.48 + r)];
+      let sweep = match icon {
+        Icon::HemRolled => 1.5 * PI,
+        Icon::HemTeardrop => 1.75 * PI,
+        _ => 2.1 * PI,
+      };
+      pts.extend(unit_arc(c, r, -FRAC_PI_2, -FRAC_PI_2 + sweep));
+      if icon == Icon::HemTeardrop {
+        pts.push((0.44, 0.48 + r - 0.04));
+      }
+      k.band(k.pts(&pts), 3.4);
+    }
   }
+}
+
+/// Points along an arc in unit-square coordinates, angles counter-clockwise from +x (screen y up).
+fn unit_arc(c: (f32, f32), r: f32, a0: f32, a1: f32) -> Vec<(f32, f32)> {
+  (0..=16).map(|i| a0 + (a1 - a0) * i as f32 / 16.0).map(|t| (c.0 + t.cos() * r, c.1 - t.sin() * r)).collect()
 }
 
 /// A five-pointed star's outline (unit-square coordinates), its first point straight up.

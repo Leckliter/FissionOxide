@@ -85,14 +85,15 @@ pub fn shown(app: &App) -> Vec<Shown> {
     .collect()
 }
 
-/// Insert > Canvas: the form, with the selected planar face or construction plane as the plane.
-pub fn start_insert(app: &mut App) {
+/// Insert > Canvas, once the Insert window picked the image: the form, with the selected planar face or
+/// construction plane as the plane.
+pub fn start_insert_with(app: &mut App, path: Option<PathBuf>) {
   app.cancel_dialog();
   let choices = plane_choices(app);
   let plane = choices.iter().position(|(_, p)| p.get("face").is_some() || p.get("feature").is_some()).unwrap_or(0);
   app.canvas_ui.calibrate = None;
   app.canvas_ui.edit = None;
-  app.canvas_ui.insert = Some(InsertForm { path: None, plane, width: "100".into(), opacity: 0.5 });
+  app.canvas_ui.insert = Some(InsertForm { path, plane, width: "100".into(), opacity: 0.5 });
 }
 
 /// Right-click > Edit Canvas.

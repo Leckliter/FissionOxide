@@ -364,7 +364,7 @@ pub(crate) fn plane_quads(app: &App) -> Vec<Quad> {
 }
 
 /// A square's fill and its edge (`px` world units wide, inside the square).
-fn square(out: &mut Vec<Quad>, c: [DVec3; 4], sample: [u8; 3], px: f64) {
+pub(crate) fn square(out: &mut Vec<Quad>, c: [DVec3; 4], sample: [u8; 3], px: f64) {
   let f = |p: DVec3| p.as_vec3().to_array();
   out.push(Quad { corners: c.map(f), color: plane_rgba(sample) });
   let [r, g, b] = sample;

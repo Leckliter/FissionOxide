@@ -5,6 +5,7 @@
 //! ViewCube, sketch palette and command dialogs floating over it; the timeline at the bottom. The UI is thin: every action goes through [`Session::execute`] commands.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod asm_component;
 mod assembly_forms;
 mod cam_ui;
 mod canvas_ui;
@@ -14,11 +15,15 @@ mod comments;
 mod comp_drag;
 mod config_ui;
 mod constrain;
+mod construction;
 mod customize;
 mod cut_ui;
 mod data_panel;
 mod dialogs;
 mod doc_dialogs;
+mod documents;
+#[cfg(test)]
+mod documents_tests;
 mod ecad_ui;
 mod error_dialog;
 mod explode_ui;
@@ -39,6 +44,7 @@ mod help;
 mod icons;
 #[cfg(test)]
 mod input_tests;
+mod insert_window;
 mod library_ui;
 mod logo;
 mod manip_arrow;
@@ -226,6 +232,11 @@ pub struct App {
   /// The plane whose sketch grid Create Sketch previews: the one under the pointer while it
   /// waits for a plane.
   pub(crate) grid_preview: Option<fox_engine::kernel::Plane>,
+  /// The construction plane under the pointer in the canvas this frame (see [`construction`]).
+  pub(crate) hover_cplane: Option<fox_engine::model::FeatureId>,
+  /// The browser's Construction folder is shown (its eye): its planes whose own eyes are on draw
+  /// in the canvas. On by default, as in Fusion.
+  pub(crate) construction_shown: bool,
   /// The Origin folder's children's own eyes (O, X, Y, Z, XY, XZ, YZ), on by default; a child
   /// shows only when the folder's eye is on too.
   pub(crate) origin_eyes: [bool; 7],
@@ -343,6 +354,12 @@ pub struct App {
   pub(crate) sections: Vec<dialogs::KeptSection>,
   /// The Analysis folder's eye is off: no kept analysis shows.
   pub(crate) analysis_hidden: bool,
+  /// The document tabs: the designs open besides the shown one, and the "+"'s chooser.
+  pub docs: documents::Documents,
+  /// Fusion's Insert window and the INSERT DXF dialog.
+  pub(crate) inserts: insert_window::Inserts,
+  /// New Component in an Assembly Design (an external design), while open.
+  pub(crate) asm_component: Option<asm_component::AsmComponent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -385,6 +402,8 @@ struct RenderKey {
   opacity: Vec<(u32, u8)>,
   /// A Mirror's or pattern's previewed copies, drawn as ghosts.
   ghosts: Vec<u32>,
+  /// Mesh bodies drawn flat-shaded.
+  flat: Vec<u32>,
   /// Faces and sketches highlighted from the timeline.
   peek_faces: Vec<(u32, u32)>,
   peek_sketches: Vec<u32>,
@@ -545,6 +564,8 @@ impl App {
       readout_distance: std::cell::Cell::new(None),
       row_hover: None,
       grid_preview: None,
+      hover_cplane: None,
+      construction_shown: true,
       origin_eyes: [true; 7],
       origin_shown: false,
       browser_sketches: None,
@@ -598,6 +619,9 @@ impl App {
       base_mode: false,
       sections: Vec::new(),
       analysis_hidden: false,
+      docs: documents::Documents::default(),
+      inserts: insert_window::Inserts::default(),
+      asm_component: None,
     }
   }
 
@@ -720,6 +744,8 @@ impl App {
 
   /// Switches to another session, keeping the hub location.
   fn replace_session(&mut self, mut s: Session) {
+    // an open design with unsaved changes keeps its tab; this one opens in a new tab
+    documents::keep_unsaved(self);
     s.store_root = self.s.store_root.clone();
     let revision = self.s.revision;
     self.s = s;
@@ -754,8 +780,15 @@ impl App {
   /// Opens a design (latest or a given version) from the data panel.
   pub fn open_hub_item(&mut self, item: &str, version: Option<u32>) {
     self.cancel_dialog();
+    let kept = documents::keep_unsaved(self);
     let revision = self.s.revision;
-    if let Some(r) = self.run("hub.open", json!({"item": item, "version": version})) {
+    let opened = self.run("hub.open", json!({"item": item, "version": version}));
+    if opened.is_none()
+      && let Some(back) = kept
+    {
+      documents::drop_new_tab(self, back);
+    }
+    if let Some(r) = opened {
       self.swapped_session(revision);
       self.dialog = None;
       self.tool = Tool::Select;
@@ -843,19 +876,34 @@ impl App {
 
   // ---- file actions ----
 
+  /// Replaces the shown document with a new empty Part Design (closing the last tab). The "+"
+  /// and Create New add a tab instead ([`documents::new_document`]).
   pub fn new_design(&mut self) {
+    self.new_design_of(fox_engine::model::DesignType::Part, None);
+  }
+
+  /// Replaces the shown document with a new empty design of type `ty`, in `unit` (default: the
+  /// Preferences' default units).
+  pub(crate) fn new_design_of(
+    &mut self,
+    ty: fox_engine::model::DesignType,
+    unit: Option<fox_engine::model::LengthUnit>,
+  ) {
     let root = self.s.store_root.clone();
     let revision = self.s.revision;
     self.s = Session::default();
     // Preferences: new designs in the default units (General) and without a timeline (Design),
     // in a fresh session so the settings aren't undo steps
-    let units = self.preferences.values.units;
+    let units = unit.map(|u| u.symbol()).unwrap_or(self.preferences.values.units.key());
     let mut set = false;
-    if units != preferences::Units::Mm {
-      set |= self.s.execute("design.units", &json!({"unit": units.key()})).is_ok();
+    if units != "mm" {
+      set |= self.s.execute("design.units", &json!({"unit": units})).is_ok();
     }
     if !self.preferences.values.capture_history {
       set |= self.s.execute("design.history", &json!({"capture": false})).is_ok();
+    }
+    if !ty.is_part() {
+      set |= self.s.execute("design.type", &json!({"type": ty.key()})).is_ok();
     }
     if set {
       self.s = Session::new(self.s.design.clone());
@@ -868,6 +916,7 @@ impl App {
     self.nav_mode = None;
     self.cam = Camera::default();
     self.fitted_once = false;
+    self.tab = if ty == fox_engine::model::DesignType::Assembly { panels::Tab::Assembly } else { panels::Tab::Solid };
   }
 
   /// File ▸ Open... (Ctrl+O): Fusion's Open window, with the projects and "Open from my
@@ -1000,6 +1049,10 @@ impl App {
   }
 
   pub fn import_path(&mut self, p: &std::path::Path) {
+    if fox_engine::exchange::format_for_path(p).is_some_and(|f| f.kind == fox_engine::exchange::FormatKind::Mesh) {
+      self.insert_mesh(p);
+      return;
+    }
     if let Some(r) = self.run("import", json!({"path": p})) {
       if r.get("warning").is_none() {
         self.status = Some((format!("Inserted {}", p.display()), false));
@@ -1107,7 +1160,7 @@ impl App {
       self.open_dialog();
     }
     if pressed(Key::N, Modifiers::COMMAND) {
-      self.new_design();
+      documents::new_document(self, fox_engine::model::DesignType::Part, None);
     }
     if pressed(Key::Escape, Modifiers::NONE) {
       self.escape();
@@ -1346,6 +1399,8 @@ impl App {
     } else if self.doc_dialog.is_some() {
       // Change Active Units or Convert Design Type closes, changing nothing
       doc_dialogs::close(self);
+    } else if asm_component::close(self) || insert_window::escape(self) {
+      // New Component (an assembly's) or INSERT DXF closed
     } else if self.other.is_some() {
       // the Select Other list closes, keeping the selection
       self.other = None;
@@ -1402,19 +1457,43 @@ impl App {
     c.run(self);
   }
 
-  /// Shows or hides the bodies of the selection (bodies, or the bodies of selected faces and
-  /// edges), as V does in Fusion.
+  /// Show/Hide (V), as Fusion's: shows or hides what is selected: bodies (or the bodies of
+  /// selected faces and edges), sketches, construction planes, axes and points, and a picked
+  /// origin point, axis or plane. A picked plane or origin item stays picked, drawn selected,
+  /// until it is deselected.
   pub fn toggle_visibility(&mut self) {
+    if let Some(id) = construction::picked(self) {
+      construction::toggle_eye(self, id);
+      return;
+    }
+    if let Some(item) = origin::picked(self) {
+      origin::toggle_eye(self, item);
+      return;
+    }
     let mut bodies: Vec<fox_engine::model::BodyId> = Vec::new();
+    let mut features = Vec::new();
     for s in &self.s.selection {
-      if let Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } = s
-        && !bodies.contains(body)
-      {
-        bodies.push(*body);
+      match s {
+        Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if !bodies.contains(body) => {
+          bodies.push(*body)
+        }
+        Sel::Feature { feature } => features.push(*feature),
+        _ => {}
+      }
+    }
+    if bodies.is_empty() && features.is_empty() {
+      self.hint("Show/Hide: select bodies, faces or edges first");
+      return;
+    }
+    for f in features {
+      if construction::is_construction(self, f) {
+        construction::toggle_eye(self, f);
+      } else if self.s.design.sketch(f).is_ok() {
+        let visible = fox_engine::scene::sketch_visible(&self.s, f);
+        self.run("sketch.visible", json!({"sketch": f.0, "visible": !visible}));
       }
     }
     if bodies.is_empty() {
-      self.hint("Show/Hide: select bodies, faces or edges first");
       return;
     }
     for b in bodies {
@@ -1422,6 +1501,20 @@ impl App {
       self.run("body.visible", json!({"body": b.0, "visible": !visible}));
     }
     self.s.selection.clear();
+  }
+
+  /// Puts the dialog back after its frame while it stays open; a construction dialog's Type or
+  /// Method switches to that command's dialog instead.
+  pub(crate) fn after_dialog_frame(&mut self, mut d: Dialog, keep: bool) {
+    if let Some(kind) = d.switch_to.take() {
+      d.cancel(&mut self.s);
+      d.leave(self);
+      self.start(kind);
+    } else if keep && self.dialog.is_none() {
+      self.dialog = Some(d);
+    } else {
+      d.leave(self);
+    }
   }
 
   pub fn start(&mut self, kind: dialogs::Kind) {
@@ -1439,6 +1532,18 @@ impl App {
       d.refresh_manip(&self.s);
       d.preview(&mut self.s);
     }
+  }
+
+  /// Opens the INSERT MESH dialog on the mesh file `path`: the mesh previews where the file puts
+  /// it, and is inserted on OK, as in Fusion.
+  pub fn insert_mesh(&mut self, path: &std::path::Path) {
+    self.end_hint();
+    self.cancel_dialog();
+    self.tool = Tool::Select;
+    let mut d = Dialog::open(self, dialogs::Kind::InsertMesh);
+    d.insert_mesh_begin(&self.s, path);
+    d.preview(&mut self.s);
+    self.dialog = Some(d);
   }
 
   /// Opens Trace Image on `path` (an opened or dropped image) in the sketch being edited, or in
@@ -1877,13 +1982,10 @@ impl App {
     notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
     doc_dialogs::show(self, &ctx);
+    asm_component::show(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
-      if keep && self.dialog.is_none() {
-        self.dialog = Some(d);
-      } else {
-        d.leave(self);
-      }
+      self.after_dialog_frame(d, keep);
     }
     if self.show_params {
       params_ui::window(self, &ctx);
@@ -1891,6 +1993,8 @@ impl App {
     data_panel::save_window(self, &ctx);
     file_dialogs::windows(self, &ctx);
     dialogs::save_window(self, &ctx);
+    documents::windows(self, &ctx);
+    insert_window::windows(self, &ctx);
     updates::window(self, &ctx);
     capture::windows(self, &ctx);
     navbar::ground_offset_window(self, &ctx);

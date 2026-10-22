@@ -161,6 +161,8 @@ const ALL: &[Icon] = &[
   Icon::InsertMesh,
   Icon::MeshBody,
   Icon::MeshFeature,
+  Icon::MeshCenter,
+  Icon::MoveToGround,
   Icon::InsertComponent,
   Icon::Fastener,
   Icon::DuplicateJoints,
@@ -329,6 +331,11 @@ const ALL: &[Icon] = &[
   Icon::OriginTwoEdge,
   Icon::DraftFixedPlane,
   Icon::DraftPartingLine,
+  Icon::HemFlat,
+  Icon::HemOpen,
+  Icon::HemRolled,
+  Icon::HemTeardrop,
+  Icon::HemRope,
 ];
 
 fn render(icons: &[Icon], tint: Option<Tint>, cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

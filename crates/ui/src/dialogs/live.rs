@@ -181,12 +181,22 @@ impl Dialog {
       .collect();
   }
 
-  /// The Preview checkbox of a model-picking dialog. Fillet, Draft, Offset Face, Thread, Emboss,
-  /// Thicken and Boundary Fill have none: they always preview, as in Fusion.
+  /// The Preview checkbox of a model-picking dialog. Fillet, Draft, Offset Face, Hem, Thread,
+  /// Emboss, Thicken and Boundary Fill have none: they always preview, as in Fusion. Fold,
+  /// Convert to Sheet Metal, Rip and Corner Closure show theirs once something is picked (they
+  /// open with their one selection row).
   pub(super) fn live_checkbox(&mut self, ui: &mut egui::Ui, s: &mut Session) {
-    if matches!(self.kind, Kind::Fillet | Kind::Draft | Kind::OffsetFace)
+    if matches!(self.kind, Kind::Fillet | Kind::Draft | Kind::OffsetFace | Kind::Hem)
       || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f) || crate::forms::no_preview(f))
     {
+      return;
+    }
+    let picked = match self.kind {
+      Kind::Form(f) => self.form.missing(f).is_none(),
+      _ => !self.faces.is_empty() || !self.bodies.is_empty() || !self.edges.is_empty(),
+    };
+    let sheet = matches!(self.kind, Kind::Form(f) if std::ptr::eq(f, &crate::forms::CORNER_CLOSURE));
+    if (sheet || matches!(self.kind, Kind::Fold | Kind::ConvertSheet | Kind::Rip)) && !picked {
       return;
     }
     if ui.checkbox(&mut self.live.on, "Preview").changed() {

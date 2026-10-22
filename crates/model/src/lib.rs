@@ -164,8 +164,55 @@ pub struct Design {
   /// Simulation studies (the Simulation workspace).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub sim: Vec<sim::Study>,
+  /// Fusion's design type (Part, Assembly or Hybrid Design): which toolbar tabs the Design
+  /// workspace shows and what Document Settings names it.
+  #[serde(default, skip_serializing_if = "DesignType::is_part")]
+  pub design_type: DesignType,
   #[serde(default)]
   next_id: u32,
+}
+
+/// Fusion's design types. A Part Design models one part (SOLID, SURFACE, MESH, ... tabs); an
+/// Assembly Design brings components together (the ASSEMBLY tab); a Hybrid Design does both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignType {
+  #[default]
+  Part,
+  Assembly,
+  Hybrid,
+}
+
+impl DesignType {
+  pub fn is_part(&self) -> bool {
+    *self == DesignType::Part
+  }
+
+  pub fn parse(s: &str) -> Option<DesignType> {
+    match s {
+      "part" => Some(DesignType::Part),
+      "assembly" => Some(DesignType::Assembly),
+      "hybrid" => Some(DesignType::Hybrid),
+      _ => None,
+    }
+  }
+
+  pub fn key(self) -> &'static str {
+    match self {
+      DesignType::Part => "part",
+      DesignType::Assembly => "assembly",
+      DesignType::Hybrid => "hybrid",
+    }
+  }
+
+  /// "Part Design", as the browser's Document Settings shows it.
+  pub fn label(self) -> &'static str {
+    match self {
+      DesignType::Part => "Part Design",
+      DesignType::Assembly => "Assembly Design",
+      DesignType::Hybrid => "Hybrid Design",
+    }
+  }
 }
 
 /// A saved camera: one of Fusion's user Named Views.
@@ -2011,6 +2058,8 @@ impl FeatureKind {
       FeatureKind::CircularPattern { .. } => "CircularPattern",
       FeatureKind::Move { .. } => "Move",
       FeatureKind::Combine { .. } => "Combine",
+      // Fusion's Insert Mesh adds a base feature holding the mesh
+      FeatureKind::Import { breps, meshes, .. } if breps.is_empty() && !meshes.is_empty() => "Base Mesh Feature",
       FeatureKind::Import { .. } => "Import",
       FeatureKind::RemoveBodies { .. } => "Remove",
       FeatureKind::Loft { .. } => "Loft",
@@ -2249,6 +2298,7 @@ impl Design {
       exploded_view: None,
       render: render::RenderDoc::default(),
       sim: Vec::new(),
+      design_type: DesignType::Part,
       next_id: 1,
     }
   }

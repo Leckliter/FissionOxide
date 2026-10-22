@@ -1092,11 +1092,7 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        in the Timeline, to ensure all assembly relationships are calculated properly.\n\nPress Ctrl+/ \
        for more help.",
     ),
-    (_, "Bill of Materials") => (
-      "Lists the components with their quantities, materials and masses.",
-      "The list updates with the design. Set each component's material first for the masses to be \
-       right.",
-    ),
+    // (Fusion's Bill of Materials tooltip is its bare name: no text here)
 
     // DIRECT EDIT
     (_, "Move Face") => (
@@ -1931,6 +1927,47 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Places standard parts from the sketch library into the sketch.",
       "Pick a part, set its angle, then click in the sketch to drop it there, as often as you like. Parts \
        are DXF, SVG or .fox files in the hub's library folder, folders from settings or an add-in's pack.",
+    ),
+    // an Assembly Design's ASSEMBLY tab
+    (_, "Create Linked PCB") => (
+      "Creates a printed circuit board linked to an electronics design.",
+      "Pick the board's outline and plane; the board stays linked to its electronics design and updates \
+       when the design changes. FissionOxide doesn't link boards to electronics designs yet.",
+    ),
+    (_, "Constrain Components") => (
+      "Positions components relative to each other with constraints.",
+      "Pick faces, edges or points on two components and a relation between them, such as mate, flush \
+       or offset. FissionOxide places components with joints instead.",
+    ),
+    (_, "Align Constraint") => (
+      "Lines up faces, edges or axes of two components.",
+      "Pick a face, edge or axis on the component that moves, then one on the other; choose flush, \
+       coincident or concentric. The constraint stays in the timeline.",
+    ),
+    (_, "Angle Constraint") => (
+      "Holds two components at an angle to each other.",
+      "Pick a face or edge on each component and type the angle between them. FissionOxide places \
+       components with joints instead.",
+    ),
+    (_, "Center Constraint") => (
+      "Centres one component's cylindrical face or axis on another's.",
+      "Pick a round face, edge or axis on each component; their centre lines are made to coincide. \
+       FissionOxide places components with joints instead.",
+    ),
+    (_, "Tangent Constraint") => (
+      "Keeps a face of one component touching a curved face of another.",
+      "Pick the two faces; the moving component rolls or slides along the other while staying in \
+       contact. FissionOxide places components with joints instead.",
+    ),
+    (_, "Enable Contact Sets") => (
+      "Turns contact sets on, so the components in them stop where they touch.",
+      "With contact sets on, dragging or driving joints stops a component when it meets another in the \
+       same set. FissionOxide's contact sets are always on.",
+    ),
+    (_, "Enable All Contact") => (
+      "Makes every component stop where it touches any other.",
+      "Treats all components as one contact set while you drag or drive joints. FissionOxide checks \
+       contact only within the contact sets you make.",
     ),
     _ => return None,
   };

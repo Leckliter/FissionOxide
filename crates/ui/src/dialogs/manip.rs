@@ -691,6 +691,7 @@ impl Dialog {
     }
     match self.kind {
       Kind::Move => self.move_triad(s),
+      Kind::InsertMesh => self.insert_mesh_triad(s),
       Kind::Joint => {
         let f = self.joint_fixed_frame(s)?;
         let (x, y, z, o) = (f.x_axis.truncate(), f.y_axis.truncate(), f.z_axis.truncate(), f.w_axis.truncate());
@@ -718,6 +719,11 @@ impl Dialog {
     match self.kind {
       Kind::Move => {
         if !self.set_move_triad(edit) {
+          return;
+        }
+      }
+      Kind::InsertMesh => {
+        if !self.set_insert_mesh_triad(edit) {
           return;
         }
       }

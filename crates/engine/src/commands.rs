@@ -35,7 +35,7 @@ cmds! {
   "open" => "Open a design (.fox, .foxz) or any importable file as a new design", "{path}";
   "save" => "Save the design to a file (.fox JSON, or .foxz archive)", "{path?}";
   "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool, explode?: bool | {direction?, factor?, ...} (mesh formats: the exploded view's positions), units?: cm|mm|m|in|ft|yd|um|hm|mi|mil (sketch DXF, default mm), points?: bool, projected?: bool, construction?: bool (sketch DXF: which geometry to write, default all)}";
-  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (mesh bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, units?: mm|cm|m|in|ft (STL, OBJ, PLY), plane?}";
+  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (mesh bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, units?: mm|cm|m|in|ft (STL, OBJ, PLY), flip_up?: bool, rotate?: [x, y, z] angles about the mesh centre, translate?: [x, y, z], plane?}";
   "formats" => "Every file format with import/export support", "{}";
   "form.insert_tsm" => "Insert T-Spline: a T-Spline Mesh (.tsm) control cage becomes a smooth body (its Catmull-Clark limit surface, one face per region between star points)", "{path? | text?: the file's contents, name?}";
   "inspect" => "Describe a file without opening it (Fusion .f3d contents, mesh sizes, DXF entities)", "{path}";
@@ -68,7 +68,7 @@ cmds! {
   "hub.search" => "Find items by name, version description or milestone", "{query}";
   "hub.activity" => "Activity feed", "{project?, item?, limit?}";
   "hub.upload" => "Upload a file: designs and importable formats become designs, others (e.g. .f3d) are stored as files", "{path, project?, folder?, name?}";
-  "hub.download" => "Write an item version to a file; the extension picks the format (.foxz includes history)", "{item?, version?, path, ...export options}";
+  "hub.download" => "Write an item version to a file; the extension picks the format (.foxz includes history; a translated upload gives back its original file in that file's extension)", "{item?, version?, path, ...export options}";
   "compute_all" => "Recompute the whole timeline from scratch", "{}";
   "undo" => "Undo", "{}";
   "redo" => "Redo", "{}";
@@ -318,7 +318,7 @@ cmds! {
   "contact_set.enable" => "Turn a contact set on or off", "{contact_set, enabled?}";
   "contact_set.delete" => "Delete a contact set", "{contact_set}";
   "contact_set.list" => "List the contact sets", "{}";
-  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version; a configured source inserts the named configuration", "{item (id, or a unique design name), version?, configuration?, name?, translate?: [x,y,z], link?: bool}";
+  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version; a configured source inserts the named configuration", "{item (id, or a unique design name), version?, configuration?, name?, translate?: [x,y,z], link?: bool, empty?: bool (allow a design without bodies: an assembly's external component)}";
   "component.configuration" => "Switch which configuration of its source design a linked component uses (null: the design as modelled); without 'configuration' lists the source's configurations", "{component, configuration?: name | null}";
   "component.links" => "Inserted components: source item, version, configuration and whether a newer version is in the hub", "{}";
   "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
@@ -515,6 +515,8 @@ cmds! {
   "select.by_boundary" => "Select the faces enclosed by a closed chain of edges of one body (the smaller side); default the selected edges", "{edges?: [{body, edge}]}";
   "select.seed_boundary" => "Select the faces connected to a seed face without crossing the boundary edges; defaults: the selected face and edges", "{seed?: {body, face}, edges?: [{body, edge}]}";
   "sketch.plane" => "Redefine Sketch Plane: put a sketch on another plane or planar face made before it (its curves keep their sketch coordinates); the features after it recompute", "{sketch, plane}";
+  "design.type" => "Fusion's design type: part, assembly or hybrid (which toolbar tabs show); no type reads it", "{type?: part|assembly|hybrid}";
+  "construction.visible" => "Show or hide a construction plane, axis or point (the browser row's eye, V)", "{feature, visible: bool}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1664,6 +1666,25 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         return Err(CmdError::new(format!("the sketch can't go on that plane: {e}")));
       }
       Ok(feature_status(s, id))
+    }
+    "construction.visible" => {
+      let id = FeatureId(req_u32(p, "feature")?);
+      let v = p.get("visible").and_then(Value::as_bool).unwrap_or(true);
+      s.edit(|d| {
+        let f = d.feature_mut(id).ok_or(CmdError::new("no such feature"))?;
+        if !matches!(
+          f.kind,
+          FeatureKind::ConstructionPlane { .. }
+            | FeatureKind::ConstructionAxis { .. }
+            | FeatureKind::ConstructionPoint { .. }
+        ) {
+          return Err(CmdError::new("not a construction plane, axis or point"));
+        }
+        // shown is the default: no flag to save
+        f.visible = (!v).then_some(false);
+        Ok(())
+      })?;
+      Ok(json!({}))
     }
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }

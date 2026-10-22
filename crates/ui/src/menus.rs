@@ -32,6 +32,8 @@ pub(crate) struct Item {
   /// The SURFACE tab's own command of a SOLID label (Fusion's surface Extrude and Sweep): its
   /// own tooltip, and no shortcut shown.
   surface: bool,
+  /// Carries Fusion's blue round subscription badge (a command of the paid Fusion subscription).
+  paid: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -60,12 +62,23 @@ const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
     disabled: false,
     needs_saved: false,
     surface: false,
+    paid: false,
   })
 }
 
 /// A Fusion command FissionOxide doesn't have yet.
 const fn x(label: &'static str, icon: Icon) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false, needs_saved: false, surface: false })
+  E::I(Item {
+    label,
+    icon,
+    tint: Tint::Blue,
+    key: "",
+    cmd: None,
+    disabled: false,
+    needs_saved: false,
+    surface: false,
+    paid: false,
+  })
 }
 
 impl E {
@@ -134,6 +147,17 @@ impl E {
       other => other,
     }
   }
+
+  /// With Fusion's subscription badge.
+  const fn p(self) -> E {
+    match self {
+      E::I(mut i) => {
+        i.paid = true;
+        E::I(i)
+      }
+      other => other,
+    }
+  }
 }
 
 /// Most commands a group shows on the toolbar; every command stays in the group's menu.
@@ -149,6 +173,7 @@ pub(crate) struct Group {
 
 use crate::form_ui::{self, Act as FormAct};
 use crate::forms;
+use crate::insert_window::Target;
 use crate::select::{Priority, SelTool};
 use Cmd::Dialog as D;
 
@@ -311,16 +336,16 @@ const INSPECT: &[E] = &[
 ];
 
 const INSERT: &[E] = &[
-  x("Decal", Icon::Decal),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
   c("Canvas", Icon::Canvas, Cmd::Canvas),
-  c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
-  c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
-  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
+  c("Insert SVG", Icon::InsertSvg, Cmd::Insert(Target::Svg)),
+  c("Insert DXF", Icon::InsertDxf, Cmd::InsertDxf),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
   // greyed until the design is saved, as Fusion's
   c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent).saved(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
-  x("Insert Derive", Icon::Derive),
+  c("Insert Derive", Icon::Derive, Cmd::Insert(Target::Derive)),
   x("Insert McMaster-Carr Component", Icon::McMaster).off(),
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
@@ -466,7 +491,7 @@ const SURFACE_MODIFY: &[E] = &[
 ];
 
 const MESH_CREATE: &[E] = &[
-  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
   x("Tessellate", Icon::Tessellate).g(),
   E::Sep,
   x("Create Mesh Section Sketch", Icon::MeshSection).g(),
@@ -486,7 +511,6 @@ const SHEET_CREATE: &[E] = &[
   c("Flange (Base/Edge/Contour)", Icon::Flange, D(Kind::Flange)),
   c("Hem", Icon::Hem, D(Kind::Hem)),
   c("Lofted Flange", Icon::LoftedFlange, D(Kind::Form(&forms::LOFTED_FLANGE))),
-  c("Miter Flange", Icon::Flange, D(Kind::Form(&forms::MITER_FLANGE))),
   c("Fold", Icon::Fold, D(Kind::Fold)),
   c("Convert to Sheet Metal", Icon::ConvertSheet, D(Kind::ConvertSheet)).k("Ctrl+Alt+S"),
   x("Derive", Icon::Derive),
@@ -495,27 +519,32 @@ const SHEET_CREATE: &[E] = &[
   E::Sep,
   c("Hole", Icon::Hole, D(Kind::Hole)).k("H"),
   c("Thread", Icon::Thread, D(Kind::Form(&forms::THREAD))),
-  E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
   c("Create Flat Pattern", Icon::FlatPattern, D(Kind::FlatPattern)),
-  c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
+];
+
+/// Sheet metal commands FissionOxide has that Fusion's CREATE and MODIFY dropdowns don't list:
+/// not in the dropdowns, still found by the S toolbox and the keyboard shortcuts.
+const SHEET_MORE: &[E] = &[
+  c("Miter Flange", Icon::Flange, D(Kind::Form(&forms::MITER_FLANGE))),
+  c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
   c("All Flat Patterns on One Sheet", Icon::FlatPattern, D(Kind::Form(&forms::COLLECT_FLAT))),
   c("Cut Service Check", Icon::Interference, Cmd::CutCheck),
+  c("Refold Faces", Icon::Refold, D(Kind::Refold)),
 ];
 
 const SHEET_MODIFY: &[E] = &[
   c("Unfold", Icon::Unfold, D(Kind::Unfold)),
-  c("Refold Faces", Icon::Refold, D(Kind::Refold)),
   c("Sheet Metal Rules", Icon::SmRules, D(Kind::SheetRules)),
   c("Corner Closure", Icon::CornerClosure, D(Kind::Form(&forms::CORNER_CLOSURE))),
-  c("Join by bend", Icon::Fold, D(Kind::Form(&forms::JOIN_BY_BEND))),
+  c("Join by bend", Icon::Fold, D(Kind::Form(&forms::JOIN_BY_BEND))).p(),
   c("Rip", Icon::Rip, D(Kind::Rip)),
   E::Sep,
-  c("Sheet Metal Fillet", Icon::Fillet, D(Kind::Form(&forms::SHEET_FILLET))),
-  c("Sheet Metal Chamfer", Icon::Chamfer, D(Kind::Form(&forms::SHEET_CHAMFER))),
+  c("Sheet Metal Fillet", Icon::Fillet, D(Kind::Form(&forms::SHEET_FILLET))).p(),
+  c("Sheet Metal Chamfer", Icon::Chamfer, D(Kind::Form(&forms::SHEET_CHAMFER))).p(),
   c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
@@ -582,6 +611,93 @@ macro_rules! shared_groups {
 }
 
 const SHARED: [Group; 6] = shared_groups!();
+
+// ---------------------------------------------------------------- Assembly Design
+
+// an Assembly Design's ASSEMBLY tab, in Fusion's order
+const ASM_INSERT: &[E] = &[
+  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
+  x("Insert Fastener", Icon::Fastener).off(),
+  x("Duplicate With Joints", Icon::DuplicateJoints).off(),
+  c("Insert Derive", Icon::Derive, Cmd::Insert(Target::Derive)),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
+  c("Canvas", Icon::Canvas, Cmd::Canvas),
+  E::Sep,
+  x("Add To Assembly", Icon::AddToAssembly),
+  E::Sep,
+  x("Insert McMaster-Carr Component", Icon::McMaster).off(),
+];
+
+const ASM_CREATE: &[E] = &[
+  c("New Component", Icon::Component, D(Kind::NewComponent)),
+  c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
+  E::Sub("Pattern", PATTERN),
+  x("Create Linked PCB", Icon::InsertComponent),
+  x("Derive", Icon::Derive),
+];
+
+const ASM_RELATIONSHIPS: &[E] = &[
+  x("Constrain Components", Icon::Coincident),
+  c("Align Constraint", Icon::Align, D(Kind::Form(&forms::ALIGN))),
+  x("Angle Constraint", Icon::AngleDim),
+  x("Center Constraint", Icon::Concentric),
+  x("Tangent Constraint", Icon::Tangent),
+  E::Sep,
+  c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
+  c("As-built Joint", Icon::JointOrigin, D(Kind::AsBuiltJoint)).k("Shift+J"),
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
+  c("Rigid Group", Icon::Component, D(Kind::Form(&assembly_forms::RIGID_GROUP))),
+];
+
+const ASM_MOTION: &[E] = &[
+  c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
+  c("Motion Link", Icon::DriveJoint, D(Kind::Form(&assembly_forms::MOTION_LINK))),
+  c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
+];
+
+const ASM_MODIFY: &[E] = &[
+  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
+  c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
+  c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
+  c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
+  E::Sep,
+  c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
+  E::Sep,
+  c("Change Parameters", Icon::Params, Cmd::Params),
+  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
+  c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
+  E::Sep,
+  x("Manage Materials", Icon::ManageMaterials),
+  E::Sep,
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
+];
+
+const ASM_CONTACT: &[E] = &[x("Enable Contact Sets", Icon::Interference), x("Enable All Contact", Icon::Interference)];
+
+const ASSEMBLY: [Group; 6] = [
+  Group { label: "INSERT", quick: &["Insert Component", "Insert Derive", "Canvas"], menu: ASM_INSERT },
+  Group { label: "CREATE", quick: &["New Component", "Create Sketch"], menu: ASM_CREATE },
+  Group {
+    label: "RELATIONSHIPS",
+    quick: &["Constrain Components", "Joint", "As-built Joint", "Rigid Group"],
+    menu: ASM_RELATIONSHIPS,
+  },
+  Group { label: "MOTION", quick: &["Drive Joints", "Motion Link", "Motion Study"], menu: ASM_MOTION },
+  Group { label: "MODIFY", quick: &["Move/Copy", "Align", "Bill of Materials"], menu: ASM_MODIFY },
+  Group { label: "CONTACT", quick: &["Enable Contact Sets"], menu: ASM_CONTACT },
+];
+
+// the ASSEMBLY tab ends with CONFIGURE, CONSTRUCT, INSPECT and SELECT (INSERT comes first)
+const ASSEMBLY_SHARED: [Group; 4] = [
+  Group {
+    label: "CONFIGURE",
+    quick: &["Configure", "Display Configuration Table", "Create Configuration Rules"],
+    menu: CONFIGURE,
+  },
+  Group { label: "CONSTRUCT", quick: &["Offset Plane"], menu: CONSTRUCT },
+  Group { label: "INSPECT", quick: &["Measure", "Section Analysis"], menu: INSPECT },
+  Group { label: "SELECT", quick: &["Select"], menu: SELECT },
+];
 
 // as in Fusion, only MESH has an EXPORT panel (elsewhere 3D Print is under UTILITIES > MAKE)
 const MESH_SHARED: [Group; 7] = shared_groups!(Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT });
@@ -712,7 +828,8 @@ const SKETCH_MODIFY_MORE: &[E] = &[
 fn extra_commands(tab: Tab) -> &'static [&'static [E]] {
   match tab {
     Tab::Sketch => &[SKETCH_MODIFY_MORE, ASSEMBLE_MORE],
-    Tab::Solid | Tab::Surface | Tab::Mesh | Tab::SheetMetal | Tab::Plastic => &[ASSEMBLE_MORE],
+    Tab::SheetMetal => &[ASSEMBLE_MORE, SHEET_MORE],
+    Tab::Solid | Tab::Surface | Tab::Mesh | Tab::Plastic => &[ASSEMBLE_MORE],
     _ => &[],
   }
 }
@@ -736,15 +853,15 @@ const SKETCH_CONSTRAINTS: &[E] = &[
 // the sketch tab's INSERT has no Insert Component
 const SKETCH_INSERT: &[E] = &[
   c("Trace Image", Icon::TraceImage, D(Kind::TraceImage)),
-  x("Decal", Icon::Decal),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
   c("Canvas", Icon::Canvas, Cmd::Canvas),
-  c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
-  c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
+  c("Insert SVG", Icon::InsertSvg, Cmd::Insert(Target::Svg)),
+  c("Insert DXF", Icon::InsertDxf, Cmd::InsertDxf),
   c("Sketch Library...", Icon::SketchLibrary, Cmd::SketchLibrary),
-  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
-  x("Insert Derive", Icon::Derive),
+  c("Insert Derive", Icon::Derive, Cmd::Insert(Target::Derive)),
   x("Insert McMaster-Carr Component", Icon::McMaster).off(),
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
@@ -1148,7 +1265,14 @@ const SHEET_METAL: [Group; 2] = [
   Group { label: "CREATE", quick: &["Flange (Base/Edge/Contour)", "Create Flat Pattern"], menu: SHEET_CREATE },
   Group {
     label: "MODIFY",
-    quick: &["Sheet Metal Rules", "Join by bend", "Sheet Metal Fillet", "Fillet", "Chamfer", "Bill of Materials"],
+    quick: &[
+      "Sheet Metal Rules",
+      "Sheet Metal Fillet",
+      "Sheet Metal Chamfer",
+      "Fillet",
+      "Chamfer",
+      "Bill of Materials",
+    ],
     menu: SHEET_MODIFY,
   },
 ];
@@ -1205,6 +1329,7 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Generative => (&GENERATIVE, &[]),
     Tab::Render => (&RENDER, &[]),
     Tab::Turning => (&TURNING, &[]),
+    Tab::Assembly => (&ASSEMBLY, &ASSEMBLY_SHARED),
   }
 }
 
@@ -1228,7 +1353,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 14] = [
+const ALL_TABS: [Tab; 15] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
@@ -1243,6 +1368,7 @@ const ALL_TABS: [Tab; 14] = [
   Tab::Generative,
   Tab::Render,
   Tab::Turning,
+  Tab::Assembly,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that
@@ -1291,6 +1417,7 @@ pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -
     disabled: false,
     needs_saved: false,
     surface: false,
+    paid: false,
   };
   let key = key_of(prefs, Scope::Sketch, label);
   rich_tip(resp, Scope::Sketch, &it, key)
@@ -1516,6 +1643,9 @@ fn show_group(
         } else {
           icons::tool_button_bare(ui, it.icon, it.tint, active)
         };
+        if it.paid {
+          paid_badge(ui.painter(), resp.rect.shrink(4.0));
+        }
         let resp = rich_tip(resp, at.scope(), it, at.key(it));
         if it.cmd.is_some() {
           resp.context_menu(|ui| at.options(ui, it, act));
@@ -1654,6 +1784,9 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
     } else {
       icons::draw_tinted(p, ir, i.icon, i.tint);
     }
+    if i.paid {
+      paid_badge(p, ir);
+    }
     if !key.is_empty() {
       p.text(
         pos2(rect.right() - 90.0, rect.center().y),
@@ -1681,6 +1814,18 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
     ));
   }
   resp
+}
+
+/// Fusion's subscription badge on a command's icon: a small blue disc with a white rim and a
+/// white four-pointed sparkle, at the icon's top right.
+fn paid_badge(p: &egui::Painter, icon: Rect) {
+  let c = icon.right_top() + vec2(-1.0, 2.0);
+  p.circle(c, 4.5, theme::ACCENT, Stroke::new(1.0, Color32::WHITE));
+  // the sparkle: a tall and a wide diamond across each other
+  for (w, h) in [(0.9, 3.0), (3.0, 0.9)] {
+    let pts = vec![c + vec2(0.0, -h), c + vec2(w, 0.0), c + vec2(0.0, h), c + vec2(-w, 0.0)];
+    p.add(egui::Shape::convex_polygon(pts, Color32::WHITE, Stroke::NONE));
+  }
 }
 
 /// The icon the toolbar menus draw for the command labelled `label` on any tab (the Undo list
@@ -1758,6 +1903,11 @@ mod tests {
         labels(g.menu, &mut all);
       }
       for l in all {
+        // Fusion's Bill of Materials tooltip is its bare name
+        if l == "Bill of Materials" {
+          assert!(tips::tip(Scope::of(tab), l).is_none());
+          continue;
+        }
         match tips::tip(Scope::of(tab), l) {
           // Fusion's Press Pull and Display Configuration Table have a description only
           Some(t)
@@ -2291,6 +2441,151 @@ mod tests {
     for (i, (label, icon)) in icons.iter().enumerate() {
       assert!(!icons[i + 1..].iter().any(|(_, o)| o == icon), "{label}'s {icon:?} is shared");
     }
+  }
+
+  #[test]
+  fn an_assembly_design_has_fusions_assembly_tab() {
+    let (own, shared) = groups(Tab::Assembly);
+    let labels: Vec<&str> = own.iter().chain(shared.iter()).map(|g| g.label).collect();
+    assert_eq!(
+      labels,
+      [
+        "INSERT",
+        "CREATE",
+        "RELATIONSHIPS",
+        "MOTION",
+        "MODIFY",
+        "CONTACT",
+        "CONFIGURE",
+        "CONSTRUCT",
+        "INSPECT",
+        "SELECT"
+      ]
+    );
+    let names = |g: &str| -> Vec<&str> {
+      own
+        .iter()
+        .find(|x| x.label == g)
+        .unwrap()
+        .menu
+        .iter()
+        .filter_map(|e| match e {
+          E::I(i) => Some(i.label),
+          E::Sub(l, _) => Some(*l),
+          _ => None,
+        })
+        .collect()
+    };
+    assert_eq!(
+      names("INSERT"),
+      [
+        "Insert Component",
+        "Insert Fastener",
+        "Duplicate With Joints",
+        "Insert Derive",
+        "Decal",
+        "Canvas",
+        "Add To Assembly",
+        "Insert McMaster-Carr Component"
+      ]
+    );
+    assert_eq!(names("CREATE"), ["New Component", "Create Sketch", "Pattern", "Create Linked PCB", "Derive"]);
+    assert_eq!(
+      names("RELATIONSHIPS"),
+      [
+        "Constrain Components",
+        "Align Constraint",
+        "Angle Constraint",
+        "Center Constraint",
+        "Tangent Constraint",
+        "Joint",
+        "As-built Joint",
+        "Joint Origin",
+        "Rigid Group"
+      ]
+    );
+    assert_eq!(names("MOTION"), ["Drive Joints", "Motion Link", "Motion Study"]);
+    assert_eq!(
+      names("MODIFY"),
+      [
+        "Move/Copy",
+        "Align",
+        "Delete",
+        "Remove",
+        "Bill of Materials",
+        "Change Parameters",
+        "Physical Material",
+        "Appearance",
+        "Manage Materials",
+        "Compute All"
+      ]
+    );
+    assert_eq!(names("CONTACT"), ["Enable Contact Sets", "Enable All Contact"]);
+    assert_eq!(cmd_of(Tab::Assembly, "RELATIONSHIPS", "Joint"), Some(D(Kind::Joint)));
+    assert_eq!(cmd_of(Tab::Assembly, "CREATE", "New Component"), Some(D(Kind::NewComponent)));
+  }
+
+  #[test]
+  fn insert_entries_open_the_insert_window() {
+    use crate::insert_window::Target;
+    for tab in [Tab::Solid, Tab::Sketch] {
+      let group = "INSERT";
+      assert_eq!(cmd_of(tab, group, "Decal"), Some(Cmd::Insert(Target::Decal)), "{tab:?}");
+      assert_eq!(cmd_of(tab, group, "Insert SVG"), Some(Cmd::Insert(Target::Svg)));
+      assert_eq!(cmd_of(tab, group, "Insert DXF"), Some(Cmd::InsertDxf));
+      assert_eq!(cmd_of(tab, group, "Insert Mesh"), Some(Cmd::Insert(Target::Mesh)));
+      assert_eq!(cmd_of(tab, group, "Insert Derive"), Some(Cmd::Insert(Target::Derive)));
+    }
+    assert_eq!(cmd_of(Tab::Mesh, "CREATE", "Insert Mesh"), Some(Cmd::Insert(Target::Mesh)));
+  }
+
+  /// A dropdown as Fusion's reads: each row with its shortcut in brackets, submenus with ">",
+  /// separators as "|".
+  fn listing(menu: &[E]) -> String {
+    let rows: Vec<String> = menu
+      .iter()
+      .map(|e| match e {
+        E::I(i) if i.key.is_empty() => i.label.to_string(),
+        E::I(i) => format!("{} ({})", i.label, i.key),
+        E::Sub(l, _) => format!("{l} >"),
+        E::Sep => "|".into(),
+      })
+      .collect();
+    rows.join(", ").replace(", |, ", " | ")
+  }
+
+  /// The SHEET METAL tab's ribbon and dropdowns are Fusion's, its subscription commands carry the
+  /// badge, and the commands Fusion doesn't list stay reachable (S toolbox, shortcuts).
+  #[test]
+  fn sheet_metal_lists_are_fusions() {
+    assert_eq!(
+      listing(SHEET_CREATE),
+      "Create Sketch, Flange (Base/Edge/Contour), Hem, Lofted Flange, Fold, Convert to Sheet Metal (Ctrl+Alt+S), \
+       Derive | Extrude (E) | Hole (H), Thread, Pattern >, Mirror | Create Flat Pattern, Joint Origin"
+    );
+    assert_eq!(
+      listing(SHEET_MODIFY),
+      "Unfold, Sheet Metal Rules, Corner Closure, Join by bend, Rip | Sheet Metal Fillet, Sheet Metal Chamfer, \
+       Fillet (F), Chamfer | Move/Copy (M), Align, Delete (Del), Remove | Physical Material, Appearance (A), \
+       Manage Materials | Change Parameters, Compute All (Ctrl+B) | Bill of Materials"
+    );
+    let quick =
+      |g: &Group| quick_items(&Prefs::default(), Tab::SheetMetal, g).iter().map(|i| i.label).collect::<Vec<_>>();
+    assert_eq!(quick(&SHEET_METAL[0]), ["Flange (Base/Edge/Contour)", "Create Flat Pattern"]);
+    assert_eq!(
+      quick(&SHEET_METAL[1]),
+      ["Sheet Metal Rules", "Sheet Metal Fillet", "Sheet Metal Chamfer", "Fillet", "Chamfer", "Bill of Materials"]
+    );
+    let paid: Vec<&str> =
+      SHEET_MODIFY.iter().filter_map(|e| if let E::I(i) = e { i.paid.then_some(i.label) } else { None }).collect();
+    assert_eq!(paid, ["Join by bend", "Sheet Metal Fillet", "Sheet Metal Chamfer"]);
+    let offered: Vec<&str> = commands(&[Tab::SheetMetal]).iter().map(|e| e.label).collect();
+    for l in
+      ["Miter Flange", "Flat Pattern Sketch", "All Flat Patterns on One Sheet", "Cut Service Check", "Refold Faces"]
+    {
+      assert!(offered.contains(&l), "{l} stays reachable");
+    }
+    assert!(tips::tip(Scope::Design, "Bill of Materials").is_none(), "the tooltip is the bare name");
   }
 
   /// Fusion's MESH tab: CREATE and PREPARE show three icons, MODIFY only Remesh and Reduce, and

@@ -81,8 +81,11 @@ fn mesh_tools_keep_a_mesh_body_and_convert_makes_it_a_solid() {
   run(&mut s, "mesh.smooth", json!({"bodies": [b], "passes": 1}));
   assert!(s.model.bodies[0].is_mesh(), "Smooth leaves a mesh");
   assert_eq!(s.body_name(s.model.bodies[0].id), "lprism");
+  // Convert Mesh makes a new B-rep body beside the mesh, which it hides (as Fusion does)
   run(&mut s, "mesh.convert", json!({"bodies": [b]}));
-  assert!(!s.model.bodies[0].is_mesh(), "Convert Mesh makes a B-rep body");
+  assert_eq!(s.model.bodies.len(), 2);
+  assert!(s.model.bodies[0].is_mesh() && !s.body_visible(s.model.bodies[0].id));
+  assert!(!s.model.bodies[1].is_mesh(), "Convert Mesh makes a B-rep body");
 }
 
 #[test]

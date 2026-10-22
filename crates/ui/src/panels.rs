@@ -41,6 +41,8 @@ pub enum Tab {
   Render,
   /// The Manufacture workspace's turning tab.
   Turning,
+  /// An Assembly Design's tab (in place of SOLID, SURFACE, ...).
+  Assembly,
 }
 
 impl Tab {
@@ -64,6 +66,7 @@ impl Tab {
       Tab::Generative => "GENERATIVE",
       Tab::Render => "RENDER",
       Tab::Turning => "TURNING",
+      Tab::Assembly => "ASSEMBLY",
     }
   }
 }
@@ -119,21 +122,10 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           .open_memory(redo_list.then_some(egui::SetOpenCommand::Toggle))
           .show(|ui| history_menu(app, ui, false));
         ui.add_space(10.0);
-        // the document tab fills the middle of the bar, its title centred, as in Fusion
+        // the document tabs fill the middle of the bar, a title centred in each, as in Fusion
         let right_w = 250.0;
         let tab_w = (ui.available_width() - right_w - 40.0).max(160.0);
-        document_tab(app, ui, tab_w);
-        ui.add_space(4.0);
-        let (r, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), egui::Sense::click());
-        ui.painter().rect_filled(
-          r,
-          2.0,
-          if resp.hovered() { Color32::from_gray(192) } else { Color32::from_gray(205) },
-        );
-        icons::draw(ui.painter(), r.shrink(8.0), Icon::Plus, Color32::from_gray(70));
-        if resp.on_hover_text("New Design (Ctrl+N)").clicked() {
-          app.new_design();
-        }
+        crate::documents::tab_strip(app, ui, tab_w);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
           ui.spacing_mut().item_spacing.x = 4.0;
           avatar(app, ui);
@@ -287,7 +279,7 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
 /// Runs a File menu entry.
 pub(crate) fn file_menu_action(app: &mut App, label: &str) {
   match label {
-    "New..." => app.new_design(),
+    "New..." => crate::documents::open_chooser(app),
     "Open..." => app.open_dialog(),
     "Upload..." => crate::data_panel::upload_dialog(app),
     "Save" => app.save(false),
@@ -357,36 +349,6 @@ fn avatar(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
-fn document_tab(app: &mut App, ui: &mut egui::Ui, w: f32) {
-  let label = browser_rows::tab_label(app);
-  let unsaved = browser_rows::unsaved(app);
-  let font = egui::FontId::proportional(13.5);
-  let full = ui.max_rect();
-  let (slot, _) = ui.allocate_exact_size(vec2(w, 30.0), egui::Sense::hover());
-  // the tab runs to the bottom edge of the bar and merges into the toolbar
-  let rect = Rect::from_min_max(pos2(slot.min.x, full.bottom() - 33.0), pos2(slot.max.x, full.bottom() + 1.0));
-  let p = ui.painter();
-  p.rect_filled(rect, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, theme::TOOLBAR);
-  let galley = p.layout_no_wrap(label, font, theme::TEXT);
-  let tx = rect.center().x - galley.size().x / 2.0 + 11.0;
-  icons::draw_color(p, Rect::from_center_size(pos2(tx - 14.0, rect.center().y), Vec2::splat(17.0)), Icon::Component);
-  let text_w = galley.size().x;
-  p.galley(pos2(tx, rect.center().y - galley.size().y / 2.0), galley, theme::TEXT);
-  if unsaved {
-    // an unsaved design's tab carries a lock after its name, as in Fusion
-    browser_rows::lock_glyph(p, pos2(tx + text_w + 11.0, rect.center().y), theme::GROUP_LABEL);
-  }
-  let close = Rect::from_center_size(rect.right_center() - vec2(16.0, 0.0), Vec2::splat(18.0));
-  let cr = ui.interact(close, ui.id().with("doc-close"), egui::Sense::click());
-  if cr.hovered() {
-    ui.painter().rect_filled(close, 2.0, Color32::from_gray(222));
-  }
-  icons::draw(ui.painter(), close, Icon::Close, theme::ICON_INK);
-  if cr.on_hover_text("Close (opens a new empty design)").clicked() {
-    app.new_design();
-  }
-}
-
 // ---------------------------------------------------------------- toolbar
 
 /// One command: shown as an icon in its toolbar group, as a row in the group's menu and in the
@@ -396,7 +358,6 @@ pub(crate) enum Cmd {
   NewSketch,
   Dialog(Kind),
   Params,
-  InsertStep,
   Select,
   SketchTool(Tool),
   Construction,
@@ -469,6 +430,11 @@ pub(crate) enum Cmd {
   SelTool(crate::select::SelTool),
   /// Create Base Feature (true), a mode rather than a dialog, and Finish Base Feature (false).
   BaseFeature(bool),
+  /// INSERT > Decal, Insert SVG, Insert Mesh, Insert Derive: Fusion's Insert (Select Source)
+  /// window.
+  Insert(crate::insert_window::Target),
+  /// INSERT > Insert DXF: the docked INSERT DXF dialog.
+  InsertDxf,
 }
 
 impl Cmd {
@@ -497,7 +463,6 @@ impl Cmd {
         k => k.info(),
       },
       Cmd::Params => (Icon::Params, "Change Parameters", "User parameters that drive the design"),
-      Cmd::InsertStep => (Icon::Import, "Insert STEP", "Insert a STEP file as bodies"),
       Cmd::Select => (Icon::Select, "Select", "Select faces, edges, bodies and profiles"),
       Cmd::SketchTool(t) => match t {
         Tool::Line => (Icon::Line, "Line", "Line (L): click points, Esc to finish"),
@@ -671,6 +636,8 @@ impl Cmd {
         (Icon::SketchLibrary, "Sketch Library...", "Place DXF, SVG or .fox library parts where you click in the sketch")
       }
       Cmd::Render(r) => r.info(),
+      Cmd::Insert(t) => crate::insert_window::info(t),
+      Cmd::InsertDxf => (Icon::InsertDxf, "Insert DXF", "Insert a 2D DXF file into a sketch"),
       Cmd::CutCheck => (
         Icon::Interference,
         "Cut Service Check",
@@ -732,9 +699,10 @@ impl Cmd {
     match self {
       Cmd::NewSketch => app.new_sketch(),
       Cmd::Form(a) => crate::form_ui::run(app, a),
+      // an Assembly Design's New Component makes an external design
+      Cmd::Dialog(Kind::NewComponent) if crate::asm_component::applies(app) => crate::asm_component::open(app),
       Cmd::Dialog(k) => app.start(k),
       Cmd::Params => app.show_params = !app.show_params,
-      Cmd::InsertStep => app.import(),
       Cmd::Select => {
         app.nav_mode = None;
         app.set_tool(Tool::Select);
@@ -819,7 +787,8 @@ impl Cmd {
       }
       Cmd::Cut2d => app.open_cut_window(),
       Cmd::Gen(w) => app.gen_command(w),
-      Cmd::Canvas => crate::canvas_ui::start_insert(app),
+      // Fusion's Insert window first; the picked image opens the CANVAS form
+      Cmd::Canvas => crate::insert_window::open(app, crate::insert_window::Target::Canvas),
       Cmd::Plugins => crate::plugins_ui::open_window(app),
       Cmd::ManageMaterials => crate::material_ui::open_browser(app),
       Cmd::Properties => crate::props_ui::toggle(),
@@ -828,6 +797,8 @@ impl Cmd {
       Cmd::CutCheck => crate::service_ui::open(app),
       Cmd::SelTool(t) => crate::select::open_tool(app, t),
       Cmd::BaseFeature(start) => crate::config_ui::base_mode(app, start),
+      Cmd::Insert(target) => crate::insert_window::open(app, target),
+      Cmd::InsertDxf => crate::insert_window::open_dxf(app),
     }
   }
 }
@@ -1177,6 +1148,16 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     } else if matches!(app.tab, Tab::Drawing | Tab::Milling | Tab::Turning | Tab::Generative | Tab::Render) {
       app.tab = Tab::Solid;
     }
+    // an Assembly Design has the ASSEMBLY tab in place of the modelling tabs, as in Fusion
+    let assembly = app.s.design.design_type == fox_engine::model::DesignType::Assembly;
+    if assembly && tabs == Tab::MAIN {
+      tabs = vec![Tab::Assembly, Tab::Manage, Tab::Utilities];
+    }
+    if assembly && matches!(app.tab, Tab::Solid | Tab::Surface | Tab::Mesh | Tab::SheetMetal | Tab::Plastic) {
+      app.tab = Tab::Assembly;
+    } else if !assembly && app.tab == Tab::Assembly {
+      app.tab = Tab::Solid;
+    }
     if app.drawing.is_none() && !app.manufacture && !app.render.active {
       tabs.extend((0..app.plugins.tabs.len().min(usize::from(u8::MAX))).map(|i| Tab::Plugin(i as u8)));
     }
@@ -1487,16 +1468,18 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
         browser_rows::folder_context_menu(ui, &browser_rows::units_menu(), |cmd| browser_rows::run_units_cmd(app, cmd));
       });
     }
-    // Part Design: a pencil on hover and a right-click menu, both Convert Design Type
+    // the design type (Part Design, Assembly Design, ...): a pencil on hover and a right-click
+    // menu, both Convert Design Type
     let convert_open = crate::doc_dialogs::convert_open(app);
-    let ev = tree_row(ui, ds.with(2), 2, None, None, Icon::Component, "Part Design", convert_open, theme::TEXT);
+    let type_label = app.s.design.design_type.label();
+    let ev = tree_row(ui, ds.with(2), 2, None, None, Icon::Component, type_label, convert_open, theme::TEXT);
     if let Some(r) = &ev.response {
       let id = egui::Id::new("design-type-pencil");
-      if crate::doc_dialogs::row_pencil(ui, r, 2, "Part Design", id, true, convert_open, "Convert Design Type") {
+      if crate::doc_dialogs::row_pencil(ui, r, 2, type_label, id, true, convert_open, "Convert Design Type") {
         crate::doc_dialogs::open_convert(app);
       }
       if r.hovered() {
-        marking::peek(app, Vec::new(), "Part Design".into());
+        marking::peek(app, Vec::new(), type_label.into());
       }
       r.context_menu(|ui| {
         browser_rows::folder_context_menu(ui, &browser_rows::design_type_menu(), |cmd| {
@@ -2000,6 +1983,9 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
     {
       isolate_badge(ui, r.rect);
     }
+    if let Some(r) = &ev.response {
+      open_mesh_badge(app, ui, r.rect, 2, bid, &name);
+    }
     if ev.eye {
       app.run("body.visible", json!({"body": bid.0, "visible": !visible}));
     } else {
@@ -2014,7 +2000,11 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
       if r.hovered() {
         marking::peek(app, vec![bid], name.clone());
       }
-      r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
+      if crate::select::is_mesh(&app.s, bid) {
+        r.context_menu(|ui| mesh_rows::mesh_context_menu(app, ui, row, bid, &name));
+      } else {
+        r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
+      }
     }
   }
 }
@@ -2023,6 +2013,26 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
 /// B-rep one.
 pub(crate) fn body_icon(app: &App, body: BodyId) -> Icon {
   if crate::select::is_mesh(&app.s, body) { Icon::MeshBody } else { Icon::Body }
+}
+
+/// The hover lines of a body row's warning: Fusion's for a mesh body that isn't closed or has no
+/// positive volume; none for a sound body.
+pub(crate) fn body_warning(app: &App, body: BodyId) -> Vec<&'static str> {
+  app.s.model.body(body).map(|b| b.mesh_problems()).unwrap_or_default()
+}
+
+/// Fusion's yellow warning triangle right of a body row's name, its hover the warning's lines.
+fn open_mesh_badge(app: &App, ui: &mut egui::Ui, row: Rect, depth: usize, body: BodyId, name: &str) {
+  let lines = body_warning(app, body);
+  if lines.is_empty() {
+    return;
+  }
+  // where tree_row ends the name's pill
+  let text = ui.painter().layout_no_wrap(name.to_string(), egui::FontId::proportional(13.0), theme::TEXT);
+  let pill_right = row.min.x + 8.0 + depth as f32 * 16.0 + 33.0 + text.size().x + 36.0;
+  let r = Rect::from_center_size(pos2(pill_right + 12.0, row.center().y), Vec2::splat(15.0));
+  warning_glyph(ui.painter(), r);
+  ui.interact(r, egui::Id::new(("mesh-warning", body.0)), egui::Sense::hover()).on_hover_text(lines.join("\n"));
 }
 
 /// A body row's in-place rename (double-click or slow-click) and dragging it onto a component.
@@ -2179,6 +2189,8 @@ pub(crate) enum RowCmd {
   Delete,
   CreateSketch,
   OffsetPlane,
+  /// A construction plane row's Edit Construction Plane (the timeline's Edit Feature).
+  EditFeature,
   /// Listed, greyed, as Fusion has it but FissionOxide doesn't yet.
   NotYet,
   // the root, Bodies, Origin and Units rows (see browser_rows)
@@ -2295,28 +2307,37 @@ fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
   sketch_rows::sketches_section(app, ui);
 }
 
+/// The Construction folder, as Fusion's: it appears once a plane is made (after OK), collapsed,
+/// with an eye that shows or hides every plane in it; each plane's row has its own eye (greyed
+/// while the folder's is off).
 fn planes_section(app: &mut App, ui: &mut egui::Ui) {
-  let planes: Vec<(FeatureId, String)> = app
-    .s
-    .design
-    .features
-    .iter()
-    .filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. }))
-    .map(|f| (f.id, f.name.clone()))
-    .collect();
+  let planes = crate::construction::planes(app);
   if planes.is_empty() {
     return;
   }
   let id = egui::Id::new("tree-construction");
-  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Construction", false, theme::TEXT);
-  if !is_open(ui, id, true) {
+  let ev =
+    tree_row(ui, id, 1, Some(false), Some(app.construction_shown), Icon::Folder, "Construction", false, theme::TEXT);
+  if ev.eye {
+    app.construction_shown = !app.construction_shown;
+  }
+  if !is_open(ui, id, false) {
     return;
   }
   for (fid, name) in planes {
     let plane = json!({"feature": fid.0});
     let picked = app.picked_plane.as_ref() == Some(&plane);
     let row = id.with(fid.0);
-    let ev = tree_row(ui, row, 2, None, None, Icon::Plane, &name, picked, theme::TEXT);
+    let eye = crate::construction::eye(app, fid);
+    let ev = tree_row(ui, row, 2, None, Some(eye), Icon::Plane, &name, picked, theme::TEXT);
+    if ev.eye {
+      crate::construction::toggle_eye(app, fid);
+    }
+    if let Some(r) = &ev.response
+      && !app.construction_shown
+    {
+      ui.painter().rect_filled(eye_rect(r.rect, 2), 0.0, Color32::from_white_alpha(150));
+    }
     // double-click sketches on the plane, as on the origin planes; a slow click renames it
     let target = RenameTarget::Feature(fid.0);
     browser_edit::slow_click(ui, &ev, row, target, &name, picked);
@@ -2336,33 +2357,35 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
       }
       reveal_row(app, Sel::Feature { feature: fid }, &r);
       r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
-        if ui.button("Create Sketch").clicked() {
-          ui.close();
-          app.create_sketch(plane.clone());
-        }
-        if ui.button("Rename").clicked() {
-          ui.close();
-          browser_edit::begin(ui, row, target, &name);
-        }
-        ui.separator();
-        if ui.button("Delete").clicked() {
-          ui.close();
-          app.run("feature.delete", json!({"feature": fid.0}));
+        let items = browser_rows::construction_plane_menu(app, fid);
+        match row_menu(ui, &items) {
+          // renamed in place in the browser row
+          Some(RowCmd::Rename) => browser_edit::begin(ui, row, target, &name),
+          Some(cmd) => browser_rows::run_construction_plane_cmd(app, fid, cmd),
+          None => {}
         }
       });
     }
   }
 }
 
-/// A click on a plane in the browser: while Create Sketch waits for a plane it starts the sketch
-/// there, with Mirror open it is the mirror plane, else it selects the plane (Create Sketch then
-/// starts on it).
-pub(super) fn pick_plane(app: &mut App, plane: Value) {
+/// A click on a plane in the browser or the canvas: while Create Sketch waits for a plane it
+/// starts the sketch there, with Mirror open it is the mirror plane, an open Offset Plane takes
+/// it as its plane, else it selects the plane (Create Sketch then starts on it).
+pub(crate) fn pick_plane(app: &mut App, plane: Value) {
   if app.dialog.as_ref().is_some_and(|d| d.kind == Kind::PickPlane) {
     app.cancel_dialog();
     app.create_sketch(plane);
   } else if let Some(d) = app.dialog.as_mut().filter(|d| d.wants_plane()) {
     d.take_plane(plane);
+  } else if app.dialog.as_ref().is_some_and(|d| d.takes_plane()) {
+    let label = match plane.get("feature").and_then(Value::as_u64) {
+      Some(f) => app.s.design.feature(FeatureId(f as u32)).map(|f| f.name.clone()).unwrap_or_default(),
+      None => format!("{} plane", plane.as_str().unwrap_or("xy").to_uppercase()),
+    };
+    if let Some(d) = app.dialog.as_mut() {
+      d.use_plane(&mut app.s, plane, label);
+    }
   } else {
     let again = app.picked_plane.as_ref() == Some(&plane);
     app.s.selection.clear();
@@ -2891,8 +2914,9 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   let sel = match app.s.selection.as_slice() {
     // a curve-picking sketch tool's picks read out like a selection ("2 Sketch Curves | ...")
     [] => {
-      // a picked origin plane, axis or point: "XY Plane", "Y Axis", "Origin Point | X: …"
-      if let Some(t) = crate::origin::status(app) {
+      // a picked origin plane, axis or point: "XY Plane", "Y Axis", "Origin Point | X: …"; a
+      // picked or hovered construction plane: "Plane1"
+      if let Some(t) = crate::origin::status(app).or_else(|| crate::construction::status(app)) {
         return Some(t);
       }
       picked = crate::viewport::picked_curves(app);
@@ -4026,6 +4050,8 @@ pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::PathPattern { .. } => Icon::Pattern,
     FeatureKind::Move { .. } => Icon::Move,
     FeatureKind::Combine { .. } => Icon::Combine,
+    // Insert Mesh's Base Mesh Feature
+    FeatureKind::Import { breps, meshes, .. } if breps.is_empty() && !meshes.is_empty() => Icon::MeshFeature,
     FeatureKind::Import { .. } => Icon::Import,
     FeatureKind::RemoveBodies { .. } => Icon::Remove,
     FeatureKind::Flange { .. }
@@ -4184,10 +4210,13 @@ mod browser_canvas;
 mod browser_config;
 mod browser_edit;
 mod browser_rows;
+mod mesh_rows;
+pub(crate) use browser_rows::lock_glyph;
 mod sketch_rows;
 mod timeline_groups;
 
 pub(crate) use browser_rows::{doc_name, root_label, unsaved as is_unsaved, window_title};
+pub(crate) use mesh_rows::{MeshCmd, OPACITY_LEVELS, mesh_body_menu, run_mesh_cmd};
 #[cfg(test)]
 pub(crate) use sketch_rows::run_sketch_cmd;
 pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};

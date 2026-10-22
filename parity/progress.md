@@ -1,41 +1,54 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 13:00, session "Parity prober 17"
+## Last stop: 2026-10-22, 13:30, session "Parity prober 18"
 
-Finished this session: "Timeline" and "Browser" (both done, with not-exercised lists in `coverage.md`).
-Report `parity/reports/2026-10-22-timeline-browser.md`, `map-wave32.json`, batches
-`ui-timeline-menus-groups` (6), `ui-timeline-rollback-play` (7) and `ui-browser-body-rows` (3), all `ready`
-in `index.jsonl` with no fixer yet. The two timeline batches both edit the timeline in
-`crates/ui/src/panels.rs` (different functions) and `ui-timeline-menus-groups` also
-`panels/timeline_groups.rs`: start them one after the other, or tell the second to rebase.
-`ui-browser-body-rows` shares `body_menu` with `ui-surface-results` (fixing).
-Verified 13 keys (three timeline, ten browser). Still `fixing-merged` in these areas:
-`ui:timeline:error-toast`, `ui:timeline:error-dialog`, `ui:timeline:failed-item-menu`,
-`ui:timeline:suppressed-item-menu`, `ui:timeline:hole-extra-sketch` (need a failed feature or a hole),
+Finished this session: "Workspaces" (done, with blocked and not-exercised lists in `coverage.md`).
+Report `parity/reports/2026-10-22-workspaces.md`, `map-wave33.json`, batches `ui-render-workspace` (7),
+`ui-manufacture-workspace` (6), `ui-electronics-workspace` (5), `ui-animation-workspace` (5, fox-missing),
+`ui-workspace-menu` (3) and `ui-extrude-body-face` (1, P1: Extrude refuses a box's planar face), all
+`ready` in `index.jsonl` with no fixer yet. File overlap: `ui-workspace-menu`, `ui-electronics-workspace`
+and `ui-animation-workspace` all edit `workspace_menu` / `switch_workspace` in `crates/ui/src/panels.rs`;
+`ui-render-workspace` and `ui-manufacture-workspace` both edit the `menus.rs` groups and the timeline in
+`panels.rs`. Start one of each overlapping set first, or tell later fixers to rebase.
+Verified `ui:inspect:interference-dialog` and `ui:inspect:section-analysis-dialog`. Still `fixing-merged`
+and not re-checked: the seven `ui:manip:*` keys (ui-extrude-manipulator; on a body face they wait for
+`ui-extrude-body-face`, a sketch profile would do), `ui:inspect:measure-two-picks`, the six
+`ui-origin-display` keys, `ui:timeline:error-toast`, `ui:timeline:error-dialog`,
+`ui:timeline:failed-item-menu`, `ui:timeline:suppressed-item-menu`, `ui:timeline:hole-extra-sketch`,
 `ui:browser:convert-design-type`, `ui:browser:new-named-view-inline-name`.
-The wave-31 batches (`ui-manage-bom-palette`, `ui-utilities-addins-make`, `ui-utilities-tips-status`) have
-cloud fixers (`fixing`).
+The wave-31/32 batches are `fixing` as `index.jsonl` says. While this session ran, `ui-insert-new-design` (4 keys) and `ui-construction-display` (5 keys) landed as `fixing-merged` (commits 05c8b0e7, 0d48ec66; the running binary predates them): re-verify those too; FissionOxide's "+" should now ask before replacing the open design (check before relying on it).
 
 ## Next prober: start here
 
-1. Take the next `todo` in `coverage.md` (the ASSEMBLY row still needs two saved designs; leave it):
-   "Workspaces: Render, Animation, Simulation, Manufacture (turning, milling tabs), Drawing, Electronics".
-   Switch with the DESIGN dropdown at the toolbar's left in both apps; some Fusion workspaces may be
-   blocked on the Personal licence (record `blocked`).
-2. Re-verify any wave-31/32 key a fixer has set to `fixing-merged` since this stop (history entries
-   dated after 2026-10-22 13:00 local), and the timeline keys listed above if a failed feature is easy
-   to make (a fillet larger than the edge allows).
-3. Rebuild before probing: the running binary is `main` at `f1f9ed56`; kill `fissionoxide.exe` first,
-   `cargo build --release -p fissionoxide` took about 3 minutes.
+1. Take the next `todo` in `coverage.md`: "Keyboard shortcuts: every default shortcut in Fusion's list vs
+   FissionOxide's" (the ASSEMBLY row still needs two saved designs; leave it). Fusion's list is under the
+   profile menu > Preferences or the shortcut toolbox (`ui-toolbar-customize-2` covered the dialogs);
+   press each default key on the canvas in both apps, with and without a selection.
+2. Re-verify the `fixing-merged` keys above that a sketch profile makes easy (`ui:manip:*`: sketch a
+   rectangle on XY, finish, E), and `ui:inspect:measure-two-picks` (a sphere face then a vertex).
+3. Rebuild before probing: the running binary is `main` at `2d74c694`; kill `fissionoxide.exe` first,
+   `cargo build --release -p fissionoxide` took about 2.5 minutes.
 
-Where the documents stand: Fusion has four tabs: "Untitled*" (active, inches, Body1, Sketch1..4, Plane1,
-a timeline group "Group1" of three sketches, Fillet1 moved to the end), "Untitled*(1)" (the MESH-tab
-design), "Untitled(2)" (an empty Assembly Design) and "Untitled*(3)" (sheet metal). Both windows sit at
-screenshot x 0..908: Fusion at y 80..730, FissionOxide at y 0..785 (mm design with Body1..3, a
-pattern, Plane1, Sketch1..3, a one-sketch timeline group, Body2 hidden, SOLID tab, Data Panel closed).
-Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
+Where the documents stand: Fusion has four tabs again ("Untitled*" active: Part Design, inches, Body1,
+Sketch1..4, Plane1, Group1; "Untitled*(1)" mesh; "Untitled(2)" empty Assembly Design; "Untitled*(3)"
+sheet metal), in the DESIGN workspace; the electronics tabs it opened were closed with Don't Save.
+FissionOxide: a new mm design with Body1 (a Box), DESIGN workspace, Data Panel closed. Both windows sit at
+screenshot x 0..908: Fusion at y 80..730, FissionOxide at y 0..785 (snapped with Win+Left, right edge
+dragged from 727 to 907). Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
 
 ## Traps
+- Fusion's Render (teapot), Drawing > From Design and the BOM all need a saved design; From Design jumps
+  back to DESIGN and opens the Save dialog (Cancel at (634,501)). Probers have not saved to the owner's
+  Default Project; ask the owner before doing so.
+- Fusion's Generative Design and Simulation open an upgrade card at the upper left (x at (247,201)).
+- Fusion's New Electronics Design opens a new document tab; New Schematic another. The schematic tab
+  closes without asking; the electronics design tab asks Save / Don't Save / Cancel (Don't Save at
+  (563,498)).
+- Fusion's In-canvas Render keeps rendering until its (now stop) button is pressed again.
+- Fusion's docked dialogs at the right (New Setup, Scene Settings) put OK/Cancel near y 678 / 549; a
+  Cancel click that lands on a tab label leaves the dialog open: take a screenshot after cancelling.
+- FissionOxide's DESIGN > RENDER turns In-Canvas Render on and opens Appearance; Finish Render or the
+  dropdown leaves it. FissionOxide's CREATE > Box now waits for a plane pick like Fusion's.
 - Shift+click and Ctrl+click from the automation tool did not extend FissionOxide's timeline selection
   (recorded as `ui:timeline:multi-select`); Fusion took them. A Ctrl+click once made Explorer the
   frontmost app for the tool (the next right-click was refused at tier "click"): click FissionOxide's
