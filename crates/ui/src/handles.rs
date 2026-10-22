@@ -21,6 +21,12 @@ const ANGLE_STEP: f64 = std::f64::consts::PI / 180.0;
 
 const IDLE: Color32 = Color32::from_rgb(30, 110, 235);
 const ACTIVE: Color32 = Color32::from_rgb(255, 140, 20);
+/// Draft's disc handle and its arc at rest, and the pull arrow's outline.
+const DARK: Color32 = Color32::from_gray(25);
+/// Screen length (points) of Draft's pull-direction arrow.
+const PULL_PX: f64 = 44.0;
+/// Pointer distance from a disc handle's arc that catches it (points).
+const TRACK_PX: f32 = 6.0;
 
 /// Where a handle sits and how its value moves it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,11 +39,15 @@ pub enum Shape {
   Dial { center: DVec3, axis: DVec3, zero: DVec3, radius: Option<f64> },
 }
 
-/// How a handle's head is drawn: an arrowhead for a distance or angle, a dot for a count.
+/// How a handle's head is drawn: an arrowhead for a distance or angle, a dot for a count,
+/// Fusion's white disc with a dark dot riding a dark arc for Draft's angle, and a hollow white
+/// arrow (shown, not dragged) for Draft's pull direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Head {
   Arrow,
   Dot,
+  Disc,
+  Pull,
 }
 
 /// One handle: its shape, current value and the text shown by its head.
@@ -47,20 +57,33 @@ pub struct Handle {
   pub value: f64,
   pub head: Head,
   pub label: String,
+  /// The step (radians) an angle snaps to without Incremental Move, when not 1°.
+  pub snap: Option<f64>,
 }
 
 impl Handle {
   pub fn arrow(origin: DVec3, dir: DVec3, value: f64, label: String) -> Handle {
-    Handle { shape: Shape::Arrow { origin, dir }, value, head: Head::Arrow, label }
+    Handle { shape: Shape::Arrow { origin, dir }, value, head: Head::Arrow, label, snap: None }
   }
 
   pub fn dial(center: DVec3, axis: DVec3, zero: DVec3, radius: Option<f64>, value: f64, label: String) -> Handle {
-    Handle { shape: Shape::Dial { center, axis, zero, radius }, value, head: Head::Arrow, label }
+    Handle { shape: Shape::Dial { center, axis, zero, radius }, value, head: Head::Arrow, label, snap: None }
   }
 
   /// The same handle drawn as a count (a dot).
   pub fn dot(self) -> Handle {
     Handle { head: Head::Dot, ..self }
+  }
+
+  /// The same dial drawn as Draft's disc on an arc, turning in steps of `snap` radians.
+  pub fn disc(self, snap: f64) -> Handle {
+    Handle { head: Head::Disc, snap: Some(snap), ..self }
+  }
+
+  /// A direction shown as a hollow arrow of fixed size on screen from `origin` along `dir`
+  /// (Draft's pull direction): drawn, never dragged.
+  pub fn pull(origin: DVec3, dir: DVec3) -> Handle {
+    Handle { shape: Shape::Arrow { origin, dir }, value: 0.0, head: Head::Pull, label: String::new(), snap: None }
   }
 
   /// Is this an angle (snapped to angle steps) rather than a length?
@@ -121,10 +144,14 @@ fn wrap(a: f64) -> f64 {
 /// A handle on screen: the shaft or arc, and the head with the direction it points.
 struct Placed {
   line: Vec<Pos2>,
-  /// The whole circle of a dial, drawn faintly.
+  /// The whole circle of a dial, drawn faintly (a disc handle's only while hovered, dashed).
   circle: Vec<Pos2>,
   head: Pos2,
   dir: Vec2,
+  /// Can the pointer take it (not Draft's pull arrow), and does a press on its arc (`line`)
+  /// take it as well as one on its head (a disc handle)?
+  grab: bool,
+  on_track: bool,
 }
 
 /// World length that spans `px` points on screen at `at`.
@@ -135,7 +162,14 @@ fn world_size(project: &dyn Fn(DVec3) -> Option<Pos2>, right: DVec3, at: DVec3, 
 }
 
 fn place(h: &Handle, right: DVec3, project: &dyn Fn(DVec3) -> Option<Pos2>) -> Option<Placed> {
+  let grab = h.head != Head::Pull;
   match h.shape {
+    Shape::Arrow { origin, dir } if h.head == Head::Pull => {
+      let (a, b) = (project(origin)?, project(origin + dir * world_size(project, right, origin, PULL_PX)?)?);
+      let d = (b - a).normalized();
+      let d = if d.is_finite() && (b - a).length() > 1.0 { d } else { Vec2::new(0.0, -1.0) };
+      Some(Placed { line: vec![a, b], circle: Vec::new(), head: b, dir: d, grab, on_track: false })
+    }
     Shape::Arrow { origin, dir } => {
       let tip = origin + dir * h.value;
       let (a, b) = (project(origin)?, project(tip)?);
@@ -143,7 +177,7 @@ fn place(h: &Handle, right: DVec3, project: &dyn Fn(DVec3) -> Option<Pos2>) -> O
       let along = (project(origin + dir * world_size(project, right, origin, 20.0)?)? - a).normalized();
       let along = if along.is_finite() { along } else { Vec2::new(0.0, -1.0) };
       let d = if h.value < 0.0 { -along } else { along };
-      Some(Placed { line: vec![a, b], circle: Vec::new(), head: b, dir: d })
+      Some(Placed { line: vec![a, b], circle: Vec::new(), head: b, dir: d, grab, on_track: false })
     }
     Shape::Dial { center, axis, zero, radius } => {
       let r = match radius {
@@ -152,40 +186,142 @@ fn place(h: &Handle, right: DVec3, project: &dyn Fn(DVec3) -> Option<Pos2>) -> O
       };
       let at = |a: f64| project(dial_point(center, axis, zero, r, a));
       let circle: Vec<Pos2> = (0..=64).filter_map(|k| at(std::f64::consts::TAU * k as f64 / 64.0)).collect();
-      let sweep = h.value.clamp(-std::f64::consts::TAU, std::f64::consts::TAU);
-      let n = ((sweep.abs() / std::f64::consts::TAU * 64.0).ceil() as usize).max(1);
-      let mut line: Vec<Pos2> = (0..=n).filter_map(|k| at(sweep * k as f64 / n as f64)).collect();
-      if let Some(c) = project(center) {
-        line.insert(0, c);
-      }
+      let disc = h.head == Head::Disc;
+      let line: Vec<Pos2> = if disc {
+        // the disc rides a half circle either side of zero (Draft's pull direction)
+        let half = std::f64::consts::FRAC_PI_2;
+        (0..=32).filter_map(|k| at(-half + 2.0 * half * k as f64 / 32.0)).collect()
+      } else {
+        let sweep = h.value.clamp(-std::f64::consts::TAU, std::f64::consts::TAU);
+        let n = ((sweep.abs() / std::f64::consts::TAU * 64.0).ceil() as usize).max(1);
+        let mut line: Vec<Pos2> = (0..=n).filter_map(|k| at(sweep * k as f64 / n as f64)).collect();
+        if let Some(c) = project(center) {
+          line.insert(0, c);
+        }
+        line
+      };
       let head = at(h.value)?;
       // the arc's tangent, the way the value grows
       let ahead = at(h.value + if h.value < 0.0 { -0.05 } else { 0.05 })?;
       let d = (ahead - head).normalized();
-      Some(Placed { line, circle, head, dir: if d.is_finite() { d } else { Vec2::new(1.0, 0.0) } })
+      let dir = if d.is_finite() { d } else { Vec2::new(1.0, 0.0) };
+      Some(Placed { line, circle, head, dir, grab, on_track: disc })
     }
   }
 }
 
-/// The handle whose head is nearest a screen point, within reach.
+/// The handle whose head is nearest a screen point, within reach; a disc handle is also caught
+/// anywhere on its arc. Draft's pull arrow is never caught.
 fn hit(placed: &[Option<Placed>], p: Pos2) -> Option<usize> {
+  let reach = |x: &Placed| {
+    let head = (x.head - p).length();
+    if head <= CATCH_PX {
+      return Some(head);
+    }
+    // a press on the arc counts as one just beyond the head's reach (heads win where both are)
+    let track = x.line.windows(2).map(|w| seg_dist(p, w[0], w[1])).fold(f32::INFINITY, f32::min);
+    (x.on_track && track <= TRACK_PX).then_some(CATCH_PX + track)
+  };
   placed
     .iter()
     .enumerate()
-    .filter_map(|(i, x)| Some((i, (x.as_ref()?.head - p).length())))
-    .filter(|(_, d)| *d <= CATCH_PX)
+    .filter_map(|(i, x)| x.as_ref().filter(|x| x.grab).and_then(|x| Some((i, reach(x)?))))
     .min_by(|a, b| a.1.total_cmp(&b.1))
     .map(|(i, _)| i)
 }
 
-/// Where a handle's label (or floating value box) sits: beside the head.
+/// Distance on screen from `p` to the segment `a`–`b`.
+fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
+  let ab = b - a;
+  let t = if ab.length_sq() > 1e-9 { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) } else { 0.0 };
+  (p - (a + ab * t)).length()
+}
+
+/// Where a handle's label sits: beside the head.
 fn label_at(p: &Placed) -> Pos2 {
   let (b, d) = (p.head, p.dir);
   let side = Vec2::new(-d.y, d.x);
   b + side * 14.0 + d * 4.0
 }
 
+/// The floating value box's size on screen (points), near enough to keep it off the arrow.
+const BOX_SIZE: Vec2 = Vec2::new(96.0, 22.0);
+/// The gap kept between the box and the arrow it belongs to (points).
+const BOX_GAP: f32 = 4.0;
+
+/// Where the floating value box goes beside an arrow from `a` to its head at `b` pointing `d`
+/// (a unit screen direction): its left-centre, as [`crate::value_box::show`] takes it. As in
+/// Fusion it sits apart from the arrow, below and to the right of the head where the shaft
+/// leaves room (else the next corner round that does), so the arrow stays visible and can be
+/// grabbed, and inside `canvas` whatever the arrow's length.
+pub(crate) fn box_beside(a: Pos2, b: Pos2, d: Vec2, canvas: egui::Rect) -> Pos2 {
+  let side = Vec2::new(-d.y, d.x);
+  let head = egui::Rect::from_points(&[b, b + d * 12.0, b + side * 6.0, b - side * 6.0]).expand(BOX_GAP);
+  let shaft = |r: egui::Rect| {
+    let r = r.expand(BOX_GAP);
+    let n = ((b - a).length() / 2.0).ceil().clamp(1.0, 400.0) as usize;
+    (0..=n).any(|k| r.contains(a + (b - a) * (k as f32 / n as f32)))
+  };
+  let corners = [
+    egui::Rect::from_min_size(head.right_bottom(), BOX_SIZE),
+    egui::Rect::from_min_size(head.left_bottom() - Vec2::new(BOX_SIZE.x, 0.0), BOX_SIZE),
+    egui::Rect::from_min_size(head.right_top() - Vec2::new(0.0, BOX_SIZE.y), BOX_SIZE),
+    egui::Rect::from_min_size(head.left_top() - BOX_SIZE, BOX_SIZE),
+  ];
+  let r = corners
+    .iter()
+    .find(|r| !shaft(**r) && canvas.contains_rect(**r))
+    .or_else(|| corners.iter().find(|r| !shaft(**r)))
+    .copied()
+    .unwrap_or(corners[0]);
+  // kept inside the canvas (an arrow running off it takes its box no further than the edge)
+  let min = canvas.min;
+  let max = (canvas.max - BOX_SIZE).max(min);
+  let top_left = r.min.clamp(min, max);
+  top_left + Vec2::new(0.0, BOX_SIZE.y / 2.0)
+}
+
+/// Draft's handles as Fusion draws them: the angle's white disc with a dark dot on a dark arc
+/// (both blue while dragged, a dashed circle round the dial while hovered), the pull direction
+/// a hollow white arrow outlined dark.
+fn draw_draft(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool) {
+  let (b, d) = (p.head, p.dir);
+  if h.head == Head::Pull {
+    let a = p.line[0];
+    let side = Vec2::new(-d.y, d.x);
+    let neck = b - d * 14.0;
+    let shaft = [a + side * 3.0, neck + side * 3.0, neck - side * 3.0, a - side * 3.0];
+    let tip = [b, neck + side * 9.0, neck - side * 9.0];
+    painter.add(egui::Shape::convex_polygon(shaft.to_vec(), Color32::WHITE, Stroke::NONE));
+    painter.add(egui::Shape::convex_polygon(tip.to_vec(), Color32::WHITE, Stroke::NONE));
+    let outline = vec![
+      a + side * 3.0,
+      neck + side * 3.0,
+      neck + side * 9.0,
+      b,
+      neck - side * 9.0,
+      neck - side * 3.0,
+      a - side * 3.0,
+    ];
+    painter.add(egui::Shape::closed_line(outline, Stroke::new(1.5, DARK)));
+    return;
+  }
+  let ink = if active { IDLE } else { DARK };
+  if lit && !active && p.circle.len() > 1 {
+    painter.extend(egui::Shape::dashed_line(&p.circle, Stroke::new(1.0, DARK), 5.0, 4.0));
+  }
+  if p.line.len() > 1 {
+    painter.add(egui::Shape::line(p.line.clone(), Stroke::new(if active { 2.5 } else { 2.0 }, ink)));
+  }
+  painter.circle_filled(b, 7.0, if active { IDLE } else { Color32::WHITE });
+  painter.circle_stroke(b, 7.0, Stroke::new(1.5, ink));
+  painter.circle_filled(b, 2.5, if active { Color32::WHITE } else { DARK });
+}
+
 fn draw(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool, label: bool) {
+  if matches!(h.head, Head::Disc | Head::Pull) {
+    return draw_draft(painter, h, p, lit, active);
+  }
   let col = if lit { ACTIVE } else { IDLE };
   if p.circle.len() > 1 {
     painter.add(egui::Shape::line(p.circle.clone(), Stroke::new(1.0, col.gamma_multiply(0.35))));
@@ -203,6 +339,7 @@ fn draw(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool
       painter.circle_filled(b, 6.0, col);
       painter.circle_stroke(b, 6.0, Stroke::new(1.5, Color32::WHITE));
     }
+    Head::Disc | Head::Pull => {}
   }
   let at = label_at(p);
   if !label {
@@ -246,8 +383,10 @@ pub(crate) fn show(
     let i = drag.index;
     if let Some(p) = resp.interact_pointer_pos() {
       let (o, d) = ray(p);
-      let angular = handles.get(i).is_some_and(Handle::angular);
-      let snap = if angular { app.increments.angular_step(ANGLE_STEP) } else { step };
+      let h = handles.get(i);
+      let angular = h.is_some_and(Handle::angular);
+      let turn = h.and_then(|h| h.snap).unwrap_or(ANGLE_STEP);
+      let snap = if angular { app.increments.angular_step(turn) } else { step };
       if let Some(v) = drag.update(o, d)
         && let Some(dlg) = app.dialog.as_mut()
       {
@@ -255,10 +394,24 @@ pub(crate) fn show(
       }
     }
     let now = app.dialog.as_ref().map(|d| d.handles(&app.s)).unwrap_or_default();
+    let canvas = resp.rect;
+    let params = crate::value_box::params_of(&app.s);
     for (k, h) in now.iter().enumerate() {
-      if let Some(p) = place(h, right, project) {
-        draw(painter, h, &p, k == i, k == i, true);
+      let Some(p) = place(h, right, project) else { continue };
+      // a handle whose box opens with the drag (Draft's angle) shows it beside the head
+      let mut boxed = false;
+      if k == i
+        && h.head == Head::Disc
+        && let Some(dlg) = app.dialog.as_mut()
+        && let Some(field) = dlg.handle_field(k)
+      {
+        let at = box_beside(p.head - p.dir * 20.0, p.head, p.dir, canvas);
+        if crate::value_box::show_nth(ctx, &mut app.manip.value_box, 0, at, field, &params).changed {
+          dlg.value_box_edited();
+        }
+        boxed = true;
       }
+      draw(painter, h, &p, k == i, k == i, !boxed);
     }
     ctx.request_repaint();
     return true;
@@ -291,7 +444,10 @@ pub(crate) fn show(
       && let Some(dlg) = app.dialog.as_mut()
       && let Some(field) = dlg.handle_field(k)
     {
-      let at = label_at(p);
+      let at = match h.shape {
+        Shape::Arrow { .. } => box_beside(p.line[0], p.head, p.dir, resp.rect),
+        Shape::Dial { .. } => box_beside(p.head - p.dir * 20.0, p.head, p.dir, resp.rect),
+      };
       if crate::value_box::show_nth(ctx, &mut app.manip.value_box, shown, at, field, &params).changed {
         dlg.value_box_edited();
       }
@@ -306,9 +462,65 @@ pub(crate) fn show(
   hot.is_some() || pressed.is_some() && ctx.input(|i| i.pointer.primary_down())
 }
 
+/// The open dialog's handles on screen: each one's head and its shaft or arc (tests press them).
+#[cfg(test)]
+pub(crate) fn placed_points(app: &App, project: &dyn Fn(DVec3) -> Option<Pos2>) -> Vec<Option<(Pos2, Vec<Pos2>)>> {
+  let (right, _, _) = app.cam.basis();
+  let handles = app.dialog.as_ref().map(|d| d.handles(&app.s)).unwrap_or_default();
+  handles.iter().map(|h| place(h, right, project).map(|p| (p.head, p.line))).collect()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// `ui:manip:value-box-covers-arrow`: whichever way an arrow points, its box sits clear of the
+  /// shaft and head (below and to the right of the head where it can), and inside the canvas.
+  #[test]
+  fn the_value_box_keeps_off_its_arrow_and_inside_the_canvas() {
+    let canvas = egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+    let b = Pos2::new(400.0, 300.0);
+    let rect = |at: Pos2| egui::Rect::from_min_size(at - Vec2::new(0.0, BOX_SIZE.y / 2.0), BOX_SIZE);
+    for k in 0..16 {
+      let t = std::f32::consts::TAU * k as f32 / 16.0;
+      let d = Vec2::new(t.cos(), t.sin());
+      let a = b - d * 80.0;
+      let r = rect(box_beside(a, b, d, canvas));
+      let side = Vec2::new(-d.y, d.x);
+      for q in [b, b + d * 12.0, b + side * 6.0, b - side * 6.0, a, a + (b - a) * 0.5] {
+        assert!(!r.contains(q), "{d:?}: the box {r:?} covers {q:?}");
+      }
+      assert!(canvas.contains_rect(r));
+    }
+    // an arrow pointing up and to the right gets its box below and to the right of the head
+    let d = Vec2::new(1.0, -1.0).normalized();
+    let r = rect(box_beside(b - d * 80.0, b, d, canvas));
+    assert!(r.left() > b.x && r.top() > b.y, "{r:?}");
+    // a head off the canvas keeps its box at the edge
+    let r = rect(box_beside(Pos2::new(700.0, 300.0), Pos2::new(1500.0, 900.0), Vec2::new(0.8, 0.6), canvas));
+    assert!(canvas.contains_rect(r), "{r:?}");
+  }
+
+  /// `ui:manip:draft-angle-handle`: Draft's disc is caught on its arc as well as its head; the
+  /// pull arrow is never caught.
+  #[test]
+  fn a_disc_is_caught_on_its_arc_and_the_pull_arrow_never() {
+    let right = DVec3::X;
+    let disc = Handle::dial(DVec3::ZERO, DVec3::Z, DVec3::Y, Some(40.0), 0.1, "".into()).disc(0.1);
+    let pull = Handle::pull(DVec3::ZERO, DVec3::Y);
+    let placed: Vec<Option<Placed>> = [&disc, &pull].iter().map(|h| place(h, right, &top)).collect();
+    // the arc runs a quarter turn either way of zero (screen (100, 60)): (140, 100) is on it
+    assert_eq!(hit(&placed, Pos2::new(141.0, 101.0)), Some(0));
+    assert_eq!(hit(&placed, Pos2::new(59.0, 100.0)), Some(0));
+    // not the arc's far side, nor the pull arrow's head (PULL_PX up from the centre)
+    assert_eq!(hit(&placed, Pos2::new(100.0, 140.0)), None);
+    let tip = placed[1].as_ref().unwrap().head;
+    assert!((tip - Pos2::new(100.0, 100.0 - PULL_PX as f32)).length() < 1e-3, "{tip:?}");
+    let arrow = Handle::arrow(DVec3::ZERO, DVec3::Y, 30.0, "".into());
+    let placed: Vec<Option<Placed>> = [&pull, &arrow].iter().map(|h| place(h, right, &top)).collect();
+    assert_eq!(hit(&placed, Pos2::new(100.0, 70.0)), Some(1), "an arrow under the pull arrow is caught");
+    assert_eq!(hit(&placed, tip), None);
+  }
 
   /// An orthographic view down -Z: world (x, y) → screen (100 + x, 100 - y).
   fn top(p: DVec3) -> Option<Pos2> {

@@ -790,9 +790,11 @@ impl Dialog {
       d.plane_label = format!("Face of {}", s.body_name(*body));
     }
     match kind {
-      Kind::Fillet => d.radius = "2 mm".into(),
+      // Fusion starts a fillet's radius and a shell's thickness at 0.00, previewing nothing until
+      // a value is typed or the arrow dragged
+      Kind::Fillet => d.radius = "0 mm".into(),
       Kind::Chamfer => d.radius = "1 mm".into(),
-      Kind::Shell => d.radius = "2 mm".into(),
+      Kind::Shell => d.radius = "0 mm".into(),
       // Fusion's defaults for the values not drawn (0.10 in high, a 0.40 in sphere, a 0.20 in
       // tube); the drawing sets the rest
       Kind::Box => d.c = "2.54 mm".into(),
@@ -1711,8 +1713,9 @@ impl Dialog {
     if !self.ready() {
       return;
     }
-    if self.kind == Kind::SkOffset && !self.offset_set() {
-      // at 0.00 (or half typed) the offset sits on its curve: nothing to preview, no complaint
+    if self.waits_for_value() {
+      // at 0.00 (or half typed) an offset sits on its curve and a fillet or shell has no size:
+      // nothing to preview, no complaint
       self.error = None;
       return;
     }
@@ -2420,19 +2423,27 @@ impl Dialog {
   fn ok_enabled(&self) -> bool {
     match self.kind {
       Kind::Extrude if self.editing.is_none() => !self.profiles.is_empty(),
-      // an offset of 0.00 sits on its curve: OK waits for a distance
-      Kind::SkOffset => self.ready() && self.offset_set(),
-      _ => self.ready(),
+      // an offset of 0.00 sits on its curve, a fillet or shell of 0.00 has no size: OK waits
+      // for a value
+      _ => self.ready() && !self.waits_for_value(),
+    }
+  }
+
+  /// Is the dialog's value still at 0.00 (or half typed), where Fusion previews nothing and OK
+  /// waits: Sketch Offset's distance, a new fillet's radius or shell's thickness.
+  fn waits_for_value(&self) -> bool {
+    match self.kind {
+      Kind::SkOffset => !self.offset_set(),
+      Kind::Fillet if self.editing.is_none() && self.solid.fillet_type != "full_round" => !length_set(&self.radius),
+      Kind::Shell if self.editing.is_none() => !length_set(&self.radius),
+      _ => false,
     }
   }
 
   /// Sketch Offset: has the distance left 0.00 (a value the arrow, the box or the row set)? A
   /// distance naming a user parameter counts as set; a half-typed one (".", "-") doesn't.
   fn offset_set(&self) -> bool {
-    match fox_engine::expr::eval(&self.distance, fox_engine::expr::Kind::Length, &fox_engine::expr::Empty) {
-      Ok(v) => v.abs() >= 1e-9,
-      Err(_) => !self.distance.trim().trim_matches(['.', '-', '+', ' ']).is_empty(),
-    }
+    length_set(&self.distance)
   }
 
   fn missing_input(&self) -> &'static str {
@@ -5469,6 +5480,15 @@ pub fn type_into(ctx: &egui::Context, text: String) {
   ctx.data_mut(|d| d.insert_temp(egui::Id::new(TYPING), text));
 }
 
+/// Has a length field left 0.00? A value naming a user parameter counts as set; a half-typed one
+/// (".", "-") doesn't.
+fn length_set(e: &str) -> bool {
+  match fox_engine::expr::eval(e, fox_engine::expr::Kind::Length, &fox_engine::expr::Empty) {
+    Ok(v) => v.abs() >= 1e-9,
+    Err(_) => !e.trim().trim_matches(['.', '-', '+', ' ']).is_empty(),
+  }
+}
+
 /// Takes the typing aimed at the open dialog, if any (the floating value box draws before the
 /// dialog, so it gets first call).
 pub(crate) fn take_typing(ctx: &egui::Context) -> Option<String> {
@@ -5690,6 +5710,39 @@ mod tests {
     d.cancel(&mut app.s);
   }
 
+  /// `ui:manip:zero-default-value`: Fillet and Shell start at 0.00 after the first pick, as in
+  /// Fusion: nothing previewed, no complaint and OK waiting until a value is typed (an edited
+  /// fillet keeps its radius); in inches the box reads "0 in".
+  #[test]
+  fn fillet_and_shell_start_at_zero() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    let body = app.s.model.bodies[0].id;
+    let top = app.s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let volume = |app: &App| app.s.model.bodies[0].shape.mass().unwrap().volume;
+    let before = volume(&app);
+    for (kind, sel) in [(Kind::Fillet, Sel::Edge { body, edge: 1 }), (Kind::Shell, Sel::Face { body, face: top })] {
+      app.s.selection = vec![sel];
+      let mut d = Dialog::open(&mut app, kind);
+      assert_eq!(d.radius, "0 mm", "{kind:?}");
+      assert!(d.ready() && !d.ok_enabled(), "{kind:?}: OK waits for a value");
+      d.preview(&mut app.s);
+      assert!(!d.applied && d.error.is_none(), "{kind:?}: nothing previewed at 0, nothing wrong");
+      assert!((volume(&app) - before).abs() < 1e-9);
+      d.radius = ".".into();
+      assert!(!d.ok_enabled(), "{kind:?}: half typed");
+      d.radius = "1 mm".into();
+      assert!(d.ok_enabled());
+      d.preview(&mut app.s);
+      assert!(d.applied && d.error.is_none(), "{kind:?}: {:?}", d.error);
+      assert!(volume(&app) < before);
+      d.cancel(&mut app.s);
+    }
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    app.s.selection = vec![Sel::Edge { body, edge: 1 }];
+    assert_eq!(Dialog::open(&mut app, Kind::Fillet).radius, "0 in");
+  }
+
   /// A Fillet preview keeps the body's own colour: only the picked edge draws in the selection
   /// blue, as Fusion's command picks look.
   #[test]
@@ -5700,6 +5753,7 @@ mod tests {
     let body = app.s.model.bodies[0].id;
     app.s.selection = vec![Sel::Edge { body, edge: 1 }];
     let mut d = Dialog::open(&mut app, Kind::Fillet);
+    d.radius = "2 mm".into();
     d.preview(&mut app.s);
     assert!(d.applied, "{:?}", d.error);
     let (sc, picks) = SceneBuilder::default().build(&app.s, &ViewOptions::default());

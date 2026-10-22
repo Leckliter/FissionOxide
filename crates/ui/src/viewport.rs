@@ -4869,9 +4869,15 @@ fn arrow_dir(drawn: Vec2, along: Option<Vec2>) -> Vec2 {
   }
 }
 
-/// The open dialog's drag arrow: drawn from its base along its direction to the current value,
-/// with the floating value box at its head (see [`crate::value_box`]); dragging the head changes
-/// the value (snapped to a tenth of the grid). Returns true while the arrow has the pointer.
+/// The longest Fillet's radius arrow is drawn on screen (points): a large radius keeps the arrow
+/// and its box near the edge, as in Fusion, rather than reaching off the canvas.
+const RADIUS_ARROW_REACH: f32 = 90.0;
+
+/// The open dialog's drag arrow: drawn from its base along its direction to the current value
+/// (Fillet's no longer than [`RADIUS_ARROW_REACH`]), with the floating value box below and to the
+/// right of its head, clear of the arrow and inside the canvas (see [`crate::value_box`]);
+/// dragging the head changes the value by the pointer's travel along the arrow (snapped to a
+/// tenth of the grid). Returns true while the arrow has the pointer.
 fn manipulator(
   app: &mut App,
   resp: &egui::Response,
@@ -4891,6 +4897,8 @@ fn manipulator(
     app.manip.value_box.hide();
     return false;
   };
+  let reach = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::Fillet).then_some(RADIUS_ARROW_REACH);
+  let b = capped(a, b, reach);
   let hot = resp.hover_pos().is_some_and(|p| (p - b).length() < 12.0);
   let active = matches!(app.drag, Some(Drag::Manip));
   let col = if hot || active { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
@@ -4902,7 +4910,7 @@ fn manipulator(
   let head = [b + dir2 * 12.0, b + side * 6.0, b - side * 6.0];
   painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
   // the value box beside the head edits the dialog's field; a dialog without one gets a label
-  let head_at = b + side * 14.0 + dir2 * 4.0;
+  let head_at = crate::handles::box_beside(a, b, dir2, view.rect);
   // Sketch Offset's box sits by the pointer while the offset is still on its curve, as Fusion
   // puts it, and moves to the arrow's head once the arrow is dragged or a distance typed
   let label_at = if app.dialog.as_ref().is_some_and(|d| d.box_by_pointer(&app.s)) {
@@ -4933,15 +4941,23 @@ fn manipulator(
     );
   }
   // a drag starts only once the pointer has moved: test where the press began
-  let pressed_on_head = ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| (p - b).length() < 14.0);
+  let press = ctx.input(|i| i.pointer.press_origin());
+  let pressed_on_head = press.is_some_and(|p| (p - b).length() < 14.0);
   if pressed_on_head && resp.drag_started_by(egui::PointerButton::Primary) {
     app.drag = Some(Drag::Manip);
+    // the value moves by the pointer's travel from where it grabbed the head (a capped arrow's
+    // head is short of its value)
+    app.manip.arrow_grab = press.and_then(|p| {
+      let (o, d) = view.ray(&app.cam, p);
+      Some((m.value, axis_param(m.origin, m.dir, o, d)?))
+    });
   }
   if matches!(app.drag, Some(Drag::Manip)) {
     if let Some(p) = resp.interact_pointer_pos() {
       let (o, d) = view.ray(&app.cam, p);
       // closest point on the arrow's axis to the pointer ray
       if let Some(t) = axis_param(m.origin, m.dir, o, d) {
+        let t = app.manip.arrow_grab.map_or(t, |(start, grab)| start + t - grab);
         let step = app.increments.linear_step(grid_step(app, view) / 10.0);
         if let Some(dlg) = app.dialog.as_mut() {
           dlg.set_manipulator(t, step);
@@ -4951,7 +4967,24 @@ fn manipulator(
     ctx.request_repaint();
     return true;
   }
+  app.manip.arrow_grab = None;
   hot || pressed_on_head && ctx.input(|i| i.pointer.primary_down())
+}
+
+/// The screen point of world `p` in the canvas the last frame drew (tests drive handles by it).
+#[cfg(test)]
+pub(crate) fn screen_of(app: &App, p: DVec3) -> Option<Pos2> {
+  let (rect, [w, h]) = (app.canvas, app.canvas_px);
+  View { rect, ppp: w as f32 / rect.width(), w, h }.to_screen(&app.cam, p)
+}
+
+/// An arrow's head at `b` (from `a`), brought back along the arrow to at most `reach` points
+/// from `a`.
+fn capped(a: Pos2, b: Pos2, reach: Option<f32>) -> Pos2 {
+  match reach {
+    Some(r) if (b - a).length() > r => a + (b - a).normalized() * r,
+    _ => b,
+  }
 }
 
 /// Draws a manipulator arrow from `a` to its head at `b` (orange while `hot`, else Fusion's
@@ -5015,6 +5048,15 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
 
 #[cfg(test)]
 mod tests {
+  /// `ui:manip:arrow-length-offscreen`: a long arrow is drawn no further than its reach.
+  #[test]
+  fn a_capped_arrow_stops_at_its_reach() {
+    let a = Pos2::new(10.0, 10.0);
+    assert_eq!(super::capped(a, Pos2::new(310.0, 10.0), Some(90.0)), Pos2::new(100.0, 10.0));
+    assert_eq!(super::capped(a, Pos2::new(50.0, 10.0), Some(90.0)), Pos2::new(50.0, 10.0));
+    assert_eq!(super::capped(a, Pos2::new(310.0, 10.0), None), Pos2::new(310.0, 10.0));
+  }
+
   /// The palette's Slice sections the model at the sketch plane, cutting away the camera's side.
   #[test]
   fn slice_sections_the_model_at_the_sketch_plane_towards_the_camera() {

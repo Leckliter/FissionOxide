@@ -1213,6 +1213,84 @@ fn the_floating_value_box_takes_typing_and_enter_is_ok() {
   assert!((top - 25.0).abs() < 1e-6, "extruded by the typed 25 mm: {top}");
 }
 
+/// `ui:manip:value-box-covers-arrow`, `ui:manip:arrow-length-offscreen`,
+/// `ui:manip:zero-default-value`: Fillet on a picked edge starts at 0 mm with the box focused and
+/// nothing previewed; with a typed radius the box sits clear of the arrow's head, and a radius
+/// far larger than the part keeps the arrow short and the box on the canvas.
+#[test]
+fn the_fillet_box_keeps_off_its_arrow_and_on_the_canvas() {
+  use serde_json::json;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+  let body = h.app.s.model.bodies[0].id;
+  h.app.s.selection = vec![fox_engine::Sel::Edge { body, edge: 1 }];
+  h.app.start(crate::dialogs::Kind::Fillet);
+  h.app.fit_view_now();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let focused = h.ctx.memory(|m| m.focused()).expect("the value box has the keyboard");
+  assert_eq!(h.ctx.read_response(focused).map(|r| r.layer_id), Some(crate::value_box::layer()));
+  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), "0 mm");
+  assert!(!h.app.dialog.as_ref().unwrap().preview_applied(), "nothing previewed at 0 mm");
+  h.frame(typing("2"));
+  for _ in 0..2 {
+    h.frame(vec![]);
+  }
+  let arrow = |h: &Harness| {
+    let m = h.app.dialog.as_ref().unwrap().manipulator(&h.app.s).unwrap();
+    let a = crate::viewport::screen_of(&h.app, m.origin).unwrap();
+    (a, crate::viewport::screen_of(&h.app, m.origin + m.dir * m.value).unwrap())
+  };
+  let (a, b) = arrow(&h);
+  let value_box = h.ctx.memory(|m| m.area_rect(crate::value_box::id())).expect("the value box");
+  for t in [1.0, 0.75, 0.5] {
+    let q = a + (b - a) * t;
+    assert!(!value_box.expand(3.0).contains(q), "the box {value_box:?} covers the arrow at {q:?}");
+  }
+  // a 1000 mm radius on a 10 mm box: the arrow stops short and the box stays on the canvas
+  *h.app.dialog.as_mut().unwrap().value_box_field().unwrap() = "1000 mm".into();
+  h.app.dialog.as_mut().unwrap().value_box_edited();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let (a, b) = arrow(&h);
+  assert!((b - a).length() > 200.0, "the full arrow would run {} points", (b - a).length());
+  let value_box = h.ctx.memory(|m| m.area_rect(crate::value_box::id())).expect("the value box");
+  assert!(h.app.canvas.contains_rect(value_box), "{value_box:?} in {:?}", h.app.canvas);
+  assert!((value_box.center() - a).length() < 200.0, "the box stays near the edge: {value_box:?} {a:?}");
+}
+
+/// `ui:manip:draft-angle-handle`: a press on Draft's arc (not only its disc) turns the angle in
+/// 5° steps and opens the floating box with it, instead of starting a window selection; the
+/// box isn't there before.
+#[test]
+fn dragging_drafts_arc_turns_the_angle_in_five_degree_steps() {
+  use serde_json::json;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+  let body = h.app.s.model.bodies[0].id;
+  let front = h.app.s.model.bodies[0].faces().iter().find(|f| f.normal.y < -0.9).unwrap().id;
+  h.app.s.selection = vec![fox_engine::Sel::Face { body, face: front }];
+  h.app.start(crate::dialogs::Kind::Draft);
+  h.app.fit_view_now();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!(h.ctx.memory(|m| m.area_rect(crate::value_box::id())).is_none(), "no box before the drag");
+  let project = |p| crate::viewport::screen_of(&h.app, p);
+  let placed = crate::handles::placed_points(&h.app, &project);
+  let (_, arc) = placed[0].clone().expect("the disc on its arc");
+  // the arc's 33 points run a quarter turn either side of the pull direction: from 45° before
+  // it to about 17° before it is a 28° turn from 3°, 31° snapped to 30°
+  let (from, to) = (arc[8], arc[13]);
+  h.drag(from, to);
+  assert!(!matches!(h.app.drag, Some(crate::viewport::Drag::Box { .. })), "no window selection");
+  let value_box = h.ctx.memory(|m| m.area_rect(crate::value_box::id()));
+  assert!(value_box.is_some(), "the drag opened the box");
+  assert_eq!(h.app.dialog.as_mut().unwrap().handle_field(0).unwrap().clone(), "30.0 deg");
+}
+
 /// Select Other, as in Fusion: a press held still on the model opens the list (Depth tab, one
 /// row per entity by type) while the button is down, selecting nothing; the release selects
 /// nothing either and the list stays until Escape. Alt+click simply selects.

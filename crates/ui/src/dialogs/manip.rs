@@ -30,7 +30,13 @@ pub(super) struct Cache {
   offset_base: Option<Value>,
   /// Offset Plane: the construction plane its preview added.
   preview_plane: Option<FeatureId>,
+  /// Draft: the angle handle has been dragged, so its floating value box shows (Fusion opens it
+  /// with the drag, not before).
+  draft_box: bool,
 }
+
+/// Draft's angle handle turns in 5° steps, as Fusion's does.
+const DRAFT_STEP: f64 = 5.0 * std::f64::consts::PI / 180.0;
 
 /// A dragged length (mm) as a value box shows it, in the design's unit.
 pub(super) fn mm(unit: fox_engine::model::LengthUnit, v: f64) -> String {
@@ -369,8 +375,12 @@ impl Dialog {
         let t = mm(self.unit, v_snapped.max(step.max(1e-3)));
         if i == 1 { self.solid.thickness_out = t } else { self.radius = t }
       }
-      // a draft stays short of a right angle
-      Kind::Draft => self.angle = deg(v_snapped.clamp(-89f64.to_radians(), 89f64.to_radians())),
+      // a draft stays short of a right angle; the box it opens reads to a tenth ("35.0 deg")
+      Kind::Draft => {
+        let a = v_snapped.clamp(-89f64.to_radians(), 89f64.to_radians());
+        self.angle = format!("{:.1} deg", (a.to_degrees() * 10.0).round() / 10.0);
+        self.manip.draft_box = true;
+      }
       Kind::RectPattern => {
         if !self.set_pattern_handle(s, i, v, step) {
           return;
@@ -455,15 +465,16 @@ impl Dialog {
     })
   }
 
-  /// Draft: a dial on the first face's hinge (where it meets the neutral plane), turning from the
-  /// pull direction the way a positive angle tilts the face.
+  /// Draft, as Fusion shows it: the angle as a disc on an arc about the first face's hinge
+  /// (where it meets the neutral plane), turning from the pull direction the way a positive angle
+  /// tilts the face in 5° steps; and the pull direction as a hollow arrow from the hinge.
   fn draft_handles(&self, s: &Session) -> Option<Vec<Handle>> {
     let (c, n) = self.face_anchor()?;
     let pl = super::plane_of(s, &self.plane)?;
     let pull = if self.flip { -pl.normal() } else { pl.normal() };
     let (zero, axis, hinge) = draft_dial(c, n, pl.origin, pull)?;
     let a = self.ang(s, &self.angle)?;
-    Some(vec![Handle::dial(hinge, axis, zero, None, a, deg(a))])
+    Some(vec![Handle::dial(hinge, axis, zero, None, a, deg(a)).disc(DRAFT_STEP), Handle::pull(hinge, pull)])
   }
 
   /// Circular Pattern: dials about its axis through the objects' centre, one for the total angle
@@ -532,6 +543,8 @@ impl Dialog {
     match (self.kind, i) {
       (Kind::Shell, 0) => Some(&mut self.radius),
       (Kind::Shell, 1) => Some(&mut self.solid.thickness_out),
+      // Draft's angle, once its handle has been dragged
+      (Kind::Draft, 0) if self.manip.draft_box => Some(&mut self.angle),
       // the sketch patterns' quantity (with its spinner) and distance boxes
       (Kind::SkCircPattern, 0) => Some(&mut self.count),
       (Kind::SkRectPattern, 0) => Some(&mut self.spacing),
@@ -1159,8 +1172,9 @@ mod tests {
     assert!(matches!(d.handles(&s)[0].shape, Shape::Arrow { origin, .. } if close(origin, top_c)));
     d.cancel(&mut s);
 
-    // Draft: a dial on the face's hinge in the neutral plane, from the pull direction, leaning
-    // the face in for a positive angle
+    // Draft (`ui:manip:draft-angle-handle`): a disc on a dial at the face's hinge in the neutral
+    // plane, from the pull direction, leaning the face in for a positive angle in 5° steps, and
+    // the pull direction as a hollow arrow from the hinge; no box until the disc is dragged
     let (front, _) = face_of(&s, -DVec3::Y);
     let before = s.model.bodies[0].shape.mass().unwrap().volume;
     let mut d = Dialog::blank(Kind::Draft);
@@ -1169,16 +1183,21 @@ mod tests {
     d.faces = vec![front];
     d.refresh_manip(&s);
     let h = d.handles(&s);
-    assert_eq!(h.len(), 1);
+    assert_eq!(h.len(), 2);
+    assert_eq!((h[0].head, h[0].snap), (crate::handles::Head::Disc, Some(5f64.to_radians())));
     let Shape::Dial { center, axis, zero, radius: None } = h[0].shape else { panic!("{h:?}") };
     assert!(close(center, DVec3::new(0.0, -10.0, 0.0)) && close(zero, DVec3::Z), "{center} {zero}");
     assert!((h[0].value - 3f64.to_radians()).abs() < 1e-9 && h[0].label == "3 deg");
+    assert_eq!(h[1].head, crate::handles::Head::Pull);
+    assert!(matches!(h[1].shape, Shape::Arrow { origin, dir } if close(origin, center) && close(dir, DVec3::Z)));
     // the head turns from +Z towards +Y: into the body
     assert!(close(axis.cross(zero), DVec3::Y), "{axis}");
-    d.set_handle(&s, 0, 10.3f64.to_radians(), 1f64.to_radians());
-    assert_eq!(d.angle, "10 deg");
-    d.set_handle(&s, 0, 120f64.to_radians(), 1f64.to_radians());
-    assert_eq!(d.angle, "89 deg", "short of a right angle");
+    assert!(d.handle_field(0).is_none(), "no box before the drag");
+    d.set_handle(&s, 0, 33.3f64.to_radians(), 5f64.to_radians());
+    assert_eq!(d.angle, "35.0 deg");
+    assert_eq!(d.handle_field(0).map(|f| f.clone()).as_deref(), Some("35.0 deg"), "the drag opens the box");
+    d.set_handle(&s, 0, 120f64.to_radians(), 5f64.to_radians());
+    assert_eq!(d.angle, "89.0 deg", "short of a right angle");
     d.angle = "10 deg".into();
     apply(&mut s, &mut d);
     let m = s.model.bodies[0].shape.mass().unwrap();
