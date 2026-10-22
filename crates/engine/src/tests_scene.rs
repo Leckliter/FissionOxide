@@ -536,7 +536,8 @@ fn construction_visibility_hides_planes_axes_and_points() {
   assert_eq!(s.design.feature(fox_model::FeatureId(plane as u32)).unwrap().visible, None);
 
   // only construction geometry takes it
-  let sketch = run(&mut s, "sketch.create", json!({"plane": "xy"}))["feature"].as_u64().unwrap();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let sketch = s.edit_sketch.unwrap().0;
   run(&mut s, "sketch.finish", json!({}));
   assert!(s.execute("construction.visible", &json!({"feature": sketch, "visible": false})).is_err());
 }
