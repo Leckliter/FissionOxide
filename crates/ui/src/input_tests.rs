@@ -1977,3 +1977,21 @@ fn box_is_drawn_on_a_picked_plane_before_its_dialog_opens() {
   assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog"))).is_some());
   assert_eq!(h.app.s.model.bodies.len(), 1, "the box is previewed");
 }
+
+/// `ui:surface:finish-sketch-returns-tab`: a sketch started from the SURFACE tab comes back to
+/// SURFACE on Finish Sketch, and one started from SOLID to SOLID.
+#[test]
+fn finish_sketch_returns_to_the_tab_it_started_from() {
+  use crate::panels::Tab;
+  let mut h = Harness::new();
+  for tab in [Tab::Surface, Tab::Solid, Tab::Surface] {
+    h.app.tab = tab;
+    h.frame(vec![]);
+    h.app.create_sketch(json!("xy"));
+    h.frame(vec![]);
+    assert_eq!(h.app.tab, Tab::Sketch);
+    h.app.finish_sketch();
+    h.frame(vec![]);
+    assert_eq!(h.app.tab, tab);
+  }
+}

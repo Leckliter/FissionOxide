@@ -27,6 +27,9 @@ pub(crate) struct Item {
   cmd: Option<Cmd>,
   /// Greyed out, as Fusion shows commands unavailable in the current context.
   disabled: bool,
+  /// The SURFACE tab's own command of a SOLID label (Fusion's surface Extrude and Sweep): its
+  /// own tooltip, and no shortcut shown.
+  surface: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -37,14 +40,21 @@ pub(crate) enum E {
   Sub(&'static str, &'static [E]),
 }
 
+impl Item {
+  /// The label its tooltip texts are found under.
+  fn tip_label(&self) -> &'static str {
+    if self.surface { tips::surface_label(self.label) } else { self.label }
+  }
+}
+
 /// A command FissionOxide runs.
 const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false })
+  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false, surface: false })
 }
 
 /// A Fusion command FissionOxide doesn't have yet.
 const fn x(label: &'static str, icon: Icon) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false })
+  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false, surface: false })
 }
 
 impl E {
@@ -75,6 +85,17 @@ impl E {
     match self {
       E::I(mut i) => {
         i.tint = Tint::Gold;
+        E::I(i)
+      }
+      other => other,
+    }
+  }
+
+  /// The SURFACE tab's own version of a SOLID command: see [`Item::surface`].
+  const fn surface(self) -> E {
+    match self {
+      E::I(mut i) => {
+        i.surface = true;
         E::I(i)
       }
       other => other,
@@ -370,15 +391,13 @@ const SURFACE_CREATE: &[E] = &[
   c("Create Form", Icon::CreateForm, Cmd::Form(FormAct::Enter)),
   x("Derive", Icon::Derive),
   E::Sep,
-  c("Extrude", Icon::Extrude, D(Kind::Form(&forms::SURFACE_EXTRUDE))).o(),
+  c("Extrude", Icon::Extrude, D(Kind::Form(&forms::SURFACE_EXTRUDE))).o().surface(),
   c("Revolve", Icon::Revolve, D(Kind::Form(&forms::SURFACE_REVOLVE))).o(),
-  x("Sweep", Icon::Sweep).o(),
+  x("Sweep", Icon::Sweep).o().surface(),
   x("Loft", Icon::Loft).o(),
   c("Patch", Icon::Patch, D(Kind::Form(&forms::PATCH))).o(),
-  c("Patch from Sketch", Icon::Patch, D(Kind::Form(&forms::PATCH_SKETCH))).o(),
   c("Ruled", Icon::Ruled, D(Kind::Form(&forms::RULED))).o(),
   c("Offset", Icon::SurfOffset, D(Kind::Form(&forms::SURFACE_OFFSET))).o(),
-  c("Variable Offset", Icon::SurfOffset, D(Kind::Form(&forms::VARIABLE_OFFSET))).o(),
   E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
@@ -393,9 +412,7 @@ const SURFACE_MODIFY: &[E] = &[
   c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
-  c("Trim", Icon::Trim, D(Kind::Form(&forms::TRIM))),
-  c("Trim with Body", Icon::Trim, D(Kind::Form(&forms::TRIM_BODY))),
-  c("Trim with Sketch", Icon::Trim, D(Kind::Form(&forms::TRIM_SKETCH))),
+  c("Trim", Icon::Trim, D(Kind::Form(&forms::TRIM))).o(),
   c("Untrim", Icon::Untrim, D(Kind::Form(&forms::UNTRIM))).o(),
   c("Extend", Icon::Extend, D(Kind::Form(&forms::EXTEND))).o(),
   c("Stitch", Icon::Stitch, D(Kind::Form(&forms::STITCH))).o(),
@@ -557,12 +574,12 @@ const SOLID: [Group; 2] = [
 const SURFACE: [Group; 2] = [
   Group {
     label: "CREATE",
-    quick: &["Create Sketch", "Patch", "Extrude", "Revolve", "Offset", "Create Form"],
+    quick: &["Create Sketch", "Patch", "Extrude", "Revolve", "Sweep"],
     menu: SURFACE_CREATE,
   },
   Group {
     label: "MODIFY",
-    quick: &["Stitch", "Unstitch", "Trim", "Extend", "Bill of Materials"],
+    quick: &["Stitch", "Unstitch", "Trim", "Extend"],
     menu: SURFACE_MODIFY,
   },
 ];
@@ -1242,14 +1259,14 @@ pub(crate) fn key_of<'a>(prefs: &'a Prefs, scope: Scope, label: &str) -> &'a str
 
 /// A command's tooltip, as in Fusion: see [`crate::ribbon_tip`].
 fn rich_tip(resp: egui::Response, scope: Scope, it: &Item, key: &str) -> egui::Response {
-  crate::ribbon_tip::show(resp, scope, it.label, it.icon, it.tint, it.cmd.is_none(), key)
+  crate::ribbon_tip::show(resp, scope, it.label, it.tip_label(), it.icon, it.tint, it.cmd.is_none(), key)
 }
 
 /// The ribbon's tooltip on a sketch tool's toggle elsewhere (the Sketch Palette's Feature
 /// Options): its name, description line and shortcut, expanding like a ribbon button's.
 pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -> egui::Response {
   let (icon, label, _) = Cmd::SketchTool(tool).info();
-  let it = Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(Cmd::SketchTool(tool)), disabled: false };
+  let it = Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(Cmd::SketchTool(tool)), disabled: false, surface: false };
   let key = key_of(prefs, Scope::Sketch, label);
   rich_tip(resp, Scope::Sketch, &it, key)
 }
@@ -1259,7 +1276,7 @@ pub(crate) fn commands(tabs: &[Tab]) -> Vec<Entry> {
   fn walk(menu: &[E], tab: Tab, out: &mut Vec<Entry>) {
     for e in menu {
       match e {
-        E::I(Item { label, icon, tint, key, cmd: Some(cmd), disabled: false }) => {
+        E::I(Item { label, icon, tint, key, cmd: Some(cmd), disabled: false, .. }) => {
           if !out.iter().any(|o| o.label == *label && o.cmd == *cmd) {
             out.push(Entry { label, icon: *icon, tint: *tint, key, cmd: *cmd, tab });
           }
@@ -1336,7 +1353,13 @@ impl At<'_> {
   }
 
   fn key(&self, it: &Item) -> &str {
-    if it.cmd.is_some() { key_of(self.prefs, self.scope(), it.label) } else { it.key }
+    if it.surface {
+      ""
+    } else if it.cmd.is_some() {
+      key_of(self.prefs, self.scope(), it.label)
+    } else {
+      it.key
+    }
   }
 
   /// A command's ⋮ options.
@@ -1624,7 +1647,7 @@ pub(crate) fn options_dots(p: &egui::Painter, c: egui::Pos2, color: Color32) {
 /// menu, level with the row, holding the command's description and instructions as paragraphs
 /// with a blank line between them. No title and no shortcut line: the row shows both.
 fn menu_tip(resp: egui::Response, scope: Scope, it: &Item) -> egui::Response {
-  let paragraphs = tips::menu_paragraphs(scope, it.label);
+  let paragraphs = tips::menu_paragraphs(scope, it.tip_label());
   if paragraphs.is_empty() && it.cmd.is_some() {
     return resp;
   }
@@ -1995,6 +2018,80 @@ mod tests {
     let named = [PanelSize { label: 200.0, icons: 3 }, PanelSize { label: 40.0, icons: 4 }];
     let two_icons = ICON_W * 2.0 - 1.0 + SEPARATOR_W;
     assert_eq!(fit_counts(&named, 200.0 + SEPARATOR_W + two_icons), vec![3, 2]);
+  }
+
+  /// A menu's rows as `label` / `label (key)`, `|` for a separator and `name >` for a submenu.
+  fn rows(tab: Tab, menu: &[E]) -> Vec<String> {
+    let prefs = Prefs::default();
+    let at = At { prefs: &prefs, tab, group: "", quick: &[] };
+    menu
+      .iter()
+      .map(|e| match e {
+        E::I(i) if at.key(i).is_empty() => i.label.to_string(),
+        E::I(i) => format!("{} ({})", i.label, at.key(i)),
+        E::Sep => "|".into(),
+        E::Sub(l, _) => format!("{l} >"),
+      })
+      .collect()
+  }
+
+  /// Fusion's SURFACE CREATE and MODIFY dropdowns, row for row: no Patch from Sketch, Variable
+  /// Offset or separate Trim with Body / Sketch, and no E on the surface Extrude.
+  #[test]
+  fn surface_menus_are_fusions() {
+    assert_eq!(
+      rows(Tab::Surface, SURFACE_CREATE).join(", "),
+      "Create Sketch, Create Form, Derive, |, Extrude, Revolve, Sweep, Loft, Patch, Ruled, Offset, |, Pattern >, \
+       Mirror, |, Thicken, Boundary Fill, Joint Origin"
+    );
+    assert_eq!(
+      rows(Tab::Surface, SURFACE_MODIFY).join(", "),
+      "Press Pull (Q), Fillet (F), Chamfer, |, Trim, Untrim, Extend, Stitch, Unstitch, Reverse Normal, Scale, \
+       Split Face, Split Body, |, Move/Copy (M), Align, Delete (Del), Remove, |, Physical Material, Appearance (A), \
+       Manage Materials, |, Change Parameters, Compute All (Ctrl+B), |, Bill of Materials"
+    );
+    // the SOLID Extrude keeps its E
+    assert!(rows(Tab::Solid, SOLID_CREATE).contains(&"Extrude (E)".to_string()));
+  }
+
+  /// Fusion's SURFACE ribbon: five CREATE buttons and four MODIFY ones, the surface commands
+  /// in orange.
+  #[test]
+  fn surface_quick_buttons_are_fusions() {
+    let prefs = Prefs::default();
+    let shown = |g: &Group| quick_items(&prefs, Tab::Surface, g).iter().map(|i| i.label).collect::<Vec<_>>();
+    assert_eq!(shown(&SURFACE[0]), ["Create Sketch", "Patch", "Extrude", "Revolve", "Sweep"]);
+    assert_eq!(shown(&SURFACE[1]), ["Stitch", "Unstitch", "Trim", "Extend"]);
+    for it in quick_items(&prefs, Tab::Surface, &SURFACE[0]).iter().skip(1).chain(&quick_items(&prefs, Tab::Surface, &SURFACE[1])) {
+      assert_eq!(it.tint, Tint::Orange, "{}", it.label);
+    }
+  }
+
+  /// The SURFACE buttons' tooltips are Fusion's, the surface Extrude and Sweep their own rather
+  /// than the SOLID ones.
+  #[test]
+  fn surface_tooltips_are_fusions() {
+    let prefs = Prefs::default();
+    let tip = |g: &Group, label: &str| {
+      let it = quick_items(&prefs, Tab::Surface, g).into_iter().find(|i| i.label == label).unwrap();
+      tips::tip(Scope::Design, it.tip_label()).unwrap_or_else(|| panic!("{label} has a tooltip"))
+    };
+    let patch = tip(&SURFACE[0], "Patch");
+    assert_eq!(patch.line, "Creates a planar or 3D surface within the boundary of a specified closed loop.");
+    assert!(tips::illustrated(Scope::Design, "Patch"), "Fusion's Patch tooltip grows an illustration");
+    let extrude = tip(&SURFACE[0], "Extrude");
+    assert_eq!(extrude.line, "Adds depth to open or closed sketch profiles or planar faces.");
+    assert_eq!(
+      extrude.paragraphs().collect::<Vec<_>>()[1..],
+      ["Select the profile or planar face then specify the distance to extrude.", tips::MORE_HELP]
+    );
+    assert_ne!(tips::tip(Scope::Design, "Extrude").unwrap().line, extrude.line, "SOLID keeps its own");
+    assert!(tip(&SURFACE[0], "Revolve").line.starts_with("Revolves a sketch profile or planar face around"));
+    assert!(tip(&SURFACE[0], "Sweep").line.starts_with("Sweeps a sketch profile or planar face along a"));
+    assert!(tip(&SURFACE[1], "Stitch").line.starts_with("Joins surfaces to make a single surface body or solid body"));
+    assert_eq!(tip(&SURFACE[1], "Unstitch").line, "Breaks joined surfaces into individual surfaces.");
+    assert!(tip(&SURFACE[1], "Trim").line.starts_with("Removes the selected area of a surface body using"));
+    assert!(tip(&SURFACE[1], "Extend").line.starts_with("Enlarges a surface by extending its edges a specified"));
   }
 
   /// The sketch MODIFY tooltips carry Fusion's wording: a first line, then the instruction and,
