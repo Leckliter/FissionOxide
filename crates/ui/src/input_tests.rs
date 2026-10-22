@@ -2633,3 +2633,156 @@ fn the_construction_folder_lists_planes_axes_and_points() {
   assert_eq!(h.app.s.selection, [Sel::Feature { feature: plane }]);
   assert!(h.app.picked_plane.is_none(), "a pick, not the browser's plane");
 }
+
+/// The Render workspace's texts after a frame.
+fn render_texts(h: &mut Harness, dt: f64) -> Vec<String> {
+  h.frame_texts(dt, vec![]).into_iter().map(|(_, t)| t).collect()
+}
+
+/// `ui:render:entry-state`, `ui:render:rendering-gallery`: entering Render opens nothing, leaves
+/// In-canvas Render off on a flat grey canvas, and the RENDERING GALLERY takes the timeline's place.
+#[test]
+fn entering_render_opens_nothing_and_shows_the_rendering_gallery() {
+  let mut h = Harness::new();
+  crate::panels::switch_workspace(&mut h.app, "Render");
+  h.frame(vec![]);
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  let r = &h.app.render;
+  assert!(!r.in_canvas && !r.appearance_open && !r.scene_open && !r.render_open);
+  assert_eq!(crate::render_ui::canvas_background(&h.app), Some(crate::render_ui::CANVAS_GREY));
+  assert!(t.iter().any(|t| t == "RENDERING GALLERY"), "{t:?}");
+  assert!(t.iter().any(|t| t == "Use the Render tool") && t.iter().any(|t| t == "to save renderings to your gallery."));
+  for panel in ["SETUP", "OPTICAL OVERRIDES", "IN-CANVAS RENDER"] {
+    assert!(t.iter().any(|t| t.starts_with(panel)), "{panel} in {t:?}");
+  }
+  assert!(!t.iter().any(|t| t.starts_with("EXIT")));
+  // the strip folds to its header
+  let header = h.find(vec![], "RENDERING GALLERY").unwrap();
+  h.move_then_click(egui::pos2(header.left() - 14.0, header.center().y));
+  assert!(h.app.render.gallery_folded);
+  assert!(!render_texts(&mut h, 1.0 / 60.0).iter().any(|t| t == "Use the Render tool"));
+  // back in Design the timeline is back
+  crate::panels::switch_workspace(&mut h.app, "Design");
+  h.frame(vec![]);
+  assert!(!render_texts(&mut h, 1.0 / 60.0).iter().any(|t| t == "RENDERING GALLERY"));
+  assert_eq!(crate::render_ui::canvas_background(&h.app), None);
+}
+
+/// `ui:render:scene-settings-dialog`: a docked SCENE SETTINGS with Settings and Environment
+/// Library tabs and Close.
+#[test]
+fn scene_settings_is_a_docked_dialog_with_two_tabs() {
+  use crate::render_ui::RenderCmd;
+  let mut h = Harness::new();
+  crate::panels::switch_workspace(&mut h.app, "Render");
+  RenderCmd::SceneSettings.run(&mut h.app);
+  h.frame(vec![]);
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  for s in ["SCENE SETTINGS", "Settings", "Environment Library", "Close", "Brightness", "1000.000", " lx", "Background"]
+  {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+  for s in ["Ground Plane", "Flatten Ground", "Reflections", "Focal Length", "Exposure", "9.5", " EV", "Depth of Field"]
+  {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+  assert!(t.iter().any(|x| x == "Viewport aspect ratio") && t.iter().any(|x| x == "Restore Defaults"));
+  // docked at the right, like a command dialog
+  let title = h.find(vec![], "SCENE SETTINGS").unwrap();
+  assert!(title.left() > h.app.canvas.center().x, "{title:?}");
+  let tab = h.find(vec![], "Environment Library").unwrap();
+  h.move_then_click(tab.center());
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  for s in
+    ["Current Environment", "Sharp Highlights", "Cool Light", "Warm Light", "Crossroads", "Attach Custom Environment"]
+  {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+  // a library environment becomes the scene's
+  let warm = h.find(vec![], "Warm Light").unwrap();
+  h.move_then_click(warm.center());
+  h.frame(vec![]);
+  assert_eq!(h.app.s.design.render.environment.preset, fox_engine::rendering::raytrace::Preset::Sunset);
+  let close = h.find(vec![], "Close").unwrap();
+  h.move_then_click(close.center());
+  assert!(!h.app.render.scene_open);
+}
+
+/// `ui:render:in-canvas-progress`: In-canvas Render hides sketches and planes and shows its
+/// progress bar with the elapsed time and iteration number; the bar's button pauses it.
+#[test]
+fn in_canvas_render_shows_its_progress() {
+  use crate::render_ui::RenderCmd;
+  let mut h = Harness::new();
+  h.app.create_sketch(json!("xy"));
+  h.app.finish_sketch();
+  crate::panels::switch_workspace(&mut h.app, "Render");
+  h.frame(vec![]);
+  assert!(!crate::viewport::scene_options(&mut h.app).hide_sketches);
+  RenderCmd::InCanvas.run(&mut h.app);
+  assert!(crate::viewport::scene_options(&mut h.app).hide_sketches);
+  assert!(crate::viewport::scene_options(&mut h.app).hide_construction_planes);
+  h.frame(vec![]);
+  for _ in 0..4 {
+    render_texts(&mut h, 0.5);
+  }
+  let t = render_texts(&mut h, 0.5);
+  assert!(t.iter().any(|x| x == "Elapsed time: 2 sec"), "{t:?}");
+  assert!(t.iter().any(|x| x == "Iteration number: 17"), "{t:?}");
+  for s in ["Excellent", "Final", "Infinite"] {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+  // pause: the count stops
+  let label = h.find(vec![], "Elapsed time: 2 sec").unwrap();
+  h.move_then_click(egui::pos2(label.left() - 20.0, label.top() - 8.0));
+  assert!(h.app.render.run.paused);
+  let n = h.app.render.run.iterations();
+  render_texts(&mut h, 2.0);
+  assert_eq!(h.app.render.run.iterations(), n);
+  // stopping it brings the sketches back
+  RenderCmd::InCanvas.run(&mut h.app);
+  assert!(!crate::viewport::scene_options(&mut h.app).hide_sketches);
+  assert!(!render_texts(&mut h, 1.0 / 60.0).iter().any(|x| x.starts_with("Elapsed time")));
+}
+
+/// `ui:render:lights-dialog`: the sun opens a docked NEW LIGHT with Light Type and Target; OK
+/// stays greyed, Cancel closes it.
+#[test]
+fn lights_opens_the_new_light_dialog() {
+  use crate::render_ui::RenderCmd;
+  let mut h = Harness::new();
+  crate::panels::switch_workspace(&mut h.app, "Render");
+  RenderCmd::Lights.run(&mut h.app);
+  h.frame(vec![]);
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  for s in ["NEW LIGHT", "Light Type", "Photometric Light", "Target", "Select", "OK", "Cancel"] {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  assert!(h.app.render.light.is_some(), "OK is greyed");
+  let cancel = h.find(vec![], "Cancel").unwrap();
+  h.move_then_click(cancel.center());
+  assert!(h.app.render.light.is_none());
+}
+
+/// `ui:render:render-needs-save`: Render on a design never saved shows Fusion's message and
+/// renders nothing; once saved it opens the Render window.
+#[test]
+fn render_needs_a_saved_design() {
+  use crate::render_ui::RenderCmd;
+  let mut h = Harness::new();
+  crate::panels::switch_workspace(&mut h.app, "Render");
+  RenderCmd::Render.run(&mut h.app);
+  assert!(h.app.render.needs_save && !h.app.render.render_open);
+  h.frame(vec![]);
+  assert!(crate::file_dialogs::modal_open(&h.app));
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  assert!(t.iter().any(|x| x == crate::render_panels::NEEDS_SAVE), "{t:?}");
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  assert!(!h.app.render.needs_save && !h.app.render.render_open);
+  h.app.s.path = Some("plate.fox".into());
+  RenderCmd::Render.run(&mut h.app);
+  assert!(h.app.render.render_open && !h.app.render.needs_save);
+}

@@ -801,6 +801,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     }
   };
   let vis = app.objects;
+  let rendering = crate::render_ui::shading(app);
   // under the Bodies priority the body under the pointer lights as a whole, not its face
   let hover_bodies = crate::select::hover_bodies(app);
   let mut peek = app.ctx_menu.peek.clone();
@@ -814,8 +815,9 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hide_origin: true,
     origin_axis_len: Some(origin_plane_size(app) * ORIGIN_AXIS_REACH),
     // the Sketches folder's eye off draws no sketch but the one being edited
-    hide_sketches: !vis.sketches || analysis.hide_sketches || app.sketch_rows.folder_hidden,
-    hide_construction_planes: !vis.construction_planes,
+    // In-canvas Render hides sketches and planes while it runs, as Fusion's
+    hide_sketches: !vis.sketches || analysis.hide_sketches || app.sketch_rows.folder_hidden || rendering,
+    hide_construction_planes: !vis.construction_planes || rendering,
     hide_construction_axes: !vis.construction_axes,
     hide_construction_points: !vis.construction_points,
     grid_step: app.grid.step(),
@@ -894,7 +896,11 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     palette: app.palette,
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies().iter().map(|b| b.0).collect()).unwrap_or_default(),
     grid_plane: app.grid_preview,
-    quads: [crate::origin::plane_quads(app), crate::construction::quads(app)].concat(),
+    quads: if crate::render_ui::shading(app) {
+      Vec::new()
+    } else {
+      [crate::origin::plane_quads(app), crate::construction::quads(app)].concat()
+    },
     tints: app
       .dialog
       .as_ref()
@@ -917,6 +923,10 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
   }
   scene.style = app.visual_style;
   app.effects.apply(&mut scene);
+  if let Some(c) = crate::render_ui::canvas_background(app) {
+    scene.background_top = [c[0], c[1], c[2], 255];
+    scene.background_bottom = scene.background_top;
+  }
   if crate::gpu::active(app) {
     // the Render workspace shades the bodies with their materials
     let look = crate::render_ui::viewport_look(app, &mut scene, &picks);
@@ -1015,6 +1025,9 @@ fn view_params(app: &App) -> serde_json::Value {
   }
   if crate::render_ui::shading(app) {
     v["render_look"] = crate::render_ui::look_key(app);
+  }
+  if let Some(c) = crate::render_ui::canvas_background(app) {
+    v["render_canvas"] = json!(c);
   }
   v
 }

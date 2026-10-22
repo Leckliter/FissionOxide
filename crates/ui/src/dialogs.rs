@@ -5077,7 +5077,7 @@ fn entity_readouts(r: &Value, f: &MeasureFmt) -> (String, Vec<Readout>) {
 
 /// A collapsible section's title row in a dialog's grid, as Fusion's: a triangle and the title,
 /// open by default; a click folds it. Returns whether it is open.
-fn section_header(ui: &mut egui::Ui, id: egui::Id, title: &str) -> bool {
+pub(crate) fn section_header(ui: &mut egui::Ui, id: egui::Id, title: &str) -> bool {
   let open = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
   let galley = ui.painter().layout_no_wrap(title.to_string(), egui::FontId::proportional(12.5), theme::TEXT);
   let (rect, resp) = ui.allocate_exact_size(egui::vec2(galley.size().x + 16.0, 18.0), egui::Sense::click());
@@ -5762,7 +5762,7 @@ pub(super) fn value_edit_w(ui: &mut egui::Ui, text: &mut String, width: f32) -> 
 
 /// The OK button: the primary button, greyed while the dialog lacks its input (see
 /// [`Dialog::ok_enabled`]).
-fn ok_button(ui: &mut egui::Ui, accent: egui::Color32, enabled: bool) -> egui::Response {
+pub(crate) fn ok_button(ui: &mut egui::Ui, accent: egui::Color32, enabled: bool) -> egui::Response {
   if enabled {
     return panels::primary_button(ui, "OK", accent);
   }
@@ -5777,13 +5777,13 @@ fn ok_button(ui: &mut egui::Ui, accent: egui::Color32, enabled: bool) -> egui::R
 }
 
 /// A selection chip's text: "Select" until something is picked, then the count.
-fn chip_text(n: usize, what: &str) -> String {
+pub(crate) fn chip_text(n: usize, what: &str) -> String {
   if n == 0 { "Select".to_string() } else { format!("{n} {what}") }
 }
 
 /// A selection input: a white "Select" chip until something is picked, then a chip tinted with
 /// the command's accent showing the count, with a ✕ beside it.
-fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> egui::Response {
+pub(crate) fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> egui::Response {
   sel_chip_lit(ui, accent, text, has, has)
 }
 

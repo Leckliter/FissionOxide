@@ -338,6 +338,13 @@ const ALL: &[Icon] = &[
   Icon::HemRope,
   Icon::BaseFlange,
   Icon::EdgeFlange,
+  Icon::Sun,
+  Icon::Teapot,
+  Icon::Stop,
+  Icon::DielectricPriority,
+  Icon::TextureMap,
+  Icon::InCanvasSettings,
+  Icon::Camera,
 ];
 
 fn render(icons: &[Icon], tint: Option<Tint>, cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

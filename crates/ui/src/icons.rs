@@ -445,6 +445,21 @@ pub enum Icon {
   ConvertFaceted,
   ConvertPrismatic,
   ConvertOrganic,
+  // the Render workspace
+  /// Lights: a sun.
+  Sun,
+  /// Render: the teapot.
+  Teapot,
+  /// In-canvas Render while it runs: a stop square.
+  Stop,
+  /// Dielectric Priority Control: a glass with 0, 1 and 2.
+  DielectricPriority,
+  /// Texture Map Controls: a chequered square with its handles.
+  TextureMap,
+  /// In-canvas Render Settings: the viewport with a gear.
+  InCanvasSettings,
+  /// Capture Image: a camera.
+  Camera,
 }
 
 #[derive(Clone, Copy)]
@@ -2941,6 +2956,60 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.06, 0.62), (0.44, 0.44), (0.94, 0.6), (0.56, 0.8)], BlueLight);
       k.solid(&[(0.06, 0.62), (0.56, 0.8), (0.56, 0.88), (0.06, 0.7)], Blue);
       k.solid(&[(0.44, 0.44), (0.44, 0.08), (0.94, 0.24), (0.94, 0.6)], Blue);
+    }
+    Icon::Sun => {
+      for i in 0..8 {
+        let a = i as f32 * TAU / 8.0;
+        let (c, s) = (a.cos(), a.sin());
+        k.thick((0.5 + c * 0.3, 0.5 + s * 0.3), (0.5 + c * 0.44, 0.5 + s * 0.44), Amber, 1.4);
+      }
+      k.circle((0.5, 0.5), 0.2, Some(Amber), Some(Ink));
+    }
+    Icon::Teapot => {
+      // body, lid knob, spout and handle
+      k.ellipse((0.48, 0.6), 0.28, 0.24, Some(Blue), Ink);
+      k.solid(&[(0.34, 0.38), (0.62, 0.38), (0.56, 0.3), (0.4, 0.3)], BlueLight);
+      k.circle((0.48, 0.25), 0.05, Some(Ink), None);
+      k.thick((0.72, 0.62), (0.94, 0.38), Ink, 1.6);
+      k.arc((0.2, 0.6), 0.12, PI * 0.5, PI * 1.5, Ink);
+    }
+    Icon::Stop => {
+      k.circle((0.5, 0.5), 0.42, Some(White), Some(Ink));
+      k.fill(&[(0.34, 0.34), (0.66, 0.34), (0.66, 0.66), (0.34, 0.66)], Red);
+    }
+    Icon::DielectricPriority => {
+      // a glass, with the priorities 0, 1 and 2 beside it
+      k.solid(&[(0.08, 0.12), (0.5, 0.12), (0.44, 0.9), (0.14, 0.9)], BlueLight);
+      k.line((0.12, 0.4), (0.47, 0.4), Blue);
+      k.text((0.74, 0.18), "0", 0.26, Ink);
+      k.text((0.74, 0.5), "1", 0.26, Ink);
+      k.text((0.74, 0.82), "2", 0.26, Ink);
+    }
+    Icon::TextureMap => {
+      k.solid(&[(0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9)], White);
+      for (x, y) in [(0.1, 0.1), (0.5, 0.1), (0.3, 0.3), (0.7, 0.3), (0.1, 0.5), (0.5, 0.5), (0.3, 0.7), (0.7, 0.7)] {
+        k.fill(&[(x, y), (x + 0.2, y), (x + 0.2, y + 0.2), (x, y + 0.2)], Blue);
+      }
+      for c in [(0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9)] {
+        k.circle(c, 0.07, Some(White), Some(Ink));
+      }
+    }
+    Icon::InCanvasSettings => {
+      k.solid(&[(0.06, 0.12), (0.94, 0.12), (0.94, 0.72), (0.06, 0.72)], White);
+      k.line((0.5, 0.72), (0.5, 0.88), Ink);
+      k.line((0.3, 0.9), (0.7, 0.9), Ink);
+      for i in 0..6 {
+        let a = i as f32 * TAU / 6.0;
+        k.thick((0.62, 0.42), (0.62 + a.cos() * 0.2, 0.42 + a.sin() * 0.2), Ink, 1.6);
+      }
+      k.circle((0.62, 0.42), 0.13, Some(Blue), Some(Ink));
+      k.circle((0.62, 0.42), 0.05, Some(White), None);
+    }
+    Icon::Camera => {
+      k.solid(&[(0.06, 0.3), (0.94, 0.3), (0.94, 0.86), (0.06, 0.86)], Fill);
+      k.solid(&[(0.34, 0.18), (0.62, 0.18), (0.68, 0.3), (0.28, 0.3)], Fill);
+      k.circle((0.5, 0.58), 0.2, Some(Blue), Some(Ink));
+      k.circle((0.5, 0.58), 0.08, Some(BlueLight), None);
     }
   }
 }

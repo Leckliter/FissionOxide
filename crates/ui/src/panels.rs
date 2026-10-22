@@ -1180,6 +1180,9 @@ pub(crate) fn open_workspace_document(app: &mut App, workspace: &str, item: &str
 /// Switches to the Design, Render, Manufacture or Drawing workspace.
 pub(crate) fn switch_workspace(app: &mut App, w: &str) {
   let drawing = app.drawing.is_some();
+  if w == "Render" && !app.render.active {
+    crate::render_ui::enter(app);
+  }
   app.render.active = w == "Render";
   if w == "Electronics" {
     if drawing {

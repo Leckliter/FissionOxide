@@ -1094,22 +1094,36 @@ const GENERATIVE: [Group; 4] = [
 ];
 
 const RENDER_SETUP: &[E] = &[
-  c("Appearance", Icon::Appearance, Cmd::Render(RenderCmd::Appearance)),
+  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
+  c("Appearance", Icon::Appearance, Cmd::Render(RenderCmd::Appearance)).k("A"),
   c("Scene Settings", Icon::EnvMap, Cmd::Render(RenderCmd::SceneSettings)),
+  c("Light", Icon::Sun, Cmd::Render(RenderCmd::Lights)),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
+  x("Texture Map Controls", Icon::TextureMap),
+  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
 ];
-const RENDER_IN_CANVAS: &[E] = &[c("In-Canvas Render", Icon::Display, Cmd::Render(RenderCmd::InCanvas))];
-const RENDER_RENDER: &[E] = &[
-  c("Render", Icon::Play, Cmd::Render(RenderCmd::Render)),
-  c("Render Gallery", Icon::Folder, Cmd::Render(RenderCmd::Gallery)),
+const RENDER_OPTICAL: &[E] = &[x("Dielectric Priority Control", Icon::DielectricPriority)];
+const RENDER_IN_CANVAS: &[E] = &[
+  c("In-canvas Render", Icon::Display, Cmd::Render(RenderCmd::InCanvas)),
+  x("In-canvas Render Settings", Icon::InCanvasSettings),
+  c("Capture Image...", Icon::Camera, Cmd::Render(RenderCmd::CaptureImage)),
 ];
-const RENDER_EXIT: &[E] = &[c("Finish Render", Icon::Finish, Cmd::Render(RenderCmd::Finish))];
+const RENDER_RENDER: &[E] = &[c("Render", Icon::Teapot, Cmd::Render(RenderCmd::Render))];
 
-/// The Render workspace's RENDER tab.
+/// The Render workspace's RENDER tab, as Fusion's: no EXIT panel (the workspace menu leaves it).
 const RENDER: [Group; 4] = [
-  Group { label: "SETUP", quick: &["Appearance", "Scene Settings"], menu: RENDER_SETUP },
-  Group { label: "IN-CANVAS RENDER", quick: &["In-Canvas Render"], menu: RENDER_IN_CANVAS },
-  Group { label: "RENDER", quick: &["Render", "Render Gallery"], menu: RENDER_RENDER },
-  Group { label: "EXIT", quick: &["Finish Render"], menu: RENDER_EXIT },
+  Group {
+    label: "SETUP",
+    quick: &["Appearance", "Scene Settings", "Light", "Decal", "Texture Map Controls", "Move/Copy"],
+    menu: RENDER_SETUP,
+  },
+  Group { label: "OPTICAL OVERRIDES", quick: &["Dielectric Priority Control"], menu: RENDER_OPTICAL },
+  Group {
+    label: "IN-CANVAS RENDER",
+    quick: &["In-canvas Render", "In-canvas Render Settings", "Capture Image..."],
+    menu: RENDER_IN_CANVAS,
+  },
+  Group { label: "RENDER", quick: &["Render"], menu: RENDER_RENDER },
 ];
 
 /// The Manufacture workspace's MILLING tab.
@@ -1494,7 +1508,18 @@ pub(crate) fn key_of<'a>(prefs: &'a Prefs, scope: Scope, label: &str) -> &'a str
 
 /// A command's tooltip, as in Fusion: see [`crate::ribbon_tip`].
 fn rich_tip(resp: egui::Response, scope: Scope, it: &Item, key: &str) -> egui::Response {
-  crate::ribbon_tip::show(resp, scope, it.label, it.tip_label(), it.icon, it.tint, it.cmd.is_none(), key)
+  let title = tips::title(it.label);
+  crate::ribbon_tip::show(resp, scope, title, it.tip_label(), it.icon, it.tint, it.cmd.is_none(), key)
+}
+
+/// A toolbar icon as it shows now: In-canvas Render turns into its stop button while it runs.
+fn live(app: &App, it: &Item) -> Item {
+  match it.cmd {
+    Some(Cmd::Render(RenderCmd::InCanvas)) if app.render.in_canvas => {
+      Item { label: "In-canvas Render Stop", icon: Icon::Stop, ..*it }
+    }
+    _ => *it,
+  }
 }
 
 /// The ribbon's tooltip on a sketch tool's toggle elsewhere (the Sketch Palette's Feature
@@ -1773,6 +1798,7 @@ fn show_group(
       // like Fusion, a group shows a handful of its commands (and the ones pinned to it); the
       // rest live in its menu
       for it in quick {
+        let it = &live(app, it);
         let active = it.cmd.is_some_and(|c| c.active(app));
         // the big FINISH button is clickable across the whole panel, not just its icon
         let resp = if finish {
@@ -2585,6 +2611,44 @@ mod tests {
     app.s.path = Some("plate.fox".into());
     assert!(!panels::is_unsaved(&app));
     assert!(offers(Tab::Solid, Cmd::InsertComponent));
+  }
+
+  /// The RENDER tab's four panels and their menus, as Fusion's (no EXIT panel: the workspace menu
+  /// leaves Render).
+  #[test]
+  fn render_tab_lists_fusions_panels() {
+    let (own, shared) = groups(Tab::Render);
+    assert!(shared.is_empty());
+    let names: Vec<&str> = own.iter().map(|g| g.label).collect();
+    assert_eq!(names, ["SETUP", "OPTICAL OVERRIDES", "IN-CANVAS RENDER", "RENDER"]);
+    let menu = |g: &Group| rows(g.menu).into_iter().map(|(l, _)| l).collect::<Vec<_>>();
+    assert_eq!(
+      menu(&own[0]),
+      ["Physical Material", "Appearance", "Scene Settings", "Light", "Decal", "Texture Map Controls", "Move/Copy"]
+    );
+    assert_eq!((rows(own[0].menu)[1].1, rows(own[0].menu)[6].1), ("A", "M"));
+    assert_eq!(own[0].quick, ["Appearance", "Scene Settings", "Light", "Decal", "Texture Map Controls", "Move/Copy"]);
+    assert_eq!(menu(&own[1]), ["Dielectric Priority Control"]);
+    assert_eq!(menu(&own[2]), ["In-canvas Render", "In-canvas Render Settings", "Capture Image..."]);
+    assert_eq!(own[2].quick.len(), 3);
+    assert_eq!(menu(&own[3]), ["Render"]);
+    assert_eq!(find(own[3].menu, "Render").map(|i| i.icon), Some(Icon::Teapot));
+    assert_eq!(find(own[0].menu, "Light").map(|i| i.icon), Some(Icon::Sun));
+    for g in own {
+      for q in g.quick {
+        assert!(find(g.menu, q).is_some(), "{q} is in {}'s menu", g.label);
+      }
+    }
+    // the sun's tooltip says Lights, as Fusion's
+    assert_eq!(tips::title("Light"), "Lights");
+    // In-canvas Render turns into its stop button while it runs
+    let mut app = App::with_session(fox_engine::Session::default());
+    let it = find(RENDER_IN_CANVAS, "In-canvas Render").unwrap();
+    assert_eq!(live(&app, &it).icon, Icon::Display);
+    app.render.in_canvas = true;
+    let stop = live(&app, &it);
+    assert_eq!((stop.label, stop.icon, stop.cmd), ("In-canvas Render Stop", Icon::Stop, it.cmd));
+    assert!(tips::tip(Scope::Design, stop.label).is_some());
   }
 
   /// Every CONSTRUCT entry draws its own icon, as Fusion's do.

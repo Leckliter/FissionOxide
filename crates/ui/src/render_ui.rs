@@ -1,7 +1,8 @@
 //! The Render workspace: Appearance (the physically based material library, applied to bodies and
-//! faces, and a material editor), Scene Settings (environment, background, ground, camera),
-//! In-Canvas Render (the GPU viewport shading the materials in real time) and Render (the path
-//! tracer, progressive, on another thread), with the Render Gallery kept in the design.
+//! faces, and a material editor), Scene Settings (environment, background, ground, camera; a docked
+//! dialog, see [`crate::render_panels`]), In-canvas Render (the GPU viewport shading the materials,
+//! with Fusion's progress bar) and Render (the path tracer, progressive, on another thread), with
+//! the Rendering Gallery kept in the design and shown in place of the timeline.
 //!
 //! Everything that changes the design goes through `render.*` commands.
 
@@ -15,25 +16,27 @@ use fox_engine::Sel;
 use fox_engine::model::BodyId;
 use fox_engine::render::Scene;
 use fox_engine::rendering::raytrace::{
-  self, Background, EnvMap, Environment, Material, Pattern, Preset, Progressive, Projection, RenderCamera, RenderImage,
-  RenderSettings, TextureSource, TextureSpec, ToneMap,
+  self, Background, EnvMap, Environment, Material, Pattern, Progressive, Projection, RenderCamera, RenderImage,
+  RenderSettings, TextureSource, TextureSpec,
 };
 use fox_engine::scene::{Pick, PickTable, SELECT_COLOR};
 use serde_json::{Value, json};
 
 use crate::App;
 use crate::icons::Icon;
+use crate::render_panels::{InCanvasRun, LightForm, SceneTab};
 
 /// The workspace's toolbar commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderCmd {
   Appearance,
   SceneSettings,
+  /// Lights: the NEW LIGHT dialog.
+  Lights,
   InCanvas,
+  /// Capture Image...: the Image Options window.
+  CaptureImage,
   Render,
-  Gallery,
-  /// Back to the Design workspace.
-  Finish,
 }
 
 impl RenderCmd {
@@ -45,46 +48,74 @@ impl RenderCmd {
         "Physically based materials: pick one and apply it to selected bodies or faces",
       ),
       RenderCmd::SceneSettings => {
-        (Icon::EnvMap, "Scene Settings", "Environment lighting, background, ground plane and shadows, camera")
+        (Icon::EnvMap, "Scene Settings", "Environment, background, ground plane and camera of the rendered scene")
       }
-      RenderCmd::InCanvas => {
-        (Icon::Display, "In-Canvas Render", "Shade the viewport with the materials and environment in real time")
-      }
-      RenderCmd::Render => (Icon::Play, "Render", "Path-trace a final image at a chosen size and quality"),
-      RenderCmd::Gallery => (Icon::Folder, "Render Gallery", "Renders kept with the design"),
-      RenderCmd::Finish => (Icon::Finish, "Finish Render", "Back to the Design workspace"),
+      RenderCmd::Lights => (Icon::Sun, "Light", "Add a light to control illumination, shadows and highlights"),
+      RenderCmd::InCanvas => (Icon::Display, "In-canvas Render", "Render the design in the canvas"),
+      RenderCmd::CaptureImage => (Icon::Camera, "Capture Image...", "Save an image of the canvas"),
+      RenderCmd::Render => (Icon::Teapot, "Render", "Render an image of the design into the Rendering Gallery"),
     }
   }
 
-  /// Shown pressed: its window is open, or in-canvas rendering is on.
+  /// Shown pressed: its window or dialog is open. In-canvas Render shows its stop button instead
+  /// while it runs.
   pub(crate) fn active(self, app: &App) -> bool {
     let r = &app.render;
     match self {
       RenderCmd::Appearance => r.appearance_open,
       RenderCmd::SceneSettings => r.scene_open,
-      RenderCmd::InCanvas => r.in_canvas,
+      RenderCmd::Lights => r.light.is_some(),
+      RenderCmd::InCanvas => false,
+      RenderCmd::CaptureImage => app.capture.image.is_some(),
       RenderCmd::Render => r.render_open,
-      RenderCmd::Gallery => r.gallery_open,
-      RenderCmd::Finish => false,
     }
   }
 
   pub(crate) fn run(self, app: &mut App) {
-    let r = &mut app.render;
     match self {
-      RenderCmd::Appearance => r.appearance_open = !r.appearance_open,
-      RenderCmd::SceneSettings => r.scene_open = !r.scene_open,
-      RenderCmd::InCanvas => {
-        r.in_canvas = !r.in_canvas;
-        if r.in_canvas && !crate::gpu::active(app) {
-          app.status = Some(("In-canvas rendering needs the GPU renderer (Display Settings)".into(), true));
+      RenderCmd::Appearance => app.render.appearance_open = !app.render.appearance_open,
+      // the docked dialogs take the place of a command dialog, one at a time
+      RenderCmd::SceneSettings => {
+        let open = !app.render.scene_open;
+        if open {
+          app.cancel_dialog();
+          app.render.light = None;
+          app.render.scene_tab = SceneTab::Settings;
         }
+        app.render.scene_open = open;
       }
-      RenderCmd::Render => r.render_open = true,
-      RenderCmd::Gallery => r.gallery_open = !r.gallery_open,
-      RenderCmd::Finish => crate::panels::switch_workspace(app, "Design"),
+      RenderCmd::Lights => {
+        app.cancel_dialog();
+        app.render.scene_open = false;
+        app.render.light = Some(LightForm);
+      }
+      RenderCmd::InCanvas => set_in_canvas(app, !app.render.in_canvas),
+      RenderCmd::CaptureImage => crate::capture::open_image(app),
+      // Fusion keeps renderings with the saved design, so an unsaved one has to be saved first
+      RenderCmd::Render if crate::panels::is_unsaved(app) => app.render.needs_save = true,
+      RenderCmd::Render => app.render.render_open = true,
     }
   }
+}
+
+/// In-canvas Render on or off: its progress starts over each time.
+pub(crate) fn set_in_canvas(app: &mut App, on: bool) {
+  app.render.in_canvas = on;
+  app.render.run = InCanvasRun::default();
+  if on && !crate::gpu::active(app) {
+    app.status = Some(("In-canvas rendering needs the GPU renderer (Display Settings)".into(), true));
+  }
+}
+
+/// Entering the Render workspace: as in Fusion, nothing opens and In-canvas Render is off.
+pub(crate) fn enter(app: &mut App) {
+  set_in_canvas(app, false);
+  let r = &mut app.render;
+  r.appearance_open = false;
+  r.scene_open = false;
+  r.render_open = false;
+  r.light = None;
+  r.gallery_view = None;
 }
 
 /// A final render running on another thread.
@@ -110,10 +141,21 @@ pub struct RenderUi {
   pub active: bool,
   /// In-canvas rendering (GPU) on.
   pub in_canvas: bool,
+  /// In-canvas Render's progress bar: elapsed time, iterations, paused.
+  pub(crate) run: InCanvasRun,
   pub appearance_open: bool,
+  /// The docked SCENE SETTINGS dialog, and its tab.
   pub scene_open: bool,
+  pub(crate) scene_tab: SceneTab,
+  /// The docked NEW LIGHT dialog.
+  pub(crate) light: Option<LightForm>,
   pub render_open: bool,
-  pub gallery_open: bool,
+  /// "You need to save your design before using the Render tool." shows.
+  pub(crate) needs_save: bool,
+  /// The Rendering Gallery strip folded to its header.
+  pub(crate) gallery_folded: bool,
+  /// What Scene Settings' Save as Default keeps (Restore Saved brings it back).
+  pub(crate) saved_scene: Option<(Environment, RenderCamera)>,
   filter: String,
   category: String,
   /// The library material picked in the Appearance window.
@@ -122,8 +164,8 @@ pub struct RenderUi {
   editing: Option<Material>,
   /// The environment and camera being edited in Scene Settings (committed when no slider is
   /// held).
-  env_edit: Option<Environment>,
-  cam_edit: Option<RenderCamera>,
+  pub(crate) env_edit: Option<Environment>,
+  pub(crate) cam_edit: Option<RenderCamera>,
   /// Final render settings.
   settings: RenderSettings,
   /// Use the stored render camera instead of the viewport's.
@@ -134,8 +176,9 @@ pub struct RenderUi {
   preview_tex: Option<egui::TextureHandle>,
   progress: (u32, u32),
   error: Option<String>,
-  gallery_tex: HashMap<u32, (usize, egui::TextureHandle)>,
-  gallery_view: Option<u32>,
+  pub(crate) gallery_tex: HashMap<u32, (usize, egui::TextureHandle)>,
+  /// The rendering opened from the gallery strip.
+  pub(crate) gallery_view: Option<u32>,
   rename: Option<(u32, String)>,
   /// The environment map of the look, by what it was built from.
   env_cache: Option<(String, Arc<EnvMap>)>,
@@ -145,11 +188,16 @@ impl Default for RenderUi {
   fn default() -> Self {
     RenderUi {
       active: false,
-      in_canvas: true,
-      appearance_open: true,
+      in_canvas: false,
+      run: InCanvasRun::default(),
+      appearance_open: false,
       scene_open: false,
+      scene_tab: SceneTab::Settings,
+      light: None,
       render_open: false,
-      gallery_open: false,
+      needs_save: false,
+      gallery_folded: false,
+      saved_scene: None,
       filter: String::new(),
       category: String::new(),
       picked: None,
@@ -196,7 +244,7 @@ impl LookData {
 
 impl RenderUi {
   /// The environment the viewport and renders use: the one being edited, else the design's.
-  fn environment(&self, app_env: &Environment) -> Environment {
+  pub(crate) fn environment(&self, app_env: &Environment) -> Environment {
     self.env_edit.clone().unwrap_or_else(|| app_env.clone())
   }
 
@@ -224,6 +272,19 @@ impl RenderUi {
 /// Whether the viewport is shaded with materials now.
 pub fn shading(app: &App) -> bool {
   app.render.active && app.render.in_canvas && app.drawing.is_none()
+}
+
+/// Fusion's Render canvas while In-canvas Render is off: a flat grey.
+pub const CANVAS_GREY: [u8; 3] = [204, 204, 204];
+
+/// The canvas colour in the Render workspace while In-canvas Render is off: the scene's Solid
+/// Color background when it has one, else Fusion's flat grey.
+pub fn canvas_background(app: &App) -> Option<[u8; 3]> {
+  if !app.render.active || shading(app) || app.drawing.is_some() {
+    return None;
+  }
+  let env = app.render.environment(&app.s.design.render.environment);
+  Some(if env.background == Background::Color { env.background_color } else { CANVAS_GREY })
 }
 
 /// What decides the viewport's look (part of the render key while in-canvas rendering is on).
@@ -336,8 +397,16 @@ pub fn windows(app: &mut App, ctx: &egui::Context) {
   if !app.render.active {
     return;
   }
+  // a command dialog (Physical Material, Move/Copy) takes the docked dialogs' place
+  if app.dialog.is_some() {
+    app.render.scene_open = false;
+    app.render.light = None;
+  }
   appearance_window(app, ctx);
-  scene_window(app, ctx);
+  crate::render_panels::scene_dialog(app, ctx);
+  crate::render_panels::light_dialog(app, ctx);
+  crate::render_panels::needs_save(app, ctx);
+  crate::render_panels::in_canvas_bar(app, ctx);
   render_window(app, ctx);
   gallery_window(app, ctx);
   commit_edits(app, ctx);
@@ -508,13 +577,13 @@ fn appearance_window(app: &mut App, ctx: &egui::Context) {
   material_editor(app, ctx);
 }
 
-fn slider(ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::RangeInclusive<f32>) {
+pub(crate) fn slider(ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::RangeInclusive<f32>) {
   ui.label(label);
   ui.add(egui::Slider::new(v, range));
   ui.end_row();
 }
 
-fn color_edit(ui: &mut egui::Ui, label: &str, c: &mut [u8; 3]) {
+pub(crate) fn color_edit(ui: &mut egui::Ui, label: &str, c: &mut [u8; 3]) {
   ui.label(label);
   ui.color_edit_button_srgb(c);
   ui.end_row();
@@ -630,121 +699,6 @@ fn material_editor(app: &mut App, ctx: &egui::Context) {
   }
   if open && !cancel {
     app.render.editing = Some(m);
-  }
-}
-
-fn scene_window(app: &mut App, ctx: &egui::Context) {
-  let mut open = app.render.scene_open;
-  if !open {
-    return;
-  }
-  let design_env = app.s.design.render.environment.clone();
-  let mut env = app.render.environment(&design_env);
-  let design_cam = fox_engine::rendering::render_camera(&app.s);
-  let mut cam = app.render.cam_edit.unwrap_or(design_cam);
-  let (mut use_view, mut reset) = (false, false);
-  egui::Window::new("Scene Settings").open(&mut open).default_pos([60.0, 520.0]).default_width(320.0).show(ctx, |ui| {
-    ui.label(RichText::new("Environment").strong());
-    egui::Grid::new("scene-env").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-      ui.label("Lighting");
-      let label = match &env.hdri {
-        Some(p) => std::path::Path::new(p).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default(),
-        None => env.preset.label().to_string(),
-      };
-      egui::ComboBox::from_id_salt("scene-preset").selected_text(label).width(180.0).show_ui(ui, |ui| {
-        for p in Preset::ALL {
-          if ui.selectable_label(env.hdri.is_none() && env.preset == p, p.label()).clicked() {
-            env.preset = p;
-            env.hdri = None;
-          }
-        }
-        if ui.selectable_label(env.hdri.is_some(), "HDRI image…").clicked()
-          && let Some(path) = rfd::FileDialog::new().add_filter("HDR image", &["hdr", "png", "jpg", "jpeg"]).pick_file()
-        {
-          env.hdri = Some(path.display().to_string());
-        }
-      });
-      ui.end_row();
-      slider(ui, "Brightness", &mut env.intensity, 0.0..=4.0);
-      slider(ui, "Rotation (°)", &mut env.rotation, 0.0..=360.0);
-      ui.label("Background");
-      egui::ComboBox::from_id_salt("scene-bg").selected_text(format!("{:?}", env.background)).show_ui(ui, |ui| {
-        for b in [Background::Environment, Background::Color, Background::Gradient, Background::Transparent] {
-          ui.selectable_value(&mut env.background, b, format!("{b:?}"));
-        }
-      });
-      ui.end_row();
-      if matches!(env.background, Background::Color | Background::Gradient) {
-        color_edit(ui, "Colour", &mut env.background_color);
-        if env.background == Background::Gradient {
-          color_edit(ui, "Bottom colour", &mut env.background_color2);
-        }
-      }
-      ui.label("Ground plane");
-      ui.checkbox(&mut env.ground, "");
-      ui.end_row();
-      if env.ground {
-        ui.label("Shadows");
-        ui.checkbox(&mut env.shadows, "");
-        ui.end_row();
-        slider(ui, "Reflections", &mut env.ground_reflection, 0.0..=1.0);
-        ui.label("Ground offset (mm)");
-        ui.add(egui::DragValue::new(&mut env.ground_offset).range(0.0..=1e5).speed(0.5));
-        ui.end_row();
-      }
-    });
-    ui.separator();
-    ui.label(RichText::new("Camera").strong());
-    egui::Grid::new("scene-cam").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-      ui.label("Projection");
-      ui.horizontal(|ui| {
-        ui.selectable_value(&mut cam.view.ortho, false, "Perspective");
-        ui.selectable_value(&mut cam.view.ortho, true, "Orthographic");
-      });
-      ui.end_row();
-      let mut fov = cam.view.fov.to_degrees() as f32;
-      slider(ui, "Field of view (°)", &mut fov, 5.0..=100.0);
-      cam.view.fov = (fov as f64).to_radians();
-      let mut dof = cam.fstop > 0.0;
-      ui.label("Depth of field");
-      ui.checkbox(&mut dof, "");
-      ui.end_row();
-      if dof && !cam.view.ortho {
-        let mut f = if cam.fstop > 0.0 { cam.fstop as f32 } else { 2.8 };
-        slider(ui, "Aperture (f-stop)", &mut f, 0.7..=32.0);
-        cam.fstop = f as f64;
-        let mut fd = cam.focus_distance.unwrap_or(cam.view.distance) as f32;
-        ui.label("Focus distance (mm)");
-        ui.add(egui::DragValue::new(&mut fd).range(1.0..=1e6).speed(1.0));
-        ui.end_row();
-        cam.focus_distance = Some(fd as f64);
-      } else {
-        cam.fstop = 0.0;
-      }
-      slider(ui, "Exposure (stops)", &mut cam.exposure, -5.0..=5.0);
-      ui.label("Tone mapping");
-      egui::ComboBox::from_id_salt("scene-tone").selected_text(format!("{:?}", cam.tone_map)).show_ui(ui, |ui| {
-        for t in [ToneMap::Aces, ToneMap::Reinhard, ToneMap::Linear] {
-          ui.selectable_value(&mut cam.tone_map, t, format!("{t:?}"));
-        }
-      });
-      ui.end_row();
-    });
-    ui.horizontal(|ui| {
-      use_view =
-        ui.button("Use Current View").on_hover_text("Store the viewport's framing as the render camera").clicked();
-      reset = ui.button("Reset Camera").on_hover_text("Renders frame the model from the viewport again").clicked();
-    });
-  });
-  app.render.scene_open = open;
-  app.render.env_edit = (env != design_env).then_some(env);
-  if use_view {
-    cam.view = app.cam;
-  }
-  app.render.cam_edit = (cam != design_cam || use_view).then_some(cam);
-  if reset {
-    app.render.cam_edit = None;
-    app.run("render.camera", json!({"reset": true}));
   }
 }
 
@@ -898,7 +852,7 @@ fn poll_job(app: &mut App, ctx: &egui::Context) {
         Err(e) => app.render.error = Some(e),
       }
       app.status =
-        Some((format!("Rendered {} samples in {seconds:.1} s; kept in the Render Gallery", img.samples), false));
+        Some((format!("Rendered {} samples in {seconds:.1} s; kept in the Rendering Gallery", img.samples), false));
       app.render.last = Some((img, tex, seconds, id));
       app.render.preview_tex = None;
     }
@@ -1019,14 +973,9 @@ fn render_window(app: &mut App, ctx: &egui::Context) {
   }
 }
 
-fn gallery_window(app: &mut App, ctx: &egui::Context) {
-  let mut open = app.render.gallery_open;
-  if !open {
-    return;
-  }
-  // thumbnails, decoded once per image
-  let gallery = app.s.design.render.gallery.clone();
-  for g in &gallery {
+/// Decodes the gallery's thumbnails once per image.
+pub(crate) fn gallery_textures(app: &mut App, ctx: &egui::Context) {
+  for g in &app.s.design.render.gallery {
     let len = g.png.0.len();
     if app.render.gallery_tex.get(&g.id).is_none_or(|(l, _)| *l != len)
       && let Ok(img) = image::load_from_memory(&g.png.0)
@@ -1037,37 +986,35 @@ fn gallery_window(app: &mut App, ctx: &egui::Context) {
       app.render.gallery_tex.insert(g.id, (len, t));
     }
   }
-  let mut export: Option<u32> = None;
-  let mut delete: Option<u32> = None;
-  let mut rename: Option<(u32, String)> = None;
-  egui::Window::new("Render Gallery").open(&mut open).default_width(560.0).show(ctx, |ui| {
-    if gallery.is_empty() {
-      ui.label(RichText::new("No renders yet: Render keeps every finished image here, with the design.").weak());
-      return;
-    }
-    let r = &mut app.render;
-    if let Some(id) = r.gallery_view
-      && let Some(g) = gallery.iter().find(|g| g.id == id)
-    {
-      ui.horizontal(|ui| {
-        if ui.button("◀ All renders").clicked() {
-          r.gallery_view = None;
-        }
-        ui.label(RichText::new(&g.name).strong());
-      });
+}
+
+/// A rendering opened from the Rendering Gallery: full size, with Export, Rename and Delete.
+fn gallery_window(app: &mut App, ctx: &egui::Context) {
+  let Some(id) = app.render.gallery_view else { return };
+  let Some(g) = app.s.design.render.gallery.iter().find(|g| g.id == id).cloned() else {
+    app.render.gallery_view = None;
+    return;
+  };
+  gallery_textures(app, ctx);
+  let mut open = true;
+  let mut export = false;
+  let mut delete = false;
+  let mut rename: Option<String> = None;
+  egui::Window::new(g.name.clone()).id(egui::Id::new("rendering")).open(&mut open).default_width(560.0).show(
+    ctx,
+    |ui| {
+      let r = &mut app.render;
       if let Some((_, t)) = r.gallery_tex.get(&id) {
         image_fit(ui, t, egui::vec2(ui.available_width().max(300.0), 420.0));
       }
       ui.label(RichText::new(format!("{} × {}, {} samples, {:.1} s", g.width, g.height, g.samples, g.seconds)).weak());
       ui.horizontal(|ui| {
-        if ui.button("Export PNG…").clicked() {
-          export = Some(id);
-        }
+        export = ui.button("Export PNG…").clicked();
         match &mut r.rename {
           Some((rid, text)) if *rid == id => {
             ui.text_edit_singleline(text);
             if ui.button("OK").clicked() {
-              rename = Some((id, text.clone()));
+              rename = Some(text.clone());
             }
           }
           _ => {
@@ -1076,40 +1023,23 @@ fn gallery_window(app: &mut App, ctx: &egui::Context) {
             }
           }
         }
-        if ui.button("Delete").clicked() {
-          delete = Some(id);
-        }
+        delete = ui.button("Delete").clicked();
       });
-      return;
-    }
-    egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
-      ui.horizontal_wrapped(|ui| {
-        for g in &gallery {
-          ui.vertical(|ui| {
-            if let Some((_, t)) = r.gallery_tex.get(&g.id) {
-              let s = t.size_vec2();
-              let k = (160.0 / s.x).min(110.0 / s.y);
-              if ui.add(egui::Button::image((t.id(), s * k))).on_hover_text("Open").clicked() {
-                r.gallery_view = Some(g.id);
-              }
-            }
-            ui.label(&g.name);
-          });
-        }
-      });
-    });
-  });
-  app.render.gallery_open = open;
-  if let Some((id, name)) = rename {
+    },
+  );
+  if !open {
+    app.render.gallery_view = None;
+  }
+  if let Some(name) = rename {
     app.run("render.gallery.rename", json!({"id": id, "name": name}));
     app.render.rename = None;
   }
-  if let Some(id) = delete {
+  if delete {
     app.run("render.gallery.delete", json!({"id": id}));
     app.render.gallery_view = None;
     app.render.gallery_tex.remove(&id);
   }
-  if let Some(id) = export
+  if export
     && let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).set_file_name("render.png").save_file()
     && app.run("render.gallery.export", json!({"id": id, "path": path})).is_some()
   {
@@ -1129,7 +1059,10 @@ mod tests {
     app.run("box", json!({"width": 20, "depth": 20, "height": 10}));
     let body = app.s.model.bodies[0].id.0;
     crate::panels::switch_workspace(&mut app, "Render");
-    assert!(app.render.active && shading(&app));
+    // In-canvas Render is off until pressed
+    assert!(app.render.active && !shading(&app));
+    RenderCmd::InCanvas.run(&mut app);
+    assert!(shading(&app));
     // a material on the top face splits the body's mesh in the viewport
     app.run("render.material.apply", json!({"material": "Gold - Polished", "faces": [{"point": [0, 0, 10]}]}));
     app.run("render.material.apply", json!({"material": "Rubber - Black", "body": body}));

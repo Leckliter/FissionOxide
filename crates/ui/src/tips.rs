@@ -23,6 +23,15 @@ pub(crate) struct Tip {
   pub more: &'static str,
 }
 
+/// The name a command's tooltip shows, where Fusion's differs from its menu row.
+pub(crate) fn title(label: &'static str) -> &'static str {
+  match label {
+    "Light" => "Lights",
+    "Capture Image..." => "Capture Image",
+    _ => label,
+  }
+}
+
 /// The tooltip for the command `label` on the `scope` toolbar.
 pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
   use Scope::*;
@@ -788,30 +797,49 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     ),
     // RENDER
     (_, "Scene Settings") => (
-      "Sets the lighting environment, background, ground plane and camera for renders.",
-      "Pick a preset environment or an HDRI image and turn it; show the environment, a colour, a \
-       gradient or nothing behind the model; let the ground catch shadows and reflections; and set the \
-       camera's projection, field of view, depth of field and exposure.",
+      "Controls the environment, background, ground plane and camera for the rendered scene.",
+      "Settings sets the brightness, position and background of the environment, the ground plane's \
+       flattening and reflections, and the camera's projection, focal length, exposure and depth of \
+       field. Environment Library sets the lighting environment, or attaches a custom image.",
     ),
-    (_, "In-Canvas Render") => (
-      "Shades the viewport with the render materials and environment in real time.",
-      "The GPU viewport draws each body in its physically based material, lit by the environment, \
-       with the ground's shadows, so you see roughly what a render gives while you set it up.",
+    (_, "Light") => (
+      "Adds light to control illumination, shadows and highlights.",
+      "Combine lights with environment lighting to light the scene. You can add up to eight lights \
+       per design.",
     ),
+    (_, "Texture Map Controls") => (
+      "Adjusts how a texture is mapped onto faces and bodies.",
+      "Choose the projection (planar, box, spherical, cylindrical or automatic), then move, turn and \
+       scale the texture in the canvas.",
+    ),
+    (_, "Dielectric Priority Control") => (
+      "Sets which transparent material wins where two bodies overlap.",
+      "Give each glass or liquid body a priority (0, 1, 2 ...). Where dielectric bodies meet, the higher \
+       priority's material is rendered, as for a liquid in a glass.",
+    ),
+    (_, "In-canvas Render Settings") => (
+      "Sets the quality and speed of the in-canvas render.",
+      "Choose the quality the in-canvas render stops at, and whether it uses advanced ray tracing.",
+    ),
+    (_, "Capture Image...") => (
+      "Saves an image of the canvas.",
+      "Set the image size, resolution and anti-aliasing, and whether the background is transparent, then \
+       save the canvas as a picture.",
+    ),
+    (_, "In-canvas Render") => (
+      "Renders the design in the canvas with its appearances and scene settings.",
+      "The render refines while it runs; sketches and planes are hidden until you stop it. The bar at \
+       the lower right shows the quality reached, the elapsed time and the iteration number, and pauses \
+       or resumes the render.",
+    ),
+    (_, "In-canvas Render Stop") => {
+      ("Stops the in-canvas render.", "The canvas goes back to the ordinary shaded view.")
+    }
     (_, "Render") => (
-      "Path-traces a final image of the design.",
-      "Choose the image size and quality (samples per pixel); the render refines on every core and is \
-       denoised at the end. Finished renders are kept in the Render Gallery inside the design.",
-    ),
-    (_, "Render Gallery") => (
-      "Shows the renders kept with the design.",
-      "Open a render to see it full size, rename it, export it as a PNG or delete it. The gallery is \
-       saved in the design file.",
-    ),
-    (_, "Finish Render") => (
-      "Leaves the Render workspace.",
-      "Goes back to the Design workspace. Materials, scene settings and the gallery stay with the \
-       design for next time.",
+      "Renders an image of the design with its appearances and scene settings.",
+      "Choose the image size and quality; the render refines on every core and is denoised at the end. \
+       Finished renders are kept in the Rendering Gallery at the bottom of the window. The design must \
+       be saved first.",
     ),
     (_, "Simulate") => (
       "Cuts the stock with the toolpaths and checks for gouges and collisions.",

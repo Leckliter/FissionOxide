@@ -71,6 +71,7 @@ mod params_ui;
 mod plugins_ui;
 mod preferences;
 mod props_ui;
+mod render_panels;
 mod render_ui;
 mod ribbon_tip;
 mod scale_to_ui;
@@ -1435,6 +1436,10 @@ impl App {
     if self.display.ground_offset_form.is_some() {
       // the GROUND PLANE OFFSET dialog closes, changing nothing
       self.display.ground_offset_form = None;
+    } else if self.render.light.is_some() {
+      self.render.light = None;
+    } else if self.render.scene_open {
+      self.render.scene_open = false;
     } else if self.doc_dialog.is_some() {
       // Change Active Units or Convert Design Type closes, changing nothing
       doc_dialogs::close(self);
@@ -1978,7 +1983,7 @@ impl App {
       panels::toolbar(self, ui);
     }
     if self.drawing.is_none() && self.electronics.is_none() {
-      panels::timeline(self, ui);
+      self.bottom_strip(ui);
     }
     data_panel::heartbeat(self, &ctx);
     data_panel::show(self, ui);
@@ -2073,6 +2078,16 @@ impl App {
 }
 
 impl App {
+  /// The strip along the bottom of the window: the timeline, or in the Render workspace the
+  /// Rendering Gallery, which Fusion shows in its place.
+  fn bottom_strip(&mut self, ui: &mut egui::Ui) {
+    if self.render.active {
+      render_panels::gallery_strip(self, ui);
+    } else {
+      panels::timeline(self, ui);
+    }
+  }
+
   /// The window while a background regeneration runs: the panels as they were, the last
   /// viewport image dimmed with a progress note, and a cover that takes all input.
   fn draw_busy(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -2081,7 +2096,7 @@ impl App {
       panels::toolbar(self, ui);
     }
     if self.drawing.is_none() {
-      panels::timeline(self, ui);
+      self.bottom_strip(ui);
     }
     egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
       let rect = ui.available_rect_before_wrap();
