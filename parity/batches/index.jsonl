@@ -36,7 +36,7 @@
 {"name": "ui-select-menus-and-other", "items": 7, "status": "done", "pr": "42294b7", "fixer": "cloud task_44a98b0c (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-selection-feedback", "items": 6, "status": "done", "pr": "80af05f", "fixer": "cloud task_8fdf60e3 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-vertex-and-construction", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_86cd55d8 (requested 2026-10-21 by the coordinator)"}
-{"name": "ui-sketch-fillet-chamfer-blend", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_db7ea9ce (requested 2026-10-21 by the coordinator)"}
+{"name": "ui-sketch-fillet-chamfer-blend", "items": 5, "status": "done", "pr": "2d505df", "fixer": "cloud session_01EtmoQRGX23ec6aogiFeHa9 (2026-10-21)"}
 {"name": "ui-sketch-modify-tooltips", "items": 3, "status": "done", "pr": "9af9589", "fixer": "cloud task_cdc40b88 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-offset-value-box", "items": 4, "status": "done", "pr": "c3cf6ff", "fixer": "cloud task_07d46a49 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-scale-move-params", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_9a94a2f9 (requested 2026-10-21 by the coordinator)"}
