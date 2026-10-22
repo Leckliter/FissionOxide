@@ -304,7 +304,11 @@ impl Prefs {
   pub(crate) fn shortcut_ids(&self) -> Vec<String> {
     let mut out: Vec<String> =
       DEFAULT_SHORTCUTS.iter().filter(|id| self.in_shortcuts(id)).map(|id| id.to_string()).collect();
-    out.extend(self.shortcuts.iter().filter(|id| !out.contains(id)).cloned());
+    for id in &self.shortcuts {
+      if !out.contains(id) {
+        out.push(id.clone());
+      }
+    }
     out
   }
 }
@@ -479,7 +483,7 @@ pub fn key_window(app: &mut App, ctx: &egui::Context) {
       let mut text = field_text(&kc.combo);
       let field = ui.add(
         egui::TextEdit::singleline(&mut text)
-          .frame(false)
+          .frame(egui::Frame::NONE)
           .desired_width(f32::INFINITY)
           .margin(egui::Margin::symmetric(4, 3)),
       );
@@ -579,7 +583,7 @@ mod tests {
     assert!(text.contains("Mode=off"));
     let back = Prefs::from_settings(&Settings::parse(&text));
     assert_eq!(back.keys, p.keys);
-    assert_eq!((back.pinned, back.shortcuts), (p.pinned.clone(), p.shortcuts.clone()));
+    assert_eq!((&back.pinned, &back.shortcuts), (&p.pinned, &p.shortcuts));
     assert_eq!(back.unshortcuts, p.unshortcuts);
     assert!(!back.in_shortcuts("design.Extrude") && back.in_shortcuts("design.Fillet"));
     assert!(back.unpinned.is_empty());
