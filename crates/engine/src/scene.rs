@@ -1183,6 +1183,7 @@ fn slice_cap_lines(scene: &mut Scene, cap: &TriMesh, pl: &Plane, step: f64) {
     id: 0,
     on_top: false,
     dashed: false,
+    dash_dot: false,
     behind: false,
   };
   for seg in cap_outline(cap) {
