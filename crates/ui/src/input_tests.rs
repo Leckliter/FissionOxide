@@ -613,10 +613,14 @@ fn tab_moves_between_the_heads_up_boxes() {
     if tool == Tool::Line {
       // the angle box sets the line's direction
       let s = h.app.s.design.sketch(sk).unwrap();
-      let c = s.curves.last().unwrap().id;
+      let c = s.curves.iter().rev().find(|c| !c.construction).unwrap().id;
       let [a, b] = [0, 1].map(|k| s.pos(s.curve_points(c)[k]).unwrap());
       let ang = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
-      assert!(d == [40.0] && (ang - 20.0).abs() < 1e-6, "{tool:?}: {d:?} at {ang}°");
+      // and is locked with an angle dimension (radians) against a horizontal construction
+      // reference, as in Fusion
+      let locked = d.len() == 2 && d[0] == 40.0 && (d[1].to_degrees() - 20.0).abs() < 1e-9;
+      assert!(locked && (ang - 20.0).abs() < 1e-6, "{tool:?}: {d:?} at {ang}°");
+      assert!(s.curves.iter().any(|c| c.construction), "the reference line stays in the sketch");
     } else {
       assert_eq!(d, [40.0, 20.0], "{tool:?}");
     }

@@ -1624,7 +1624,7 @@ fn lock_typed(
       && app.tool == Tool::Line
       && let (Some(&line), Some(from)) = (curves.first(), from)
     {
-      lock_angle(app, sk, line, from);
+      lock_angle(app, sk, line, from, text);
     }
   }
 }
@@ -1655,29 +1655,25 @@ fn lock_polygon(app: &mut App, sk: FeatureId, curves: &[u32], locks: &[(Field, S
   }
 }
 
-/// Locks a chained line's angle to the segment before it. A first segment has nothing to measure
-/// from; a horizontal or vertical one is locked by its H/V constraint already.
-fn lock_angle(app: &mut App, sk: FeatureId, line: u32, from: [f64; 2]) {
+/// Locks a line's typed angle the way Fusion does: a dashed horizontal construction line as long
+/// as the segment runs from its start (`from`), and an angle dimension holds `text` between that
+/// reference and the line. A horizontal or vertical segment is locked by its H/V constraint
+/// already, so it gets neither.
+fn lock_angle(app: &mut App, sk: FeatureId, line: u32, from: [f64; 2], text: &str) {
   let Ok(sketch) = app.s.design.sketch(sk) else { return };
-  let near = |id: PointId| sketch.pos(id).is_some_and(|q| (q[0] - from[0]).hypot(q[1] - from[1]) < 1e-6);
-  let prev = sketch.curves.iter().rev().find_map(|c| match c.kind {
-    CurveKind::Line { a, b } if c.id.0 != line && (near(a) || near(b)) => Some(c.id),
-    _ => None,
-  });
-  let Some(prev) = prev else { return };
   let ends = sketch.curve_points(fox_engine::sketch::CurveId(line));
-  if let (Some(p), Some(q)) = (ends.first().and_then(|p| sketch.pos(*p)), ends.get(1).and_then(|p| sketch.pos(*p)))
-    && ((p[0] - q[0]).abs() < 1e-9 || (p[1] - q[1]).abs() < 1e-9)
-  {
+  let (Some(p), Some(q)) = (ends.first().and_then(|p| sketch.pos(*p)), ends.get(1).and_then(|p| sketch.pos(*p))) else {
+    return;
+  };
+  if (p[0] - q[0]).abs() < 1e-9 || (p[1] - q[1]).abs() < 1e-9 {
     return;
   }
-  let Some(ang) = line_angle(sketch, prev, fox_engine::sketch::CurveId(line)) else { return };
-  let deg = ang.to_degrees();
-  if deg.abs() < 1e-6 || (deg - 180.0).abs() < 1e-6 {
-    return;
-  }
-  let value = format!("{} deg", fox_engine::sketch::Dim::new(deg).expr);
-  app.run("sketch.dimension", json!({"sketch": sk.0, "type": "angle", "curves": [prev.0, line], "value": value}));
+  let len = (q[0] - p[0]).hypot(q[1] - p[1]);
+  let reference = [from, [from[0] + len, from[1]]];
+  let Some(made) = app.run("sketch.line", json!({"sketch": sk.0, "points": reference})) else { return };
+  let Some(reference) = made["curves"][0].as_u64() else { return };
+  app.run("sketch.construction", json!({"sketch": sk.0, "curves": [reference], "on": true}));
+  app.run("sketch.dimension", json!({"sketch": sk.0, "type": "angle", "curves": [reference, line], "value": text}));
 }
 
 /// Commits the spline being drawn (Enter, its check-mark button, or clicking its last point
@@ -3585,10 +3581,16 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
   let mut rho_at: Option<Pos2> = None;
   for f in fields {
     let shape = match (app.tool, f, pts.as_slice()) {
-      (Tool::Line | Tool::EdgePolygon, Field::Length, _) => along(last, cur),
-      (Tool::Line, Field::Angle, _) => hud_angle_shape(last, cur, wpp, &to_screen),
+      (Tool::Line, Field::Length, _) => hud_length_shape(last, cur, off, wpp, &to_screen),
+      (Tool::EdgePolygon, Field::Length, _) => along(last, cur),
       (Tool::MidpointLine, Field::Length, _) => along([2.0 * last[0] - cur[0], 2.0 * last[1] - cur[1]], cur),
-      (Tool::MidpointLine, Field::Angle, _) => hud_angle_shape(last, cur, wpp, &to_screen),
+      // the angle's arc starts from a dashed horizontal reference at the line's start
+      (Tool::Line | Tool::MidpointLine, Field::Angle, _) => {
+        hud_angle_shape(last, cur, wpp, &to_screen).map(|(s, r)| {
+          painter.extend(egui::Shape::dashed_line(&r, Stroke::new(1.0, Color32::from_gray(128)), 6.0, 4.0));
+          s
+        })
+      }
       (Tool::Rect3, Field::Length, _) => along(last, cur),
       (Tool::Rect3, Field::Width, [a, b]) => {
         let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
@@ -3730,40 +3732,43 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
         .pivot(egui::Align2::CENTER_CENTER)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-          // a typed value is locked: a padlock before the box, which stays editable until Enter
-          if typed {
-            let (lr, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
-            paint_lock(ui.painter(), lr.center(), ink);
-          }
-          // a fixed id: the padlock appearing before the box must not change it (and drop focus)
-          let r = ui.add(
-            egui::TextEdit::singleline(&mut buf)
-              .id(egui::Id::new(("hud-edit", i)))
-              .desired_width(62.0)
-              .font(egui::FontId::proportional(12.0))
-              .margin(egui::Margin::symmetric(3, 1))
-              .lock_focus(true),
-          );
-          if let Some(select) = hud.focus.take() {
-            focus_text(ctx, &r, &buf, select);
-          }
-          if r.changed() {
-            hud.typed[i] = buf.clone();
-          }
-          let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-          if enter && (r.has_focus() || r.lost_focus()) {
-            commit = true;
-            keep = false;
-          } else if esc || (!r.has_focus() && hud.focus.is_none() && r.lost_focus()) {
-            // Esc (or a click elsewhere) stops typing; the typed values stay until the point is placed
-            keep = false;
-          }
+          ui.horizontal(|ui| {
+            // a fixed id: the padlock appearing by the box must not change it (and drop focus)
+            let r = ui.add(
+              egui::TextEdit::singleline(&mut buf)
+                .id(egui::Id::new(("hud-edit", i)))
+                .desired_width(62.0)
+                .font(egui::FontId::proportional(12.0))
+                .margin(egui::Margin::symmetric(3, 1))
+                .lock_focus(true),
+            );
+            // a typed value is locked: Fusion's yellow padlock to the right of the box, which
+            // stays editable until Enter
+            if typed {
+              let (lr, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+              paint_lock(ui.painter(), lr.center(), HUD_LOCK);
+            }
+            if let Some(select) = hud.focus.take() {
+              focus_text(ctx, &r, &buf, select);
+            }
+            if r.changed() {
+              hud.typed[i] = buf.clone();
+            }
+            let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+            if enter && (r.has_focus() || r.lost_focus()) {
+              commit = true;
+              keep = false;
+            } else if esc || (!r.has_focus() && hud.focus.is_none() && r.lost_focus()) {
+              // Esc (or a click elsewhere) stops typing; the typed values stay until the point is placed
+              keep = false;
+            }
+          });
         });
       hud.buf = keep.then_some(buf).filter(|_| !commit);
       continue;
     }
-    // the other boxes show the live value, or what was typed (locked, with its unit) after a
-    // padlock
+    // the other boxes show the live value, or what was typed (locked, with its unit) with a
+    // padlock to their right
     let text = if typed {
       let t = hud.typed[i].trim();
       if matches!(fields[i], Field::Angle | Field::Sides) { t.to_string() } else { unit.typed(t) }
@@ -3772,20 +3777,20 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     };
     let font = egui::FontId::proportional(12.0);
     let galley = painter.layout_no_wrap(text, font, if typed { Color32::BLACK } else { Color32::from_gray(60) });
-    let lock_w = if typed { 14.0 } else { 0.0 };
-    let r = Rect::from_center_size(p, galley.size() + Vec2::new(10.0 + lock_w, 5.0));
+    let r = Rect::from_center_size(p, galley.size() + Vec2::new(10.0, 5.0));
     let active = i == hud.active;
+    // as Fusion's: no border until the box has the keyboard
     painter.rect(
       r,
       2.0,
       Color32::from_rgba_unmultiplied(255, 255, 255, 235),
-      Stroke::new(if active || typed { 1.5 } else { 1.0 }, if active || typed { ink } else { Color32::from_gray(160) }),
+      if active { Stroke::new(1.5, ink) } else { Stroke::NONE },
       egui::StrokeKind::Inside,
     );
     if typed {
-      paint_lock(painter, r.left_center() + Vec2::new(9.0, 0.0), ink);
+      paint_lock(painter, r.right_center() + Vec2::new(9.0, 0.0), HUD_LOCK);
     }
-    let text_at = r.min + Vec2::new(5.0 + lock_w, 2.5);
+    let text_at = r.min + Vec2::new(5.0, 2.5);
     if active && !typed {
       // the box with the keyboard shows its value selected, as Fusion's does: typing replaces it
       painter.rect_filled(Rect::from_min_size(text_at, galley.size()), 0.0, Color32::from_rgb(190, 214, 248));
@@ -3809,7 +3814,10 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
   }
 }
 
-/// A small padlock: the glyph Fusion puts before a heads-up value once it's typed.
+/// The padlock's colour: Fusion's is yellow.
+const HUD_LOCK: Color32 = crate::theme::WARNING;
+
+/// A small padlock: the glyph Fusion puts beside a heads-up value once it's typed.
 fn paint_lock(painter: &egui::Painter, c: Pos2, col: Color32) {
   let body = Rect::from_center_size(c + Vec2::new(0.0, 2.0), Vec2::new(8.0, 6.0));
   painter.rect_filled(body, 1.0, col);
@@ -3824,13 +3832,15 @@ fn paint_lock(painter: &egui::Painter, c: Pos2, col: Color32) {
   painter.add(egui::Shape::line(pts, Stroke::new(1.3, col)));
 }
 
-/// A line's heads-up angle: an arc from the horizontal to the line at its start.
+/// A line's heads-up angle, as Fusion draws it: an arc from the horizontal to the line about its
+/// start, its box just past the arc's end on the line, and (returned apart, to draw dashed) the
+/// horizontal reference the arc starts from.
 fn hud_angle_shape(
   from: [f64; 2],
   to: [f64; 2],
   wpp: f64,
   to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
-) -> Option<DimShape> {
+) -> Option<(DimShape, [Pos2; 2])> {
   let ang = (to[1] - from[1]).atan2(to[0] - from[0]);
   let r = 42.0 * wpp;
   let arc: Vec<Pos2> = (0..=24)
@@ -3840,16 +3850,35 @@ fn hud_angle_shape(
     })
     .collect();
   let o = to_screen(from)?;
-  let base = to_screen([from[0] + r * 1.3, from[1]])?;
-  let mid =
-    to_screen([from[0] + (r + 22.0 * wpp) * (ang / 2.0).cos(), from[1] + (r + 22.0 * wpp) * (ang / 2.0).sin()])?;
+  let reference = [o, to_screen([from[0] + r * 1.6, from[1]])?];
+  // the box sits beyond the arc's end, inside the angle so it stays clear of the line
+  let t = ang - ang.signum() * (16.0 * wpp / r).min(0.5);
+  let d = r + 24.0 * wpp;
+  let label = to_screen([from[0] + d * t.cos(), from[1] + d * t.sin()])?;
   let mut arrows = Vec::new();
   if arc.len() > 2 && ang.abs() > 0.15 {
     let k = arc.len();
     arrows.push((arc[0], arc[0] - arc[1]));
     arrows.push((arc[k - 1], arc[k - 1] - arc[k - 2]));
   }
-  Some(DimShape { lines: vec![[o, base]], arc, arrows, label: mid })
+  Some((DimShape { lines: Vec::new(), arc, arrows, label }, reference))
+}
+
+/// A line's heads-up length, as Fusion draws it: a linear dimension above the segment's middle,
+/// between extension lines with arrows.
+fn hud_length_shape(
+  from: [f64; 2],
+  to: [f64; 2],
+  off: f64,
+  wpp: f64,
+  to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
+) -> Option<DimShape> {
+  let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+  let l = dx.hypot(dy).max(1e-12);
+  let mid = [(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0];
+  // a vertical segment's dimension goes on its left, the way `along` puts every other one
+  let below = if dx.abs() < 1e-12 { [mid[0] + 1.0, mid[1]] } else { [mid[0], mid[1] - 1.0] };
+  linear_shape(from, to, [dx / l, dy / l], below, off, wpp, to_screen)
 }
 
 /// A diameter (or any length) drawn as a line from `a` to `b` with arrowheads at both ends and
@@ -4019,7 +4048,7 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
       if n == 0 {
         "Place first point"
       } else {
-        "Place next point"
+        "Specify next point"
       }
     }
     Tool::Spline | Tool::ControlSpline => {
@@ -5316,16 +5345,90 @@ mod tests {
     // the next segment: 20 long at 90° from the X axis, locked to the first one
     typed(&mut app, ["20", "90"]);
     place_point(&mut app, sk, [51.0, 1.0], None);
-    assert_eq!(dims(&app, sk), vec![50.0, 20.0]);
+    assert_eq!(dims(&app, sk), vec![50.0, 20.0], "a vertical segment is locked by its V constraint, not an angle");
     let s = app.s.design.sketch(sk).unwrap();
     let (_, hi) = s.bounds().unwrap();
     assert!((hi[0] - 50.0).abs() < 1e-6 && (hi[1] - 20.0).abs() < 1e-6, "{hi:?}");
-    // a 45° segment gets an angle to the previous one
+    assert!(s.curves.iter().all(|c| !c.construction), "no reference line yet");
+    // a 135° segment gets its angle against a horizontal reference from its start, as in Fusion
     typed(&mut app, ["10", "135"]);
     place_point(&mut app, sk, [40.0, 30.0], None);
-    let d = dims(&app, sk);
-    assert_eq!(d.len(), 4, "{d:?}");
-    assert!((d[3] - 45.0).abs() < 1e-6 || (d[3] - 135.0).abs() < 1e-6, "{d:?}");
+    assert_eq!(dims(&app, sk), vec![50.0, 20.0, 10.0, 135.0]);
+    let s = app.s.design.sketch(sk).unwrap();
+    let reference = s.curves.iter().find(|c| c.construction).expect("the reference line");
+    let ends: Vec<[f64; 2]> = s.curve_points(reference.id).iter().map(|p| s.pos(*p).unwrap()).collect();
+    assert!((ends[0][0] - 50.0).abs() < 1e-6 && (ends[0][1] - 20.0).abs() < 1e-6, "{ends:?}");
+    assert!((ends[1][0] - 60.0).abs() < 1e-6 && (ends[1][1] - 20.0).abs() < 1e-6, "{ends:?}");
+  }
+
+  /// Fusion's "Tab 40 Tab 1 Enter": the line at 40 degrees with a "1.00" linear dimension along
+  /// it and a "40.0" degree angular dimension against a dashed construction reference line that
+  /// stays in the sketch; the Line tool continues from the new end.
+  #[test]
+  fn typed_line_angle_makes_a_reference_line_and_an_angle_dimension() {
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [5.0, 5.0], None);
+    typed(&mut app, ["1", "40"]);
+    place_point(&mut app, sk, [9.0, 9.0], None);
+    assert_eq!(dims(&app, sk), vec![1.0, 40.0]);
+    let s = app.s.design.sketch(sk).unwrap();
+    let lines: Vec<_> = s.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).collect();
+    assert_eq!(lines.len(), 2, "the segment and its reference");
+    let (line, reference) = (lines[0], lines[1]);
+    assert!(!line.construction && reference.construction, "the reference is construction geometry");
+    let ends = |c: &fox_engine::sketch::Curve| -> Vec<[f64; 2]> {
+      s.curve_points(c.id).iter().map(|p| s.pos(*p).unwrap()).collect()
+    };
+    let (le, re) = (ends(line), ends(reference));
+    let (c, sn) = (40f64.to_radians().cos(), 40f64.to_radians().sin());
+    assert!((le[1][0] - 5.0 - c).abs() < 1e-6 && (le[1][1] - 5.0 - sn).abs() < 1e-6, "{le:?}");
+    // the reference runs horizontally from the line's start, as long as the line
+    assert_eq!(re[0], [5.0, 5.0]);
+    assert!((re[1][0] - 6.0).abs() < 1e-6 && (re[1][1] - 5.0).abs() < 1e-6, "{re:?}");
+    assert!(
+      s.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Horizontal { line } if line == reference.id))
+    );
+    let angle = s.constraints.iter().find(|k| k.kind.is_angle()).expect("the angle dimension");
+    assert!(matches!(angle.kind, ConstraintKind::Angle { a, b, .. } if a == reference.id && b == line.id));
+    assert_eq!(angle.kind.dim().unwrap().expr, "40");
+    let (_, label) = dim_label(s, &angle.kind, angle.kind.dim().unwrap(), app.s.design.units).unwrap();
+    assert_eq!(label, "40.0°", "angles read at one decimal, as Fusion's");
+    // the Line tool continues from the new end
+    assert_eq!(app.tool, Tool::Line);
+    assert_eq!(app.tstate.pts.len(), 2);
+    assert!(app.tstate.hud.typed.iter().all(String::is_empty));
+    // the shape and its three locking commands undo as one step
+    app.run("undo", json!({})).unwrap();
+    assert!(app.s.design.sketch(sk).unwrap().curves.is_empty());
+  }
+
+  /// The Line tool's heads-up graphics as Fusion draws them: the length dimension above the
+  /// segment's middle between extension lines, the angle arc from a horizontal reference at the
+  /// start with its box past the arc's end, and the "Specify next point" prompt.
+  #[test]
+  fn line_heads_up_layout_is_fusions() {
+    // sketch units are screen points (y up, as on the sketch plane)
+    let to_screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, p[1] as f32));
+    for (to, name) in [([100.0, 20.0], "rightward"), ([-100.0, -30.0], "leftward")] {
+      let s = hud_length_shape([0.0, 0.0], to, 30.0, 1.0, &to_screen).unwrap();
+      let mid = Pos2::new(to[0] as f32 / 2.0, to[1] as f32 / 2.0);
+      assert!(s.label.y > mid.y + 20.0, "{name}: the length box sits above the middle, at {:?}", s.label);
+      assert_eq!(s.lines.len(), 3, "{name}: two extension lines and the dimension line");
+      assert_eq!(s.arrows.len(), 2);
+    }
+    let (s, reference) = hud_angle_shape([10.0, 10.0], [60.0, 60.0], 1.0, &to_screen).unwrap();
+    assert_eq!(reference[0], Pos2::new(10.0, 10.0));
+    assert!(reference[1].y == 10.0 && reference[1].x > 50.0, "a horizontal reference from the start: {reference:?}");
+    assert!(s.lines.is_empty(), "the reference is drawn dashed, apart from the arc");
+    assert_eq!(s.arc.len(), 25);
+    assert_eq!(s.arc[0], Pos2::new(52.0, 10.0), "the arc starts on the reference");
+    let end = s.arc[24];
+    assert!((end.x - end.y).abs() < 1e-3, "and ends on the line: {end:?}");
+    let d = s.label - Pos2::new(10.0, 10.0);
+    assert!(d.length() > 60.0 && d.x > d.y && d.y > 0.0, "the box sits past the arc's end, inside the angle: {d:?}");
+    let mut st = ToolState::default();
+    st.pts.push([0.0, 0.0]);
+    assert_eq!(sketch_prompt(Tool::Line, &st), Some("Specify next point"));
   }
 
   #[test]
