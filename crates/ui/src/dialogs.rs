@@ -64,6 +64,8 @@ mod sheet_flat_tests;
 mod sketch_row_tests;
 mod solid;
 mod thread;
+
+mod mesh_modify;
 pub(crate) use export_dxf::{SaveWindow, save_window};
 pub(crate) use mesh::group_triangle;
 pub(crate) use primitive::overlay as place_overlay;
@@ -3257,6 +3259,9 @@ impl Dialog {
         continue;
       }
       if self.mesh_form_field(f, i, s, ui, dirty) {
+        continue;
+      }
+      if crate::forms::mesh_modify_form(f) && self.mesh_modify_field(f, i, ui, dirty) {
         continue;
       }
       let v = self.form.values[i].clone();

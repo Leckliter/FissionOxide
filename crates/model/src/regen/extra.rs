@@ -572,6 +572,10 @@ impl Ctx<'_> {
       | FeatureKind::MeshRepair { .. }
       | FeatureKind::GenerateFaceGroups { .. }
       | FeatureKind::CombineFaceGroups { .. } => self.apply_mesh_prep(id, kind),
+      FeatureKind::MeshRemesh { .. }
+      | FeatureKind::MeshShell { .. }
+      | FeatureKind::MeshCombine { .. }
+      | FeatureKind::MeshSeparate { .. } => self.apply_mesh_edit(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

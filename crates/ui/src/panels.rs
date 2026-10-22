@@ -4524,6 +4524,10 @@ pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::GenerateFaceGroups { .. } => Icon::GenFaceGroups,
     FeatureKind::CombineFaceGroups { .. } => Icon::CombineFaceGroups,
     FeatureKind::MeshPlaneCut { .. } => Icon::PlaneCut,
+    FeatureKind::MeshRemesh { .. } => Icon::Remesh,
+    FeatureKind::MeshShell { .. } => Icon::Shell,
+    FeatureKind::MeshCombine { .. } => Icon::Combine,
+    FeatureKind::MeshSeparate { .. } => Icon::Separate,
   }
 }
 

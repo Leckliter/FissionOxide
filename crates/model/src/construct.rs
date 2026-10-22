@@ -264,6 +264,17 @@ pub enum FillType {
   Minimal,
 }
 
+/// What Mesh Combine does with the tool bodies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeshCombineOp {
+  Join,
+  Cut,
+  Intersect,
+  /// The meshes become one body as they are, without a boolean.
+  Merge,
+}
+
 impl PointRef {
   pub(crate) fn feature(&self) -> Option<FeatureId> {
     match self {

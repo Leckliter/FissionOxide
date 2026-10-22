@@ -479,6 +479,8 @@ pub enum Icon {
   Video,
   /// An assembly (the Animation browser's root): two components side by side.
   Assembly,
+  /// Mesh Combine's Merge: two meshes side by side, joined as they are.
+  OpMerge,
 }
 
 #[derive(Clone, Copy)]
@@ -3087,6 +3089,12 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.06, 0.36), (0.94, 0.36), (0.94, 0.92), (0.06, 0.92)], Dark);
       k.solid(&[(0.06, 0.14), (0.9, 0.04), (0.92, 0.2), (0.08, 0.3)], Light);
       k.fill(&[(0.4, 0.48), (0.66, 0.64), (0.4, 0.8)], White);
+    }
+    Icon::OpMerge => {
+      k.solid(&[(0.06, 0.2), (0.46, 0.2), (0.46, 0.8), (0.06, 0.8)], BlueLight);
+      k.solid(&[(0.54, 0.2), (0.94, 0.2), (0.94, 0.8), (0.54, 0.8)], BlueLight);
+      k.closed(&[(0.06, 0.2), (0.94, 0.2), (0.94, 0.8), (0.06, 0.8)], Blue);
+      k.line((0.5, 0.2), (0.5, 0.8), Blue);
     }
   }
 }

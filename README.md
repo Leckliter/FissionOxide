@@ -82,6 +82,8 @@ change a parameter and watch the whole history rebuild.
   Make Uniform, box/frame/smooth display. The body is an exact B-rep. See [Form](#form).
 - **Meshes.** Inserted meshes stay mesh bodies named after their file (picked whole, drawn
   smooth); reduce, smooth, or convert them to clean B-rep (coplanar triangles merged into faces).
+  Remesh them to an even size (Adaptive or Uniform, by density or edge length), shell them, combine
+  them (join, cut, intersect or merge), separate them into their shells and scale them.
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
   Base Flange from closed profiles (either side of the sketch or centred on it), Contour Flange from an open path (corners become bends), Edge
   Flange (any angle, adjacent/inside/outside bend position, offsets), Lofted Flange between two

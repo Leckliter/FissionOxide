@@ -43,32 +43,36 @@ pub fn reduce(pos: &[DVec3], tris: &[u32], keep: f64) -> (Vec<DVec3>, Vec<u32>) 
   let mut cells = (target.sqrt() * 2.0).max(2.0);
   let mut out = (pos.to_vec(), tris.to_vec());
   for _ in 0..12 {
-    let cell = size / cells;
-    let mut ids: HashMap<[i64; 3], usize> = HashMap::new();
-    let mut sums: Vec<(DVec3, f64)> = Vec::new();
-    let map: Vec<usize> = pos
-      .iter()
-      .map(|p| {
-        let k = ((*p - lo) / cell).floor();
-        let key = [k.x as i64, k.y as i64, k.z as i64];
-        let i = *ids.entry(key).or_insert_with(|| {
-          sums.push((DVec3::ZERO, 0.0));
-          sums.len() - 1
-        });
-        sums[i].0 += *p;
-        sums[i].1 += 1.0;
-        i
-      })
-      .collect();
-    let new_pos: Vec<DVec3> = sums.iter().map(|(s, n)| *s / *n).collect();
-    let new_tris = drop_degenerate(tris.iter().map(|&i| map[i as usize] as u32).collect());
-    out = (new_pos, new_tris);
+    out = cluster(pos, tris, lo, size / cells);
     if (out.1.len() as f64) <= tris.len() as f64 * keep * 1.15 {
       break;
     }
     cells *= 0.8;
   }
   out
+}
+
+/// Merges the vertices in each cube of a grid (side `cell`, corner `lo`) into their average.
+fn cluster(pos: &[DVec3], tris: &[u32], lo: DVec3, cell: f64) -> (Vec<DVec3>, Vec<u32>) {
+  let mut ids: HashMap<[i64; 3], usize> = HashMap::new();
+  let mut sums: Vec<(DVec3, f64)> = Vec::new();
+  let map: Vec<usize> = pos
+    .iter()
+    .map(|p| {
+      let k = ((*p - lo) / cell).floor();
+      let key = [k.x as i64, k.y as i64, k.z as i64];
+      let i = *ids.entry(key).or_insert_with(|| {
+        sums.push((DVec3::ZERO, 0.0));
+        sums.len() - 1
+      });
+      sums[i].0 += *p;
+      sums[i].1 += 1.0;
+      i
+    })
+    .collect();
+  let new_pos: Vec<DVec3> = sums.iter().map(|(s, n)| *s / *n).collect();
+  let new_tris = drop_degenerate(tris.iter().map(|&i| map[i as usize] as u32).collect());
+  (new_pos, new_tris)
 }
 
 /// Laplacian smoothing (each pass moves vertices halfway to their neighbours' average).
@@ -96,6 +100,307 @@ pub fn smooth(pos: &[DVec3], tris: &[u32], passes: usize) -> Vec<DVec3> {
     }
   }
   p
+}
+
+/// Remesh's settings (Fusion's MESH > MODIFY > Remesh).
+#[derive(Debug, Clone, Copy)]
+pub struct Remesh {
+  /// The edge length to aim for.
+  pub target: f64,
+  /// Adaptive keeps flat regions coarse and refines where the surface bends; Uniform makes every
+  /// edge about `target` long.
+  pub adaptive: bool,
+  /// 0–1: how little the relaxation that evens the triangles out may move vertices.
+  pub shape: f64,
+  /// Vertices on sharp edges stay where they are.
+  pub sharp: bool,
+  /// Vertices on open boundaries stay where they are.
+  pub boundaries: bool,
+}
+
+/// Fusion's Density (0–1, higher is more faces) as an edge length for a body `diagonal` across.
+pub fn density_edge(diagonal: f64, density: f64) -> f64 {
+  diagonal.max(1e-9) / (4.0 + 60.0 * density.clamp(0.0, 1.0))
+}
+
+/// Regenerates the triangles to edges about `opts.target` long: a dense mesh is coarsened by
+/// clustering first, long edges are split (conformingly) until none is left, then the vertices
+/// relax in their tangent planes.
+pub fn remesh(pos: &[DVec3], tris: &[u32], opts: &Remesh) -> (Vec<DVec3>, Vec<u32>) {
+  let target = opts.target.max(1e-6);
+  let (mut pos, mut tris) = (pos.to_vec(), tris.to_vec());
+  if pos.is_empty() || tris.is_empty() {
+    return (pos, tris);
+  }
+  let edges = edge_lengths(&pos, &tris);
+  let mean = edges.iter().sum::<f64>() / edges.len().max(1) as f64;
+  // coarsen: denser than asked
+  if !opts.adaptive && mean < 0.5 * target {
+    let lo = pos.iter().fold(DVec3::splat(f64::INFINITY), |a, p| a.min(*p));
+    let (p, t) = cluster(&pos, &tris, lo, 0.7 * target);
+    if !t.is_empty() {
+      (pos, tris) = (p, t);
+    }
+  }
+  for _ in 0..12 {
+    if tris.len() / 3 > 400_000 {
+      break;
+    }
+    let normals = face_normals(&pos, &tris);
+    let flat = flat_edges(&tris, &normals);
+    let long = |a: u32, b: u32| {
+      let l = (pos[a as usize] - pos[b as usize]).length();
+      // adaptive: flat regions may keep edges three times as long
+      let lim = if opts.adaptive && flat.contains(&key(a, b)) { 4.0 } else { 4.0 / 3.0 };
+      l > lim * target
+    };
+    let marked: Vec<(u32, u32)> = tris
+      .chunks_exact(3)
+      .flat_map(|t| [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])])
+      .filter(|&(a, b)| long(a, b))
+      .map(|(a, b)| key(a, b))
+      .collect();
+    if marked.is_empty() {
+      break;
+    }
+    tris = split_edges(&mut pos, &tris, &marked);
+  }
+  let passes = ((1.0 - opts.shape.clamp(0.0, 1.0)) * 6.0).round() as usize;
+  if passes > 0 {
+    let normals = face_normals(&pos, &tris);
+    let mut fixed = vec![false; pos.len()];
+    for (a, b) in boundary_edges(&tris) {
+      if opts.boundaries {
+        fixed[a as usize] = true;
+        fixed[b as usize] = true;
+      }
+    }
+    if opts.sharp {
+      for (a, b) in sharp_edges(&tris, &normals) {
+        fixed[a as usize] = true;
+        fixed[b as usize] = true;
+      }
+    }
+    pos = relax(&pos, &tris, &fixed, passes, 0.5 * (1.0 - opts.shape.clamp(0.0, 1.0)));
+  }
+  (pos, drop_degenerate(tris))
+}
+
+fn key(a: u32, b: u32) -> (u32, u32) {
+  (a.min(b), a.max(b))
+}
+
+fn edge_lengths(pos: &[DVec3], tris: &[u32]) -> Vec<f64> {
+  tris
+    .chunks_exact(3)
+    .flat_map(|t| [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])])
+    .map(|(a, b)| (pos[a as usize] - pos[b as usize]).length())
+    .collect()
+}
+
+/// Unit normals of the triangles (zero for slivers).
+fn face_normals(pos: &[DVec3], tris: &[u32]) -> Vec<DVec3> {
+  tris
+    .chunks_exact(3)
+    .map(|t| {
+      let (a, b, c) = (pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]);
+      (b - a).cross(c - a).normalize_or_zero()
+    })
+    .collect()
+}
+
+/// The triangles on each undirected edge.
+fn edge_faces(tris: &[u32]) -> HashMap<(u32, u32), Vec<usize>> {
+  let mut m: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+  for (f, t) in tris.chunks_exact(3).enumerate() {
+    for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+      m.entry(key(a, b)).or_default().push(f);
+    }
+  }
+  m
+}
+
+/// Edges whose two triangles lie within 10 degrees of each other.
+fn flat_edges(tris: &[u32], normals: &[DVec3]) -> std::collections::HashSet<(u32, u32)> {
+  edge_faces(tris)
+    .into_iter()
+    .filter(|(_, f)| f.len() == 2 && normals[f[0]].dot(normals[f[1]]) > 0.985)
+    .map(|(k, _)| k)
+    .collect()
+}
+
+/// Edges whose two triangles meet at more than 30 degrees.
+fn sharp_edges(tris: &[u32], normals: &[DVec3]) -> Vec<(u32, u32)> {
+  edge_faces(tris)
+    .into_iter()
+    .filter(|(_, f)| f.len() == 2 && normals[f[0]].dot(normals[f[1]]) < 0.866)
+    .map(|(k, _)| k)
+    .collect()
+}
+
+/// Edges on one triangle only: the outline of an open mesh, as they run in that triangle.
+pub fn boundary_edges(tris: &[u32]) -> Vec<(u32, u32)> {
+  let faces = edge_faces(tris);
+  tris
+    .chunks_exact(3)
+    .flat_map(|t| [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])])
+    .filter(|&(a, b)| faces.get(&key(a, b)).is_some_and(|f| f.len() == 1))
+    .collect()
+}
+
+/// Splits every `marked` edge at its middle and the triangles around it to match, so the mesh
+/// stays watertight: a triangle with one split edge becomes two, with two three, with three four.
+fn split_edges(pos: &mut Vec<DVec3>, tris: &[u32], marked: &[(u32, u32)]) -> Vec<u32> {
+  let mut mid: HashMap<(u32, u32), u32> = HashMap::new();
+  for &(a, b) in marked {
+    mid.entry((a, b)).or_insert_with(|| {
+      let m = (pos[a as usize] + pos[b as usize]) / 2.0;
+      pos.push(m);
+      (pos.len() - 1) as u32
+    });
+  }
+  let mut out = Vec::with_capacity(tris.len() * 2);
+  for t in tris.chunks_exact(3) {
+    let v = [t[0], t[1], t[2]];
+    let e: [Option<u32>; 3] = [0, 1, 2].map(|i| mid.get(&key(v[i], v[(i + 1) % 3])).copied());
+    match e.iter().filter(|x| x.is_some()).count() {
+      0 => out.extend(v),
+      1 => {
+        let i = e.iter().position(Option::is_some).unwrap_or(0);
+        let (a, b, c, m) = (v[i], v[(i + 1) % 3], v[(i + 2) % 3], e[i].unwrap_or(0));
+        out.extend([a, m, c, m, b, c]);
+      }
+      2 => {
+        // the unsplit edge runs a → b
+        let i = e.iter().position(Option::is_none).unwrap_or(0);
+        let (a, b, c) = (v[i], v[(i + 1) % 3], v[(i + 2) % 3]);
+        let (mbc, mca) = (e[(i + 1) % 3].unwrap_or(0), e[(i + 2) % 3].unwrap_or(0));
+        out.extend([mca, mbc, c, a, b, mbc, a, mbc, mca]);
+      }
+      _ => {
+        let [m0, m1, m2] = e.map(|x| x.unwrap_or(0));
+        out.extend([v[0], m0, m2, m0, v[1], m1, m2, m1, v[2], m0, m1, m2]);
+      }
+    }
+  }
+  out
+}
+
+/// Tangential smoothing: each pass moves the free vertices `lambda` of the way to their
+/// neighbours' average, within the plane through them across their normal.
+fn relax(pos: &[DVec3], tris: &[u32], fixed: &[bool], passes: usize, lambda: f64) -> Vec<DVec3> {
+  let mut nb: Vec<Vec<u32>> = vec![Vec::new(); pos.len()];
+  for t in tris.chunks_exact(3) {
+    for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+      if !nb[a as usize].contains(&b) {
+        nb[a as usize].push(b);
+      }
+      if !nb[b as usize].contains(&a) {
+        nb[b as usize].push(a);
+      }
+    }
+  }
+  let mut p = pos.to_vec();
+  for _ in 0..passes {
+    let normals = vertex_normals(&p, tris);
+    let prev = p.clone();
+    for (i, n) in nb.iter().enumerate() {
+      if n.is_empty() || fixed[i] {
+        continue;
+      }
+      let avg = n.iter().map(|&j| prev[j as usize]).sum::<DVec3>() / n.len() as f64;
+      let d = avg - prev[i];
+      p[i] = prev[i] + (d - normals[i] * d.dot(normals[i])) * lambda;
+    }
+  }
+  p
+}
+
+/// Area-weighted vertex normals.
+fn vertex_normals(pos: &[DVec3], tris: &[u32]) -> Vec<DVec3> {
+  let mut n = vec![DVec3::ZERO; pos.len()];
+  for t in tris.chunks_exact(3) {
+    let (a, b, c) = (pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]);
+    let f = (b - a).cross(c - a);
+    for &i in t {
+      n[i as usize] += f;
+    }
+  }
+  n.iter().map(|v| v.normalize_or_zero()).collect()
+}
+
+/// The vertices moved `d` along their normals (negative: against them), far enough at corners
+/// that every triangle around a vertex ends up `d` from where it was.
+pub fn offset(pos: &[DVec3], tris: &[u32], d: f64) -> Vec<DVec3> {
+  let normals = vertex_normals(pos, tris);
+  let faces = face_normals(pos, tris);
+  // the triangle around each vertex that leans furthest from its normal
+  let mut lean = vec![1.0f64; pos.len()];
+  for (f, t) in tris.chunks_exact(3).enumerate() {
+    for &i in t {
+      let c = normals[i as usize].dot(faces[f]);
+      lean[i as usize] = lean[i as usize].min(c);
+    }
+  }
+  pos.iter().enumerate().map(|(i, p)| *p + normals[i] * (d / lean[i].clamp(0.3, 1.0))).collect()
+}
+
+/// Mesh Shell of an open mesh: the surface, its copy offset `-d` (inward) turned inside out and
+/// walls joining the two along the open boundary, as one closed mesh.
+pub fn shell_open(pos: &[DVec3], tris: &[u32], d: f64) -> (Vec<DVec3>, Vec<u32>) {
+  let n = pos.len() as u32;
+  let mut out_pos = pos.to_vec();
+  out_pos.extend(offset(pos, tris, -d));
+  let mut out = tris.to_vec();
+  for t in tris.chunks_exact(3) {
+    out.extend([t[0] + n, t[2] + n, t[1] + n]);
+  }
+  for (a, b) in boundary_edges(tris) {
+    // the wall runs b → a beside the surface's a → b
+    out.extend([b, a, a + n, b, a + n, b + n]);
+  }
+  (out_pos, out)
+}
+
+/// The connected pieces of a mesh (Separate's mesh shells), each with its own vertices, largest
+/// first.
+pub fn components(pos: &[DVec3], tris: &[u32]) -> Vec<(Vec<DVec3>, Vec<u32>)> {
+  let mut parent: Vec<u32> = (0..pos.len() as u32).collect();
+  fn root(parent: &mut [u32], mut i: u32) -> u32 {
+    while parent[i as usize] != i {
+      parent[i as usize] = parent[parent[i as usize] as usize];
+      i = parent[i as usize];
+    }
+    i
+  }
+  for t in tris.chunks_exact(3) {
+    for (a, b) in [(t[0], t[1]), (t[1], t[2])] {
+      let (ra, rb) = (root(&mut parent, a), root(&mut parent, b));
+      if ra != rb {
+        parent[ra as usize] = rb;
+      }
+    }
+  }
+  let mut groups: HashMap<u32, (Vec<DVec3>, Vec<u32>, HashMap<u32, u32>)> = HashMap::new();
+  let mut order = Vec::new();
+  for t in tris.chunks_exact(3) {
+    let r = root(&mut parent, t[0]);
+    let g = groups.entry(r).or_insert_with(|| {
+      order.push(r);
+      (Vec::new(), Vec::new(), HashMap::new())
+    });
+    for &i in t {
+      let j = *g.2.entry(i).or_insert_with(|| {
+        g.0.push(pos[i as usize]);
+        (g.0.len() - 1) as u32
+      });
+      g.1.push(j);
+    }
+  }
+  let mut out: Vec<(Vec<DVec3>, Vec<u32>)> =
+    order.into_iter().filter_map(|r| groups.remove(&r)).map(|(p, t, _)| (p, t)).collect();
+  out.sort_by_key(|(_, t)| std::cmp::Reverse(t.len()));
+  out
 }
 
 #[cfg(test)]
@@ -133,5 +438,47 @@ mod tests {
     let (pos, tris) = grid(5);
     let p = smooth(&pos, &tris, 3);
     assert!(p.iter().all(|v| v.z.abs() < 1e-12));
+  }
+
+  #[test]
+  fn remesh_splits_long_edges_and_keeps_a_flat_grid_flat() {
+    let (pos, tris) = grid(2);
+    // full shape preservation: no relaxation, every edge within the split limit
+    let opts = Remesh { target: 0.25, adaptive: false, shape: 1.0, sharp: false, boundaries: true };
+    let (p, t) = remesh(&pos, &tris, &opts);
+    assert!(t.len() > tris.len() * 8, "{} → {}", tris.len() / 3, t.len() / 3);
+    assert!(edge_lengths(&p, &t).iter().all(|l| *l <= 4.0 / 3.0 * 0.25 + 1e-9));
+    // relaxing keeps it flat and its outline where it was
+    let opts = Remesh { shape: 0.5, ..opts };
+    let (p, t) = remesh(&pos, &tris, &opts);
+    assert!(p.iter().all(|v| v.z.abs() < 1e-12));
+    // watertight: every inner edge still has two triangles, the outline is the grid's
+    assert_eq!(boundary_edges(&t).iter().map(|(a, b)| (p[*a as usize] - p[*b as usize]).length()).sum::<f64>(), 8.0);
+    // adaptive leaves a flat region coarser
+    let (_, ta) = remesh(&pos, &tris, &Remesh { adaptive: true, ..opts });
+    assert!(ta.len() < t.len());
+  }
+
+  #[test]
+  fn separate_finds_each_piece() {
+    let (mut pos, mut tris) = grid(3);
+    let (p2, t2) = grid(1);
+    let n = pos.len() as u32;
+    pos.extend(p2.iter().map(|p| *p + DVec3::new(10.0, 0.0, 0.0)));
+    tris.extend(t2.iter().map(|i| i + n));
+    let parts = components(&pos, &tris);
+    assert_eq!(parts.len(), 2);
+    assert_eq!((parts[0].1.len() / 3, parts[1].1.len() / 3), (18, 2));
+    assert_eq!(parts[1].0.len(), 4);
+  }
+
+  #[test]
+  fn shelling_an_open_mesh_closes_it() {
+    let (pos, tris) = grid(2);
+    let (p, t) = shell_open(&pos, &tris, 0.5);
+    assert!(boundary_edges(&t).is_empty());
+    assert_eq!(p.len(), 2 * pos.len());
+    // the grid faces +z: the copy lies 0.5 below
+    assert!(p[pos.len()..].iter().all(|v| (v.z + 0.5).abs() < 1e-12));
   }
 }

@@ -532,6 +532,11 @@ cmds! {
   "mesh.edit.finish" => "Finish Direct Editing: the edited mesh body is kept as \"<name>_Edited\" in the base feature, and the marker goes back to the end", "{body?, feature?}";
   "sheet.create_flat_pattern" => "Create Flat Pattern: the design's flat pattern, a sheet metal body laid flat on its stationary face (kept with the design, not in the timeline); sheet.flat_pattern then defaults to it", "{face: {body, face}}";
   "sheet.delete_flat_pattern" => "Delete the design's flat pattern", "{}";
+  "mesh.remesh" => "Remesh: regenerate the triangles of mesh bodies to an even size (Adaptive keeps flat regions coarse); Density 0-1 (higher is more faces) or a target edge length", "{bodies, type?: adaptive|uniform, method?: density|edge_length, density? (0.25), edge_length?, shape? (shape preservation 0-1, 0.5), sharp?: preserve sharp edges, boundaries?: preserve boundaries}";
+  "mesh.shell" => "Mesh Shell: hollow mesh bodies to a wall this thick (negative grows it outward); an open mesh gets walls along its outline", "{bodies, thickness}";
+  "mesh.combine" => "Mesh Combine: join, cut or intersect tool bodies with a target mesh body, or merge them into it as they are", "{target, tools, operation?: join|cut|intersect|merge, keep_tools?}";
+  "mesh.separate" => "Separate: split a mesh body into one body per connected shell", "{body, type?: shells, keep_body?}";
+  "mesh.scale" => "Scale Mesh: scale mesh bodies about a point (default their centre), uniformly or per axis", "{bodies, center?: [x,y,z], scale_type?: uniform|non_uniform, factor? | x, y, z}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -624,6 +629,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::collect_flat::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::mesh_edit::run(s, name, p) {
     return r;
   }
   match name {

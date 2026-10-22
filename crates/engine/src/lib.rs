@@ -54,6 +54,8 @@ mod surfaces;
 mod trace;
 mod views;
 
+mod mesh_edit;
+
 use std::path::PathBuf;
 
 use fox_model::regen::{Model, Regenerator};

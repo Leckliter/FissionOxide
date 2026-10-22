@@ -1857,8 +1857,8 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Select points on the mesh and matching points on the target; the mesh moves to fit them.",
     ),
     (_, "Remesh") => (
-      "Rebuilds a mesh with evenly sized triangles.",
-      "Pick the mesh and the density. An even mesh smooths and converts more reliably.",
+      "Refines or coarsens faces on a mesh body or face groups.",
+      "Select a mesh body or face groups on a mesh body, then adjust the settings to regenerate the mesh faces.",
     ),
     (_, "Reduce") => (
       "Reduces the number of triangles on mesh bodies.",

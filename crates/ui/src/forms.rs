@@ -649,6 +649,14 @@ impl State {
       self.values[i] = v;
     }
     match form.cmd {
+      // Mesh Combine: the first picked body is the target, the others the tools
+      "mesh.combine" => {
+        let at = |k: &str| form.inputs.iter().position(|x| x.key() == k);
+        if let (Some(t), Some(o)) = (at("target"), at("tools")) {
+          self.values[t] = json!(bodies.first().map(|b| vec![*b]).unwrap_or_default());
+          self.values[o] = json!(bodies.get(1..).unwrap_or_default());
+        }
+      }
       "thread" => crate::thread_form::sync(form, self, &before, s),
       // Emboss wraps the profiles around a curved face, as Fusion does: no row for it
       "emboss" => {
@@ -842,6 +850,20 @@ impl State {
         _ => true,
       },
       "thicken" if key == "thickness" => self.picked(form, &["bodies"]),
+      // Remesh's Method decides which value it asks for; Scale Mesh's Scale Type the factors
+      "mesh.remesh" => match key {
+        "density" => get("method").and_then(Value::as_str) != Some("edge_length"),
+        "edge_length" => get("method").and_then(Value::as_str) == Some("edge_length"),
+        _ => true,
+      },
+      "mesh.scale" => {
+        let uniform = get("scale_type").and_then(Value::as_str) != Some("non_uniform");
+        match key {
+          "factor" => uniform,
+          "x" | "y" | "z" => !uniform,
+          _ => true,
+        }
+      }
       // the thread's span: Full Length off
       "thread" if matches!(key, "length" | "offset" | "flip") => {
         get("full_length").and_then(Value::as_bool) == Some(false)
@@ -1213,7 +1235,11 @@ impl State {
         Input::Bodies { required: false, .. } if v.as_array().is_some_and(Vec::is_empty) => continue,
         // picked pieces count only while picking them is on
         Input::Pieces { .. } if !self.picking_pieces || v.as_array().is_none_or(Vec::is_empty) => continue,
-        Input::Expr { .. } | Input::Text { .. } if v.as_str().is_some_and(|t| t.trim().is_empty()) => continue,
+        Input::Expr { .. } | Input::Text { .. } | Input::Slider { .. }
+          if v.as_str().is_some_and(|t| t.trim().is_empty()) =>
+        {
+          continue;
+        }
         Input::Face { near: Some(n), .. } => {
           if let Some(c) = self.near[i] {
             p.insert(n.to_string(), json!(c));
@@ -2082,6 +2108,105 @@ pub static MESH_CONVERT: Form = Form {
   picks_model: true,
 };
 
+const REMESH_TYPES: &[(&str, &str)] = &[("adaptive", "Adaptive"), ("uniform", "Uniform")];
+const REMESH_METHODS: &[(&str, &str)] = &[("density", "Density"), ("edge_length", "Edge Length")];
+
+pub static MESH_REMESH: Form = Form {
+  title: "REMESH",
+  name: "Remesh",
+  hint: "Refines or coarsens faces on a mesh body or face groups",
+  icon: Icon::Remesh,
+  cmd: "mesh.remesh",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Body/Face Groups", required: true },
+    Input::Choice { key: "type", label: "Type", options: REMESH_TYPES },
+    Input::Choice { key: "method", label: "Method", options: REMESH_METHODS },
+    Input::Slider { key: "density", label: "Density", default: "0.25", max: 1 },
+    Input::Expr { key: "edge_length", label: "Edge Length", default: "1 mm" },
+    Input::Slider { key: "shape", label: "Shape Preservation", default: "0.50", max: 1 },
+    Input::Check { key: "sharp", label: "Preserve Sharp Edges" },
+    Input::Check { key: "boundaries", label: "Preserve Boundaries" },
+  ],
+  picks_model: true,
+};
+
+pub static MESH_SHELL: Form = Form {
+  title: "SHELL",
+  name: "Shell",
+  hint: "Hollow mesh bodies to a wall thickness",
+  icon: Icon::Shell,
+  cmd: "mesh.shell",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Body", required: true },
+    // Fusion's 0.079 in
+    Input::Slider { key: "thickness", label: "Thickness", default: "2 mm", max: 10 },
+  ],
+  picks_model: true,
+};
+
+const MESH_COMBINE_OPS: &[(&str, Icon, &str)] = &[
+  ("join", Icon::OpJoin, "Join"),
+  ("cut", Icon::OpCut, "Cut"),
+  ("intersect", Icon::OpIntersect, "Intersect"),
+  ("merge", Icon::OpMerge, "Merge"),
+];
+
+pub static MESH_COMBINE: Form = Form {
+  title: "COMBINE",
+  name: "Combine",
+  hint: "Join, cut or intersect mesh bodies, or merge them into one",
+  icon: Icon::Combine,
+  cmd: "mesh.combine",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "target", label: "Target Body", required: true },
+    Input::Bodies { key: "tools", label: "Tool Bodies", required: true },
+    Input::Icons { key: "operation", label: "Operation", options: MESH_COMBINE_OPS },
+    Input::Check { key: "keep_tools", label: "Keep Tools" },
+    Input::Choice { key: "algorithm", label: "Algorithm", options: &[("standard", "Standard")] },
+  ],
+  picks_model: true,
+};
+
+pub static MESH_SEPARATE: Form = Form {
+  title: "SEPARATE",
+  name: "Separate",
+  hint: "Split a mesh body into a body per disconnected shell",
+  icon: Icon::Separate,
+  cmd: "mesh.separate",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Body", required: true },
+    Input::Choice { key: "type", label: "Type", options: &[("shells", "Mesh Shells")] },
+    Input::Check { key: "keep_body", label: "Keep Body" },
+  ],
+  picks_model: true,
+};
+
+const SCALE_TYPES: &[(&str, &str)] = &[("uniform", "Uniform"), ("non_uniform", "Non-Uniform")];
+
+pub static SCALE_MESH: Form = Form {
+  title: "SCALE MESH",
+  name: "Scale Mesh",
+  hint: "Scale mesh bodies about their centre",
+  icon: Icon::ScaleMesh,
+  cmd: "mesh.scale",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Entities", required: true },
+    // filled in by itself: the engine scales about the bodies' centre (drawn as a chip)
+    Input::Text { key: "point", label: "Point", default: "" },
+    Input::Choice { key: "scale_type", label: "Scale Type", options: SCALE_TYPES },
+    Input::Expr { key: "factor", label: "Scale Factor", default: "1.00" },
+    Input::Expr { key: "x", label: "X Scale", default: "1.00" },
+    Input::Expr { key: "y", label: "Y Scale", default: "1.00" },
+    Input::Expr { key: "z", label: "Z Scale", default: "1.00" },
+  ],
+  picks_model: true,
+};
+
 pub static APPEARANCE: Form = Form {
   title: "APPEARANCE",
   name: "Appearance",
@@ -2227,6 +2352,15 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
   match form.cmd {
     "coil.form" => ("coil", coil_params(&p)),
     "pipe.form" => ("pipe", pipe_params(&p)),
+    // Mesh Combine's Target Body chip holds one body
+    "mesh.combine" => {
+      let mut q = p.clone();
+      if let Some(o) = q.as_object_mut() {
+        let t = o.get("target").and_then(|t| t.get(0)).cloned().unwrap_or(Value::Null);
+        o.insert("target".into(), t);
+      }
+      ("mesh.combine", q)
+    }
     "sketch.intersect.form" | "sketch.spun_profile.form" => {
       // the Selection Filter decides what Geometry holds: whole bodies, or just the picked faces
       // (Spun Profile spins their bodies: the engine spins bodies only)
@@ -3758,6 +3892,9 @@ pub fn pick_prompt(form: &Form) -> Option<&'static str> {
     "boundary_fill" => "Select bodies & planes",
     "sheet.corner_closure" => "Select edges",
     "mesh.combine_face_groups" => crate::mesh_ui::COMBINE_PROMPT,
+    "mesh.combine" => "Select target body",
+    "mesh.separate" => "Select mesh body to separate",
+    "mesh.scale" => "Select bodies or sketches to scale",
     _ => return None,
   })
 }
@@ -3769,6 +3906,9 @@ pub fn specify_prompt(form: &Form) -> Option<&'static str> {
     "mesh.reduce" => Some("Adjust reduce type and settings"),
     "mesh.smooth" => Some("Adjust smoothness"),
     "mesh.convert" => Some("Adjust conversion settings"),
+    "mesh.shell" => Some("Adjust direction and thickness"),
+    // Fusion keeps asking for the picks while the values are set
+    "mesh.combine" | "mesh.separate" | "mesh.scale" => pick_prompt(form),
     _ => None,
   }
 }
@@ -3776,7 +3916,13 @@ pub fn specify_prompt(form: &Form) -> Option<&'static str> {
 /// Is this a mesh dialog, where Fusion opens with Preview unticked, keeps its settings prompt
 /// whatever the pointer is over, and counts the picked body on its chip ("1 selected")?
 pub fn mesh_form(form: &Form) -> bool {
-  matches!(form.cmd, "mesh.reduce" | "mesh.smooth" | "mesh.convert")
+  matches!(form.cmd, "mesh.reduce" | "mesh.smooth" | "mesh.convert") || mesh_modify_form(form)
+}
+
+/// MESH > MODIFY's Remesh, Shell, Combine, Separate and Scale Mesh (rows of their own in
+/// `dialogs/mesh_modify.rs`).
+pub fn mesh_modify_form(form: &Form) -> bool {
+  matches!(form.cmd, "mesh.remesh" | "mesh.shell" | "mesh.combine" | "mesh.separate" | "mesh.scale")
 }
 
 /// Forms that open with Preview unticked.
@@ -3820,7 +3966,7 @@ pub fn always_previews(form: &Form) -> bool {
 /// Forms whose drop-downs show an icon before each value, as Fusion's Extent Type, Direction
 /// and Operation do.
 pub fn icon_dropdowns(form: &Form) -> bool {
-  matches!(form.cmd, "rib" | "web" | "thicken" | "boundary_fill" | "mesh.reduce")
+  matches!(form.cmd, "rib" | "web" | "thicken" | "boundary_fill" | "mesh.reduce" | "mesh.remesh")
 }
 
 pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {

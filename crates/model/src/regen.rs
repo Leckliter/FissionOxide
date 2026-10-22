@@ -2766,3 +2766,5 @@ pub use made::Made;
 
 mod mesh;
 mod mesh_prep;
+
+mod mesh_edit;

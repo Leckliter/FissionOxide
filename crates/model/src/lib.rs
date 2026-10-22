@@ -2054,6 +2054,46 @@ pub enum FeatureKind {
     #[serde(default)]
     fill: construct::FillType,
   },
+  /// Mesh Remesh: regenerates the triangles of mesh bodies to an even size (see
+  /// `meshops::remesh`).
+  MeshRemesh {
+    bodies: Vec<BodyId>,
+    /// Adaptive (coarse where flat) rather than Uniform.
+    #[serde(default)]
+    adaptive: bool,
+    /// Method Edge Length: the length to aim for; none is Method Density.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    edge_length: Option<String>,
+    /// 0–1, higher is more faces.
+    density: String,
+    /// Shape Preservation, 0–1.
+    shape: String,
+    #[serde(default)]
+    sharp: bool,
+    #[serde(default)]
+    boundaries: bool,
+  },
+  /// Mesh Shell: hollows mesh bodies to a wall `thickness` thick (negative: the wall grows
+  /// outward); an open mesh gets walls along its outline.
+  MeshShell {
+    bodies: Vec<BodyId>,
+    thickness: String,
+  },
+  /// Mesh Combine: tools joined to, cut from or intersected with the target, or merged into it
+  /// as they are; the result stays one mesh body.
+  MeshCombine {
+    target: BodyId,
+    tools: Vec<BodyId>,
+    operation: construct::MeshCombineOp,
+    #[serde(default)]
+    keep_tools: bool,
+  },
+  /// Separate: a mesh body split into one body per connected shell.
+  MeshSeparate {
+    body: BodyId,
+    #[serde(default)]
+    keep_body: bool,
+  },
 }
 
 fn medium() -> String {
@@ -2229,6 +2269,10 @@ impl FeatureKind {
       FeatureKind::GenerateFaceGroups { .. } => "GenerateFaceGroups",
       FeatureKind::CombineFaceGroups { .. } => "CombineFaceGroups",
       FeatureKind::MeshPlaneCut { .. } => "MeshPlaneCut",
+      FeatureKind::MeshRemesh { .. } => "Remesh",
+      FeatureKind::MeshShell { .. } => "MeshShell",
+      FeatureKind::MeshCombine { .. } => "MeshCombine",
+      FeatureKind::MeshSeparate { .. } => "MeshSeparate",
     }
   }
 
@@ -3227,6 +3271,15 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         f(e);
       }
     }
+    FeatureKind::MeshRemesh { edge_length, density, shape, .. } => {
+      if let Some(e) = edge_length {
+        f(e);
+      }
+      f(density);
+      f(shape);
+    }
+    FeatureKind::MeshShell { thickness, .. } => f(thickness),
+    FeatureKind::MeshCombine { .. } | FeatureKind::MeshSeparate { .. } => {}
   }
 }
 

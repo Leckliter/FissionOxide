@@ -1070,3 +1070,72 @@ fn angle_plane_offset_and_point_at_a_circular_edges_centre() {
   let q = s.model.points[&crate::model::FeatureId(p["feature"].as_u64().unwrap() as u32)];
   assert!((q - centre).length() < 1e-9, "{q:?}");
 }
+
+/// MESH > MODIFY on the inserted `lprism.stl` (an L-shaped prism, 2000 mm³): Remesh, Shell,
+/// Scale Mesh, Combine and Separate.
+#[test]
+fn mesh_remesh_shell_combine_separate_and_scale() {
+  let stl = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/reference/464-stl-millimeter/lprism.stl");
+  let insert = |s: &mut Session| {
+    run(s, "import", json!({"path": stl}));
+    s.model.bodies.last().unwrap().id.0
+  };
+  let tris = |s: &Session, b: u32| s.model.body(fox_model::BodyId(b)).unwrap().mesh().unwrap().indices.len() / 3;
+  // Remesh: denser, the same solid; Uniform makes more faces than Adaptive on flat sides
+  let mut s = Session::default();
+  let b = insert(&mut s);
+  let before = tris(&s, b);
+  run(&mut s, "mesh.remesh", json!({"bodies": [b], "type": "uniform", "density": 0.25, "sharp": true}));
+  let uniform = tris(&s, b);
+  assert!(uniform > before * 4, "{before} → {uniform}");
+  assert!((volume(&s) - 2000.0).abs() < 1.0, "{}", volume(&s));
+  let f = s.design.features.last().unwrap().id.0;
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"adaptive": true}}));
+  assert!(tris(&s, b) < uniform);
+  run(&mut s, "mesh.remesh", json!({"bodies": [b], "method": "edge_length", "edge_length": "2 mm"}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  assert!(s.model.bodies[0].is_mesh(), "a remeshed mesh body stays a mesh body");
+  assert_eq!(s.design.features.last().unwrap().name, "Remesh2");
+  // Shell: a closed mesh keeps its outside and loses a 1 mm thick inside
+  let mut s = Session::default();
+  let b = insert(&mut s);
+  run(&mut s, "mesh.shell", json!({"bodies": [b], "thickness": "1 mm"}));
+  let v = volume(&s);
+  assert!(v > 500.0 && v < 1800.0, "{v}");
+  assert!((s.model.bodies[0].shape.mass().unwrap().area - 1300.0) > 300.0);
+  // Scale Mesh about the body's centre
+  let mut s = Session::default();
+  let b = insert(&mut s);
+  run(&mut s, "mesh.scale", json!({"bodies": [b], "factor": 2}));
+  assert!((volume(&s) - 16000.0).abs() < 1e-3, "{}", volume(&s));
+  let m = s.model.bodies[0].shape.mass().unwrap();
+  assert!((m.bbox_min.x + 15.0).abs() < 1e-6 && (m.bbox_max.x - 45.0).abs() < 1e-6, "{m:?}");
+  // Combine: Merge keeps both as one body, Separate splits it into its shells again
+  let mut s = Session::default();
+  let a = insert(&mut s);
+  let b = insert(&mut s);
+  run(&mut s, "move", json!({"bodies": [b], "translate": [100, 0, 0]}));
+  assert!(s.execute("mesh.combine", &json!({"target": a, "tools": [a]})).is_err());
+  run(&mut s, "mesh.combine", json!({"target": a, "tools": [b], "operation": "merge"}));
+  assert_eq!(s.model.bodies.len(), 1);
+  assert!((volume(&s) - 4000.0).abs() < 1.0, "{}", volume(&s));
+  run(&mut s, "mesh.separate", json!({"body": a}));
+  assert_eq!(s.model.bodies.len(), 2);
+  assert!(s.model.bodies.iter().all(|b| (b.shape.mass().unwrap().volume - 2000.0).abs() < 1.0));
+  // the shells stay mesh bodies named after the one they came from
+  let names: Vec<&str> = s.model.bodies.iter().map(|b| b.name.as_str()).collect();
+  assert_eq!(names, ["lprism (1)", "lprism (2)"]);
+  assert!(s.model.bodies.iter().all(|b| b.is_mesh()));
+  // a single shell has nothing to separate
+  let one = s.model.bodies[0].id.0;
+  let r = s.execute("mesh.separate", &json!({"body": one, "keep_body": true})).unwrap();
+  assert!(r["error"].as_str().is_some_and(|e| e.contains("single shell")), "{r}");
+  // Combine Join of two overlapping copies, the tool kept
+  let mut s = Session::default();
+  let a = insert(&mut s);
+  let b = insert(&mut s);
+  run(&mut s, "move", json!({"bodies": [b], "translate": [0, 0, 2.5]}));
+  run(&mut s, "mesh.combine", json!({"target": a, "tools": [b], "operation": "join", "keep_tools": true}));
+  assert_eq!(s.model.bodies.len(), 2);
+  assert!((s.model.body(fox_model::BodyId(a)).unwrap().shape.mass().unwrap().volume - 3000.0).abs() < 1.0);
+}
