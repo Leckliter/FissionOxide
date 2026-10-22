@@ -104,7 +104,8 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut State, at: Pos2, text: &mut 
           crate::units::pin(ui, &mut r, text);
           out.changed |= r.changed();
           state.last = Some(text.clone());
-          ui.menu_button(egui::RichText::new("⋮").color(INK), |ui| {
+          // the ⋮ is painted: the UI font has no glyph for it
+          let menu = ui.menu_button(" ", |ui| {
             if params.is_empty() {
               ui.add_enabled(false, egui::Label::new("No user parameters"));
             }
@@ -116,6 +117,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut State, at: Pos2, text: &mut 
               }
             }
           });
+          crate::menus::options_dots(ui.painter(), menu.response.rect.center(), INK);
           if out.changed {
             state.last = Some(text.clone());
           }

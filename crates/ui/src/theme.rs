@@ -47,6 +47,8 @@ pub const DIALOG_BODY: Color32 = color(app::DIALOG_BODY);
 pub const TIMELINE: Color32 = color(app::TIMELINE);
 /// The piece Trim would remove, under the pointer: Fusion's dark blue / purple highlight.
 pub const TRIM_PIECE: Color32 = color(fox_brand::PURPLE.deep);
+/// A menu row's tooltip: Fusion's dark panel with white text.
+pub const TOOLTIP: Color32 = color(fox_brand::neutral::GRAPHITE);
 
 /// Icon palette: outlines, solid fills, the highlighted face, sketch curves and accents.
 pub const ICON_INK: Color32 = color(app::ICON_INK);

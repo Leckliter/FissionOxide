@@ -1561,17 +1561,11 @@ fn entries(
             if dots.hovered() || open {
               ui.painter().rect_filled(dots_rect.shrink(2.0), 2.0, Color32::from_gray(205));
             }
-            ui.painter().text(
-              dots_rect.center(),
-              egui::Align2::CENTER_CENTER,
-              "⋮",
-              egui::FontId::proportional(14.0),
-              theme::TEXT,
-            );
+            options_dots(ui.painter(), dots_rect.center(), theme::TEXT);
           }
           egui::containers::menu::SubMenu::new().show(ui, &dots, |ui| at.options(ui, it, act));
         }
-        let r = rich_tip(r, at.scope(), it, at.key(it));
+        let r = menu_tip(r, at.scope(), it);
         if on.contains(&it.label) {
           ui.painter().text(
             r.rect.right_center() - vec2(30.0, 0.0),
@@ -1655,6 +1649,49 @@ pub(crate) fn icon_of_label(label: &str) -> Option<Icon> {
   })
 }
 
+/// Fusion's ⋮ (a command's options, a value box's parameters) painted as three stacked dots at
+/// `c`: the UI font has no U+22EE, which would render as a missing-glyph box.
+pub(crate) fn options_dots(p: &egui::Painter, c: egui::Pos2, color: Color32) {
+  for dy in [-4.0, 0.0, 4.0] {
+    p.circle_filled(c + vec2(0.0, dy), 1.4, color);
+  }
+}
+
+/// A menu row's tooltip, as in Fusion: a dark panel with white text to the right of the open
+/// menu, level with the row, holding the command's description and instructions as paragraphs
+/// with a blank line between them. No title and no shortcut line: the row shows both.
+fn menu_tip(resp: egui::Response, scope: Scope, it: &Item) -> egui::Response {
+  let tip = tips::tip(scope, it.label);
+  if tip.is_none() && it.cmd.is_some() {
+    return resp;
+  }
+  let style = resp.ctx.global_style();
+  // the row spans the menu's content; its frame (the menu margin and a 1 px stroke) lies beyond
+  let edge = resp.rect.right() + f32::from(style.spacing.menu_margin.right) + 1.0;
+  let anchor = Rect::from_min_max(pos2(edge, resp.rect.top()), pos2(edge, resp.rect.bottom()));
+  let frame = egui::Frame::new()
+    .fill(theme::TOOLTIP)
+    .corner_radius(egui::CornerRadius::same(4))
+    .inner_margin(egui::Margin::symmetric(10, 8))
+    .shadow(style.visuals.popup_shadow);
+  let mut tooltip = egui::Tooltip::for_enabled(&resp);
+  tooltip.popup = tooltip.popup.anchor(anchor).align(egui::RectAlign::RIGHT_START).gap(6.0).width(300.0).frame(frame);
+  tooltip.show(|ui| {
+    ui.set_max_width(300.0);
+    ui.spacing_mut().item_spacing.y = 12.0;
+    ui.style_mut().visuals.override_text_color = Some(Color32::WHITE);
+    if let Some(t) = tip {
+      for paragraph in std::iter::once(t.line).chain(t.more.split("\n\n")) {
+        ui.add(egui::Label::new(paragraph).wrap());
+      }
+    }
+    if it.cmd.is_none() {
+      ui.add(egui::Label::new(RichText::new("Not in FissionOxide yet").color(theme::MUTED)).wrap());
+    }
+  });
+  resp
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -1680,7 +1717,7 @@ mod tests {
       }
       for l in all {
         match tips::tip(Scope::of(tab), l) {
-          Some(t) if !t.line.is_empty() && t.more.len() > t.line.len() => {}
+          Some(t) if !t.line.is_empty() && !t.more.is_empty() && t.more != t.line => {}
           _ => missing.push((tab, l)),
         }
       }
@@ -1988,5 +2025,30 @@ mod tests {
     let named = [PanelSize { label: 200.0, icons: 3 }, PanelSize { label: 40.0, icons: 4 }];
     let two_icons = ICON_W * 2.0 - 1.0 + SEPARATOR_W;
     assert_eq!(fit_counts(&named, 200.0 + SEPARATOR_W + two_icons), vec![3, 2]);
+  }
+
+  /// The sketch MODIFY tooltips carry Fusion's wording: a first line, then the instruction and,
+  /// where Fusion shows it, "Press Ctrl+/ for more help." as its own paragraph.
+  #[test]
+  fn sketch_modify_tooltips_are_fusions_paragraphs() {
+    let help = "Press Ctrl+/ for more help.";
+    for (label, line, paragraphs, has_help) in [
+      ("Fillet", "Places an arc of a specified radius at the intersection of two lines or arcs.", 3, true),
+      ("Blend Curve", "Creates a tangent or curvature continuous blend curve", 2, false),
+      ("Offset", "Copies the selected sketch curves a specified distance from the original curves.", 3, true),
+      ("Trim", "Trims a sketch curve to the nearest intersecting curve or boundary geometry.", 3, true),
+      ("Extend", "Extends a curve to the nearest intersecting curve or boundary geometry.", 3, true),
+      ("Break", "Breaks a sketch entity into two or more segments", 2, false),
+      ("Sketch Scale", "Scales sketch geometry.", 2, false),
+      ("Move/Copy", "Moves the selected face, body, sketch, or construction geometry", 3, true),
+      ("Change Parameters", "Displays the Parameters dialog", 3, true),
+    ] {
+      let t = tips::tip(Scope::Sketch, label).unwrap_or_else(|| panic!("{label} has a tooltip"));
+      assert!(t.line.starts_with(line), "{label}: {}", t.line);
+      assert!(!t.line.contains("Shortcut"), "{label}: the row shows the key, not the tooltip");
+      let more: Vec<&str> = t.more.split("\n\n").collect();
+      assert_eq!(1 + more.len(), paragraphs, "{label}: {more:?}");
+      assert_eq!(more.last() == Some(&help), has_help, "{label}: {more:?}");
+    }
   }
 }

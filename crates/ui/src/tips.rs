@@ -250,40 +250,41 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     ),
 
     // SKETCH MODIFY
+    // Fusion's own wording: the first line, then the instruction paragraph and, where Fusion shows
+    // it, "Press Ctrl+/ for more help." as a third paragraph (a blank line between each)
     (Sketch, "Fillet") => (
-      "Rounds the corner where two sketch curves meet.",
-      "Click the corner, or the two curves, then set the radius. An arc tangent to both replaces the \
-       corner and the curves are trimmed to it.",
+      "Places an arc of a specified radius at the intersection of two lines or arcs.",
+      "Select the vertex or the two lines or arcs. Specify a radius for the fillet.\n\nPress Ctrl+/ for \
+       more help.",
     ),
     (_, "Blend Curve") => (
-      "Joins the ends of two curves with a smooth spline.",
-      "Pick near the ends of two curves; a spline bridges the gap, matching their direction or their \
-       curvature too. Use it for flowing transitions that an arc can't make.",
+      "Creates a tangent or curvature continuous blend curve between the endpoints of two sketch curves \
+       or edges.",
+      "Select two sketch curves or edges in the canvas to blend.",
     ),
     (Sketch, "Offset") => (
-      "Copies a chain of sketch curves at a constant distance.",
-      "Pick a curve; the connected chain is offset, then drag or type the distance and flip the side if \
-       needed. Use it for walls of even thickness or a clearance around a shape.",
+      "Copies the selected sketch curves a specified distance from the original curves.",
+      "Select the curves to offset then specify the offset distance.\n\nPress Ctrl+/ for more help.",
     ),
     (Sketch, "Trim") => (
-      "Removes the piece of a sketch curve you click, up to where it crosses others.",
-      "Hover to preview the piece that will go, then click it. Drag across several curves to trim them \
-       all at once. A curve with no crossings is deleted entirely.",
+      "Trims a sketch curve to the nearest intersecting curve or boundary geometry.",
+      "Pause the cursor over the curve to preview the portion to be trimmed. Select the curve to \
+       trim.\n\nPress Ctrl+/ for more help.",
     ),
     (Sketch, "Extend") => (
-      "Lengthens a sketch curve until it meets the next curve.",
-      "Click near the end you want to extend; it grows to the nearest curve in its path. Use it to \
-       close a gap so a profile becomes closed.",
+      "Extends a curve to the nearest intersecting curve or boundary geometry.",
+      "Pause the cursor over the curve to preview the portion to be extended. Select the curve to \
+       extend it.\n\nPress Ctrl+/ for more help.",
     ),
     (_, "Break") => (
-      "Splits a sketch curve where it crosses other curves, keeping every piece.",
-      "Click a curve; it's cut into separate pieces at its crossings. Unlike Trim nothing is removed, \
-       so you can then constrain or delete the pieces one by one.",
+      "Breaks a sketch entity into two or more segments where it intersects other sketch entities.",
+      "Pause the cursor over the sketch entity to preview where it will be broken, then click to break \
+       it.",
     ),
     (_, "Sketch Scale") => (
-      "Scales sketch geometry about a point.",
-      "Pick the curves and a base point, then set the scale factor. Dimensions and constraints are \
-       kept, so the shape stays the same while its size changes.",
+      "Scales sketch geometry.",
+      "Select sketch geometry to scale, select the point from which to scale, then drag the manipulator \
+       handle in the canvas or specify an exact Scale Factor.",
     ),
     (Sketch, "Remove Duplicates") => (
       "Deletes curves lying on top of another of the same kind.",
@@ -299,9 +300,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        curves, closes small gaps between curve ends and turns splines into arcs or lines.",
     ),
     (Sketch, "Move/Copy") => (
-      "Moves, rotates or copies sketch geometry.",
-      "Pick the curves, then drag the handles or type distances and angles. Turn on copy to keep the \
-       originals. Constraints that fight the move may need removing first.",
+      "Moves the selected face, body, sketch, or construction geometry a specified distance or angle.",
+      "Select the objects to modify then specify the distance or angle to move them.\n\nPress Ctrl+/ for \
+       more help.",
     ),
     (_, "Edit Text") => (
       "Changes the wording, font or size of a sketch text.",
@@ -1073,9 +1074,10 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        share. Materials you add then appear in Physical Material and Appearance.",
     ),
     (_, "Change Parameters") => (
-      "Edits the named parameters that drive the design.",
-      "Change the values of dimensions and add user parameters with expressions such as width / 2. \
-       Everything that uses them updates.",
+      "Displays the Parameters dialog, where you can create and manage equations and relationships to \
+       control the size of objects in the design.",
+      "Model parameters list every dimension and feature value; add user parameters with expressions \
+       that other values can reference.\n\nPress Ctrl+/ for more help.",
     ),
     (_, "Compute All") => (
       "Recomputes the whole timeline.",

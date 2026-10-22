@@ -322,12 +322,23 @@ impl Harness {
 
   /// Rests the pointer at `pos` for `secs`, returning the text drawn at the end.
   fn rest(&mut self, pos: Pos2, secs: f64) -> Vec<String> {
+    self.rest_rects(pos, secs).into_iter().map(|(_, t)| t).collect()
+  }
+
+  /// [`Self::rest`] with where each text is drawn.
+  fn rest_rects(&mut self, pos: Pos2, secs: f64) -> Vec<(Rect, String)> {
     self.frame_texts(1.0 / 60.0, vec![Event::PointerMoved(pos)]);
     let mut last = Vec::new();
     for _ in 0..(secs / 0.1) as usize {
       last = self.frame_texts(0.1, vec![]);
     }
-    last.into_iter().map(|(_, t)| t).collect()
+    last
+  }
+
+  /// Where the SOLID tab's open CREATE ▾ menu is (its popup, frame included).
+  fn create_menu_rect(&self) -> Rect {
+    let id = egui::Id::new(("toolbar-menu", crate::panels::Tab::Solid, "CREATE"));
+    egui::AreaState::load(&self.ctx, id).expect("the CREATE menu is open").rect()
   }
 
   /// The SOLID tab's CREATE ▾ group label.
@@ -365,15 +376,40 @@ fn the_extrude_tooltip_shows_its_shortcut_then_grows() {
   assert!(shown.iter().any(|t| t == "Shortcut: Shift+X"), "{shown:?}");
 }
 
+/// A menu row's tooltip is Fusion's: the description and instructions as paragraphs in a panel
+/// to the right of the menu, level with the row, with no title and no shortcut line.
+#[test]
+fn a_menu_rows_tooltip_sits_right_of_the_menu_without_a_title() {
+  let mut h = Harness::new();
+  let label = h.create_label();
+  h.move_then_click(label.center());
+  let row = h.find(vec![], "Extrude").expect("Extrude is in the CREATE menu");
+  let menu = h.create_menu_rect();
+  let tip = crate::tips::tip(crate::tips::Scope::Design, "Extrude").unwrap();
+  // egui shows no tooltip for a pointer that moved within 0.1 s of a click
+  h.frame_texts(0.3, vec![]);
+  let shown = h.rest_rects(row.center(), 0.8);
+  let at = |text: &str| shown.iter().find(|(_, t)| t == text).map(|(r, _)| *r);
+  for paragraph in std::iter::once(tip.line).chain(tip.more.split("\n\n")) {
+    let r = at(paragraph).unwrap_or_else(|| panic!("{paragraph:?} shown: {shown:?}"));
+    assert!(r.left() > menu.right(), "right of the menu: {r:?} vs {menu:?}");
+    assert!(r.top() >= row.top() - 12.0 && r.top() < menu.bottom(), "level with the row: {r:?} vs {row:?}");
+  }
+  assert!(!shown.iter().any(|(_, t)| t.starts_with("Shortcut:")), "the row shows the key: {shown:?}");
+  assert_eq!(shown.iter().filter(|(_, t)| t == "Extrude").count(), 1, "no title line: {shown:?}");
+}
+
 /// Opens CREATE ▾ and opens the ⋮ options of `row`, returning where "Pin to Toolbar" is.
 fn row_options(h: &mut Harness, row: &str, option: &str) -> Pos2 {
   let label = h.create_label();
   h.move_then_click(label.center());
   let r = h.find(vec![], row).unwrap_or_else(|| panic!("{row} is in the CREATE menu"));
   h.frame(vec![Event::PointerMoved(r.center())]);
-  let dots = h.find(vec![], "⋮").expect("the hovered row shows ⋮");
-  assert!((dots.center().y - r.center().y).abs() < 6.0, "on the {row} row");
-  h.frame(vec![Event::PointerMoved(dots.center())]);
+  // the hovered row's ⋮ is painted as dots at the menu's right edge (the font has no glyph, so
+  // no text must stand in for it)
+  assert!(h.find(vec![], "⋮").is_none(), "no missing-glyph box for the options");
+  let dots = Pos2::new(h.create_menu_rect().right() - 16.0, r.center().y);
+  h.frame(vec![Event::PointerMoved(dots)]);
   for _ in 0..3 {
     h.frame(vec![]);
   }
