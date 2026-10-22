@@ -294,6 +294,8 @@ const ALL: &[Icon] = &[
   Icon::DistSpacing,
   Icon::DirOne,
   Icon::DirSymmetric,
+  Icon::GridSettings,
+  Icon::SetIncrements,
 ];
 
 fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

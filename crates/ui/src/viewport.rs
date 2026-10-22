@@ -431,7 +431,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |=
     crate::library_ui::place_clicks(app, &resp, &painter, &|p| view.to_screen(&cam, p), &|p| view.ray(&cam, p));
   if app.s.edit_sketch.is_some() {
-    if grid_shown(app) {
+    if grid_shown(app) && app.grid.reference_numbers {
       grid_labels(app, &painter, &view);
     }
     consumed |= sketch_overlay(app, ui, &painter, &view);
@@ -767,6 +767,8 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hide_sketches: !vis.sketches || analysis.hide_sketches,
     hide_construction: !vis.construction,
     grid_step: app.grid.step(),
+    // the Layout Grid carries Fusion's red X and green Y axis lines across it
+    grid_axes: app.s.edit_sketch.is_none() && vis.origins,
     show_profiles_of: profiles_of,
     hide_profiles_of: app.hidden_profiles.clone(),
     show_vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none() && vis.bodies,
@@ -866,10 +868,14 @@ pub(crate) fn slice_params(app: &App) -> Option<serde_json::Value> {
   Some(json!({"sketch": sk.0, "flip": flip}))
 }
 
-/// Whether the sketch grid is drawn: the palette's Sketch Grid, except while 3D Sketch is on and
-/// a tool with a 3D form runs, when Fusion hides it under the tool's 3D manipulator.
+/// Whether the grid is drawn. Outside a sketch it is Grid and Snaps ▸ Layout Grid (off by
+/// default, as in Fusion). In a sketch it is the palette's Sketch Grid, except while 3D Sketch is
+/// on and a tool with a 3D form runs, when Fusion hides it under the tool's 3D manipulator.
 pub(crate) fn grid_shown(app: &App) -> bool {
-  let tool_3d = app.s.edit_sketch.is_some() && app.tool != Tool::Select && sketch_3d_enabled(app);
+  if app.s.edit_sketch.is_none() {
+    return app.layout_grid;
+  }
+  let tool_3d = app.tool != Tool::Select && sketch_3d_enabled(app);
   app.show_grid && !(app.palette.sketch_3d && tool_3d)
 }
 

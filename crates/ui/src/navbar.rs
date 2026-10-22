@@ -5,6 +5,7 @@
 use egui::RichText;
 use fox_engine::render::{Effects, VisualStyle};
 
+use crate::icons::Icon;
 use crate::viewcube::Projection;
 use crate::{App, NavMode};
 
@@ -36,11 +37,13 @@ pub struct GridSettings {
   pub spacing: f64,
   /// Layout Grid Lock: the spacing frozen when the lock went on.
   pub locked: Option<f64>,
+  /// Reference Numbers: the coordinate values printed along the grid's axes.
+  pub reference_numbers: bool,
 }
 
 impl Default for GridSettings {
   fn default() -> Self {
-    GridSettings { adaptive: true, spacing: 10.0, locked: None }
+    GridSettings { adaptive: true, spacing: 10.0, locked: None, reference_numbers: true }
   }
 }
 
@@ -57,10 +60,13 @@ impl GridSettings {
 }
 
 /// Grid and Snaps ▸ Incremental Move and Set Increments: manipulator drags move and turn in
-/// these steps.
+/// these steps. Fusion has Incremental Move on and the increments Adaptive by default: the steps
+/// follow the grid (and the view) until Set Increments fixes them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Increments {
   pub on: bool,
+  /// The steps follow the grid; else they are `linear` and `angular`.
+  pub adaptive: bool,
   /// Linear step (mm).
   pub linear: f64,
   /// Angular step (degrees).
@@ -69,19 +75,20 @@ pub struct Increments {
 
 impl Default for Increments {
   fn default() -> Self {
-    Increments { on: false, linear: 1.0, angular: 15.0 }
+    Increments { on: true, adaptive: true, linear: 1.0, angular: 15.0 }
   }
 }
 
 impl Increments {
-  /// The step a move snaps to: the linear increment with Incremental Move on, else `free`.
+  /// The step a move snaps to: the fixed linear increment with Incremental Move on and the
+  /// increments Fixed, else `free` (the grid's own step, which the adaptive increments follow).
   pub fn linear_step(&self, free: f64) -> f64 {
-    if self.on && self.linear > 0.0 { self.linear } else { free }
+    if self.on && !self.adaptive && self.linear > 0.0 { self.linear } else { free }
   }
 
   /// The step a turn snaps to (radians).
   pub fn angular_step(&self, free: f64) -> f64 {
-    if self.on && self.angular > 0.0 { self.angular.to_radians() } else { free }
+    if self.on && !self.adaptive && self.angular > 0.0 { self.angular.to_radians() } else { free }
   }
 }
 
@@ -363,45 +370,64 @@ pub fn ground_offset_window(app: &mut App, ctx: &egui::Context) {
   }
 }
 
-/// Grid and Snaps. `adaptive_now` is the spacing the adaptive grid has (what a lock freezes).
+/// Grid and Snaps, as Fusion lists it: Layout Grid (the 3D view's ground grid, off by default),
+/// Layout Grid Lock (greyed while the grid is off, and checked when the grid goes on), Snap to
+/// Grid, Grid Settings, then Incremental Move and Set Increments. The two command rows carry icons
+/// and open the docked GRID SETTINGS and SET INCREMENTS dialogs (see [`crate::grid_dialogs`]).
+/// `adaptive_now` is the spacing the adaptive grid has (what a lock freezes).
 pub fn grid_menu(app: &mut App, ui: &mut egui::Ui, adaptive_now: f64) {
   ui.set_min_width(190.0);
-  ui.checkbox(&mut app.show_grid, "Layout Grid");
+  if ui.checkbox(&mut app.layout_grid, "Layout Grid").changed() {
+    set_layout_grid(app, app.layout_grid, adaptive_now);
+  }
   let mut lock = app.grid.locked.is_some();
-  if ui.checkbox(&mut lock, "Layout Grid Lock").on_hover_text("Keep the grid's spacing as it is now").changed() {
+  if ui
+    .add_enabled(app.layout_grid, egui::Checkbox::new(&mut lock, "Layout Grid Lock"))
+    .on_hover_text("Keep the grid's spacing as it is now")
+    .changed()
+  {
     app.grid.set_lock(lock, adaptive_now);
   }
   ui.checkbox(&mut app.snap, "Snap to Grid");
-  ui.menu_button("Grid Settings", |ui| {
-    ui.set_min_width(200.0);
-    let g = &mut app.grid;
-    ui.radio_value(&mut g.adaptive, true, "Adaptive");
-    ui.radio_value(&mut g.adaptive, false, "Fixed");
-    ui.add_enabled_ui(!g.adaptive, |ui| {
-      ui.horizontal(|ui| {
-        ui.label("Spacing");
-        ui.add(egui::DragValue::new(&mut g.spacing).range(0.01..=10_000.0).speed(0.5).suffix(" mm"));
-      });
-    });
-    if g.locked.is_some() {
-      ui.label(RichText::new("Layout Grid Lock holds the spacing").small().weak());
-    }
-  });
+  if icon_row(ui, Icon::GridSettings, "Grid Settings").clicked() {
+    crate::grid_dialogs::open_grid_settings(app);
+    ui.close();
+  }
   ui.separator();
   ui.checkbox(&mut app.increments.on, "Incremental Move")
     .on_hover_text("Manipulator drags move and turn in the set increments");
-  ui.menu_button("Set Increments", |ui| {
-    ui.set_min_width(200.0);
-    let inc = &mut app.increments;
-    egui::Grid::new("increments").num_columns(2).show(ui, |ui| {
-      ui.label("Linear");
-      ui.add(egui::DragValue::new(&mut inc.linear).range(0.001..=10_000.0).speed(0.1).suffix(" mm"));
-      ui.end_row();
-      ui.label("Angular");
-      ui.add(egui::DragValue::new(&mut inc.angular).range(0.01..=180.0).speed(0.5).suffix("°"));
-      ui.end_row();
-    });
-  });
+  if icon_row(ui, Icon::SetIncrements, "Set Increments").clicked() {
+    crate::grid_dialogs::open_set_increments(app);
+    ui.close();
+  }
+}
+
+/// Layout Grid on or off. Fusion locks the grid's spacing as the grid goes on (Layout Grid Lock
+/// comes up checked) and drops the lock with the grid, whose row greys.
+pub fn set_layout_grid(app: &mut App, on: bool, adaptive_now: f64) {
+  app.layout_grid = on;
+  app.grid.set_lock(on, adaptive_now);
+}
+
+/// A menu row with an icon at its left, as Fusion draws the Grid Settings and Set Increments
+/// commands.
+fn icon_row(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
+  let width = ui.available_width();
+  let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 22.0), egui::Sense::click());
+  let p = ui.painter();
+  if resp.hovered() {
+    p.rect_filled(rect, 0.0, crate::theme::HOVER);
+  }
+  let ir = egui::Rect::from_center_size(rect.left_center() + egui::vec2(12.0, 0.0), egui::Vec2::splat(17.0));
+  crate::icons::draw_color(p, ir, icon);
+  p.text(
+    rect.left_center() + egui::vec2(26.0, 0.0),
+    egui::Align2::LEFT_CENTER,
+    label,
+    egui::FontId::proportional(12.5),
+    crate::theme::TEXT,
+  );
+  resp
 }
 
 #[cfg(test)]
@@ -469,12 +495,32 @@ mod tests {
   }
 
   #[test]
-  fn increments_apply_only_with_incremental_move() {
+  fn increments_apply_only_with_incremental_move_and_fixed_steps() {
     let mut i = Increments::default();
-    assert_eq!(i.linear_step(0.25), 0.25);
+    assert!(i.on && i.adaptive, "Fusion: Incremental Move on, Adaptive increments");
+    assert_eq!(i.linear_step(0.25), 0.25, "adaptive increments follow the grid's step");
     assert_eq!(i.angular_step(0.1), 0.1);
-    i.on = true;
+    i.adaptive = false;
     assert_eq!(i.linear_step(0.25), 1.0);
     assert!((i.angular_step(0.1) - 15f64.to_radians()).abs() < 1e-12);
+    i.on = false;
+    assert_eq!(i.linear_step(0.25), 0.25);
+    assert_eq!(i.angular_step(0.1), 0.1);
+  }
+
+  #[test]
+  fn layout_grid_is_off_by_default_and_locks_the_grid_as_it_goes_on() {
+    let mut app = App::with_session(fox_engine::Session::default());
+    assert!(!app.layout_grid, "no grid in the 3D view until Layout Grid goes on");
+    assert!(app.show_grid, "the sketch grid stays on");
+    assert!(!app.snap);
+    assert_eq!(app.grid.locked, None, "Layout Grid Lock greyed and off while the grid is off");
+    assert!(app.grid.reference_numbers);
+    set_layout_grid(&mut app, true, 5.0);
+    assert!(app.layout_grid);
+    assert_eq!(app.grid.locked, Some(5.0), "the lock comes up checked with the grid");
+    set_layout_grid(&mut app, false, 7.0);
+    assert!(!app.layout_grid);
+    assert_eq!(app.grid.locked, None);
   }
 }

@@ -346,6 +346,9 @@ pub enum Icon {
   DistSpacing,
   DirOne,
   DirSymmetric,
+  // Grid and Snaps' two commands
+  GridSettings,
+  SetIncrements,
 }
 
 #[derive(Clone, Copy)]
@@ -2523,6 +2526,33 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.arrow_head((0.08, 0.5), (-1.0, 0.0), 0.14, Slate);
       k.line((0.66, 0.5), (0.86, 0.5), Slate);
       k.arrow_head((0.92, 0.5), (1.0, 0.0), 0.14, Slate);
+    }
+    Icon::GridSettings => {
+      // a grid with a gear at its lower right
+      for i in 0..3 {
+        let t = 0.1 + i as f32 * 0.3;
+        k.line((t, 0.1), (t, 0.7), Ink);
+        k.line((0.1, t), (0.7, t), Ink);
+      }
+      for i in 0..8 {
+        let a = i as f32 * TAU / 8.0;
+        let (c, s) = (a.cos(), a.sin());
+        k.thick((0.72 + c * 0.13, 0.72 + s * 0.13), (0.72 + c * 0.2, 0.72 + s * 0.2), Blue, 1.6);
+      }
+      k.circle((0.72, 0.72), 0.14, Some(Blue), Some(Ink));
+      k.circle((0.72, 0.72), 0.05, Some(White), None);
+    }
+    Icon::SetIncrements => {
+      // a ruler with an arrow stepping along it
+      k.solid(&[(0.08, 0.56), (0.92, 0.56), (0.92, 0.86), (0.08, 0.86)], White);
+      for i in 0..7 {
+        let x = 0.16 + i as f32 * 0.113;
+        let h = if i % 2 == 0 { 0.7 } else { 0.64 };
+        k.line((x, 0.56), (x, h), Ink);
+      }
+      k.line((0.14, 0.3), (0.76, 0.3), Blue);
+      k.arrow_head((0.86, 0.3), (1.0, 0.0), 0.16, Blue);
+      k.line((0.14, 0.18), (0.14, 0.42), Ink);
     }
   }
 }
