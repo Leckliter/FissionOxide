@@ -121,5 +121,5 @@
 {"name": "ui-leftovers-chrome", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_730cf83a (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-display-handles", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_cc33cf04 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-render", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_169f7654 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-reverify-sketch-1", "items": 6, "status": "ready", "pr": null}
-{"name": "ui-reverify-sketch-2", "items": 4, "status": "ready", "pr": null}
+{"name": "ui-reverify-sketch-1", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_2752aa8d (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-reverify-sketch-2", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_6af2f6a1 (requested 2026-10-22 by the coordinator)"}
