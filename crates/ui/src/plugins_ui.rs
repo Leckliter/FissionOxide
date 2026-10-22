@@ -620,10 +620,14 @@ fn hub_list(ui: &mut egui::Ui, st: &PluginsUi, act: &mut Option<Act>) {
 
 /// A collapsible group of the details pane, open at first unless `closed`.
 fn section(ui: &mut egui::Ui, name: &str, closed: bool, add: impl FnOnce(&mut egui::Ui)) {
-  egui::CollapsingHeader::new(RichText::new(name).strong())
-    .id_salt(("scripts-addins-section", name))
-    .default_open(!closed)
-    .show(ui, add);
+  egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), section_id(name), !closed)
+    .show_header(ui, |ui| ui.label(RichText::new(name).strong()))
+    .body(add);
+}
+
+/// The id of a details group's folded state.
+fn section_id(name: &str) -> egui::Id {
+  egui::Id::new(("scripts-addins-section", name))
 }
 
 /// The picked add-in: its name and star, a picture, then Information, Description and Full Path
@@ -1514,8 +1518,16 @@ mod tests {
     for t in ["Information", "Author", "Version", "Supported OS", "Programming Language", "Description", "Full Path"] {
       assert!(text.iter().any(|x| x == t), "'{t}' not drawn: {text:?}");
     }
-    at_least(&text, "Open File Location");
     assert!(!text.iter().any(|x| x == "Select an item to see details here"));
+    // a long Full Path can push the link below the pane (it scrolls): fold the groups above it
+    for name in ["Information", "Description"] {
+      let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(&ctx, section_id(name), true);
+      state.set_open(false);
+      state.store(&ctx);
+    }
+    let folded = drawn(&mut app, &ctx);
+    at_least(&folded, "Open File Location");
+    assert!(!folded.iter().any(|x| x == "Supported OS"), "Information folds");
     // no missing-glyph boxes: every character drawn, and every command line, is in the font
     let m = app.plugins.registry(&hub_root).get(id).unwrap().manifest.clone().unwrap();
     let lines: Vec<String> = m.commands.iter().map(|c| command_line(&m, c)).collect();
