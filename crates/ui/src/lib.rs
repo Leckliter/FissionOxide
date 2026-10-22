@@ -20,7 +20,10 @@ mod data_panel;
 mod dialogs;
 mod doc_dialogs;
 mod ecad_ui;
+mod error_dialog;
 mod explode_ui;
+#[cfg(test)]
+mod failed_items_tests;
 mod file_dialogs;
 #[cfg(test)]
 mod file_dialogs_tests;
@@ -1396,6 +1399,10 @@ impl App {
 
   pub fn start(&mut self, kind: dialogs::Kind) {
     self.end_hint();
+    // the last command's lower-left message makes way for this one's, as in Fusion
+    if self.status.as_ref().is_some_and(|(_, err)| !err) {
+      self.status = None;
+    }
     self.note_cmd(panels::Cmd::Dialog(kind));
     self.cancel_dialog();
     self.tool = Tool::Select;
@@ -1836,6 +1843,8 @@ impl App {
     panels::error_toast(self, &ctx);
     panels::selection_info(self, &ctx);
     panels::warning_toast(self, &ctx);
+    error_dialog::badge(self, &ctx);
+    error_dialog::window(self, &ctx);
     notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
     doc_dialogs::show(self, &ctx);

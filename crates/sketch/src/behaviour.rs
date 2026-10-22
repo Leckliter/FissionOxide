@@ -141,6 +141,10 @@ pub const OFFSET_FACES_EXTEND: &str = "offset_faces_extend";
 /// solver spreading the change over both (see `crate::place`). Without it, the solver takes the
 /// drawn positions as they are.
 pub const PLACE_SECOND_PICK: &str = "place_second_pick";
+/// A Combine join that leaves separate lumps (bodies that don't touch, or only along an edge)
+/// keeps the target's id and name on the lump holding the target, and the tools' lumps become
+/// new bodies, as in Fusion. Without it the first lump the kernel lists keeps the target's id.
+pub const COMBINE_KEEPS_TARGET: &str = "combine_keeps_target";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -167,6 +171,7 @@ pub const CURRENT: &[&str] = &[
   FUSION_SKETCH_FRAMES,
   OFFSET_FACES_EXTEND,
   PLACE_SECOND_PICK,
+  COMBINE_KEEPS_TARGET,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

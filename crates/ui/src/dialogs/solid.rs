@@ -75,6 +75,8 @@ pub(super) struct Extra {
   pub(super) shell_no_chain: bool,
   /// Hole placement and rectangular pattern options (see [`super::hole_pattern`]).
   pub(super) hp: super::hole_pattern::State,
+  /// Press Pull on a primitive's top face: the primitive it edits (see [`super::press_owner`]).
+  pub(super) owner: super::press_owner::Owner,
 }
 
 /// Fusion's Fillet Type; Rule Fillet has no engine support and is greyed.

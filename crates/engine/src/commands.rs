@@ -1297,8 +1297,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Ok(feature_status(s, id))
     }
     "feature.delete" => {
-      let id = FeatureId(req_u32(p, "feature")?);
-      let cascade = p.get("cascade").and_then(Value::as_bool).unwrap_or(false);
+      let mut id = FeatureId(req_u32(p, "feature")?);
+      let mut cascade = p.get("cascade").and_then(Value::as_bool).unwrap_or(false);
+      // a single hole's own placement sketch goes with it (the timeline shows only the hole)
+      if let Some(FeatureKind::Hole { sketch, placed: true, .. }) = s.design.feature(id).map(|f| &f.kind) {
+        (id, cascade) = (*sketch, true);
+      }
       // Fusion's Delete on a sketch keeps the features that use it, on cached geometry
       let solved = match s.design.feature(id).map(|f| &f.kind) {
         Some(FeatureKind::Sketch { .. }) if !cascade => s.model.sketches.get(&id).map(|r| {

@@ -427,6 +427,26 @@ impl Ctx<'_> {
     }
     union_all(keep).map_err(|_| "the extrusion doesn't reach the target".to_string())
   }
+
+  /// [`Ctx::split_multi`] after a Combine join: the lump that holds most of the target as it was
+  /// before (`was`) keeps the target's id, and so its name; the tools' lumps become new bodies.
+  pub(super) fn split_keeping_target(&mut self, feature: FeatureId, id: BodyId, was: &Shape) {
+    let Some(i) = self.state.bodies.iter().position(|b| b.id == id) else { return };
+    let Ok(mut solids) = self.state.bodies[i].shape.solids() else { return };
+    if solids.len() <= 1 {
+      return;
+    }
+    let overlap = |s: &Shape| s.boolean(was, BoolOp::Intersect).and_then(|c| c.mass()).map(|m| m.volume).unwrap_or(0.0);
+    let held: Vec<f64> = solids.iter().map(overlap).collect();
+    let keep = (0..held.len()).max_by(|a, b| held[*a].total_cmp(&held[*b])).unwrap_or(0);
+    let first = solids.remove(keep);
+    self.state.bodies[i] = self.state.bodies[i].with_shape(first, feature);
+    let sheet = self.state.bodies[i].sheet.clone();
+    for s in solids {
+      let nid = self.new_body(feature, s);
+      self.set_sheet(nid, sheet.clone());
+    }
+  }
 }
 
 /// A body with faces (id, outward normal, centre; a curved face's mean normal) moved to an

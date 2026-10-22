@@ -243,7 +243,9 @@ impl Dialog {
       None if self.kind == Kind::SkOffset => 0.0,
       None => return None,
     };
-    Some(Manipulator { origin: *origin, dir: *dir, value })
+    // Press Pull editing a primitive: the arrow runs from its base, as long as its height
+    let origin = *origin - *dir * if self.kind == Kind::PressPull { self.press_pull_base() } else { 0.0 };
+    Some(Manipulator { origin, dir: *dir, value })
   }
 
   /// Does the floating value box sit by the pointer rather than at the arrow's head? Sketch

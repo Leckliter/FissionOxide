@@ -1163,12 +1163,17 @@ impl Ctx<'_> {
             shape = shape.boolean(&self.state.bodies[i].shape, op).map_err(ke)?;
           }
         }
+        let was = self.state.bodies[ti].shape.clone();
         let new_target = self.state.bodies[ti].with_shape(shape, id);
         self.state.bodies[ti] = new_target;
         if !*keep_tools {
           self.state.bodies.retain(|b| b.id == *target || !tools.contains(&b.id));
         }
-        self.split_multi(id, *target);
+        if op == BoolOp::Union && self.behaviours.has(fox_sketch::behaviour::COMBINE_KEEPS_TARGET) {
+          self.split_keeping_target(id, *target, &was);
+        } else {
+          self.split_multi(id, *target);
+        }
         Ok(None)
       }
       FeatureKind::Import { breps, meshes, .. } => {

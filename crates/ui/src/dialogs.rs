@@ -21,6 +21,7 @@ mod live;
 mod manip;
 mod move_copy;
 mod pieces;
+mod press_owner;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod body_picks;
@@ -1126,6 +1127,9 @@ impl Dialog {
     }
     d.start_placing(app);
     d.localize(app.s.design.units);
+    if kind == Kind::PressPull {
+      d.sync_press_owner(&app.s);
+    }
     d.dirty = !d.picks();
     d
   }
@@ -1461,7 +1465,7 @@ impl Dialog {
         ),
       ),
       Kind::Hole => ("hole", self.hole_params()?),
-      Kind::PressPull => ("press_pull", json!({"faces": self.faces, "distance": self.distance})),
+      Kind::PressPull => self.press_pull_command(),
       Kind::Draft => {
         ("draft", json!({"faces": self.faces, "plane": self.plane, "angle": self.angle, "flip": self.flip}))
       }
@@ -2206,6 +2210,9 @@ impl Dialog {
         let f = sel_faces(s);
         if f != self.faces {
           self.faces = f;
+          if self.kind == Kind::PressPull {
+            self.sync_press_owner(s);
+          }
         }
       }
       Kind::Refold if !self.applied => {
@@ -7610,8 +7617,9 @@ mod tests {
     let mut app = App::with_session(Session::default());
     app.s.execute("box", &json!({"width": 20, "depth": 20, "height": 10})).unwrap();
     let b = app.s.model.bodies[0].id;
-    let top = face(&app.s, 0, |f| f.normal.z > 0.9)["face"].as_u64().unwrap() as u32;
-    app.s.selection = vec![Sel::Face { body: b, face: top }];
+    // a side face (the box's top edits its Height, see `press_owner`)
+    let side = face(&app.s, 0, |f| f.normal.x > 0.9)["face"].as_u64().unwrap() as u32;
+    app.s.selection = vec![Sel::Face { body: b, face: side }];
     let d = Dialog::open(&mut app, Kind::PressPull);
     assert_eq!((d.kind, d.faces.len(), d.choice), (Kind::PressPull, 1, "automatic"));
     assert_eq!(d.command().unwrap().0, "press_pull");
