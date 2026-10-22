@@ -5858,7 +5858,7 @@ mod tests {
     let on = r["curves"][0].as_u64().unwrap();
     app.run("sketch.constrain", json!({"sketch": sk.0, "type": "tangent", "curves": [on, line]})).unwrap();
     let s = app.s.design.sketch(sk).unwrap();
-    let c = s.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).last().unwrap();
+    let c = s.constraints.iter().rfind(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).unwrap();
     let (at, _) = glyph_anchor(s, &c.kind).unwrap();
     assert!((at[0] - 20.0).abs() < 1e-9 && at[1].abs() < 1e-9, "{at:?}");
   }
