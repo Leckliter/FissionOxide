@@ -78,3 +78,6 @@
 {"name": "ui-edit-feature-errors", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_e354b219 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-extrude-manipulator", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_d7232407 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-feature-handles", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_810067ca (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-edit-more-features", "items": 6, "status": "ready", "pr": null}
+{"name": "ui-inspect-insert-assemble", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-timeline-failed-items", "items": 7, "status": "ready", "pr": null}

@@ -484,3 +484,15 @@ a grey dimension in the preview, moves the box with Tab, keeps the box clear of 
 timeline back while editing, greys OK on a failing value and shows a "1 error(s)" toast with a
 status-bar badge. 16 rows in three batches (`parity/batches/map-wave25.json`), four match rows,
 five keys verified.
+
+## 2026-10-22, prober 11: Edit Feature finished; Construct, Inspect, Insert, Assemble, Select started
+
+Chamfer, Mirror, Hole, Move, Combine and Press Pull made and double-clicked in both apps, a chamfer
+made to fail, then its toast, Error window, right-click menu, Suppress, Unsuppress and Roll here;
+then the CONSTRUCT, CONFIGURE, INSPECT, INSERT, ASSEMBLE and SELECT lists, Offset Plane, Axis Through
+Cylinder and Measure (report `parity/reports/2026-10-22-edit-construct.md`). Fusion edits every
+feature in its creation dialog titled "EDIT FEATURE"; FissionOxide cannot edit Hole, Mirror, Combine
+or Press Pull (and, from the code, most other kinds), has no Error window or Review warning, and
+lists every assembly command in a Part Design document where Fusion offers only "Add To Assembly".
+18 rows in three batches (`parity/batches/map-wave26.json`), three match rows, three Select menu keys
+verified.

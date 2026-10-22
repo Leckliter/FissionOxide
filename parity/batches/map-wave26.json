@@ -1,0 +1,20 @@
+{
+  "ui:dialogs:edit-hole": "ui-edit-more-features",
+  "ui:dialogs:edit-mirror": "ui-edit-more-features",
+  "ui:dialogs:edit-combine": "ui-edit-more-features",
+  "ui:dialogs:edit-press-pull": "ui-edit-more-features",
+  "ui:dialogs:edit-move-rows": "ui-edit-more-features",
+  "ui:dialogs:edit-values-units": "ui-edit-more-features",
+  "ui:timeline:error-dialog": "ui-timeline-failed-items",
+  "ui:timeline:failed-item-menu": "ui-timeline-failed-items",
+  "ui:timeline:suppressed-item-menu": "ui-timeline-failed-items",
+  "ui:chrome:stale-status-message": "ui-timeline-failed-items",
+  "ui:timeline:hole-extra-sketch": "ui-timeline-failed-items",
+  "ui:dialogs:combine-disjoint-names": "ui-timeline-failed-items",
+  "ui:dialogs:press-pull-edits-owner": "ui-timeline-failed-items",
+  "ui:menus:assemble-part-design": "ui-inspect-insert-assemble",
+  "ui:inspect:measure-dialog-rows": "ui-inspect-insert-assemble",
+  "ui:menus:inspect-properties-extra": "ui-inspect-insert-assemble",
+  "ui:menus:insert-list": "ui-inspect-insert-assemble",
+  "ui:menus:construct-icons": "ui-inspect-insert-assemble"
+}
