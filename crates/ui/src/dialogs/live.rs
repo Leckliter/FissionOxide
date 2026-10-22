@@ -48,6 +48,16 @@ impl Live {
   pub(super) fn retry(&mut self) {
     self.tried = None;
   }
+
+  /// Fusion's mesh dialogs open with Preview unticked.
+  pub(super) fn for_kind(kind: Kind) -> Live {
+    let off = match kind {
+      Kind::Form(f) => crate::forms::preview_off(f),
+      Kind::PlaneCut => true,
+      _ => false,
+    };
+    Live { on: !off, ..Live::default() }
+  }
 }
 
 /// A picked edge or face of the un-previewed model.
@@ -187,7 +197,8 @@ impl Dialog {
     if matches!(self.kind, Kind::Fillet | Kind::Draft | Kind::OffsetFace | Kind::Hem)
       || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f)
         || crate::mesh_ui::is_mesh_form(f)
-        || !crate::forms::preview_box(f))
+        || !crate::forms::preview_box(f)
+        || crate::forms::no_preview(f))
     {
       return;
     }

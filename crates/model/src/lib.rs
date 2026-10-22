@@ -27,6 +27,7 @@ pub mod include;
 pub mod mechanism;
 pub mod meshops;
 pub mod meshprep;
+pub mod meshtools;
 pub mod naming;
 pub mod newcomp;
 pub mod pathpattern;
@@ -1523,6 +1524,9 @@ pub enum FeatureKind {
     op: construct::MeshOp,
     #[serde(default = "one")]
     amount: String,
+    /// The settings of Fusion's mesh dialogs (none in features saved before them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    settings: Option<construct::MeshSettings>,
   },
   /// Flattens a sheet metal body onto its stationary face.
   Unfold {
@@ -2013,6 +2017,26 @@ pub enum FeatureKind {
   CombineFaceGroups {
     faces: Vec<FaceRef>,
   },
+  /// Cuts a mesh body with a plane (Fusion's Plane Cut): the plane moved `distance` along its
+  /// normal and turned `y_angle` and `z_angle` about its own X and Y directions; the part in
+  /// front of it (behind it with `flip`) is trimmed away, split off as another body, or the
+  /// triangles are only split along it.
+  MeshPlaneCut {
+    body: BodyId,
+    plane: PlaneRef,
+    #[serde(default = "zero")]
+    distance: String,
+    #[serde(default = "zero")]
+    y_angle: String,
+    #[serde(default = "zero")]
+    z_angle: String,
+    #[serde(default)]
+    flip: bool,
+    #[serde(default)]
+    cut: construct::PlaneCutType,
+    #[serde(default)]
+    fill: construct::FillType,
+  },
 }
 
 fn medium() -> String {
@@ -2153,7 +2177,7 @@ impl FeatureKind {
       FeatureKind::Trim { .. } => "Trim",
       FeatureKind::Mesh { op: construct::MeshOp::Reduce, .. } => "Reduce",
       FeatureKind::Mesh { op: construct::MeshOp::Smooth, .. } => "Smooth",
-      FeatureKind::Mesh { op: construct::MeshOp::Convert, .. } => "ConvertMesh",
+      FeatureKind::Mesh { op: construct::MeshOp::Convert, .. } => "Convert Mesh",
       FeatureKind::Emboss { deboss: true, .. } => "Deboss",
       FeatureKind::Emboss { .. } => "Emboss",
       FeatureKind::BoundaryFill { .. } => "BoundaryFill",
@@ -2187,6 +2211,7 @@ impl FeatureKind {
       FeatureKind::MeshRepair { .. } => "MeshRepair",
       FeatureKind::GenerateFaceGroups { .. } => "GenerateFaceGroups",
       FeatureKind::CombineFaceGroups { .. } => "CombineFaceGroups",
+      FeatureKind::MeshPlaneCut { .. } => "MeshPlaneCut",
     }
   }
 
@@ -2239,7 +2264,8 @@ impl FeatureKind {
       FeatureKind::ConstructionPoint { def } => def.depends_on(),
       FeatureKind::Coil { plane, .. }
       | FeatureKind::SplitFace { tool: plane, .. }
-      | FeatureKind::Trim { tool: plane, .. } => plane_dep(plane),
+      | FeatureKind::Trim { tool: plane, .. }
+      | FeatureKind::MeshPlaneCut { plane, .. } => plane_dep(plane),
       FeatureKind::Pipe { path_sketch, .. } => vec![*path_sketch],
       FeatureKind::Rib { sketch, .. } | FeatureKind::SurfaceExtrude { sketch, .. } => vec![*sketch],
       FeatureKind::SurfaceRevolve { sketch, axis, .. } => {
@@ -3177,6 +3203,11 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::GenerateFaceGroups { angle, min_size, .. } => {
       f(angle);
       f(min_size);
+    }
+    FeatureKind::MeshPlaneCut { distance, y_angle, z_angle, .. } => {
+      for e in [distance, y_angle, z_angle] {
+        f(e);
+      }
     }
   }
 }

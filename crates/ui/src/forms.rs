@@ -163,6 +163,14 @@ pub enum Input {
   Planes {
     key: &'static str,
   },
+  /// A number with a slider under it from 0 to `max`, shown to two decimals (Reduce's
+  /// Proportion, Smooth's Smoothness).
+  Slider {
+    key: &'static str,
+    label: &'static str,
+    default: &'static str,
+    max: u32,
+  },
   /// A selection row that takes picks only while it is the active row (Fusion's blue chip); a
   /// form with one routes every pick to its active row (see [`State::sync_rows`]). `fits` says
   /// which picks it takes, `multi` whether it holds more than one (a single row hands the active
@@ -228,7 +236,8 @@ impl Input {
       | Input::Flip { key, .. }
       | Input::Planes { key }
       | Input::Pick { key, .. }
-      | Input::TrimTool { key, .. } => key,
+      | Input::TrimTool { key, .. }
+      | Input::Slider { key, .. } => key,
     }
   }
 
@@ -261,7 +270,8 @@ impl Input {
       | Input::CheckOn { label, .. }
       | Input::Flip { label, .. }
       | Input::Pick { label, .. }
-      | Input::TrimTool { label, .. } => label,
+      | Input::TrimTool { label, .. }
+      | Input::Slider { label, .. } => label,
       Input::Planes { .. } => "",
     }
   }
@@ -306,15 +316,17 @@ impl State {
       .inputs
       .iter()
       .map(|i| match i {
-        Input::Expr { default, .. } | Input::Text { default, .. } => json!(default),
+        Input::Expr { default, .. } | Input::Text { default, .. } | Input::Slider { default, .. } => json!(default),
         Input::Check { .. } | Input::Flip { .. } => json!(false),
         Input::CheckOn { .. } => json!(true),
         Input::Pick { multi: true, .. } => json!([]),
-        Input::Choice { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         // (Pattern on Path is the pattern dialog's last Type)
         Input::Icons { key: "pattern_type", .. } => json!("path"),
         // (Lofted Flange is the Flange dialog's last Type)
         Input::Icons { key: "flange_type", .. } => json!("lofted"),
+        Input::Choice { key, options, .. } => {
+          json!(initial_choice(form, key).or(options.first().map(|o| o.0)).unwrap_or(""))
+        }
         Input::Icons { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         Input::Vec3 { default, .. } => json!(default),
         Input::Faces { .. }
@@ -745,6 +757,10 @@ impl State {
       "surface.untrim" if key == "extension" => {
         get("faces").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
           && matches!(get("loops").and_then(Value::as_str), Some("all" | "outer"))
+      }
+      // Reduce's Type names the one value it asks for
+      "mesh.reduce" if matches!(key, "tolerance" | "proportion" | "face_count") => {
+        get("type").and_then(Value::as_str) == Some(key)
       }
       "drawing.feature_control" if key.starts_with("lower_") => {
         get("composite").and_then(Value::as_bool).unwrap_or(false)
@@ -1808,16 +1824,23 @@ pub static REVERSE_NORMAL: Form = Form {
   picks_model: true,
 };
 
+const REDUCE_TYPES: &[(&str, &str)] =
+  &[("tolerance", "Tolerance"), ("proportion", "Proportion"), ("face_count", "Face Count")];
+
 pub static MESH_REDUCE: Form = Form {
   title: "REDUCE",
   name: "Reduce",
-  hint: "Fewer triangles on mesh bodies",
+  hint: "Fewer triangles on a mesh body: within a tolerance, to a proportion or to a face count",
   icon: Icon::Reduce,
   cmd: "mesh.reduce",
   fixed: &[],
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies", required: true },
-    Input::Expr { key: "keep", label: "Keep (fraction)", default: "0.5" },
+    Input::Bodies { key: "bodies", label: "Body/Face Groups", required: true },
+    Input::Choice { key: "type", label: "Type", options: REDUCE_TYPES },
+    Input::Choice { key: "remesh", label: "Remesh Type", options: &[("adaptive", "Adaptive"), ("uniform", "Uniform")] },
+    Input::Expr { key: "tolerance", label: "Tolerance", default: "0.10 mm" },
+    Input::Slider { key: "proportion", label: "Proportion", default: "25.00", max: 100 },
+    Input::Expr { key: "face_count", label: "Face Count", default: "1000" },
   ],
   picks_model: true,
 };
@@ -1825,13 +1848,13 @@ pub static MESH_REDUCE: Form = Form {
 pub static MESH_SMOOTH: Form = Form {
   title: "SMOOTH",
   name: "Smooth",
-  hint: "Smooth mesh bodies",
+  hint: "Smooth a mesh body, keeping its volume",
   icon: Icon::Smooth,
   cmd: "mesh.smooth",
   fixed: &[],
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies", required: true },
-    Input::Expr { key: "passes", label: "Passes", default: "3" },
+    Input::Bodies { key: "bodies", label: "Body/Face Groups", required: true },
+    Input::Slider { key: "smoothness", label: "Smoothness", default: "1.00", max: 1 },
   ],
   picks_model: true,
 };
@@ -1839,11 +1862,35 @@ pub static MESH_SMOOTH: Form = Form {
 pub static MESH_CONVERT: Form = Form {
   title: "CONVERT MESH",
   name: "Convert Mesh",
-  hint: "Mesh bodies to clean B-rep: coplanar triangles become faces",
+  hint: "A solid body from a mesh body (the mesh is hidden)",
   icon: Icon::ConvertMesh,
   cmd: "mesh.convert",
   fixed: &[],
-  inputs: &[Input::Bodies { key: "bodies", label: "Bodies", required: true }],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Body", required: true },
+    Input::Choice {
+      key: "operation",
+      label: "Operation",
+      options: &[("parametric", "Parametric"), ("base_feature", "Base Feature")],
+    },
+    Input::Icons {
+      key: "method",
+      label: "Method",
+      options: &[
+        (
+          "faceted",
+          Icon::ConvertFaceted,
+          "Faceted\nConverts individual faces on the mesh to individual faces on the new solid",
+        ),
+        (
+          "prismatic",
+          Icon::ConvertPrismatic,
+          "Prismatic\nConverts planar regions of the mesh to planar faces on the new solid",
+        ),
+        ("organic", Icon::ConvertOrganic, "Organic\nConverts the mesh to smooth surfaces on the new solid"),
+      ],
+    },
+  ],
   picks_model: true,
 };
 
@@ -3462,6 +3509,9 @@ pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static st
     ("joint_origin", "mode", "between" | "two_edge") => {
       Some("Only the Simple mode is in FissionOxide yet: a joint origin sits on one picked face")
     }
+    ("mesh.convert", "method", "organic") => {
+      Some("Organic conversion isn't in FissionOxide yet: the kernel can't fit smooth surfaces to a mesh")
+    }
     _ => None,
   }
 }
@@ -3530,6 +3580,33 @@ pub fn pick_prompt(form: &Form) -> Option<&'static str> {
 pub fn specify_prompt(form: &Form) -> Option<&'static str> {
   match form.cmd {
     "thread" => Some("Specify size, or hold Ctrl/CMD to modify selections"),
+    "mesh.reduce" => Some("Adjust reduce type and settings"),
+    "mesh.smooth" => Some("Adjust smoothness"),
+    "mesh.convert" => Some("Adjust conversion settings"),
+    _ => None,
+  }
+}
+
+/// Is this a mesh dialog, where Fusion opens with Preview unticked, keeps its settings prompt
+/// whatever the pointer is over, and counts the picked body on its chip ("1 selected")?
+pub fn mesh_form(form: &Form) -> bool {
+  matches!(form.cmd, "mesh.reduce" | "mesh.smooth" | "mesh.convert")
+}
+
+/// Forms that open with Preview unticked.
+pub fn preview_off(form: &Form) -> bool {
+  mesh_form(form)
+}
+
+/// Forms with no Preview check box that don't preview (Convert Mesh): OK applies them.
+pub fn no_preview(form: &Form) -> bool {
+  form.cmd == "mesh.convert"
+}
+
+/// A drop-down's first value when it isn't the first in the list (Reduce's Type: Proportion).
+fn initial_choice(form: &Form, key: &str) -> Option<&'static str> {
+  match (form.cmd, key) {
+    ("mesh.reduce", "type") => Some("proportion"),
     _ => None,
   }
 }
@@ -3557,7 +3634,7 @@ pub fn always_previews(form: &Form) -> bool {
 /// Forms whose drop-downs show an icon before each value, as Fusion's Extent Type, Direction
 /// and Operation do.
 pub fn icon_dropdowns(form: &Form) -> bool {
-  matches!(form.cmd, "rib" | "web" | "thicken" | "boundary_fill")
+  matches!(form.cmd, "rib" | "web" | "thicken" | "boundary_fill" | "mesh.reduce")
 }
 
 pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {

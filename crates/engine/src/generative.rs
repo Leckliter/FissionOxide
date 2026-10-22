@@ -954,7 +954,11 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
       Ok(())
     };
     if brep || merge {
-      feature(s, FeatureKind::Mesh { bodies: vec![body], op: MeshOp::Convert, amount: "1".into() }, "B-rep")?;
+      feature(
+        s,
+        FeatureKind::Mesh { bodies: vec![body], op: MeshOp::Convert, amount: "1".into(), settings: None },
+        "B-rep",
+      )?;
     }
     if merge {
       let live = |v: &[BodyId]| v.iter().copied().filter(|b| s.model.body(*b).is_some()).collect::<Vec<_>>();

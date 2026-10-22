@@ -163,9 +163,10 @@ cmds! {
   "surface.ruled" => "Ruled surface between two edges", "{a: edge, b: edge}";
   "surface.offset" => "New surfaces offset from faces or bodies; face_distances give faces distances of their own (variable offset)", "{faces? | bodies?, distance, face_distances?: [{face, distance}]}";
   "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it), a body (keeps what's outside a solid or behind a surface) or a sketch projected onto them (cuts its profiles away, or keeps the right of its curves); flip keeps the other side, keep points pick the pieces to keep, remove points the pieces to remove (the rest stays); cut_only (Fusion's Trim) changes only the bodies the tool cuts, removing just the remove pieces, and fails when it cuts none", "{bodies, tool: plane | {body} | {sketch, curves?}, flip?, keep?: [[x,y,z]], remove?: [[x,y,z]], cut_only?: bool}";
-  "mesh.reduce" => "Fewer triangles on mesh bodies", "{bodies, keep?: 0.05..1}";
-  "mesh.smooth" => "Smooth mesh bodies", "{bodies, passes?}";
-  "mesh.convert" => "Mesh bodies to clean B-rep (coplanar triangles merged into faces)", "{bodies}";
+  "mesh.reduce" => "Fewer triangles on mesh bodies (Fusion's Reduce: a tolerance, a proportion of the triangles kept or a face count; a mesh already at its minimum stays as it is)", "{body | bodies, type?: tolerance|proportion|face_count, proportion?: percent (25), tolerance?: length, face_count?, remesh?: adaptive|uniform} | {bodies, keep: 0.05..1} (older files)";
+  "mesh.smooth" => "Smooth mesh bodies, keeping their volume", "{body | bodies, smoothness?: 0..1 (1)} | {bodies, passes} (older files)";
+  "mesh.convert" => "Mesh bodies to a new solid body each (the mesh is hidden): faceted (a face per triangle) or prismatic (coplanar triangles merged into faces)", "{body | bodies, method?: faceted|prismatic|organic, operation?: parametric|base_feature}";
+  "mesh.plane_cut" => "Cut a mesh body with a plane (moved along its normal and turned): trim away the part in front of it (behind with flip), split it into two bodies or split its triangles; the opening filled or left open", "{body, plane, distance?, y_angle?, z_angle?, flip?, type?: trim|split_body|split_faces, fill?: none|uniform|minimal}";
   "body.appearance" => "Set the appearance of bodies (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{body?|bodies?|component?, appearance? | color?}";
   "appearances" => "The appearance library", "{}";
   "face.appearance" => "Set the appearance of single faces, over their body's (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{faces: [{body, face} | {point}], appearance? | color?}";

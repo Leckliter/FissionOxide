@@ -4091,6 +4091,7 @@ pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::MeshRepair { .. } => Icon::Repair,
     FeatureKind::GenerateFaceGroups { .. } => Icon::GenFaceGroups,
     FeatureKind::CombineFaceGroups { .. } => Icon::CombineFaceGroups,
+    FeatureKind::MeshPlaneCut { .. } => Icon::PlaneCut,
   }
 }
 
