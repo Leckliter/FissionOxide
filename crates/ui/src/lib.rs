@@ -1003,6 +1003,10 @@ impl App {
       self.grid_dialog = None;
       return;
     }
+    // ... and Enter is their OK (see `grid_dialogs::window`), not Repeat
+    if self.grid_dialog.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+      return;
+    }
     if ctx.egui_wants_keyboard_input() {
       // Esc in a command dialog's field cancels the command and drops its selection, as in Fusion
       if self.dialog.is_some()
