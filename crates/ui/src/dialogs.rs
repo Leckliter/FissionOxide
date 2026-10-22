@@ -24,7 +24,9 @@ mod pieces;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod newcomp;
+mod primitive;
 mod solid;
+pub(crate) use primitive::overlay as place_overlay;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
 pub(crate) const PICK_PLANE_HINT: &str = "Select a plane or planar face";
@@ -419,11 +421,11 @@ fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
 }
 
 const OPS: [(&str, &str); 5] = [
-  ("new_body", "New body"),
+  ("new_body", "New Body"),
   ("join", "Join"),
   ("cut", "Cut"),
   ("intersect", "Intersect"),
-  ("new_component", "New component"),
+  ("new_component", "New Component"),
 ];
 const REVOLVE_DIRECTIONS: [(&str, &str); 3] =
   [("one_side", "One side"), ("two_sides", "Two sides"), ("symmetric", "Symmetric")];
@@ -560,6 +562,9 @@ pub struct Dialog {
   /// Text: the frame was just placed, so the Text box takes the keyboard on the next frame (its
   /// sample text selected, so typing replaces it), as in Fusion.
   focus_text: bool,
+  /// Box, Cylinder, Sphere, Torus and Coil: the plane pick and drawing before the dialog shows
+  /// (see [`primitive`]).
+  place: primitive::Step,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -683,6 +688,7 @@ impl Dialog {
       center: None,
       dir_lines: Vec::new(),
       focus_text: false,
+      place: primitive::Step::Done,
     }
   }
 
@@ -765,14 +771,14 @@ impl Dialog {
       Kind::Fillet => d.radius = "2 mm".into(),
       Kind::Chamfer => d.radius = "1 mm".into(),
       Kind::Shell => d.radius = "2 mm".into(),
-      Kind::Cylinder => {
-        d.a = "10 mm".into();
-        d.b = "20 mm".into();
-      }
-      Kind::Sphere => d.a = "10 mm".into(),
+      // Fusion's defaults for the values not drawn (0.10 in high, a 0.40 in sphere, a 0.20 in
+      // tube); the drawing sets the rest
+      Kind::Box => d.c = "2.54 mm".into(),
+      Kind::Cylinder => d.b = "2.54 mm".into(),
+      Kind::Sphere => d.a = "10.16 mm".into(),
       Kind::Torus => {
-        d.a = "20 mm".into();
-        d.b = "5 mm".into();
+        d.b = "5.08 mm".into();
+        d.position = "center";
       }
       Kind::Revolve => d.axis = "z".into(),
       Kind::Mirror => {
@@ -1038,6 +1044,7 @@ impl Dialog {
     if let Kind::Analysis(a) = kind {
       app.analysis = Some(json!({"analysis": a, "pull": "z", "angle": 1.0}));
     }
+    d.start_placing(app);
     d.localize(app.s.design.units);
     d.dirty = !d.picks();
     d
@@ -1152,16 +1159,14 @@ impl Dialog {
         d
       }
       FeatureKind::Primitive { shape, at, operation, .. } => {
-        let (kind, a, b, c) = match shape {
-          Primitive::Box { width, depth, height } => (Kind::Box, width.clone(), depth.clone(), height.clone()),
-          Primitive::Cylinder { radius, height } => (Kind::Cylinder, radius.clone(), height.clone(), String::new()),
-          Primitive::Sphere { radius } => (Kind::Sphere, radius.clone(), String::new(), String::new()),
-          Primitive::Torus { major, minor } => (Kind::Torus, major.clone(), minor.clone(), String::new()),
+        let kind = match shape {
+          Primitive::Box { .. } => Kind::Box,
+          Primitive::Cylinder { .. } => Kind::Cylinder,
+          Primitive::Sphere { .. } => Kind::Sphere,
+          Primitive::Torus { .. } => Kind::Torus,
         };
         let mut d = Dialog::blank(kind);
-        d.a = a;
-        d.b = b;
-        d.c = c;
+        d.load_primitive(shape);
         d.at = [fox_engine::sketch::Dim::new(at[0]).expr, fox_engine::sketch::Dim::new(at[1]).expr];
         d.op = op_str(*operation);
         d
@@ -1565,17 +1570,18 @@ impl Dialog {
         ("chamfer", self.chamfer_params(json!({"edges": self.edges, "tangent_chain": !self.solid.no_chain}), false))
       }
       Kind::Shell => ("shell", self.shell_params()),
-      Kind::Box => (
-        "box",
-        json!({"plane": self.plane, "at": self.at_pt()?, "width": self.a, "depth": self.b, "height": self.c, "operation": op}),
-      ),
-      Kind::Cylinder => (
-        "cylinder",
-        json!({"plane": self.plane, "at": self.at_pt()?, "radius": self.a, "height": self.b, "operation": op}),
-      ),
-      Kind::Sphere => ("sphere", json!({"plane": self.plane, "at": self.at_pt()?, "radius": self.a, "operation": op})),
-      Kind::Torus => {
-        ("torus", json!({"plane": self.plane, "at": self.at_pt()?, "major": self.a, "minor": self.b, "operation": op}))
+      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
+        let mut p = self.primitive_shape();
+        p["plane"] = self.plane.clone();
+        p["at"] = json!(self.at_pt()?);
+        p["operation"] = json!(op);
+        let cmd = match self.kind {
+          Kind::Box => "box",
+          Kind::Cylinder => "cylinder",
+          Kind::Sphere => "sphere",
+          _ => "torus",
+        };
+        (cmd, p)
       }
       Kind::OffsetPlane => ("plane.offset", json!({"plane": self.plane, "offset": self.distance})),
       Kind::Mirror if self.choice == "features" => {
@@ -1618,15 +1624,15 @@ impl Dialog {
       Kind::Fillet => self.fillet_edit_set(),
       Kind::Chamfer => self.chamfer_params(json!({}), true),
       Kind::Shell => self.shell_edit_set(),
-      Kind::Box => {
-        json!({"shape": {"type": "box", "width": self.a, "depth": self.b, "height": self.c}, "at": self.at_pt()?, "operation": self.op})
-      }
-      Kind::Cylinder => {
-        json!({"shape": {"type": "cylinder", "radius": self.a, "height": self.b}, "at": self.at_pt()?, "operation": self.op})
-      }
-      Kind::Sphere => json!({"shape": {"type": "sphere", "radius": self.a}, "at": self.at_pt()?, "operation": self.op}),
-      Kind::Torus => {
-        json!({"shape": {"type": "torus", "major": self.a, "minor": self.b}, "at": self.at_pt()?, "operation": self.op})
+      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
+        let mut shape = self.primitive_shape();
+        shape["type"] = json!(match self.kind {
+          Kind::Box => "box",
+          Kind::Cylinder => "cylinder",
+          Kind::Sphere => "sphere",
+          _ => "torus",
+        });
+        json!({"shape": shape, "at": self.at_pt()?, "operation": self.op})
       }
       Kind::OffsetPlane => json!({"offset": self.distance}),
       Kind::RectPattern => {
@@ -1717,6 +1723,9 @@ impl Dialog {
   fn ready(&self) -> bool {
     if self.editing.is_some() {
       return true;
+    }
+    if self.placing() {
+      return false;
     }
     match self.kind {
       Kind::Form(f) => self.form.missing(f).is_none(),
@@ -1926,7 +1935,10 @@ impl Dialog {
     match self.kind {
       Kind::OffsetPlane => self.sync_offset_base(s),
       Kind::Form(f) if !self.applied || !self.picks() => {
-        if self.form.sync(f, s, last_unconsumed_sketch(s)) {
+        let before = self.form.values.clone();
+        self.form.sync(f, s, last_unconsumed_sketch(s));
+        self.form.chain_path(f, s);
+        if self.form.values != before {
           self.dirty = !self.picks();
         }
       }
@@ -2105,6 +2117,11 @@ impl Dialog {
       // hint asks; Escape or the button cancels
       return !self.closed;
     }
+    if self.placing() {
+      // nor while a primitive's plane is picked and its base drawn
+      self.place_sync(app);
+      return !self.closed;
+    }
     let mut keep = true;
     // Enter is OK, from one of the dialog's boxes or with nothing focused (as in Fusion); OK can
     // also come from the marking menu
@@ -2121,13 +2138,7 @@ impl Dialog {
             .is_some_and(|r| r.layer_id == dialog_layer || crate::value_box::is_box_layer(r.layer_id)),
         };
     let mut cancel = false;
-    let base = match self.kind {
-      Kind::Move => self.move_title().unwrap_or(self.kind.title()),
-      // Press Pull on a face is Fusion's Offset Face
-      Kind::PressPull if !self.faces.is_empty() => "OFFSET FACE",
-      _ => self.kind.title(),
-    };
-    let title = if self.editing.is_some() { format!("EDIT {base}") } else { base.to_string() };
+    let title = self.heading();
     // FILLET's selection table needs the extra width, as in Fusion
     let width = if self.kind == Kind::Fillet { 360.0 } else { 300.0 };
     // docked at the canvas's top-right corner when it opens and again after the window is
@@ -2249,6 +2260,21 @@ impl Dialog {
     keep && !self.closed
   }
 
+  /// The dialog's title: the command's, or EDIT FEATURE for every feature edited from the
+  /// timeline, as in Fusion.
+  pub(crate) fn heading(&self) -> String {
+    if self.editing.is_some() {
+      return "EDIT FEATURE".into();
+    }
+    match self.kind {
+      Kind::Move => self.move_title().unwrap_or(self.kind.title()),
+      // Press Pull on a face is Fusion's Offset Face
+      Kind::PressPull if !self.faces.is_empty() => "OFFSET FACE",
+      _ => self.kind.title(),
+    }
+    .to_string()
+  }
+
   /// The command family's accent colour, used by this dialog's chips and OK button.
   fn accent(&self) -> egui::Color32 {
     crate::icons::accent_of(self.kind.icon())
@@ -2260,6 +2286,9 @@ impl Dialog {
   pub(crate) fn prompt(&self, hovering: bool) -> Option<String> {
     if self.kind == Kind::PickPlane {
       return Some(PICK_PLANE_HINT.into());
+    }
+    if let Some(p) = self.place_prompt() {
+      return Some(p.into());
     }
     if !self.ready() {
       return Some(match self.kind {
@@ -2487,42 +2516,7 @@ impl Dialog {
       }
       Kind::Chamfer => self.chamfer_rows(app, ui, creating),
       Kind::Shell => self.shell_rows(ui, creating),
-      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
-        ui.label("Plane");
-        ui.label(&self.plane_label);
-        ui.end_row();
-        let labels: &[&str] = match self.kind {
-          Kind::Box => &["Width (X)", "Depth (Y)", "Height"],
-          Kind::Cylinder => &["Radius", "Height"],
-          Kind::Sphere => &["Radius"],
-          _ => &["Major radius", "Minor radius"],
-        };
-        for (i, l) in labels.iter().enumerate() {
-          ui.label(*l);
-          let f = match i {
-            0 => &mut self.a,
-            1 => &mut self.b,
-            _ => &mut self.c,
-          };
-          if value_edit(ui, f).changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-        }
-        ui.label("Position X, Y");
-        ui.horizontal(|ui| {
-          for v in self.at.iter_mut() {
-            if ui.add(egui::TextEdit::singleline(v).desired_width(64.0)).changed() {
-              self.dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-        ui.label("Operation");
-        self.combo(ui, "op", &OPS, false);
-        ui.end_row();
-        self.comp_name_row(ui);
-      }
+      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => self.primitive_rows(ui, creating),
       Kind::OffsetPlane | Kind::Mirror => {
         ui.label("Plane");
         if creating {
@@ -2693,6 +2687,27 @@ impl Dialog {
       }
       let v = self.form.values[i].clone();
       let greyed = crate::forms::greyed(f, input.key());
+      // Coil's Profile: the circle drawn before the dialog opened
+      if f.cmd == "coil.form" && input.key() == "plane" {
+        ui.label("Profile");
+        sel_chip(ui, accent, "1 selected", true);
+        ui.end_row();
+        continue;
+      }
+      // Coil's and Pipe's Operation shows each value's icon, as Fusion's
+      if let Input::Choice { key: "operation", label, options } = input
+        && matches!(f.cmd, "coil.form" | "pipe.form")
+      {
+        ui.label(*label);
+        let cur = v.as_str().unwrap_or("");
+        let mut sel: &'static str = options.iter().find(|(k, _)| *k == cur).map_or("new_body", |(k, _)| *k);
+        if choice::combo(ui, "form-op", options, &mut sel, choice::extrude_icon) {
+          *dirty = true;
+        }
+        self.form.values[i] = json!(sel);
+        ui.end_row();
+        continue;
+      }
       match input {
         Input::Faces { label, .. }
         | Input::FacesOpt { label, .. }
@@ -4020,8 +4035,7 @@ impl Dialog {
     }
   }
 
-  /// A form dialog's value for input `key` (tests).
-  #[cfg(test)]
+  /// A form dialog's value for input `key`.
   pub(crate) fn form_value(&self, key: &str) -> Option<&Value> {
     let Kind::Form(f) = self.kind else { return None };
     self.form.values.get(f.inputs.iter().position(|x| x.key() == key)?)

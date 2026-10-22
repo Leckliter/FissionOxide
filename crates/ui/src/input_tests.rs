@@ -80,9 +80,15 @@ impl Harness {
     self.ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog"))).expect("the dialog is open")
   }
 
-  /// Opens a command dialog (Box: it needs no picks) and lets it settle.
+  /// Opens a command dialog (Box, its base drawn on the XY plane: it needs no picks) and lets it
+  /// settle.
   fn open_dialog(&mut self) {
     self.app.start(crate::dialogs::Kind::Box);
+    if let Some(d) = self.app.dialog.as_mut() {
+      d.place_on(&self.app.s, json!("xy"));
+      d.place_click([0.0, 0.0]);
+      d.place_click([20.0, 10.0]);
+    }
     for _ in 0..3 {
       self.frame(vec![]);
     }
@@ -1939,4 +1945,35 @@ fn the_fifth_navigation_button_is_zoom_window_with_a_one_word_tooltip() {
   h.frame(vec![]);
   assert_eq!(h.app.nav_mode, None, "Esc ends it");
   assert!(h.find(vec![], "Zoom Window").is_none(), "and its label goes");
+}
+
+/// `ui:dialogs:primitive-plane-pick-flow`: Box shows no dialog at first. The cursor asks for a
+/// plane, a click on the XY plane starts the rectangle, two clicks draw it, and only then does
+/// the dialog open with the box previewed.
+#[test]
+fn box_is_drawn_on_a_picked_plane_before_its_dialog_opens() {
+  let mut h = Harness::new();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.app.start(crate::dialogs::Kind::Box);
+  // (the view turns to Top over a few frames)
+  for _ in 0..90 {
+    h.frame(vec![]);
+  }
+  let c = h.app.canvas.center();
+  assert!(h.prompt_at(c, crate::dialogs::PICK_PLANE_HINT));
+  assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog"))).is_none(), "no dialog yet");
+  // (off the origin, where the XZ and YZ planes are seen edge on)
+  h.move_then_click(c + vec2(30.0, 20.0));
+  assert!(h.prompt_at(c, "Place first corner"), "the XY plane is picked");
+  h.move_then_click(c);
+  let b = c + vec2(60.0, -40.0);
+  assert!(h.prompt_at(b, "Specify size of rectangle"));
+  h.move_then_click(b);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let d = h.app.dialog.as_ref().expect("the dialog is open");
+  assert!(!d.placing() && d.preview_applied(), "{:?}", d.prompt(false));
+  assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog"))).is_some());
+  assert_eq!(h.app.s.model.bodies.len(), 1, "the box is previewed");
 }

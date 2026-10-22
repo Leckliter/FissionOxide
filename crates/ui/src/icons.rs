@@ -355,6 +355,9 @@ pub enum Icon {
   SetIncrements,
   /// The navigation bar's Zoom Window: a magnifier inside a dashed box.
   ZoomWindow,
+  // Coil's Rotation toggles
+  RotateCw,
+  RotateCcw,
 }
 
 #[derive(Clone, Copy)]
@@ -2584,6 +2587,15 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.thick((0.59, 0.59), (0.78, 0.78), Ink, 2.0);
       k.line((0.34, 0.44), (0.54, 0.44), Ink);
       k.line((0.44, 0.34), (0.44, 0.54), Ink);
+    }
+    // a coil's turn seen down its axis: three quarters of a circle and the arrow at its end
+    Icon::RotateCw => {
+      k.arc((0.5, 0.52), 0.32, 2.4, -2.4, Blue);
+      k.arrow_head((0.26, 0.74), (-0.68, -0.74), 0.18, Blue);
+    }
+    Icon::RotateCcw => {
+      k.arc((0.5, 0.52), 0.32, 0.74, 5.54, Blue);
+      k.arrow_head((0.74, 0.74), (0.68, -0.74), 0.18, Blue);
     }
   }
 }

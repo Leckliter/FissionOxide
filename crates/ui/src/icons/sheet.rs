@@ -297,6 +297,8 @@ const ALL: &[Icon] = &[
   Icon::GridSettings,
   Icon::SetIncrements,
   Icon::ZoomWindow,
+  Icon::RotateCw,
+  Icon::RotateCcw,
 ];
 
 fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

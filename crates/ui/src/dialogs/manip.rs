@@ -2,7 +2,8 @@
 //! of Fillet and Chamfer, Press Pull's distance arrow, the move/rotate triad of Move and the
 //! offset arrow and angle ring of Joint (see [`crate::manipulators`]), the feature handles of
 //! Shell (thickness arrows), Draft (angle dial) and the patterns (distance, count and angle; see
-//! [`crate::handles`]); and picking joints and saved joint origins in the viewport.
+//! [`crate::handles`]), the primitives' arrows (see [`super::primitive`]); and picking joints and
+//! saved joint origins in the viewport.
 
 use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::{DMat4, DQuat, DVec3};
@@ -279,6 +280,8 @@ impl Dialog {
       Kind::SkCircPattern => self.sk_circ_handles(s),
       Kind::SkRectPattern => self.sk_rect_handles(s),
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => self.text_handles(s),
+      // Box, Cylinder, Sphere, Torus and Coil (see [`super::primitive`])
+      k if super::primitive::base_of(k).is_some() => self.primitive_handles(s),
       _ => None,
     }
     .unwrap_or_default()
@@ -403,6 +406,11 @@ impl Dialog {
       }
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => {
         self.set_text_angle(snap(v, step).to_degrees());
+      }
+      k if super::primitive::base_of(k).is_some() => {
+        if !self.set_primitive_handle(s, i, v, step) {
+          return;
+        }
       }
       _ => return,
     }
@@ -530,6 +538,7 @@ impl Dialog {
       (Kind::SkRectPattern, 1) => Some(&mut self.count),
       (Kind::SkRectPattern, 2) => Some(&mut self.spacing2),
       (Kind::SkRectPattern, 3) => Some(&mut self.count2),
+      (k, _) if super::primitive::base_of(k).is_some() => self.primitive_field(i),
       _ => None,
     }
   }

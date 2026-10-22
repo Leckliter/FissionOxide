@@ -383,6 +383,8 @@ impl State {
           };
           sk.map(|f| json!(f.0)).unwrap_or(Value::Null)
         }
+        // the coil's plane is the one its circle was drawn on, whatever is picked later
+        Input::Plane { .. } if form.cmd == "coil.form" => self.chosen[i].clone().unwrap_or(json!("xy")),
         Input::Plane { .. } => {
           np += 1;
           planes.get(np - 1).cloned().or_else(|| self.chosen[i].clone()).unwrap_or(json!("xy"))
@@ -396,6 +398,44 @@ impl State {
       self.values[i] = v;
     }
     self.values != before
+  }
+
+  /// Pipe with Chain Selection, as Fusion's: the picked path curves and every curve of their
+  /// sketch joined end to end to them.
+  pub fn chain_path(&mut self, form: &Form, s: &Session) {
+    let at = |k: &str| form.inputs.iter().position(|x| x.key() == k);
+    let (Some(ci), Some(si), Some(chi)) = (at("path_curves"), at("path"), at("chain")) else { return };
+    if form.cmd != "pipe.form" || self.values[chi] != json!(true) {
+      return;
+    }
+    let Some(sk) = self.values[si].as_u64() else { return };
+    let Ok(sketch) = s.design.sketch(FeatureId(sk as u32)) else { return };
+    let mut chain: Vec<u32> = self.values[ci]
+      .as_array()
+      .map(|a| a.iter().filter_map(Value::as_u64).map(|c| c as u32).collect())
+      .unwrap_or_default();
+    if chain.is_empty() {
+      return;
+    }
+    let ends = |c: fox_engine::sketch::CurveId| {
+      let segs = sketch.curve_segs(c);
+      Some([segs.first()?.start(), segs.last()?.end()])
+    };
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-6;
+    loop {
+      let reached: Vec<[f64; 2]> =
+        chain.iter().filter_map(|c| ends(fox_engine::sketch::CurveId(*c))).flatten().collect();
+      let next = sketch.curves.iter().find(|c| {
+        !c.reference()
+          && !chain.contains(&c.id.0)
+          && ends(c.id).is_some_and(|e| e.iter().any(|p| reached.iter().any(|q| near(*p, *q))))
+      });
+      match next {
+        Some(c) => chain.push(c.id.0),
+        None => break,
+      }
+    }
+    self.values[ci] = json!(chain);
   }
 
   /// Does input `i` count? Some only do when another is set: a composite frame's lower tier,
@@ -421,6 +461,24 @@ impl State {
         }
       }
       "sketch.project_to_surface" if key == "direction" => get("type").and_then(Value::as_str) == Some("along_vector"),
+      // Coil's Type names the two values it asks for
+      "coil.form" => {
+        let ty = get("type").and_then(Value::as_str).unwrap_or("");
+        match key {
+          "revolutions" => ty != "height_pitch",
+          "height" => matches!(ty, "revolution_height" | "height_pitch"),
+          "pitch" => ty != "revolution_height",
+          _ => true,
+        }
+      }
+      // Pipe's Distance and Section Size rows appear with the path, Section Thickness with Hollow
+      "pipe.form" => match key {
+        "distance" | "distance2" | "diameter" => {
+          get("path_curves").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+        }
+        "wall" => get("hollow").and_then(Value::as_bool).unwrap_or(false),
+        _ => true,
+      },
       "drawing.feature_control" if key.starts_with("lower_") => {
         get("composite").and_then(Value::as_bool).unwrap_or(false)
       }
@@ -449,6 +507,9 @@ impl State {
       "sketch.text.form" => matches!(key, "placement" | "x" | "y" | "x2" | "y2" | "angle"),
       "sketch.project_to_surface" | "sketch.intersection_curve" => key == "sketch",
       "sketch.intersect.form" => key == "faces",
+      // the coil's centre is where its circle was drawn; the pipe's sketch is its path's
+      "coil.form" => key == "at",
+      "pipe.form" => key == "path",
       _ => false,
     }
   }
@@ -589,6 +650,13 @@ impl State {
 
   /// Is everything the command needs there?
   pub fn missing(&self, form: &Form) -> Option<&'static str> {
+    let get = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
+    if form.cmd == "pipe.form" && get("path_curves").and_then(Value::as_array).is_none_or(Vec::is_empty) {
+      return Some("Select a path to sweep the profile along");
+    }
+    if form.cmd == "coil.form" && get("type").and_then(Value::as_str) == Some("spiral") {
+      return Some("Spiral coils aren't in FissionOxide yet");
+    }
     if form.cmd == "sketch.text.form" {
       let get = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
       let on_path = get("type").and_then(Value::as_str) == Some("path");
@@ -720,7 +788,7 @@ fn face_center(s: &Session, v: &Value) -> Option<[f64; 3]> {
   s.model.body(body)?.faces().iter().find(|f| f.id == face).map(|f| f.center.to_array())
 }
 
-const OPS: &[(&str, &str)] = &[("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
+const OPS: &[(&str, &str)] = &[("new_body", "New Body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
 
 pub static THREAD: Form = Form {
   title: "THREAD",
@@ -748,25 +816,49 @@ pub static COIL: Form = Form {
   name: "Coil",
   hint: "A helical coil (spring) around a plane's normal",
   icon: Icon::Coil,
-  cmd: "coil",
+  cmd: "coil.form",
   fixed: &[],
+  // Fusion's rows: the plane and centre come from the circle drawn before the dialog opens (the
+  // Profile chip; see `dialogs::primitive`), the pitch from the Type's two values
   inputs: &[
-    Input::Plane { key: "plane", label: "Plane" },
+    Input::Plane { key: "plane", label: "Profile" },
+    Input::Text { key: "at", label: "Center", default: "" },
+    Input::Choice {
+      key: "type",
+      label: "Type",
+      options: &[
+        ("revolution_height", "Revolution and Height"),
+        ("revolution_pitch", "Revolution and Pitch"),
+        ("height_pitch", "Height and Pitch"),
+        ("spiral", "Spiral"),
+      ],
+    },
+    Input::Icons {
+      key: "rotation",
+      label: "Rotation",
+      options: &[("cw", Icon::RotateCw, "Clockwise"), ("ccw", Icon::RotateCcw, "Counterclockwise")],
+    },
     Input::Expr { key: "diameter", label: "Diameter", default: "20 mm" },
+    Input::Expr { key: "revolutions", label: "Revolutions", default: "3" },
+    Input::Expr { key: "height", label: "Height", default: "20 mm" },
     Input::Expr { key: "pitch", label: "Pitch", default: "5 mm" },
-    Input::Expr { key: "revolutions", label: "Revolutions", default: "5" },
+    Input::Expr { key: "angle", label: "Angle", default: "0.0 deg" },
     Input::Choice {
       key: "section",
       label: "Section",
       options: &[
         ("circular", "Circular"),
         ("square", "Square"),
-        ("triangle_out", "Triangular (external)"),
-        ("triangle_in", "Triangular (internal)"),
+        ("triangle_out", "Triangular (External)"),
+        ("triangle_in", "Triangular (Internal)"),
       ],
     },
-    Input::Expr { key: "section_size", label: "Section size", default: "2 mm" },
-    Input::Check { key: "left", label: "Left-handed" },
+    Input::Choice {
+      key: "section_position",
+      label: "Section Position",
+      options: &[("center", "On Center"), ("inside", "Inside"), ("outside", "Outside")],
+    },
+    Input::Expr { key: "section_size", label: "Section Size", default: "6.35 mm" },
     Input::Choice { key: "operation", label: "Operation", options: OPS },
   ],
   picks_model: false,
@@ -777,19 +869,24 @@ pub static PIPE: Form = Form {
   name: "Pipe",
   hint: "A round, square or triangular tube along a sketch path of lines and arcs",
   icon: Icon::Pipe,
-  cmd: "pipe",
+  cmd: "pipe.form",
   fixed: &[],
+  // Fusion's rows: the Path chip (the picked curves, chained to the curves joined to them), the
+  // Distance rows and Section Size once a path is picked, Section Thickness under Hollow
   inputs: &[
     Input::Sketch { key: "path", label: "Path sketch" },
-    Input::Curves { key: "path_curves", label: "Path curves (default all)" },
+    Input::Curves { key: "path_curves", label: "Path" },
+    Input::CheckOn { key: "chain", label: "Chain Selection" },
+    Input::Expr { key: "distance", label: "Distance", default: "1.00" },
+    Input::Expr { key: "distance2", label: "Distance", default: "0.00" },
     Input::Choice {
       key: "section",
       label: "Section",
       options: &[("circular", "Circular"), ("square", "Square"), ("triangular", "Triangular")],
     },
-    Input::Expr { key: "diameter", label: "Size", default: "10 mm" },
-    Input::Expr { key: "wall", label: "Wall (empty = solid)", default: "" },
-    Input::Expr { key: "distance", label: "Distance (fraction of the path)", default: "1" },
+    Input::Expr { key: "diameter", label: "Section Size", default: "5.08 mm" },
+    Input::Check { key: "hollow", label: "Hollow" },
+    Input::Expr { key: "wall", label: "Section Thickness", default: "0.5 mm" },
     Input::Choice { key: "operation", label: "Operation", options: OPS },
   ],
   picks_model: false,
@@ -1386,6 +1483,8 @@ fn text_params(p: &Value) -> Value {
 pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
   let pt = |k: &str| json!({"at": p.get(k).cloned().unwrap_or(json!([0, 0, 0]))});
   match form.cmd {
+    "coil.form" => ("coil", coil_params(&p)),
+    "pipe.form" => ("pipe", pipe_params(&p)),
     "plane.points" => ("plane", json!({"method": "three_points", "a": pt("a"), "b": pt("b"), "c": pt("c")})),
     "axis.points" => ("axis", json!({"method": "two_points", "a": pt("a"), "b": pt("b")})),
     "point.vertex" => (
@@ -2744,6 +2843,8 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
     ("sketch.spun_profile.form", "tolerance") => {
       Some("The outline is drawn exactly; a tolerance isn't in FissionOxide yet")
     }
+    ("coil.form", "angle") => Some("Tapered coils aren't in FissionOxide yet"),
+    ("pipe.form", "distance2") => Some("A pipe runs from its path's start in FissionOxide"),
     ("sketch.isoparametric_curve", "curve" | "associative") => {
       Some("Isoparametric curves aren't in FissionOxide yet: the kernel can't evaluate a face's iso-curves")
     }
@@ -2860,3 +2961,56 @@ pub static COLLECT_FLAT: Form = Form {
   ],
   picks_model: false,
 };
+
+/// The `coil` command for Coil's rows: the Type's two values make the height and pitch, the
+/// Rotation the hand (counterclockwise is left-handed) and the Section Position moves the
+/// section's centre inside or outside the drawn diameter.
+fn coil_params(p: &Value) -> Value {
+  let text = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
+  let mut q = Map::new();
+  for k in ["plane", "at", "section", "section_size", "operation"] {
+    if let Some(v) = p.get(k) {
+      q.insert(k.into(), v.clone());
+    }
+  }
+  let (d, size) = (text("diameter"), text("section_size"));
+  let diameter = match p.get("section_position").and_then(Value::as_str) {
+    Some("inside") => format!("({d}) - ({size})"),
+    Some("outside") => format!("({d}) + ({size})"),
+    _ => d,
+  };
+  q.insert("diameter".into(), json!(diameter));
+  let (h, n, pitch) = (text("height"), text("revolutions"), text("pitch"));
+  match p.get("type").and_then(Value::as_str).unwrap_or("revolution_height") {
+    "revolution_height" => {
+      q.insert("height".into(), json!(h));
+      q.insert("pitch".into(), json!(format!("({h}) / ({n})")));
+    }
+    "height_pitch" => {
+      q.insert("height".into(), json!(h));
+      q.insert("pitch".into(), json!(pitch));
+    }
+    _ => {
+      q.insert("revolutions".into(), json!(n));
+      q.insert("pitch".into(), json!(pitch));
+    }
+  }
+  q.insert("left".into(), json!(p.get("rotation").and_then(Value::as_str) == Some("ccw")));
+  Value::Object(q)
+}
+
+/// The `pipe` command for Pipe's rows: the wall only when Hollow is ticked.
+fn pipe_params(p: &Value) -> Value {
+  let mut q = Map::new();
+  for k in ["path", "path_curves", "section", "diameter", "distance", "operation"] {
+    if let Some(v) = p.get(k) {
+      q.insert(k.into(), v.clone());
+    }
+  }
+  if p.get("hollow").and_then(Value::as_bool) == Some(true)
+    && let Some(w) = p.get("wall")
+  {
+    q.insert("wall".into(), w.clone());
+  }
+  Value::Object(q)
+}

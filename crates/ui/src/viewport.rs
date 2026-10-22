@@ -454,8 +454,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if !consumed && let Some(plane) = hot_plane {
     consumed = true;
     if resp.clicked() {
-      app.cancel_dialog();
-      app.create_sketch(plane);
+      match app.dialog.as_mut() {
+        // a primitive's base is drawn on the plane
+        Some(d) if d.picks_plane() => d.place_on(&app.s, plane),
+        _ => {
+          app.cancel_dialog();
+          app.create_sketch(plane);
+        }
+      }
     }
   }
   // a click on a visible origin plane, axis or point selects it (again: clears it), as in Fusion
@@ -467,6 +473,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
   let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
+  consumed |= !consumed && crate::dialogs::place_overlay(app, &resp, &painter, &project, &ray, step);
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= crate::form_ui::overlay(app, &resp, &painter, &ctx, &project, &ray);
   consumed |= crate::handles::show(app, &resp, &painter, &ctx, &project, &ray, step);
@@ -4714,7 +4721,8 @@ struct PlanePick {
 /// visible point, axes and planes are drawn and picked by [`crate::origin`], and the one under
 /// the cursor is noted here (`App::hover_origin`, winning over the face highlight too).
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
-  let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane);
+  // Create Sketch, and Box, Cylinder, Sphere, Torus and Coil before their base is drawn
+  let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane());
   app.hover_origin = None;
   if !picking {
     if app.dialog.is_none()
