@@ -17,17 +17,24 @@ use crate::App;
 use crate::dialogs::Kind;
 use crate::origin::{Look, PLANE_HOVER, PLANE_PLAIN, PLANE_SELECTED, RowHover};
 
-/// The design's construction planes, in timeline order with their names: committed ones only
-/// (not the plane an open Offset Plane is previewing, which joins the browser on OK).
-pub(crate) fn planes(app: &App) -> Vec<(FeatureId, String)> {
-  let preview = app.dialog.as_ref().and_then(|d| d.previewed_plane());
+/// The Construction folder's rows: the design's construction planes, axes and points in timeline
+/// order with their names and whether each is a plane; committed ones only (not what an open
+/// Offset Plane or CONSTRUCT method dialog is previewing, which joins the browser on OK).
+pub(crate) fn rows(app: &App) -> Vec<(FeatureId, String, bool)> {
+  let preview = app.dialog.as_ref().and_then(|d| d.previewed_plane().or_else(|| d.previewed_construction(&app.s)));
   app
     .s
     .design
     .features
     .iter()
-    .filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. }) && Some(f.id) != preview)
-    .map(|f| (f.id, f.name.clone()))
+    .filter(|f| Some(f.id) != preview)
+    .filter_map(|f| match f.kind {
+      FeatureKind::ConstructionPlane { .. } | FeatureKind::PlaneBy { .. } => Some((f.id, f.name.clone(), true)),
+      FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } => {
+        Some((f.id, f.name.clone(), false))
+      }
+      _ => None,
+    })
     .collect()
 }
 

@@ -180,6 +180,12 @@ pub(crate) fn picked(app: &App) -> Option<OriginItem> {
 
 /// Selects the item (clearing the model's selection), or clears it when it is the one picked.
 pub(crate) fn pick(app: &mut App, item: OriginItem) {
+  // a CONSTRUCT dialog takes it as a pick
+  if let Some(d) = app.dialog.as_mut()
+    && d.take_origin_pick(crate::forms::origin_value(item))
+  {
+    return;
+  }
   let again = picked(app) == Some(item);
   // a dialog with selection rows keeps its picks: the plane or axis goes to its active row
   if !app.dialog.as_ref().is_some_and(|d| d.routes_picks()) {
@@ -291,7 +297,8 @@ pub(crate) enum RowHover {
 /// Hovered in the canvas or by its browser row.
 pub(crate) fn look(app: &App, item: OriginItem) -> Look {
   let dialog_axis = app.dialog.as_ref().and_then(|d| d.origin_axis());
-  if picked(app) == Some(item) || dialog_axis == Some(item) {
+  let form_pick = app.dialog.as_ref().is_some_and(|d| d.origin_picked(&crate::forms::origin_value(item)));
+  if picked(app) == Some(item) || dialog_axis == Some(item) || form_pick {
     Look::Selected
   } else if app.hover_origin == Some(item) || app.row_hover == Some(RowHover::Origin(item)) {
     Look::Hovered

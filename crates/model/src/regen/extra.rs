@@ -998,7 +998,7 @@ impl Ctx<'_> {
 
   fn plane_by(&mut self, def: &mut PlaneDef) -> Result<Plane, String> {
     match def {
-      PlaneDef::Angle { axis, base, angle } => {
+      PlaneDef::Angle { axis, base, angle, offset } => {
         let (o, d) = self.resolve_axis(axis, None)?;
         let d = d.try_normalize().ok_or("the axis has no direction")?;
         let bp = self.resolve_plane(base)?;
@@ -1006,7 +1006,8 @@ impl Ctx<'_> {
         let m = (n0 - d * n0.dot(d)).try_normalize().unwrap_or_else(|| perpendicular(d));
         let a = self.angle(angle)?;
         let n = DQuat::from_axis_angle(d, a) * m;
-        Plane::from_normal(o, n, d).map_err(ke)
+        let off = if offset.trim().is_empty() { 0.0 } else { self.len(offset)? };
+        Plane::from_normal(o + n * off, n, d).map_err(ke)
       }
       PlaneDef::Midplane { a, b } => {
         // the bisector it picks was matched to Fusion with the legacy normals (XZ facing −Y; case

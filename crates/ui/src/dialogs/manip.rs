@@ -391,6 +391,7 @@ impl Dialog {
       // Box, Cylinder, Sphere, Torus and Coil (see [`super::primitive`])
       k if super::primitive::base_of(k).is_some() => self.primitive_handles(s),
       Kind::Section if !self.plane.is_null() => self.section_handles(s),
+      Kind::Form(f) if std::ptr::eq(f, &crate::forms::PLANE_ANGLE) => self.angle_plane_handles(s),
       _ => None,
     }
     .unwrap_or_default()
@@ -464,6 +465,25 @@ impl Dialog {
     Some(vec![Handle::dial(plane.to_world(a), plane.normal(), plane.x * sign, Some(r), value, deg(value))])
   }
 
+  /// Plane at Angle: Fusion's rotation handle on the previewed plane, a dial about the picked
+  /// line from the 0° plane, its head on the plane at the angle.
+  fn angle_plane_handles(&self, s: &Session) -> Option<Vec<Handle>> {
+    if !self.applied {
+      return None;
+    }
+    let f = s.design.features.last()?;
+    if !matches!(&f.kind, FeatureKind::PlaneBy { def: fox_engine::model::construct::PlaneDef::Angle { .. } }) {
+      return None;
+    }
+    let pl = s.model.planes.get(&f.id)?;
+    let Kind::Form(form) = self.kind else { return None };
+    let i = form.inputs.iter().position(|x| x.key() == "angle")?;
+    let a = self.ang(s, self.form.values[i].as_str()?)?;
+    let d = pl.x.try_normalize()?;
+    let zero = DQuat::from_axis_angle(d, -a) * pl.normal().cross(d);
+    Some(vec![Handle::dial(pl.origin, d, zero, None, a, deg(a))])
+  }
+
   /// Takes handle `i`'s dragged value (not yet snapped; lengths snap to `step` world units,
   /// angles to `step` radians) into the dialog's fields.
   pub fn set_handle(&mut self, s: &Session, i: usize, v: f64, step: f64) {
@@ -535,6 +555,10 @@ impl Dialog {
         }
       }
       Kind::PlaneCut => self.set_plane_cut_handle(i, v, step),
+      Kind::Form(f) if std::ptr::eq(f, &crate::forms::PLANE_ANGLE) => {
+        let Some(i) = f.inputs.iter().position(|x| x.key() == "angle") else { return };
+        self.form.values[i] = json!(deg(v_snapped));
+      }
       _ => return,
     }
     self.dirty = true;

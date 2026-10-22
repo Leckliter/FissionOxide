@@ -8,6 +8,9 @@ use serde_json::{Map, Value, json};
 
 use crate::icons::Icon;
 
+mod picks;
+pub(crate) use picks::origin_value;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Form {
   /// Dialog title (upper case, as Fusion's).
@@ -188,6 +191,17 @@ pub enum Input {
     key: &'static str,
     label: &'static str,
   },
+  /// A construction pick, Fusion's "Select" chip in the CONSTRUCT dialogs: the next picked object
+  /// of its kind, from the canvas or the browser (origin items too). `prompt` is the pointer's
+  /// text while it waits; with `near`, the pick's position also goes under that key (the point a
+  /// normal or tangent goes through).
+  Construct {
+    key: &'static str,
+    label: &'static str,
+    what: Pick,
+    prompt: &'static str,
+    near: Option<&'static str>,
+  },
 }
 
 /// What a [`Input::Pick`] row takes.
@@ -204,6 +218,23 @@ pub enum Fits {
   Body,
   /// A face, flat or curved, or a plane (as [`Fits::Plane`]): a surface to replace faces with.
   Surface,
+}
+
+/// What a construction pick ([`Input::Construct`]) takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pick {
+  /// A planar face, a construction plane or an origin plane.
+  Plane,
+  /// An edge, a construction or origin axis, or a sketch line.
+  Line,
+  /// A body vertex, a sketch point, a construction point or the origin point.
+  Point,
+  /// A body edge or a sketch curve.
+  Path,
+  /// A round face or a circular edge (Point At Center's Face/Edge).
+  Round,
+  /// Anything picked besides the inputs before it (Tangent Plane's Reference).
+  Any,
 }
 
 impl Input {
@@ -236,6 +267,7 @@ impl Input {
       | Input::Flip { key, .. }
       | Input::Planes { key }
       | Input::Pick { key, .. }
+      | Input::Construct { key, .. }
       | Input::TrimTool { key, .. }
       | Input::Slider { key, .. } => key,
     }
@@ -270,6 +302,7 @@ impl Input {
       | Input::CheckOn { label, .. }
       | Input::Flip { label, .. }
       | Input::Pick { label, .. }
+      | Input::Construct { label, .. }
       | Input::TrimTool { label, .. }
       | Input::Slider { label, .. } => label,
       Input::Planes { .. } => "",
@@ -308,6 +341,11 @@ pub struct State {
   pub open_edges_for: Value,
   /// The row of the Unstitched Edges table picked (the magnifier zooms to its edge).
   pub open_edge_row: Option<usize>,
+  /// Origin planes, axes and the origin point picked while the form is open, in pick order (they
+  /// are UI-side picks, not in the session's selection).
+  pub origin: Vec<Value>,
+  /// Parameters that follow from the picks (Plane at Angle's 0° plane).
+  derived: Map<String, Value>,
 }
 
 impl State {
@@ -361,6 +399,73 @@ impl State {
       open_edges: Vec::new(),
       open_edges_for: Value::Null,
       open_edge_row: None,
+      origin: Vec::new(),
+      derived: Map::new(),
+    }
+  }
+
+  /// Does the form take construction picks (so origin items picked go to it)?
+  pub fn takes_picks(form: &Form) -> bool {
+    form.inputs.iter().any(|x| matches!(x, Input::Construct { .. }))
+  }
+
+  /// An origin item picked in the canvas or browser: added to the picks, or taken out again
+  /// when it is one of them.
+  pub fn pick_origin(&mut self, v: Value) {
+    match self.origin.iter().position(|x| *x == v) {
+      Some(i) => {
+        self.origin.remove(i);
+      }
+      None => self.origin.push(v),
+    }
+  }
+
+  /// The pointer's prompt while a construction pick is the next thing missing.
+  pub fn chip_prompt(&self, form: &Form) -> Option<&'static str> {
+    let label = self.missing(form)?;
+    form.inputs.iter().zip(&self.values).find_map(|(input, v)| match input {
+      Input::Construct { prompt, label: l, .. } if v.is_null() && *l == label => Some(*prompt),
+      _ => None,
+    })
+  }
+
+  /// Fills the construction picks from the session's picks and the origin items picked.
+  fn sync_picks(&mut self, form: &Form, s: &Session) {
+    if !State::takes_picks(form) {
+      return;
+    }
+    let items = picks::items(s, &self.origin);
+    let mut counts = [0usize; 6];
+    let mut face_at: Option<[f64; 3]> = None;
+    for (i, input) in form.inputs.iter().enumerate() {
+      if let Input::Face { .. } = input {
+        face_at = self.near[i];
+      }
+      let Input::Construct { what, near, .. } = input else { continue };
+      let v = if *what == Pick::Any {
+        // anything not already taken by the inputs before it
+        let taken = &self.values[..i];
+        items.iter().find(|it| !taken.contains(&it.value)).map(|it| it.value.clone())
+      } else {
+        let k = *what as usize;
+        counts[k] += 1;
+        items.iter().filter(|it| it.fits(*what)).nth(counts[k] - 1).map(|it| it.value.clone())
+      };
+      let v = v.unwrap_or(Value::Null);
+      self.near[i] = match (near, &v) {
+        (Some(_), Value::Null) => None,
+        (Some(_), r) if *what == Pick::Any => picks::reference_near(s, face_at, r),
+        (Some(_), p) => picks::position(s, p),
+        _ => None,
+      };
+      self.values[i] = v;
+    }
+    self.derived.clear();
+    if method(form) == Some("angle")
+      && let Some(line) = form.inputs.iter().position(|x| x.key() == "axis").map(|j| &self.values[j])
+      && let Some(base) = picks::angle_base(s, line)
+    {
+      self.derived.insert("plane".into(), base);
     }
   }
 
@@ -557,6 +662,7 @@ impl State {
       _ if crate::mesh_ui::is_mesh_form(form) => crate::mesh_ui::sync(form, self, &before, s),
       _ => {}
     }
+    self.sync_picks(form, s);
     self.values != before
   }
 
@@ -762,6 +868,13 @@ impl State {
       "mesh.reduce" if matches!(key, "tolerance" | "proportion" | "face_count") => {
         get("type").and_then(Value::as_str) == Some(key)
       }
+      // the construction methods' value rows come once the picks are made, as in Fusion
+      "plane" | "point" => match (method(form), key) {
+        (Some("angle"), "extent" | "angle" | "offset" | "resize") => self.picked(form, &["axis"]),
+        (Some("along_path"), "t") => self.picked(form, &["edge"]),
+        (Some("perpendicular"), "distance") => self.picked(form, &["plane"]) && set("extent"),
+        _ => true,
+      },
       "drawing.feature_control" if key.starts_with("lower_") => {
         get("composite").and_then(Value::as_bool).unwrap_or(false)
       }
@@ -931,6 +1044,21 @@ impl State {
             }
           }
         }
+        Input::Construct { .. } => {
+          for x in picks {
+            let sel = match (get(x, "body"), get(x, "face"), get(x, "edge")) {
+              (Some(b), Some(f), _) => Sel::Face { body: BodyId(b), face: f },
+              (Some(b), _, Some(e)) => Sel::Edge { body: BodyId(b), edge: e },
+              _ => match picks::to_sel(x) {
+                Some(sel) => sel,
+                None => continue,
+              },
+            };
+            if !out.contains(&sel) {
+              out.push(sel);
+            }
+          }
+        }
         // Trim's surfaces aren't picks: they are every surface the tool may cut
         Input::Bodies { .. } if form.cmd == TRIM_CMD => {}
         Input::Bodies { .. } => bodies.extend(picks.iter().filter_map(|x| x.as_u64()).map(|b| b as u32)),
@@ -1031,6 +1159,7 @@ impl State {
         | Input::Edges { key, label }
         | Input::Face { key, label, .. }
         | Input::Edge { key, label }
+        | Input::Construct { key, label, .. }
           if empty =>
         {
           return Some((key, label));
@@ -1091,6 +1220,14 @@ impl State {
           }
           p.insert(key.to_string(), v.clone());
         }
+        Input::Construct { what, near, .. } if !v.is_null() => {
+          if let (Some(n), Some(c)) = (near, self.near[i]) {
+            p.insert(n.to_string(), json!(c));
+          }
+          // Point At Center's Face/Edge: a circular edge goes as the edge
+          let key = if *what == Pick::Round && v.get("edge").is_some() { "edge" } else { key };
+          p.insert(key.to_string(), v.clone());
+        }
         Input::Vec3 { .. } => {
           let nums: Vec<f64> = v
             .as_array()
@@ -1103,6 +1240,9 @@ impl State {
           p.insert(key.to_string(), v.clone());
         }
       }
+    }
+    for (k, v) in &self.derived {
+      p.entry(k.clone()).or_insert_with(|| v.clone());
     }
     Value::Object(p)
   }
@@ -1177,6 +1317,11 @@ fn fit_value(fits: Fits, sel: &Sel, s: &Session) -> Option<Value> {
       _ => None,
     },
   }
+}
+
+/// A construction form's method (its fixed `method` parameter).
+fn method(form: &Form) -> Option<&'static str> {
+  form.fixed.iter().find(|(k, _)| *k == "method").map(|(_, v)| *v)
 }
 
 /// Does a drawing form take model points picked on the sheet?
@@ -1512,6 +1657,16 @@ pub static THICKEN: Form = Form {
   picks_model: true,
 };
 
+/// A construction pick's chip (see [`Input::Pick`]).
+const fn pick(key: &'static str, label: &'static str, what: Pick, prompt: &'static str) -> Input {
+  Input::Construct { key, label, what, prompt, near: None }
+}
+
+const PICK_PLANE: &str = "Select a plane or planar face";
+const PICK_LINE: &str = "Select an edge, axis or sketch line";
+const PICK_POINT: &str = "Select a point, vertex or sketch point";
+const PICK_PATH: &str = "Select an edge or sketch curve";
+
 pub static PLANE_ANGLE: Form = Form {
   title: "PLANE AT ANGLE",
   name: "Plane at Angle",
@@ -1520,12 +1675,17 @@ pub static PLANE_ANGLE: Form = Form {
   cmd: "plane",
   fixed: &[("method", "angle")],
   inputs: &[
-    Input::Axis { key: "axis", label: "Line" },
-    Input::Plane { key: "plane", label: "Reference plane" },
-    Input::Expr { key: "angle", label: "Angle", default: "45 deg" },
+    pick("axis", "Edge", Pick::Line, PICK_LINE),
+    Input::Choice { key: "extent", label: "Extent type", options: &[("angle", "Angle"), ("to_object", "To Object")] },
+    Input::Expr { key: "angle", label: "Angle", default: "0.0 deg" },
+    Input::Expr { key: "offset", label: "Offset", default: "0.00 mm" },
+    Input::Icons { key: "resize", label: "Resize", options: RESIZE },
   ],
   picks_model: false,
 };
+
+/// Fusion's Resize toggles on the method planes: the plane sized to the model, or as dragged.
+const RESIZE: &[(&str, Icon, &str)] = &[("auto", Icon::Fit, "Auto size"), ("custom", Icon::Scale, "Custom size")];
 
 pub static MIDPLANE: Form = Form {
   title: "MIDPLANE",
@@ -1534,7 +1694,7 @@ pub static MIDPLANE: Form = Form {
   icon: Icon::Midplane,
   cmd: "plane",
   fixed: &[("method", "midplane")],
-  inputs: &[Input::Plane { key: "a", label: "First plane" }, Input::Plane { key: "b", label: "Second plane" }],
+  inputs: &[pick("a", "Plane 1", Pick::Plane, PICK_PLANE), pick("b", "Plane 2", Pick::Plane, PICK_PLANE)],
   picks_model: false,
 };
 
@@ -1545,7 +1705,36 @@ pub static TANGENT_PLANE: Form = Form {
   icon: Icon::PlaneTangent,
   cmd: "plane",
   fixed: &[("method", "tangent")],
-  inputs: &[Input::Face { key: "face", label: "Face", near: Some("near") }],
+  inputs: &[
+    Input::Face { key: "face", label: "Face", near: Some("near") },
+    Input::Construct {
+      key: "reference",
+      label: "Reference",
+      what: Pick::Any,
+      prompt: "Select a reference object.",
+      near: Some("near"),
+    },
+  ],
+  picks_model: false,
+};
+
+pub static PERPENDICULAR_PLANE: Form = Form {
+  title: "PERPENDICULAR PLANE",
+  name: "Perpendicular Plane",
+  hint: "A plane square to a face or plane, along one of its edges' directions",
+  icon: Icon::PlanePerpendicular,
+  cmd: "plane",
+  fixed: &[("method", "perpendicular")],
+  inputs: &[
+    pick("plane", "Face", Pick::Plane, "Select a face or plane"),
+    Input::Icons {
+      key: "direction",
+      label: "Plane Edge",
+      options: &[("u", Icon::Horizontal, "U direction"), ("v", Icon::Vertical, "V direction")],
+    },
+    Input::Choice { key: "extent", label: "Extent", options: &[("distance", "Distance")] },
+    Input::Expr { key: "distance", label: "Distance", default: "0.00 mm" },
+  ],
   picks_model: false,
 };
 
@@ -1556,7 +1745,7 @@ pub static PLANE_TWO_EDGES: Form = Form {
   icon: Icon::PlaneTwoEdges,
   cmd: "plane",
   fixed: &[("method", "two_edges")],
-  inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
+  inputs: &[pick("a", "Edge 1", Pick::Line, PICK_LINE), pick("b", "Edge 2", Pick::Line, PICK_LINE)],
   picks_model: false,
 };
 
@@ -1565,12 +1754,12 @@ pub static PLANE_THREE_POINTS: Form = Form {
   name: "Plane Through Three Points",
   hint: "A plane through three points",
   icon: Icon::PlaneThreePoints,
-  cmd: "plane.points",
-  fixed: &[],
+  cmd: "plane",
+  fixed: &[("method", "three_points")],
   inputs: &[
-    Input::Vec3 { key: "a", label: "Point 1", default: ["0", "0", "0"] },
-    Input::Vec3 { key: "b", label: "Point 2", default: ["10", "0", "0"] },
-    Input::Vec3 { key: "c", label: "Point 3", default: ["0", "10", "0"] },
+    pick("a", "Point 1", Pick::Point, PICK_POINT),
+    pick("b", "Point 2", Pick::Point, PICK_POINT),
+    pick("c", "Point 3", Pick::Point, PICK_POINT),
   ],
   picks_model: false,
 };
@@ -1583,8 +1772,9 @@ pub static PLANE_ALONG_PATH: Form = Form {
   cmd: "plane",
   fixed: &[("method", "along_path")],
   inputs: &[
-    Input::Edge { key: "edge", label: "Path" },
-    Input::Expr { key: "t", label: "Distance (0–1)", default: "0.5" },
+    pick("edge", "Path", Pick::Path, PICK_PATH),
+    Input::CheckOn { key: "chain", label: "Chaining" },
+    Input::Expr { key: "t", label: "Distance", default: "0.5" },
   ],
   picks_model: false,
 };
@@ -1607,7 +1797,10 @@ pub static AXIS_NORMAL: Form = Form {
   icon: Icon::AxisNormal,
   cmd: "axis",
   fixed: &[("method", "normal")],
-  inputs: &[Input::Face { key: "face", label: "Face", near: Some("near") }],
+  inputs: &[
+    Input::Face { key: "face", label: "Face", near: Some("near") },
+    Input::Construct { key: "point", label: "Point", what: Pick::Point, prompt: PICK_POINT, near: Some("near") },
+  ],
   picks_model: false,
 };
 
@@ -1618,7 +1811,7 @@ pub static AXIS_TWO_PLANES: Form = Form {
   icon: Icon::AxisTwoPlanes,
   cmd: "axis",
   fixed: &[("method", "two_planes")],
-  inputs: &[Input::Plane { key: "a", label: "First plane" }, Input::Plane { key: "b", label: "Second plane" }],
+  inputs: &[pick("a", "Plane 1", Pick::Plane, PICK_PLANE), pick("b", "Plane 2", Pick::Plane, PICK_PLANE)],
   picks_model: false,
 };
 
@@ -1638,26 +1831,20 @@ pub static AXIS_TWO_POINTS: Form = Form {
   name: "Axis Through Two Points",
   hint: "An axis through two points",
   icon: Icon::AxisTwoPoints,
-  cmd: "axis.points",
-  fixed: &[],
-  inputs: &[
-    Input::Vec3 { key: "a", label: "Point 1", default: ["0", "0", "0"] },
-    Input::Vec3 { key: "b", label: "Point 2", default: ["0", "0", "10"] },
-  ],
+  cmd: "axis",
+  fixed: &[("method", "two_points")],
+  inputs: &[pick("a", "Point 1", Pick::Point, PICK_POINT), pick("b", "Point 2", Pick::Point, PICK_POINT)],
   picks_model: false,
 };
 
 pub static POINT_VERTEX: Form = Form {
   title: "POINT AT VERTEX",
   name: "Point at Vertex",
-  hint: "A point at an end of an edge",
+  hint: "A point at a vertex or sketch point",
   icon: Icon::PointVertex,
-  cmd: "point.vertex",
-  fixed: &[],
-  inputs: &[
-    Input::Edge { key: "edge", label: "Edge" },
-    Input::Choice { key: "end", label: "End", options: &[("start", "Start"), ("end", "End")] },
-  ],
+  cmd: "point",
+  fixed: &[("method", "vertex")],
+  inputs: &[pick("point", "Point", Pick::Point, PICK_POINT)],
   picks_model: false,
 };
 
@@ -1668,7 +1855,7 @@ pub static POINT_TWO_EDGES: Form = Form {
   icon: Icon::PointTwoEdges,
   cmd: "point",
   fixed: &[("method", "two_edges")],
-  inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
+  inputs: &[pick("a", "Edge 1", Pick::Line, PICK_LINE), pick("b", "Edge 2", Pick::Line, PICK_LINE)],
   picks_model: false,
 };
 
@@ -1680,9 +1867,9 @@ pub static POINT_THREE_PLANES: Form = Form {
   cmd: "point",
   fixed: &[("method", "three_planes")],
   inputs: &[
-    Input::Plane { key: "a", label: "Plane 1" },
-    Input::Plane { key: "b", label: "Plane 2" },
-    Input::Plane { key: "c", label: "Plane 3" },
+    pick("a", "Plane 1", Pick::Plane, PICK_PLANE),
+    pick("b", "Plane 2", Pick::Plane, PICK_PLANE),
+    pick("c", "Plane 3", Pick::Plane, PICK_PLANE),
   ],
   picks_model: false,
 };
@@ -1690,11 +1877,11 @@ pub static POINT_THREE_PLANES: Form = Form {
 pub static POINT_CENTER: Form = Form {
   title: "POINT AT CENTER",
   name: "Point at Center of Circle/Sphere/Torus",
-  hint: "The centre of a round face",
+  hint: "The centre of a round face or a circular edge",
   icon: Icon::PointCenter,
   cmd: "point",
   fixed: &[("method", "center")],
-  inputs: &[Input::Face { key: "face", label: "Face", near: None }],
+  inputs: &[pick("face", "Face/Edge", Pick::Round, "Select a circular edge, sphere or torus")],
   picks_model: false,
 };
 
@@ -1705,7 +1892,7 @@ pub static POINT_EDGE_PLANE: Form = Form {
   icon: Icon::PointEdgePlane,
   cmd: "point",
   fixed: &[("method", "edge_plane")],
-  inputs: &[Input::Edge { key: "edge", label: "Edge" }, Input::Plane { key: "plane", label: "Plane" }],
+  inputs: &[pick("edge", "Edge", Pick::Line, PICK_LINE), pick("plane", "Plane", Pick::Plane, PICK_PLANE)],
   picks_model: false,
 };
 
@@ -1717,8 +1904,9 @@ pub static POINT_ALONG_PATH: Form = Form {
   cmd: "point",
   fixed: &[("method", "along_path")],
   inputs: &[
-    Input::Edge { key: "edge", label: "Path" },
-    Input::Expr { key: "t", label: "Distance (0–1)", default: "0.5" },
+    pick("edge", "Path", Pick::Path, PICK_PATH),
+    Input::CheckOn { key: "chain", label: "Chaining" },
+    Input::Expr { key: "t", label: "Distance", default: "0.5" },
   ],
   picks_model: false,
 };
@@ -2033,19 +2221,12 @@ fn text_params(p: &Value) -> Value {
   })
 }
 
-/// Commands a form runs that need their parameters reshaped first ("plane.points" →
-/// "plane" with point references, …). Returns the engine command and parameters.
+/// Commands a form runs that need their parameters reshaped first (Intersect's Selection
+/// Filter, Text's frame, …). Returns the engine command and parameters.
 pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
-  let pt = |k: &str| json!({"at": p.get(k).cloned().unwrap_or(json!([0, 0, 0]))});
   match form.cmd {
     "coil.form" => ("coil", coil_params(&p)),
     "pipe.form" => ("pipe", pipe_params(&p)),
-    "plane.points" => ("plane", json!({"method": "three_points", "a": pt("a"), "b": pt("b"), "c": pt("c")})),
-    "axis.points" => ("axis", json!({"method": "two_points", "a": pt("a"), "b": pt("b")})),
-    "point.vertex" => (
-      "point",
-      json!({"method": "vertex", "point": {"vertex": p.get("edge").cloned().unwrap_or(Value::Null), "end": p.get("end") == Some(&json!("end"))}}),
-    ),
     "sketch.intersect.form" | "sketch.spun_profile.form" => {
       // the Selection Filter decides what Geometry holds: whole bodies, or just the picked faces
       // (Spun Profile spins their bodies: the engine spins bodies only)
@@ -3502,8 +3683,8 @@ pub static SK_ISOPARAMETRIC: Form = Form {
   picks_model: true,
 };
 
-/// Why one option of a form's icon row is drawn greyed (not pickable): what FissionOxide can't
-/// do yet.
+/// Why one option of a form's icon row or drop-down is drawn greyed (not pickable): what
+/// FissionOxide can't do yet.
 pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static str> {
   match (form.cmd, key, option) {
     ("joint_origin", "mode", "between" | "two_edge") => {
@@ -3512,6 +3693,11 @@ pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static st
     ("mesh.convert", "method", "organic") => {
       Some("Organic conversion isn't in FissionOxide yet: the kernel can't fit smooth surfaces to a mesh")
     }
+    ("plane", "extent", "to_object") if method(form) == Some("angle") => {
+      Some("A plane at angle to an object isn't in FissionOxide yet")
+    }
+    // the plane is drawn at a fixed size on screen, as Offset Plane's
+    ("plane", "resize", "custom") => Some("A custom size isn't in FissionOxide yet"),
     _ => None,
   }
 }

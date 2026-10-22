@@ -294,7 +294,7 @@ const CONSTRUCT: &[E] = &[
   c("Plane at Angle", Icon::PlaneAngle, D(Kind::Form(&forms::PLANE_ANGLE))),
   c("Tangent Plane", Icon::PlaneTangent, D(Kind::Form(&forms::TANGENT_PLANE))),
   c("Midplane", Icon::Midplane, D(Kind::Form(&forms::MIDPLANE))),
-  c("Perpendicular Plane", Icon::PlanePerpendicular, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
+  c("Perpendicular Plane", Icon::PlanePerpendicular, D(Kind::Form(&forms::PERPENDICULAR_PLANE))),
   c("Plane Through Two Edges", Icon::PlaneTwoEdges, D(Kind::Form(&forms::PLANE_TWO_EDGES))),
   c("Plane Through Three Points", Icon::PlaneThreePoints, D(Kind::Form(&forms::PLANE_THREE_POINTS))),
   c("Plane Along Path", Icon::PlaneAlongPath, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
@@ -2022,6 +2022,15 @@ fn menu_tip(resp: egui::Response, scope: Scope, it: &Item) -> egui::Response {
     }
   });
   resp
+}
+
+/// The form a CONSTRUCT entry opens, by its label.
+#[cfg(test)]
+pub(crate) fn construct_form(label: &str) -> Option<&'static crate::forms::Form> {
+  CONSTRUCT.iter().find_map(|e| match e {
+    E::I(Item { label: l, cmd: Some(Cmd::Dialog(Kind::Form(f))), .. }) if *l == label => Some(*f),
+    _ => None,
+  })
 }
 
 #[cfg(test)]

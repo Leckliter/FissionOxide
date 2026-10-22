@@ -50,8 +50,15 @@ pub enum PointRef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PlaneDef {
-  /// Through an axis, turned by `angle` from the plane through the axis closest to `base`.
-  Angle { axis: AxisRef, base: PlaneRef, angle: String },
+  /// Through an axis, turned by `angle` from the plane through the axis closest to `base`, then
+  /// moved `offset` along its normal (Fusion's Offset row).
+  Angle {
+    axis: AxisRef,
+    base: PlaneRef,
+    angle: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    offset: String,
+  },
   /// Halfway between two planes (the bisector when they are not parallel).
   Midplane { a: PlaneRef, b: PlaneRef },
   /// Through three points.
@@ -297,7 +304,13 @@ impl PlaneDef {
 
   pub(crate) fn exprs(&mut self) -> Vec<&mut String> {
     match self {
-      PlaneDef::Angle { angle, .. } => vec![angle],
+      PlaneDef::Angle { angle, offset, .. } => {
+        if offset.trim().is_empty() {
+          vec![angle]
+        } else {
+          vec![angle, offset]
+        }
+      }
       PlaneDef::AlongPath { t, distance, .. } | PlaneDef::AlongCurve { t, distance, .. } => along_exprs(t, distance),
       PlaneDef::Perpendicular { distance, .. } => vec![distance],
       _ => vec![],

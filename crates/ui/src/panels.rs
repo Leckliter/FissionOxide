@@ -1562,7 +1562,10 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       Sel::Body { .. } => Some("tree-bodies"),
       Sel::Feature { feature } => app.s.design.feature(feature).and_then(|f| match f.kind {
         FeatureKind::Sketch { .. } => Some("tree-sketches"),
-        FeatureKind::ConstructionPlane { .. } => Some("tree-construction"),
+        FeatureKind::ConstructionPlane { .. }
+        | FeatureKind::PlaneBy { .. }
+        | FeatureKind::ConstructionAxis { .. }
+        | FeatureKind::ConstructionPoint { .. } => Some("tree-construction"),
         FeatureKind::Joint { .. } => Some("tree-joints"),
         FeatureKind::Canvas { .. } => Some("tree-canvases"),
         _ => None,
@@ -2377,17 +2380,18 @@ fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
   sketch_rows::sketches_section(app, ui);
 }
 
-/// The Construction folder, as Fusion's: it appears once a plane is made (after OK), collapsed,
-/// with an eye that shows or hides every plane in it; each plane's row has its own eye (greyed
-/// while the folder's is off).
+/// The Construction folder, as Fusion's: it appears once a plane, axis or point is made (after
+/// OK), collapsed, with an eye that shows or hides everything in it; each row (planes, axes and
+/// points in timeline order, "Plane1", "Axis1", "Point1") has its own eye, greyed while the
+/// folder's is off.
 fn planes_section(app: &mut App, ui: &mut egui::Ui) {
-  let planes = crate::construction::planes(app);
-  if planes.is_empty() {
+  let items = crate::construction::rows(app);
+  if items.is_empty() {
     return;
   }
   let id = egui::Id::new("tree-construction");
   // its eye waits for the pointer while a plane's own eye is off, as the Bodies folder's
-  let some_hidden = planes.iter().any(|(fid, _)| !crate::construction::eye(app, *fid));
+  let some_hidden = items.iter().any(|(fid, ..)| !crate::construction::eye(app, *fid));
   let eye = folder_eye(ui, app.construction_shown, some_hidden);
   let ev = tree_row(ui, id, 1, Some(false), eye, Icon::Folder, "Construction", false, theme::TEXT);
   if ev.eye {
@@ -2396,29 +2400,25 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
   if !is_open(ui, id, false) {
     return;
   }
-  for (fid, name) in planes {
+  for (fid, name, is_plane) in items {
+    let icon = app.s.design.feature(fid).map_or(Icon::Plane, |f| feature_icon(&f.kind));
+    if !is_plane {
+      construction_row(app, ui, id, fid, &name, icon);
+      continue;
+    }
     let plane = json!({"feature": fid.0});
-    let picked = app.picked_plane.as_ref() == Some(&plane);
+    let picked = app.picked_plane.as_ref() == Some(&plane) || app.s.selection.contains(&Sel::Feature { feature: fid });
     let row = id.with(fid.0);
-    let eye = crate::construction::eye(app, fid);
-    let ev = tree_row(ui, row, 2, None, Some(eye), Icon::Plane, &name, picked, theme::TEXT);
-    if ev.eye {
-      crate::construction::toggle_eye(app, fid);
-    }
-    if let Some(r) = &ev.response
-      && !app.construction_shown
-    {
-      ui.painter().rect_filled(eye_rect(r.rect, 2), 0.0, Color32::from_white_alpha(150));
-    }
+    let ev = construction_tree_row(app, ui, row, fid, icon, &name, picked);
     // double-click sketches on the plane, as on the origin planes; a slow click renames it
     let target = RenameTarget::Feature(fid.0);
-    browser_edit::slow_click(ui, &ev, row, target, &name, picked);
+    browser_edit::slow_click(ui, &ev, row, target, &name, picked && !construct_picking(app));
     if ev.double_clicked {
       // the first click already started it if Create Sketch was waiting for a plane
       if app.s.edit_sketch.is_none() {
         app.create_sketch(plane.clone());
       }
-    } else if ev.clicked && !picked {
+    } else if ev.clicked && (!picked || construct_picking(app)) {
       pick_plane(app, plane.clone());
     }
     browser_edit::slow_click_due(ui, row, app.picked_plane.as_ref() == Some(&plane));
@@ -2441,10 +2441,85 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
   }
 }
 
-/// A click on a plane in the browser or the canvas: while Create Sketch waits for a plane it
-/// starts the sketch there, with Mirror open it is the mirror plane, an open Offset Plane takes
-/// it as its plane, else it selects the plane (Create Sketch then starts on it).
+/// A Construction folder row with its own eye (greyed while the folder's is off).
+fn construction_tree_row(
+  app: &mut App,
+  ui: &mut egui::Ui,
+  row: egui::Id,
+  fid: FeatureId,
+  icon: Icon,
+  name: &str,
+  picked: bool,
+) -> RowEvents {
+  let eye = crate::construction::eye(app, fid);
+  let ev = tree_row(ui, row, 2, None, Some(eye), icon, name, picked, theme::TEXT);
+  if ev.eye {
+    crate::construction::toggle_eye(app, fid);
+  }
+  if let Some(r) = &ev.response
+    && !app.construction_shown
+  {
+    ui.painter().rect_filled(eye_rect(r.rect, 2), 0.0, Color32::from_white_alpha(150));
+  }
+  ev
+}
+
+/// A construction axis's or point's row: a click selects it (or, while a CONSTRUCT dialog is
+/// open, adds it to the dialog's picks), a slow click renames it.
+fn construction_row(app: &mut App, ui: &mut egui::Ui, folder: egui::Id, fid: FeatureId, name: &str, icon: Icon) {
+  let sel = Sel::Feature { feature: fid };
+  let picked = app.s.selection.contains(&sel);
+  let row = folder.with(fid.0);
+  let ev = construction_tree_row(app, ui, row, fid, icon, name, picked);
+  let target = RenameTarget::Feature(fid.0);
+  browser_edit::slow_click(ui, &ev, row, target, name, picked && !construct_picking(app));
+  if ev.clicked {
+    let add = construct_picking(app) || ui.input(|i| i.modifiers.command || i.modifiers.shift);
+    crate::origin::clear(app);
+    toggle_sel(&mut app.s, sel, add);
+  }
+  browser_edit::slow_click_due(ui, row, app.s.selection.contains(&sel));
+  browser_edit::edit_box(app, ui, &ev, row, 2);
+  if let Some(r) = ev.response {
+    reveal_row(app, sel, &r);
+    r.context_menu(|ui| {
+      if ui.button("Rename").clicked() {
+        ui.close();
+        browser_edit::begin(ui, row, target, name);
+      }
+      ui.separator();
+      if ui.button("Delete").clicked() {
+        ui.close();
+        app.run("feature.delete", json!({"feature": fid.0}));
+      }
+    });
+  }
+}
+
+/// Is a CONSTRUCT dialog open, taking the browser's planes, axes and points as picks?
+fn construct_picking(app: &App) -> bool {
+  app.dialog.as_ref().is_some_and(|d| d.takes_construct_picks())
+}
+
+/// A click on a plane in the browser or the canvas: an open CONSTRUCT dialog takes it as a pick,
+/// while Create Sketch waits for a plane it starts the sketch there, with Mirror open it is the
+/// mirror plane, an open Offset Plane takes it as its plane, else it selects the plane (Create
+/// Sketch then starts on it).
 pub(crate) fn pick_plane(app: &mut App, plane: Value) {
+  // a CONSTRUCT dialog's pick: an origin plane in its own picks, a construction plane in the
+  // selection
+  if plane.is_string()
+    && let Some(d) = app.dialog.as_mut()
+    && d.take_origin_pick(plane.clone())
+  {
+    return;
+  }
+  if let Some(f) = plane.get("feature").and_then(Value::as_u64)
+    && construct_picking(app)
+  {
+    toggle_sel(&mut app.s, Sel::Feature { feature: FeatureId(f as u32) }, true);
+    return;
+  }
   if app.dialog.as_ref().is_some_and(|d| d.kind == Kind::PickPlane) {
     app.cancel_dialog();
     app.create_sketch(plane);

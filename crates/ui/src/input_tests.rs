@@ -2553,3 +2553,33 @@ fn a_hovered_dimensions_tooltip_is_dark() {
   });
   assert_eq!(color, Some(theme::TOOLTIP_TITLE));
 }
+
+/// Fusion's Construction folder lists construction planes, axes and points in timeline order
+/// ("Plane1", "Axis1", "Point1"); a click on a point's row selects it, and with a CONSTRUCT
+/// dialog open a click on a plane's row is one of its picks.
+#[test]
+fn the_construction_folder_lists_planes_axes_and_points() {
+  use fox_engine::Sel;
+  use fox_engine::model::FeatureId;
+  let mut h = Harness::new();
+  let id = |v: Option<serde_json::Value>| FeatureId(v.unwrap()["feature"].as_u64().unwrap() as u32);
+  let plane = id(h.app.run("plane", json!({"method": "angle", "axis": "x", "plane": "xy", "angle": "30 deg"})));
+  h.app.run("axis", json!({"method": "two_planes", "a": "xz", "b": "yz"})).unwrap();
+  let point = id(h.app.run("point", json!({"method": "three_planes", "a": "xy", "b": "xz", "c": "yz"})));
+  // the folder comes collapsed: open it
+  h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("tree-construction").with("open"), true));
+  h.frame(vec![]);
+  let at = |h: &mut Harness, t: &str| h.find(vec![], t).unwrap_or_else(|| panic!("no {t} row"));
+  let folder = at(&mut h, "Construction");
+  let (p, a, pt) = (at(&mut h, "Plane1"), at(&mut h, "Axis1"), at(&mut h, "Point1"));
+  assert!(folder.top() < p.top() && p.top() < a.top() && a.top() < pt.top(), "{folder:?} {p:?} {a:?} {pt:?}");
+  h.move_then_click(pt.center());
+  assert_eq!(h.app.s.selection, [Sel::Feature { feature: point }]);
+  h.app.s.selection.clear();
+  h.app.start(crate::dialogs::Kind::Form(&crate::forms::POINT_THREE_PLANES));
+  h.frame(vec![]);
+  let p = at(&mut h, "Plane1");
+  h.move_then_click(p.center());
+  assert_eq!(h.app.s.selection, [Sel::Feature { feature: plane }]);
+  assert!(h.app.picked_plane.is_none(), "a pick, not the browser's plane");
+}

@@ -67,6 +67,8 @@ mod thread;
 pub(crate) use export_dxf::{SaveWindow, save_window};
 pub(crate) use mesh::group_triangle;
 pub(crate) use primitive::overlay as place_overlay;
+#[cfg(test)]
+mod construct_tests;
 
 pub(crate) use section::{KeptSection, shown_section};
 
@@ -1963,6 +1965,38 @@ impl Dialog {
     self.preview(s);
   }
 
+  /// An origin item picked in the canvas or browser: a form with construction picks takes it as
+  /// a pick (true), as Fusion's CONSTRUCT dialogs do, rather than it being selected.
+  pub(crate) fn take_origin_pick(&mut self, v: Value) -> bool {
+    match self.kind {
+      Kind::Form(_) if self.takes_construct_picks() => {
+        self.form.pick_origin(v);
+        true
+      }
+      _ => false,
+    }
+  }
+
+  /// Does this dialog take construction picks (planes, axes and points from the browser)?
+  pub(crate) fn takes_construct_picks(&self) -> bool {
+    matches!(self.kind, Kind::Form(f) if crate::forms::State::takes_picks(f)) && self.editing.is_none()
+  }
+
+  /// The plane, axis or point an open CONSTRUCT method dialog is previewing (the last feature
+  /// while its command is applied).
+  pub(crate) fn previewed_construction(&self, s: &Session) -> Option<FeatureId> {
+    let Kind::Form(f) = self.kind else { return None };
+    if !self.applied || self.editing.is_some() || !matches!(f.cmd, "plane" | "axis" | "point") {
+      return None;
+    }
+    s.design.features.last().map(|f| f.id)
+  }
+
+  /// Is this origin item one of the form's picks (drawn selected)?
+  pub(crate) fn origin_picked(&self, v: &Value) -> bool {
+    matches!(self.kind, Kind::Form(_)) && self.form.origin.contains(v)
+  }
+
   /// Withdraws the current preview (if any) and applies the dialog's command.
   pub fn preview(&mut self, s: &mut Session) {
     self.dirty = false;
@@ -2768,9 +2802,12 @@ impl Dialog {
         Kind::SkScale => {
           "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
         }
-        Kind::Form(f) => {
-          crate::forms::pick_prompt(f).map(String::from).unwrap_or_else(|| sentence(self.missing_input()))
-        }
+        Kind::Form(f) => self
+          .form
+          .chip_prompt(f)
+          .or_else(|| crate::forms::pick_prompt(f))
+          .map(String::from)
+          .unwrap_or_else(|| sentence(self.missing_input())),
         _ => sentence(self.missing_input()),
       });
     }
@@ -3233,7 +3270,7 @@ impl Dialog {
           sel_chip(ui, accent, &text, if faces_mode { faces_picked > 0 } else { n + planes > 0 });
           ui.end_row();
         }
-        Input::Face { label, .. } | Input::Edge { label, .. } => {
+        Input::Face { label, .. } | Input::Edge { label, .. } | Input::Construct { label, .. } => {
           ui.label(*label);
           sel_chip(ui, accent, if v.is_null() { "Select" } else { "1 selected" }, !v.is_null());
           ui.end_row();
@@ -3334,6 +3371,25 @@ impl Dialog {
             if choice::combo(ui, &format!("form-choice-{i}"), options, &mut sel, choice::form_icon) {
               *dirty = true;
             }
+          } else if options.iter().any(|(k, _)| crate::forms::greyed_option(f, input.key(), k).is_some()) {
+            // a drop-down with entries FissionOxide can't do yet: those are greyed, with the reason
+            ui.label(*label);
+            let shown = options.iter().find(|(k, _)| *k == sel).map(|(_, l)| *l).unwrap_or(sel);
+            egui::ComboBox::from_id_salt(("form-choice", i)).selected_text(shown).width(140.0).show_ui(ui, |ui| {
+              for (k, l) in options.iter() {
+                match crate::forms::greyed_option(f, input.key(), k) {
+                  Some(why) => {
+                    ui.add_enabled(false, egui::Button::selectable(false, *l)).on_disabled_hover_text(why);
+                  }
+                  None => {
+                    if ui.selectable_label(sel == *k, *l).clicked() {
+                      sel = k;
+                      *dirty = true;
+                    }
+                  }
+                }
+              }
+            });
             ui.end_row();
           } else {
             Self::choose(ui, label, &format!("form-choice-{i}"), &mut sel, options, dirty);
@@ -6720,20 +6776,23 @@ mod tests {
     run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 10}));
     let b = s.model.bodies[0].id;
     let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    // Midplane between the top face and the XY plane picked in the browser
     let mut d = form(&mut s, &MIDPLANE, vec![Sel::Face { body: b, face: top }], &[]);
+    assert!(!d.ready(), "Plane 2 is still to pick");
+    d.form.pick_origin(json!("xy"));
+    d.form.sync(&MIDPLANE, &s, None);
     apply(&mut s, &mut d);
     assert_eq!(s.model.planes.len(), 1);
+    assert!((s.model.planes.values().next().unwrap().origin.z - 5.0).abs() < 1e-6);
     d.applied = false;
-    let mut d = form(&mut s, &AXIS_TWO_PLANES, vec![], &[("a", json!("xz")), ("b", json!("yz"))]);
-    // the drop-down choices survive a selection sync
-    d.form.chosen = vec![Some(json!("xz")), Some(json!("yz"))];
+    let mut d = form(&mut s, &AXIS_TWO_PLANES, vec![], &[]);
+    d.form.pick_origin(json!("xz"));
+    d.form.pick_origin(json!("yz"));
+    // the origin picks survive a selection sync
     d.form.sync(&AXIS_TWO_PLANES, &s, None);
     apply(&mut s, &mut d);
     let (_, dir) = s.model.axes.values().next().copied().unwrap();
     assert!(dir.z.abs() > 0.999, "{dir:?}");
-    d.applied = false;
-    let mut d = form(&mut s, &PLANE_THREE_POINTS, vec![], &[("c", json!(["0", "0", "10"]))]);
-    apply(&mut s, &mut d);
     d.applied = false;
     let mut d = Dialog::blank(Kind::Scale);
     d.bodies = vec![b.0];

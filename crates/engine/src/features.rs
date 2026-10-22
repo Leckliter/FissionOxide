@@ -518,6 +518,7 @@ fn plane(s: &mut Session, p: &Value) -> CmdResult {
       axis: axis_ref(s, p.get("axis").ok_or(CmdError::new("missing 'axis'"))?)?,
       base: plane_ref(s, p.get("plane").unwrap_or(&json!("xy")))?,
       angle: req_expr(p, "angle")?,
+      offset: opt_expr(p, "offset").unwrap_or_default(),
     },
     "midplane" => PlaneDef::Midplane { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")? },
     "three_points" => PlaneDef::ThreePoints { a: pref(s, p, "a")?, b: pref(s, p, "b")?, c: pref(s, p, "c")? },
@@ -600,7 +601,11 @@ fn point(s: &mut Session, p: &Value) -> CmdResult {
     "three_planes" => {
       PointDef::ThreePlanes { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")?, c: plane_of(s, p, "c")? }
     }
-    "center" => PointDef::Center { face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)? },
+    // a circular edge's centre (Fusion's Face/Edge pick), else a round face's
+    "center" => match p.get("edge") {
+      Some(e) => PointDef::Ref { point: PointRef::Center { edge: edge_ref_of(s, e)? } },
+      None => PointDef::Center { face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)? },
+    },
     "edge_plane" => {
       let e = p.get("edge").ok_or(CmdError::new("missing 'edge' (an edge, sketch line or axis)"))?;
       let plane = plane_of(s, p, "plane")?;

@@ -757,9 +757,9 @@ mod tests {
     let mut app = App::with_session(Session::default());
     app.start(Kind::OffsetPlane);
     assert_eq!(app.s.model.planes.len(), 1, "previewed");
-    assert!(crate::construction::planes(&app).is_empty(), "not in the browser before OK");
+    assert!(crate::construction::rows(&app).is_empty(), "not in the browser before OK");
     app.dialog = None;
-    let planes = crate::construction::planes(&app);
+    let planes = crate::construction::rows(&app);
     assert_eq!(planes.len(), 1);
     let fid = planes[0].0;
     assert!(app.construction_shown, "the folder's eye is on");

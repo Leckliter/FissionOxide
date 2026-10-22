@@ -25,12 +25,13 @@ const fn m(ty: &'static str, name: &'static str, kind: Kind) -> Method {
   Method { ty, name, kind }
 }
 
-/// The methods, in the CONSTRUCT menu's order (Perpendicular Plane is Plane Along Path's form).
+/// The methods, in the CONSTRUCT menu's order.
 pub(crate) const METHODS: &[Method] = &[
   m("plane", "Offset", Kind::OffsetPlane),
   m("plane", "At Angle", Kind::Form(&forms::PLANE_ANGLE)),
   m("plane", "Tangent", Kind::Form(&forms::TANGENT_PLANE)),
   m("plane", "Midplane", Kind::Form(&forms::MIDPLANE)),
+  m("plane", "Perpendicular Plane", Kind::Form(&forms::PERPENDICULAR_PLANE)),
   m("plane", "Through Two Edges", Kind::Form(&forms::PLANE_TWO_EDGES)),
   m("plane", "Through Three Points", Kind::Form(&forms::PLANE_THREE_POINTS)),
   m("plane", "Along Path", Kind::Form(&forms::PLANE_ALONG_PATH)),
@@ -210,7 +211,7 @@ mod tests {
     assert!(method_of(Kind::Extrude).is_none());
     assert_eq!(Kind::Extrude.title(), "EXTRUDE");
     let types: Vec<&str> = METHODS.iter().map(|m| m.ty).collect();
-    assert_eq!(types.iter().filter(|t| **t == "plane").count(), 7);
+    assert_eq!(types.iter().filter(|t| **t == "plane").count(), 8);
     assert_eq!(types.iter().filter(|t| **t == "axis").count(), 5);
     assert_eq!(types.iter().filter(|t| **t == "point").count(), 6);
   }

@@ -1042,3 +1042,31 @@ fn replace_with_primitives_swaps_each_body_for_a_box_or_cylinder() {
   assert!(s.execute("replace_with_primitives", &json!({"bodies": []})).is_err());
   assert!(s.execute("replace_with_primitives", &json!({"bodies": [s.model.bodies[0].id.0], "shape": "cone"})).is_err());
 }
+
+/// Fusion's Plane at Angle Offset row moves the plane along its normal (an older plane, with no
+/// offset, keeps its place); Point At Center takes a circular edge as well as a round face.
+#[test]
+fn angle_plane_offset_and_point_at_a_circular_edges_centre() {
+  let mut s = Session::default();
+  let plane = |s: &Session, v: &Value| s.model.planes[&crate::model::FeatureId(v["feature"].as_u64().unwrap() as u32)];
+  let a = run(&mut s, "plane", json!({"method": "angle", "axis": "x", "plane": "xy", "angle": "90 deg"}));
+  let b =
+    run(&mut s, "plane", json!({"method": "angle", "axis": "x", "plane": "xy", "angle": "90 deg", "offset": "5 mm"}));
+  let (pa, pb) = (plane(&s, &a), plane(&s, &b));
+  assert!(pa.normal().y.abs() > 0.999 && pa.origin.length() < 1e-9, "{pa:?}");
+  assert!(((pb.origin - pa.origin).dot(pb.normal()) - 5.0).abs() < 1e-9, "{pb:?}");
+  let saved = |v: &Value| {
+    let f = crate::model::FeatureId(v["feature"].as_u64().unwrap() as u32);
+    serde_json::to_string(&s.design.feature(f).unwrap().kind).unwrap()
+  };
+  assert!(saved(&b).contains(r#""offset":"5 mm""#), "{}", saved(&b));
+  assert!(!saved(&a).contains("offset"), "no offset written when there is none: {}", saved(&a));
+
+  run(&mut s, "cylinder", json!({"radius": 5, "height": 20}));
+  let b = &s.model.bodies[0];
+  let rim = b.edges().iter().find(|e| e.kind == fox_kernel::CurveKind::Circle && e.center.z > 1.0).unwrap();
+  let (body, edge, centre) = (b.id.0, rim.id, rim.center);
+  let p = run(&mut s, "point", json!({"method": "center", "edge": {"body": body, "edge": edge}}));
+  let q = s.model.points[&crate::model::FeatureId(p["feature"].as_u64().unwrap() as u32)];
+  assert!((q - centre).length() < 1e-9, "{q:?}");
+}

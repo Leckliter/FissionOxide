@@ -1221,9 +1221,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick two parallel or angled planes or faces. Use it as a mirror plane for symmetric parts.",
     ),
     (_, "Perpendicular Plane") => (
-      "Creates a plane square to an edge or path.",
-      "Pick an edge or sketch curve; the plane is placed across it. Use it to sketch a profile for a \
-       sweep.",
+      "Creates a plane perpendicular to a face or plane.",
+      "Pick a planar face or plane, choose which of its edge directions the new plane stands square \
+       to, and set the distance along it.",
     ),
     (_, "Plane Through Two Edges") => (
       "Creates a plane through two straight edges.",
@@ -1247,7 +1247,7 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     ),
     (_, "Axis Perpendicular To Face") => (
       "Creates an axis normal to a face through a point.",
-      "Pick a face at the point the axis should pass through. Use it as a pivot for a revolve or a \
+      "Pick a face, then the point the axis should pass through. Use it as a pivot for a revolve or a \
        circular pattern on a face.",
     ),
     (_, "Axis Through Two Planes") => (
