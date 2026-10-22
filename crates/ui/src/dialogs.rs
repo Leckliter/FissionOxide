@@ -27,6 +27,7 @@ mod modify;
 mod move_copy;
 mod pieces;
 mod press_owner;
+mod rows;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod auto_cut;
@@ -909,7 +910,15 @@ impl Dialog {
       }
       Kind::RectPattern => d.join = false,
       Kind::CircPattern => d.circ_defaults(s),
-      Kind::Combine => d.op = "join",
+      Kind::Combine => {
+        // the first picked body is the target, the others tools; the Tool Bodies row is active
+        // once there is a target, as in Fusion
+        d.op = "join";
+        d.faces.clear();
+        d.edges.clear();
+        d.target = (!d.bodies.is_empty()).then(|| d.bodies.remove(0));
+        d.pick_row = usize::from(d.target.is_some());
+      }
       // Move turns by nothing until asked (the blank dialog's angle is a full turn)
       Kind::Move => {
         d.angle = "0 deg".into();
@@ -967,7 +976,14 @@ impl Dialog {
         }
         d.point = d.bodies.first().and_then(|b| body_centre(s, *b));
       }
-      Kind::SplitBody => d.bodies = sel_only_bodies(s),
+      Kind::SplitBody => {
+        // Body to Split takes one body (the picked one), then Splitting Tool(s) is active; no
+        // tool until one is picked
+        d.bodies = sel_bodies(s).into_iter().take(1).collect();
+        d.faces.clear();
+        d.plane = Value::Null;
+        d.pick_row = usize::from(!d.bodies.is_empty());
+      }
       Kind::Interference => d.flag = true,
       Kind::DriveJoint | Kind::MotionStudy => {
         d.target = joints(s).first().map(|(id, _)| *id);
@@ -1549,20 +1565,13 @@ impl Dialog {
         ("scale", p)
       }
       Kind::SplitBody if self.target.is_some() => {
-        let tool = self.target?;
-        let bodies: Vec<u32> = self.bodies.iter().copied().filter(|b| *b != tool).collect();
-        let mut p = json!({"tool": tool, "remove_tool": self.flag});
-        if !bodies.is_empty() {
-          p["bodies"] = json!(bodies);
-        }
-        ("split_by_body", p)
+        ("split_by_body", json!({"tool": self.target?, "bodies": [self.bodies.first()?]}))
       }
       Kind::SplitBody => {
-        let mut p = json!({"plane": self.plane});
-        if !self.bodies.is_empty() {
-          p["bodies"] = json!(self.bodies);
+        if self.plane.is_null() {
+          return None;
         }
-        ("split", p)
+        ("split", json!({"plane": self.plane, "bodies": [self.bodies.first()?]}))
       }
       Kind::Flange => match self.choice {
         "edge" => (
@@ -1866,10 +1875,10 @@ impl Dialog {
       Kind::Mirror => ("mirror", json!({"plane": self.plane, "bodies": self.bodies, "join": self.join})),
       Kind::RectPattern => ("pattern.rectangular", self.pattern_params()?),
       Kind::CircPattern => ("pattern.circular", self.circ_params()?),
-      Kind::Combine => {
-        let (target, tools) = self.bodies.split_first()?;
-        ("combine", json!({"target": target, "tools": tools, "operation": op, "keep_tools": self.keep_tools}))
-      }
+      Kind::Combine => (
+        "combine",
+        json!({"target": self.target?, "tools": self.bodies, "operation": op, "keep_tools": self.keep_tools}),
+      ),
       Kind::Move => self.move_command()?,
       Kind::RedefinePlane => self.redefine_command()?,
       Kind::ExportDxf => return None,
@@ -2031,7 +2040,8 @@ impl Dialog {
       Kind::Fillet => self.fillet_ready(),
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty() || !self.bodies.is_empty(),
-      Kind::Combine => self.bodies.len() >= 2,
+      Kind::Combine => self.target.is_some() && !self.bodies.is_empty(),
+      Kind::SplitBody => !self.bodies.is_empty() && (self.target.is_some() || !self.plane.is_null()),
       Kind::Mirror if self.choice == "features" => !self.mirror_features.is_empty() && !self.plane.is_null(),
       Kind::Mirror => !self.bodies.is_empty() && !self.plane.is_null(),
       Kind::CircPattern => !self.bodies.is_empty() && self.circ_axis().is_some(),
@@ -2114,8 +2124,8 @@ impl Dialog {
         out.push(Sel::Face { body: BodyId(b), face: i });
       }
     }
-    if self.kind == Kind::Combine {
-      out.extend(self.bodies.iter().map(|b| Sel::Body { body: BodyId(*b) }));
+    if matches!(self.kind, Kind::Combine | Kind::SplitBody) {
+      return self.routed_selection();
     }
     if matches!(self.kind, Kind::Joint | Kind::AsBuiltJoint) {
       out.clear();
@@ -2362,13 +2372,7 @@ impl Dialog {
           self.dirty = !self.picks();
         }
       }
-      Kind::SplitBody => {
-        let b = sel_only_bodies(s);
-        if b != self.bodies {
-          self.bodies = b;
-          self.dirty = true;
-        }
-      }
+      Kind::SplitBody => self.sync_split_body(s),
       Kind::NewComponent => {
         let b = sel_bodies(s);
         if b != self.bodies {
@@ -2418,7 +2422,8 @@ impl Dialog {
       Kind::CircPattern if self.editing.is_none() => self.circ_sync(s),
       Kind::Interference => self.interference_sync(s),
       Kind::Section => self.section_sync(s),
-      Kind::Combine | Kind::Mirror | Kind::CircPattern if !self.applied || !self.picks() => {
+      Kind::Combine if !self.applied => self.sync_combine(s),
+      Kind::Mirror | Kind::CircPattern if !self.applied || !self.picks() => {
         let mut b: Vec<u32> = Vec::new();
         for x in &s.selection {
           let id = match x {
@@ -2448,6 +2453,7 @@ impl Dialog {
     {
       crate::origin::clear(app);
     }
+    self.route_picks(app);
     self.hole_sync(app);
     self.redefine_sync(app);
     if self.kind == Kind::PickPlane
@@ -2700,7 +2706,6 @@ impl Dialog {
         Kind::Loft => "Select profiles or planar faces".into(),
         Kind::Sweep if self.profiles.is_empty() => "Specify a sweep type or select an object to sweep".into(),
         Kind::Sweep => "Select path".into(),
-        Kind::Combine if self.bodies.is_empty() => "Select target body".into(),
         Kind::Mirror if self.choice == "features" && self.mirror_features.is_empty() => {
           "Select features to mirror".into()
         }
@@ -2710,7 +2715,14 @@ impl Dialog {
           "Select solid or surface bodies in the canvas or browser to pattern".into()
         }
         Kind::CircPattern => "Select axis".into(),
-        Kind::Combine => "Select tool bodies".into(),
+        Kind::Combine if self.pick_row == 0 => "Select target body".into(),
+        Kind::Combine => "Select bodies to combine with target body".into(),
+        Kind::SplitBody if self.pick_row == 0 => "Select Body to split".into(),
+        Kind::SplitBody => "Select splitting tool(s)".into(),
+        // a routed form asks for its active row's picks
+        Kind::Form(f) if crate::forms::routed(f) => {
+          sentence(self.form.row_prompt(f).unwrap_or_else(|| self.missing_input()))
+        }
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
         Kind::Draft if self.pick_row == 0 || self.plane.is_null() => "Select pull direction".into(),
         Kind::Draft => "Select faces to draft".into(),
@@ -3022,23 +3034,7 @@ impl Dialog {
         }
         ui.end_row();
       }
-      Kind::Combine => {
-        ui.label("Target");
-        match self.bodies.first() {
-          Some(b) => sel_chip(ui, self.accent(), &app.s.body_name(BodyId(*b)), true),
-          None => sel_chip(ui, self.accent(), "Select", false),
-        };
-        ui.end_row();
-        ui.label("Tools");
-        ui.label(format!("{}", self.bodies.len().saturating_sub(1)));
-        ui.end_row();
-        ui.label("Operation");
-        self.combo(ui, "op", &OPS[1..4], false);
-        ui.end_row();
-        ui.label("");
-        ui.checkbox(&mut self.keep_tools, "Keep tools");
-        ui.end_row();
-      }
+      Kind::Combine => self.combine_fields(ui),
       Kind::Move => self.move_fields(app, ui),
       Kind::Inspect => self.inspect(app, ui),
       // the palettes draw outside the grid (see `show`)
@@ -3332,6 +3328,7 @@ impl Dialog {
         }
         // counted on the tools' chip
         Input::Planes { .. } => {}
+        Input::Pick { label, multi, .. } => self.form_pick_row(app, ui, i, label, *multi),
       }
     }
     if crate::forms::takes_sheet_points(f) {
@@ -3512,38 +3509,7 @@ impl Dialog {
       Kind::Draft => self.draft_rows(ui, dirty),
       Kind::Scale => self.scale_rows(ui, dirty),
       Kind::OffsetFace => self.offset_face_rows(ui, dirty),
-      Kind::SplitBody => {
-        ui.label("Bodies to split");
-        sel_chip(ui, accent, &self.bodies_label(), !self.bodies.is_empty());
-        ui.end_row();
-        ui.label("Splitting tool");
-        let shown = match self.target {
-          Some(b) => app.s.body_name(BodyId(b)),
-          None => self.plane_label.clone(),
-        };
-        let bodies: Vec<(u32, String)> = app.s.model.bodies.iter().map(|b| (b.id.0, app.s.body_name(b.id))).collect();
-        egui::ComboBox::from_id_salt("splittool").selected_text(shown).width(140.0).show_ui(ui, |ui| {
-          for (l, p) in [("XY plane", "xy"), ("XZ plane", "xz"), ("YZ plane", "yz")] {
-            if ui.selectable_label(self.target.is_none() && self.plane_label == l, l).clicked() {
-              self.target = None;
-              self.plane = json!(p);
-              self.plane_label = l.into();
-              *dirty = true;
-            }
-          }
-          ui.separator();
-          for (id, n) in &bodies {
-            if ui.selectable_label(self.target == Some(*id), n).clicked() {
-              self.target = Some(*id);
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-        if self.target.is_some() {
-          Self::check(ui, "Remove the tool body", &mut self.flag, dirty);
-        }
-      }
+      Kind::SplitBody => self.split_body_fields(ui),
       Kind::Flange => {
         let before = self.choice;
         Self::choose(ui, "Type", "flange", &mut self.choice, &FLANGES, dirty);
@@ -6429,6 +6395,7 @@ mod tests {
     apply(&mut s, &mut d);
     d.applied = false;
     let mut d = Dialog::blank(Kind::SplitBody);
+    d.bodies = vec![s.model.bodies[0].id.0];
     d.plane = json!("xz");
     apply(&mut s, &mut d);
     assert_eq!(s.model.bodies.len(), 2);

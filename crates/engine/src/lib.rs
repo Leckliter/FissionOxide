@@ -40,6 +40,7 @@ pub mod properties;
 pub mod rendering;
 pub mod scene;
 mod sheet2;
+mod silhouette;
 pub mod sim;
 mod solid;
 mod step;

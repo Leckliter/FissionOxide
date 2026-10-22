@@ -241,7 +241,7 @@ macro_rules! solid_modify {
       c("Replace Face", Icon::ReplaceFace, D(Kind::Form(&forms::REPLACE_FACE))),
       c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
       c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
-      x("Silhouette Split", Icon::SilhouetteSplit),
+      c("Silhouette Split", Icon::SilhouetteSplit, D(Kind::Form(&forms::SILHOUETTE_SPLIT))),
       E::Sep,
       c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
       c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),

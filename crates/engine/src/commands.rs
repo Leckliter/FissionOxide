@@ -516,6 +516,7 @@ cmds! {
   "sketch.plane" => "Redefine Sketch Plane: put a sketch on another plane or planar face made before it (its curves keep their sketch coordinates); the features after it recompute", "{sketch, plane}";
   "design.type" => "Fusion's design type: part, assembly or hybrid (which toolbar tabs show); no type reads it", "{type?: part|assembly|hybrid}";
   "construction.visible" => "Show or hide a construction plane, axis or point (the browser row's eye, V)", "{feature, visible: bool}";
+  "silhouette_split" => "Silhouette Split: split a body (or its faces) where its outline lies seen along a direction (a plane's normal or an axis)", "{direction: plane | axis | edge, body, operation?: shelled|solid|face}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

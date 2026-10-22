@@ -163,6 +163,33 @@ pub enum Input {
   Planes {
     key: &'static str,
   },
+  /// A selection row that takes picks only while it is the active row (Fusion's blue chip); a
+  /// form with one routes every pick to its active row (see [`State::sync_rows`]). `fits` says
+  /// which picks it takes, `multi` whether it holds more than one (a single row hands the active
+  /// row on to the next once picked), `prompt` is Fusion's cursor prompt while it is empty.
+  Pick {
+    key: &'static str,
+    label: &'static str,
+    fits: Fits,
+    multi: bool,
+    prompt: &'static str,
+  },
+}
+
+/// What a [`Input::Pick`] row takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fits {
+  /// Faces, as `{body, face}`.
+  Faces,
+  /// A planar face or a construction plane (`{body, face}` or `{feature}`), or an origin plane.
+  Plane,
+  /// A plane (as [`Fits::Plane`]), a straight edge (`{body, edge}`), a construction axis
+  /// (`{axis}`) or an origin axis: a direction.
+  Direction,
+  /// Whole bodies, by id (the dialog picks bodies while the row is active).
+  Body,
+  /// A face, flat or curved, or a plane (as [`Fits::Plane`]): a surface to replace faces with.
+  Surface,
 }
 
 impl Input {
@@ -193,7 +220,8 @@ impl Input {
       | Input::Icons { key, .. }
       | Input::CheckOn { key, .. }
       | Input::Flip { key, .. }
-      | Input::Planes { key } => key,
+      | Input::Planes { key }
+      | Input::Pick { key, .. } => key,
     }
   }
 }
@@ -221,6 +249,8 @@ pub struct State {
   /// Editing a feature from the timeline: its picks stay as they are, so the rows that follow
   /// the picks show.
   pub edit: bool,
+  /// The [`Input::Pick`] row the next picks go to (an index into the form's inputs).
+  pub row: usize,
 }
 
 impl State {
@@ -232,6 +262,7 @@ impl State {
         Input::Expr { default, .. } | Input::Text { default, .. } => json!(default),
         Input::Check { .. } | Input::Flip { .. } => json!(false),
         Input::CheckOn { .. } => json!(true),
+        Input::Pick { multi: true, .. } => json!([]),
         Input::Choice { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         // (Pattern on Path is the pattern dialog's last Type)
         Input::Icons { key: "pattern_type", .. } => json!("path"),
@@ -264,6 +295,7 @@ impl State {
       picking_pieces: false,
       text_corner: false,
       edit: false,
+      row: form.inputs.iter().position(|i| matches!(i, Input::Pick { .. })).unwrap_or(0),
     }
   }
 
@@ -296,6 +328,9 @@ impl State {
 
   /// Refills the pick inputs from the selection. Returns whether anything changed.
   pub fn sync(&mut self, form: &Form, s: &Session, last_sketch: Option<FeatureId>) -> bool {
+    if routed(form) {
+      return self.sync_rows(form, s);
+    }
     let before = self.values.clone();
     let faces: Vec<Value> = s
       .selection
@@ -497,6 +532,75 @@ impl State {
           .and_then(|j| self.values.get(j))
           .is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty()))
       })
+  }
+
+  /// A routed form's picks (see [`routed`]): each row keeps the picks still selected, and what
+  /// was picked since goes to the active row when it fits there (a face picked for a body row
+  /// names its body). A single row takes the newest pick and hands the active row on to the
+  /// next row, as Fusion's selection rows do.
+  pub fn sync_rows(&mut self, form: &Form, s: &Session) -> bool {
+    let before = self.values.clone();
+    // (an origin plane or axis is picked outside the model's selection: it stays)
+    let selected = |v: &Value| pick_sel(v).is_none_or(|sel| s.selection.contains(&sel));
+    for (input, v) in form.inputs.iter().zip(self.values.iter_mut()) {
+      let Input::Pick { multi, .. } = input else { continue };
+      if *multi {
+        if let Some(a) = v.as_array_mut() {
+          a.retain(|x| selected(x));
+        }
+      } else if !v.is_null() && !selected(v) {
+        *v = Value::Null;
+      }
+    }
+    let row = self.row;
+    let Some(&Input::Pick { fits, multi, .. }) = form.inputs.get(row) else { return self.values != before };
+    let held = self.selection(form);
+    for sel in s.selection.iter().filter(|x| !held.contains(x)) {
+      let Some(v) = fit_value(fits, sel, s) else { continue };
+      if !multi {
+        self.values[row] = v;
+      } else if let Some(a) = self.values[row].as_array_mut()
+        && !a.contains(&v)
+      {
+        a.push(v);
+      }
+    }
+    if !multi && !self.values[row].is_null() && self.values[row] != before[row] {
+      self.row = (row + 1..form.inputs.len()).find(|&j| matches!(form.inputs[j], Input::Pick { .. })).unwrap_or(row);
+    }
+    self.values != before
+  }
+
+  /// What a click on the model picks while the form is open: whole bodies for a body row,
+  /// faces and edges otherwise (None: the form leaves the priority alone).
+  pub fn row_priority(&self, form: &Form) -> Option<crate::select::Priority> {
+    match form.inputs.get(self.row) {
+      Some(Input::Pick { fits: Fits::Body, .. }) => Some(crate::select::Priority::Body),
+      Some(Input::Pick { .. }) => Some(crate::select::Priority::Face),
+      _ => None,
+    }
+  }
+
+  /// Fusion's cursor prompt for the active [`Input::Pick`] row.
+  pub fn row_prompt(&self, form: &Form) -> Option<&'static str> {
+    match form.inputs.get(self.row) {
+      Some(Input::Pick { prompt, .. }) => Some(prompt),
+      _ => None,
+    }
+  }
+
+  /// An origin plane or axis picked in the canvas: the active row takes it if it fits.
+  pub fn origin_pick(&mut self, form: &Form, plane: Option<&'static str>, axis: Option<&'static str>) -> bool {
+    let row = self.row;
+    let v = match form.inputs.get(row) {
+      Some(Input::Pick { fits: Fits::Plane | Fits::Surface, .. }) => plane,
+      Some(Input::Pick { fits: Fits::Direction, .. }) => plane.or(axis),
+      _ => None,
+    };
+    let Some(v) = v.map(|v| json!(v)).filter(|v| *v != self.values[row]) else { return false };
+    self.values[row] = v;
+    self.row = (row + 1..form.inputs.len()).find(|&j| matches!(form.inputs[j], Input::Pick { .. })).unwrap_or(row);
+    true
   }
 
   /// Does input `i` count? Some only do when another is set: a composite frame's lower tier,
@@ -718,6 +822,13 @@ impl State {
             }
           }
         }
+        Input::Pick { .. } => {
+          for x in picks {
+            if let Some(sel) = pick_sel(x).filter(|sel| !out.contains(sel)) {
+              out.push(sel);
+            }
+          }
+        }
         Input::Bodies { .. } => bodies.extend(picks.iter().filter_map(|x| x.as_u64()).map(|b| b as u32)),
         Input::Curves { .. } => curves.extend(picks.iter().filter_map(|x| x.as_u64()).map(|c| c as u32)),
         Input::Sketch { .. } if sketch.is_none() => sketch = v.as_u64().map(|f| FeatureId(f as u32)),
@@ -798,6 +909,7 @@ impl State {
         Input::Curves { label, key } | Input::Profiles { label, key } if empty && required(form, key) => {
           return Some(label);
         }
+        Input::Pick { prompt, .. } if empty => return Some(prompt),
         Input::DrawingView { label, .. } | Input::Component { label, .. } if empty => return Some(label),
         // picking pieces: nothing to preview until one is clicked
         Input::Pieces { label, .. } if self.picking_pieces && empty => return Some(label),
@@ -877,6 +989,57 @@ impl State {
         _ => {}
       }
     }
+  }
+}
+
+/// Does the form route its picks by an active row (it has [`Input::Pick`] rows)?
+pub fn routed(form: &Form) -> bool {
+  form.inputs.iter().any(|i| matches!(i, Input::Pick { .. }))
+}
+
+/// The selection a [`Input::Pick`] value stands for (None for an origin plane or axis).
+fn pick_sel(v: &Value) -> Option<Sel> {
+  let get = |k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
+  if let Some(b) = v.as_u64() {
+    return Some(Sel::Body { body: BodyId(b as u32) });
+  }
+  if let Some(f) = get("feature").or(get("axis")) {
+    return Some(Sel::Feature { feature: FeatureId(f) });
+  }
+  let body = BodyId(get("body")?);
+  match (get("face"), get("edge")) {
+    (Some(face), _) => Some(Sel::Face { body, face }),
+    (_, Some(edge)) => Some(Sel::Edge { body, edge }),
+    _ => None,
+  }
+}
+
+/// The value a pick gives a row that takes `fits`, if it fits.
+fn fit_value(fits: Fits, sel: &Sel, s: &Session) -> Option<Value> {
+  let plane = || match *sel {
+    Sel::Face { body, face } if planar(s, body, face) => Some(json!({"body": body.0, "face": face})),
+    Sel::Feature { feature } if s.model.planes.contains_key(&feature) => Some(json!({"feature": feature.0})),
+    _ => None,
+  };
+  match fits {
+    Fits::Faces => match *sel {
+      Sel::Face { body, face } => Some(json!({"body": body.0, "face": face})),
+      _ => None,
+    },
+    Fits::Plane => plane(),
+    Fits::Surface => plane().or_else(|| fit_value(Fits::Faces, sel, s)),
+    Fits::Direction => plane().or_else(|| match *sel {
+      Sel::Edge { body, edge } => {
+        let e = s.model.body(body)?.edges().iter().find(|e| e.id == edge)?;
+        (e.kind == fox_engine::kernel::CurveKind::Line).then(|| json!({"body": body.0, "edge": edge}))
+      }
+      Sel::Feature { feature } if s.model.axes.contains_key(&feature) => Some(json!({"axis": feature.0})),
+      _ => None,
+    }),
+    Fits::Body => match *sel {
+      Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } => Some(json!(body.0)),
+      _ => None,
+    },
   }
 }
 
@@ -1076,11 +1239,55 @@ pub static SPLIT_FACE: Form = Form {
   cmd: "split_face",
   fixed: &[],
   inputs: &[
-    Input::Faces { key: "faces", label: "Faces to split" },
-    Input::Plane { key: "tool", label: "Splitting tool" },
+    Input::Pick {
+      key: "faces",
+      label: "Faces to Split",
+      fits: Fits::Faces,
+      multi: true,
+      prompt: "Select Face to split",
+    },
+    Input::Pick {
+      key: "tool",
+      label: "Splitting Tool(s)",
+      fits: Fits::Plane,
+      multi: false,
+      prompt: "Select splitting tool(s)",
+    },
+    Input::CheckOn { key: "chain", label: "Chain Selection" },
+    Input::Choice { key: "split_type", label: "Split Type", options: SPLIT_TYPES },
+    Input::CheckOn { key: "extend", label: "Extend Splitting Tool" },
   ],
   picks_model: true,
 };
+
+pub static SILHOUETTE_SPLIT: Form = Form {
+  title: "SILHOUETTE SPLIT",
+  name: "Silhouette Split",
+  hint: "Split a body where its outline lies, seen along a direction",
+  icon: Icon::SilhouetteSplit,
+  cmd: "silhouette_split",
+  fixed: &[],
+  inputs: &[
+    Input::Pick {
+      key: "direction",
+      label: "View Direction",
+      fits: Fits::Direction,
+      multi: false,
+      prompt: "Select plane or axis for the pull direction",
+    },
+    Input::Pick { key: "body", label: "Target Body", fits: Fits::Body, multi: false, prompt: "Select target body" },
+    Input::Choice {
+      key: "operation",
+      label: "Operation",
+      options: &[("shelled", "Split Shelled Body"), ("face", "Split Face"), ("solid", "Split Solid Body")],
+    },
+  ],
+  picks_model: true,
+};
+
+/// Split Face's Split Type, as Fusion lists it (the engine splits with the surface).
+const SPLIT_TYPES: &[(&str, &str)] =
+  &[("surface", "Split with Surface"), ("vector", "Along Vector"), ("closest", "Closest Point")];
 
 pub static REMOVE_FACES: Form = Form {
   title: "REMOVE FACES",
@@ -2518,9 +2725,22 @@ pub static REPLACE_FACE: Form = Form {
   cmd: "replace_face",
   fixed: &[],
   inputs: &[
-    Input::Faces { key: "faces", label: "Source faces" },
-    Input::FaceOther { key: "target", label: "Target face" },
-    Input::PlaneOpt { key: "plane", label: "Or a plane" },
+    Input::Pick {
+      key: "faces",
+      label: "Source Faces",
+      fits: Fits::Faces,
+      multi: true,
+      prompt: "Select faces to replace",
+    },
+    Input::Check { key: "tangent_chain", label: "Tangent Chain" },
+    // (a face, or a plane: the engine takes one target)
+    Input::Pick {
+      key: "target",
+      label: "Target Faces",
+      fits: Fits::Surface,
+      multi: false,
+      prompt: "Select target faces",
+    },
   ],
   picks_model: true,
 };
@@ -3097,6 +3317,8 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
     }
     ("coil.form", "angle") => Some("Tapered coils aren't in FissionOxide yet"),
     ("pipe.form", "distance2") => Some("A pipe runs from its path's start in FissionOxide"),
+    ("split_face", "split_type") => Some("FissionOxide splits faces with the surface only"),
+    ("split_face", "extend") => Some("A splitting plane always extends across the faces in FissionOxide"),
     ("sketch.isoparametric_curve", "curve" | "associative") => {
       Some("Isoparametric curves aren't in FissionOxide yet: the kernel can't evaluate a face's iso-curves")
     }

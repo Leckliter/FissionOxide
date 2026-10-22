@@ -164,10 +164,17 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       add_feature(s, FeatureKind::Scale { bodies: body_sel(p), center, factor, factors })
     })(),
     "split_face" => (|| {
-      let faces = faces(s, p)?;
+      // Fusion's Chain Selection: faces that continue the picked ones smoothly split too
+      let faces = if p.get("chain").and_then(Value::as_bool).unwrap_or(false) {
+        let picked = p.get("faces").and_then(Value::as_array).cloned().unwrap_or_default();
+        faces(s, &json!({"faces": crate::solid::tangent_faces(s, picked)}))?
+      } else {
+        faces(s, p)?
+      };
       let tool = plane_ref(s, p.get("tool").or(p.get("plane")).ok_or(CmdError::new("missing 'tool' (a plane)"))?)?;
       add_feature(s, FeatureKind::SplitFace { faces, tool })
     })(),
+    "silhouette_split" => crate::silhouette::split(s, p),
     "remove_faces" => (|| {
       let faces = faces(s, p)?;
       add_feature(s, FeatureKind::RemoveFaces { faces })

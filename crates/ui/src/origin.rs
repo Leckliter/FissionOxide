@@ -181,7 +181,10 @@ pub(crate) fn picked(app: &App) -> Option<OriginItem> {
 /// Selects the item (clearing the model's selection), or clears it when it is the one picked.
 pub(crate) fn pick(app: &mut App, item: OriginItem) {
   let again = picked(app) == Some(item);
-  app.s.selection.clear();
+  // a dialog with selection rows keeps its picks: the plane or axis goes to its active row
+  if !app.dialog.as_ref().is_some_and(|d| d.routes_picks()) {
+    app.s.selection.clear();
+  }
   clear(app);
   if !again {
     match item.sketch_plane() {
