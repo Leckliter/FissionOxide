@@ -1659,3 +1659,41 @@ fn the_sketch_palette_has_no_footer_unless_preferred() {
   let texts = h.frame_texts(1.0 / 60.0, vec![]);
   assert!(dof(&texts), "{texts:?}");
 }
+
+/// The Sketches folder and each sketch row carry an eye: the row's eye hides the sketch and
+/// leaves it selected, the folder's hides every sketch; hovering a sketch row lights it in the
+/// canvas with no tooltip and no status text.
+#[test]
+fn sketch_rows_have_eyes_and_hover_quietly() {
+  let mut h = Harness::new();
+  h.app.create_sketch(json!("xy"));
+  let sk = h.app.s.edit_sketch.expect("sketching");
+  h.app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 5]}));
+  h.app.finish_sketch();
+  h.app.browser_sketches = Some(true);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("browser"))).expect("the browser is shown");
+  let row = |i: f32| area.min.y + 30.0 + 25.0 * i + 12.5;
+  // root, Document Settings, Units, Part Design, Named Views, Origin, then Sketches and Sketch1
+  let name = egui::pos2(area.min.x + 8.0 + 32.0 + 44.0 + 30.0, row(7.0));
+  h.move_then_click(name);
+  assert_eq!(h.app.s.selection, vec![fox_engine::Sel::Feature { feature: sk }], "the row selects the sketch");
+  h.frame(vec![Event::PointerMoved(name)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.ctx_menu.peek_sketches, vec![sk], "hovering lights the sketch");
+  assert_eq!(h.app.ctx_menu.peek_label, None, "and names it nowhere");
+  let eye = egui::pos2(area.min.x + 8.0 + 32.0 + 24.0, row(7.0));
+  h.move_then_click(eye);
+  assert!(!fox_engine::scene::sketch_visible(&h.app.s, sk), "the row's eye hides the sketch");
+  assert_eq!(h.app.s.selection, vec![fox_engine::Sel::Feature { feature: sk }], "and keeps it selected");
+  h.move_then_click(eye);
+  assert!(fox_engine::scene::sketch_visible(&h.app.s, sk));
+  let folder_eye = egui::pos2(area.min.x + 8.0 + 16.0 + 24.0, row(6.0));
+  h.move_then_click(folder_eye);
+  assert!(h.app.sketch_rows.folder_hidden, "the folder's eye hides the sketches");
+  assert!(!crate::panels::sketch_drawn(&h.app, sk));
+  h.move_then_click(folder_eye);
+  assert!(crate::panels::sketch_drawn(&h.app, sk));
+}

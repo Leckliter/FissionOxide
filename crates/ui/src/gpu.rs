@@ -260,6 +260,7 @@ mod tests {
       visible: Vec::new(),
       profiles_of: Vec::new(),
       hidden_profiles: Vec::new(),
+      sketch_rows: Default::default(),
       view: serde_json::json!({}),
       vertices: false,
       peek: Vec::new(),

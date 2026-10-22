@@ -768,11 +768,14 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     // the image by `crate::origin`, so the scene draws none of its own
     hide_origin: true,
     origin_axis_len: Some(origin_plane_half_size(app) * ORIGIN_AXIS_REACH),
-    hide_sketches: !vis.sketches || analysis.hide_sketches,
+    // the Sketches folder's eye off draws no sketch but the one being edited
+    hide_sketches: !vis.sketches || analysis.hide_sketches || app.sketch_rows.folder_hidden,
     hide_construction: !vis.construction,
     grid_step: app.grid.step(),
     show_profiles_of: profiles_of,
     hide_profiles_of: app.hidden_profiles.clone(),
+    hide_projected_of: app.sketch_rows.hidden_projected.clone(),
+    hide_construction_of: app.sketch_rows.hidden_construction.clone(),
     show_vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none() && vis.bodies,
     peek,
     peek_faces: app.ctx_menu.peek_faces.clone(),
@@ -820,6 +823,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of,
     hidden_profiles: app.hidden_profiles.clone(),
+    sketch_rows: app.sketch_rows.clone(),
     view: view_params(app),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().chain(&crate::select::hover_bodies(app)).map(|b| b.0).collect(),
@@ -2846,7 +2850,7 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
   let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
   let font = egui::FontId::proportional(12.0);
   for sk in &app.shown_dims {
-    if app.s.edit_sketch == Some(*sk) || !fox_engine::scene::sketch_visible(&app.s, *sk) {
+    if app.s.edit_sketch == Some(*sk) || !crate::panels::sketch_drawn(app, *sk) {
       continue;
     }
     let Some(r) = app.s.model.sketches.get(sk) else { continue };

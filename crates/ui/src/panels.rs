@@ -1431,7 +1431,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     marking::peek(app, Vec::new(), "Document Settings".into());
   }
   if is_open(ui, ds, true) {
-    let label = format!("Units: {}", app.s.design.units.symbol());
+    let label = crate::units::row_label(app.s.design.units);
     let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, false, theme::TEXT);
     if let Some(r) = &ev.response {
       crate::units::settings_row(app, ui, r, 2);
@@ -2123,6 +2123,12 @@ pub(crate) enum RowCmd {
   ShowHidePlanes,
   ShowHideAxes,
   ChangeUnits,
+  // the sketch rows and the Sketches folder (see sketch_rows)
+  Extrude,
+  SelectSketchPlane,
+  ProjectedVisibility,
+  ConstructionVisibility,
+  FindInTimeline,
 }
 
 /// One row of a browser context menu.
@@ -2130,33 +2136,17 @@ pub(crate) struct RowItem {
   pub icon: Icon,
   pub label: String,
   pub cmd: RowCmd,
+  /// The shortcut hint at the right of the row ("E", "Del", "V").
+  pub key: Option<&'static str>,
 }
 
 fn row_item(icon: Icon, label: &str, cmd: RowCmd) -> Option<RowItem> {
-  Some(RowItem { icon, label: label.into(), cmd })
+  Some(RowItem { icon, label: label.into(), cmd, key: None })
 }
 
-/// A sketch row's menu, as Fusion's (`None` is a separator).
-pub(crate) fn sketch_menu(app: &App, fid: FeatureId) -> Vec<Option<RowItem>> {
-  let profiles = !app.hidden_profiles.contains(&fid);
-  let dims = app.shown_dims.contains(&fid);
-  let visible = fox_engine::scene::sketch_visible(&app.s, fid);
-  vec![
-    row_item(Icon::Sketch, "Edit Sketch", RowCmd::EditSketch),
-    row_item(Icon::Plane, "Redefine Sketch Plane", RowCmd::NotYet),
-    row_item(Icon::Section, "Slice Sketch", RowCmd::NotYet),
-    None,
-    row_item(Icon::SketchSmall, if profiles { "Hide Profile" } else { "Show Profile" }, RowCmd::ProfileVisibility),
-    row_item(Icon::Dimension, if dims { "Hide Dimensions" } else { "Show Dimensions" }, RowCmd::DimensionVisibility),
-    row_item(Icon::LookAt, "Look At", RowCmd::LookAt),
-    row_item(Icon::ExportDxf, "Save As DXF", RowCmd::SaveAsDxf),
-    None,
-    row_item(Icon::Params, "Rename", RowCmd::Rename),
-    row_item(Icon::Remove, "Delete", RowCmd::Delete),
-    None,
-    row_item(if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", RowCmd::ShowHide),
-    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
-  ]
+/// A menu row with a shortcut hint, as Fusion's "Extrude  E".
+fn row_key(icon: Icon, label: &str, key: &'static str, cmd: RowCmd) -> Option<RowItem> {
+  Some(RowItem { icon, label: label.into(), cmd, key: Some(key) })
 }
 
 /// An origin plane row's menu ("xy", "xz" or "yz"), as Fusion's.
@@ -2181,55 +2171,15 @@ fn row_menu(ui: &mut egui::Ui, items: &[Option<RowItem>]) -> Option<RowCmd> {
       continue;
     };
     if it.cmd == RowCmd::NotYet {
-      ui.add_enabled_ui(false, |ui| menu_item(ui, it.icon, &it.label, None))
+      ui.add_enabled_ui(false, |ui| menu_item(ui, it.icon, &it.label, it.key))
         .inner
         .on_disabled_hover_text("Not in FissionOxide yet");
-    } else if menu_item(ui, it.icon, &it.label, None).clicked() {
+    } else if menu_item(ui, it.icon, &it.label, it.key).clicked() {
       ui.close();
       picked = Some(it.cmd);
     }
   }
   picked
-}
-
-/// Runs a sketch row's menu command.
-pub(crate) fn run_sketch_cmd(app: &mut App, fid: FeatureId, name: &str, cmd: RowCmd) {
-  let toggle = |v: &mut Vec<FeatureId>| {
-    if let Some(i) = v.iter().position(|f| *f == fid) {
-      v.remove(i);
-    } else {
-      v.push(fid);
-    }
-  };
-  match cmd {
-    RowCmd::EditSketch => app.edit_sketch(fid),
-    RowCmd::ProfileVisibility => toggle(&mut app.hidden_profiles),
-    RowCmd::DimensionVisibility => toggle(&mut app.shown_dims),
-    RowCmd::LookAt => {
-      if let Some(plane) = app.s.model.sketches.get(&fid).map(|r| r.plane) {
-        app.look_at_plane(&plane);
-      }
-    }
-    RowCmd::SaveAsDxf => {
-      let Some(p) = rfd::FileDialog::new().add_filter("DXF", &["dxf"]).set_file_name(format!("{name}.dxf")).save_file()
-      else {
-        return;
-      };
-      if app.run("export", json!({"path": p, "sketch": fid.0})).is_some() {
-        app.status = Some((format!("Saved {name} as {}", p.display()), false));
-      }
-    }
-    RowCmd::FindInWindow => marking::find_in_window(app, &[], Some(fid)),
-    RowCmd::ShowHide => {
-      let visible = fox_engine::scene::sketch_visible(&app.s, fid);
-      app.run("sketch.visible", json!({"sketch": fid.0, "visible": !visible}));
-    }
-    RowCmd::Rename => app.rename = Some((RenameTarget::Feature(fid.0), name.to_string())),
-    RowCmd::Delete => {
-      app.run("feature.delete", json!({"feature": fid.0}));
-    }
-    _ => {}
-  }
 }
 
 /// Runs an origin plane row's menu command.
@@ -2263,72 +2213,7 @@ pub(crate) fn run_origin_plane_cmd(app: &mut App, plane: &str, cmd: RowCmd) {
 }
 
 fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
-  // a sketch made to place a single hole isn't a sketch of the user's: Fusion shows none
-  let placed = crate::dialogs::placement_sketches(&app.s);
-  let sketches: Vec<(FeatureId, String)> = app
-    .s
-    .design
-    .features
-    .iter()
-    .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && !placed.contains(&f.id))
-    .map(|f| (f.id, f.name.clone()))
-    .collect();
-  if sketches.is_empty() {
-    return;
-  }
-  let id = egui::Id::new("tree-sketches");
-  // the folder starts collapsed, opens on the sketch being edited and closes on Finish Sketch
-  if let Some(open) = app.browser_sketches.take() {
-    ui.data_mut(|d| d.insert_temp(id.with("open"), open));
-  }
-  let ev = tree_row(ui, id, 1, Some(false), None, Icon::Folder, "Sketches", false, theme::TEXT);
-  if ev.response.is_some_and(|r| r.hovered()) {
-    marking::peek(app, Vec::new(), "Sketches".into());
-  }
-  if !is_open(ui, id, false) {
-    return;
-  }
-  for (fid, name) in sketches {
-    let editing = app.s.edit_sketch == Some(fid);
-    let selected = editing || app.s.selection.contains(&Sel::Feature { feature: fid });
-    let st = app.s.model.status(fid).cloned().unwrap_or_default();
-    let color = if st.error.is_some() {
-      theme::ERROR
-    } else if st.warning.is_some() {
-      theme::WARNING
-    } else if st.rolled_back {
-      theme::MUTED
-    } else {
-      theme::TEXT
-    };
-    let row = id.with(fid.0);
-    let ev = tree_row(ui, row, 2, None, None, Icon::SketchSmall, &name, selected, color);
-    // double-click edits the sketch, as in Fusion; a slow click renames it
-    let target = RenameTarget::Feature(fid.0);
-    browser_edit::slow_click(ui, &ev, row, target, &name, selected && !editing);
-    if ev.double_clicked {
-      app.edit_sketch(fid);
-    } else if ev.clicked {
-      app.s.selection = vec![Sel::Feature { feature: fid }];
-    }
-    browser_edit::slow_click_due(ui, row, app.s.selection.contains(&Sel::Feature { feature: fid }));
-    browser_edit::edit_box(app, ui, &ev, row, 2);
-    if let Some(r) = ev.response {
-      reveal_row(app, Sel::Feature { feature: fid }, &r);
-      if r.hovered() {
-        marking::peek(app, Vec::new(), name.clone());
-      }
-      r.on_hover_text("Double-click to edit").context_menu(|ui| {
-        let items = sketch_menu(app, fid);
-        match row_menu(ui, &items) {
-          // renamed in place in the browser row
-          Some(RowCmd::Rename) => browser_edit::begin(ui, row, target, &name),
-          Some(cmd) => run_sketch_cmd(app, fid, &name, cmd),
-          None => {}
-        }
-      });
-    }
-  }
+  sketch_rows::sketches_section(app, ui);
 }
 
 fn planes_section(app: &mut App, ui: &mut egui::Ui) {
@@ -3806,9 +3691,11 @@ mod browser_canvas;
 mod browser_config;
 mod browser_edit;
 mod browser_rows;
+mod sketch_rows;
 mod timeline_groups;
 
 pub(crate) use browser_rows::{doc_name, window_title};
+pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};
 
 #[cfg(test)]
 mod row_menu_tests {
@@ -3920,47 +3807,6 @@ mod row_menu_tests {
     app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 5]}));
     app.finish_sketch();
     (app, sk)
-  }
-
-  #[test]
-  fn sketch_row_menu_is_fusions() {
-    let (mut app, sk) = sketched();
-    let l = labels(&sketch_menu(&app, sk));
-    assert_eq!(
-      l,
-      [
-        "Edit Sketch",
-        "Redefine Sketch Plane",
-        "Slice Sketch",
-        "-",
-        "Hide Profile",
-        "Show Dimensions",
-        "Look At",
-        "Save As DXF",
-        "-",
-        "Rename",
-        "Delete",
-        "-",
-        "Show/Hide",
-        "Find in Window",
-      ]
-    );
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ProfileVisibility);
-    assert_eq!(app.hidden_profiles, vec![sk]);
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::DimensionVisibility);
-    assert_eq!(app.shown_dims, vec![sk]);
-    let l = labels(&sketch_menu(&app, sk));
-    assert!(l.contains(&"Show Profile".into()) && l.contains(&"Hide Dimensions".into()), "{l:?}");
-    assert!(fox_engine::scene::sketch_visible(&app.s, sk));
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ShowHide);
-    assert!(!fox_engine::scene::sketch_visible(&app.s, sk));
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ShowHide);
-    assert!(fox_engine::scene::sketch_visible(&app.s, sk));
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::FindInWindow);
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::LookAt);
-    assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "{:?}", app.status);
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::EditSketch);
-    assert_eq!(app.s.edit_sketch, Some(sk));
   }
 
   #[test]

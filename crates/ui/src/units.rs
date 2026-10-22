@@ -57,6 +57,11 @@ pub fn pin(ui: &egui::Ui, r: &mut egui::Response, text: &mut String) {
   }
 }
 
+/// The Units row's label, as Fusion's: the length unit, then the mass unit ("Units: in, ouncemass").
+pub(crate) fn row_label(unit: LengthUnit) -> String {
+  format!("Units: {}, {}", unit.symbol(), unit.mass_symbol())
+}
+
 /// The Units row of Document Settings: hovering shows a pencil that picks the design's unit.
 pub fn settings_row(app: &mut App, ui: &mut egui::Ui, row: &egui::Response, depth: usize) {
   let unit = app.s.design.units;
@@ -64,11 +69,7 @@ pub fn settings_row(app: &mut App, ui: &mut egui::Ui, row: &egui::Response, dept
   let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
   let rect = row.rect;
   let x = rect.min.x + 8.0 + depth as f32 * 16.0 + 44.0;
-  let label_w = ui
-    .painter()
-    .layout_no_wrap(format!("Units: {}", unit.symbol()), egui::FontId::proportional(13.0), theme::TEXT)
-    .size()
-    .x;
+  let label_w = ui.painter().layout_no_wrap(row_label(unit), egui::FontId::proportional(13.0), theme::TEXT).size().x;
   let pr = egui::Rect::from_center_size(pos2(x + label_w + 36.0, rect.center().y), vec2(20.0, 20.0));
   let pencil = ui.interact(pr, egui::Id::new("units-pencil"), egui::Sense::click());
   let hovered = row.hovered() || pencil.hovered() || open;

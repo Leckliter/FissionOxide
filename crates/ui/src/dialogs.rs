@@ -1656,6 +1656,16 @@ impl Dialog {
     self.preview(s);
   }
 
+  /// Puts the dialog on any plane reference (an origin plane's name, `{feature}` for a
+  /// construction plane, `{body, face}` for a planar face) and re-previews (a sketch row's
+  /// Offset Plane, on the sketch's plane).
+  pub(crate) fn use_plane(&mut self, s: &mut Session, plane: Value, label: String) {
+    self.plane = plane;
+    self.plane_label = label;
+    self.refresh_manip(s);
+    self.preview(s);
+  }
+
   /// Withdraws the current preview (if any) and applies the dialog's command.
   pub fn preview(&mut self, s: &mut Session) {
     self.dirty = false;

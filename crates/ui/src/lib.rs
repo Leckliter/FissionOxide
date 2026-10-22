@@ -210,6 +210,9 @@ pub struct App {
   pub(crate) hidden_profiles: Vec<fox_engine::model::FeatureId>,
   /// Sketches whose dimensions show outside Edit Sketch (the browser's Show Dimensions).
   pub(crate) shown_dims: Vec<fox_engine::model::FeatureId>,
+  /// What the browser's Sketches folder and sketch rows hide (the folder's eye, Hide Projected
+  /// and Hide Construction Geometries).
+  pub(crate) sketch_rows: panels::SketchRowState,
   /// The data panel (projects, designs, versions).
   pub data: data_panel::DataPanel,
   /// The drawing open in the Drawing workspace; None = the Design workspace.
@@ -326,6 +329,8 @@ struct RenderKey {
   visible: Vec<(u32, bool)>,
   profiles_of: Vec<fox_engine::model::FeatureId>,
   hidden_profiles: Vec<fox_engine::model::FeatureId>,
+  /// The Sketches folder's eye and the sketches drawn without projected or construction curves.
+  sketch_rows: panels::SketchRowState,
   /// Section and analysis settings.
   view: Value,
   /// Body vertices drawn (the Vertices selection filter).
@@ -487,6 +492,7 @@ impl App {
       pending_export: None,
       hidden_profiles: Vec::new(),
       shown_dims: Vec::new(),
+      sketch_rows: Default::default(),
       data: data_panel::DataPanel::default(),
       sel_priority: select::Priority::Face,
       sel_filter: select::Filters::default(),
