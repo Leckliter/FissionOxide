@@ -1944,16 +1944,15 @@ fn drawings_section(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
-  // bodies a dialog's preview added appear on OK
-  let previewed = app.dialog.as_ref().map(|d| d.preview_bodies(&app.s)).unwrap_or_default();
-  let bodies: Vec<(BodyId, String, bool)> = app
-    .s
-    .model
-    .bodies
-    .iter()
-    .filter(|b| !previewed.contains(&b.id))
-    .map(|b| (b.id, app.s.body_name(b.id), app.s.body_visible(b.id)))
-    .collect();
+  // a dialog's preview leaves the rows alone: bodies it adds appear, and bodies it consumes go,
+  // on OK
+  let rows = app
+    .dialog
+    .as_ref()
+    .and_then(|d| d.browser_bodies(&app.s))
+    .unwrap_or_else(|| app.s.model.bodies.iter().map(|b| (b.id, app.s.body_name(b.id))).collect());
+  let bodies: Vec<(BodyId, String, bool)> =
+    rows.into_iter().map(|(id, name)| (id, name, app.s.body_visible(id))).collect();
   if bodies.is_empty() {
     return;
   }

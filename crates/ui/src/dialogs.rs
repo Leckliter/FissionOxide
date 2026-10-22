@@ -23,6 +23,7 @@ mod move_copy;
 mod pieces;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
+mod body_picks;
 mod copies;
 mod export_dxf;
 #[cfg(test)]
@@ -2305,6 +2306,7 @@ impl Dialog {
 
   /// Draws the dialog. Returns false when it closed.
   pub fn show(&mut self, app: &mut App, ctx: &egui::Context) -> bool {
+    self.body_pick_priority(app);
     self.sync_selection(&app.s);
     // an origin plane or axis picked in the browser: Mirror's plane, Circular Pattern's axis
     if let Some(item) = crate::origin::picked(app)
@@ -2493,6 +2495,10 @@ impl Dialog {
     if cancel {
       self.cancel(&mut app.s);
       keep = false;
+      // Cancel closes with nothing selected, as OK, Escape and the marking menu's Cancel do
+      if !self.kind.reports() {
+        app.s.selection.clear();
+      }
     }
     keep && !self.closed
   }

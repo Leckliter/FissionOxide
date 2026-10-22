@@ -23,11 +23,20 @@ pub(super) struct Live {
   picked: Vec<Was>,
   /// The features before the preview: the ones it adds stay out of the timeline until OK.
   before_features: Vec<FeatureId>,
+  /// The browser's body rows before the preview (id, name): it keeps them until OK.
+  before_rows: Vec<(BodyId, String)>,
 }
 
 impl Default for Live {
   fn default() -> Live {
-    Live { on: true, tried: None, before: Vec::new(), picked: Vec::new(), before_features: Vec::new() }
+    Live {
+      on: true,
+      tried: None,
+      before: Vec::new(),
+      picked: Vec::new(),
+      before_features: Vec::new(),
+      before_rows: Vec::new(),
+    }
   }
 }
 
@@ -116,6 +125,7 @@ impl Dialog {
     self.refresh_manip(s);
     self.live.tried = Some(json!([cmd, params]));
     self.live.before = s.model.bodies.iter().map(|b| b.id).collect();
+    self.live.before_rows = s.model.bodies.iter().map(|b| (b.id, s.body_name(b.id))).collect();
     self.live.picked.clear();
     if keeps_picks(self.kind) && !self.picks_fixed() {
       let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
@@ -178,6 +188,17 @@ impl Dialog {
       return Vec::new();
     }
     s.model.bodies.iter().map(|b| b.id).filter(|b| !self.live.before.contains(b)).collect()
+  }
+
+  /// The browser's body rows while a preview shows: the bodies as they were before it, so a body
+  /// the preview consumes (Combine's tools) keeps its row and one it adds has none until OK, as
+  /// in Fusion. None when no preview shows.
+  pub fn browser_bodies(&self, s: &Session) -> Option<Vec<(BodyId, String)>> {
+    if !self.applied || self.editing.is_some() {
+      return None;
+    }
+    let name = |id: BodyId, was: &str| if s.model.body(id).is_some() { s.body_name(id) } else { was.to_string() };
+    Some(self.live.before_rows.iter().map(|(id, was)| (*id, name(*id, was))).collect())
   }
 
   /// Features the showing preview added, in timeline order (the timeline leaves them out until

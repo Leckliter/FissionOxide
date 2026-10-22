@@ -2166,3 +2166,42 @@ fn escape_clears_a_timeline_pick_and_its_highlight() {
   h.frame(vec![]);
   assert_eq!(h.app.ctx_menu.peek, vec![body]);
 }
+
+/// Fusion's Cancel closes a dialog with nothing selected: Combine's two bodies and Offset Face's
+/// face go back to unselected (no blue, an empty status bar), and Combine's whole-body picking
+/// ends with the dialog.
+#[test]
+fn cancel_leaves_nothing_selected() {
+  use crate::dialogs::Kind;
+  use fox_engine::Sel;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20, "at": [40, 0]})).unwrap();
+  let (b1, b2) = (h.app.s.model.bodies[0].id, h.app.s.model.bodies[1].id);
+  h.app.s.selection.clear();
+  h.app.start(Kind::Combine);
+  h.frame(vec![]);
+  assert_eq!(h.app.sel_priority, crate::select::Priority::Body, "Combine picks whole bodies");
+  h.app.s.selection = vec![Sel::Body { body: b1 }, Sel::Body { body: b2 }];
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!(h.app.s.model.body(b2).is_none(), "the preview consumes the tool body");
+  h.move_then_click(cancel_pos(h.dialog_rect()));
+  assert!(h.app.dialog.is_none(), "Cancel closes the dialog");
+  assert!(h.app.s.selection.is_empty(), "{:?}", h.app.s.selection);
+  assert!(h.app.s.model.body(b2).is_some(), "the preview is withdrawn");
+  assert_eq!(h.app.sel_priority, crate::select::Priority::Face);
+
+  let b = &h.app.s.model.bodies[0];
+  let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  h.app.s.selection = vec![Sel::Face { body: b.id, face: top }];
+  h.app.start(Kind::Form(&crate::forms::OFFSET_FACE));
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!(h.app.dialog.is_some());
+  h.move_then_click(cancel_pos(h.dialog_rect()));
+  assert!(h.app.dialog.is_none());
+  assert!(h.app.s.selection.is_empty(), "{:?}", h.app.s.selection);
+}
