@@ -191,6 +191,9 @@ pub struct App {
   pub(crate) picked_origin: Option<origin::OriginItem>,
   /// The origin item under the pointer in the canvas this frame.
   pub(crate) hover_origin: Option<origin::OriginItem>,
+  /// The status readout's last least distance (mm) between two selected items, kept until the
+  /// model or the pair changes so the kernel isn't asked every frame.
+  pub(crate) readout_distance: std::cell::Cell<Option<panels::PairDistance>>,
   /// The Origin folder's children's own eyes (O, X, Y, Z, XY, XZ, YZ), on by default; a child
   /// shows only when the folder's eye is on too.
   pub(crate) origin_eyes: [bool; 7],
@@ -471,6 +474,7 @@ impl App {
       picked_plane: None,
       picked_origin: None,
       hover_origin: None,
+      readout_distance: std::cell::Cell::new(None),
       origin_eyes: [true; 7],
       origin_shown: false,
       browser_sketches: None,
@@ -1264,9 +1268,11 @@ impl App {
       self.cancel_dialog();
       self.s.selection.clear();
     } else {
-      // a picked origin plane, axis or point clears too; the item stays visible
+      // a picked origin plane, axis or point clears too; the item stays visible; the timeline or
+      // browser row still under the pointer stops lighting its feature's body
       self.s.selection.clear();
       origin::clear(self);
+      marking::hold_peek(self);
     }
     self.dim_edit = None;
   }

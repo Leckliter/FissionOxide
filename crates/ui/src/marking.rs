@@ -46,10 +46,13 @@ enum Sub {
 /// Context-menu state kept between frames.
 #[derive(Default)]
 pub(crate) struct MenuState {
-  /// Bodies drawn highlighted (the browser or timeline row under the pointer) and the name the
-  /// status bar shows for it.
+  /// Bodies drawn highlighted (the browser or timeline row under the pointer) and that row's
+  /// name (the status bar doesn't show it: Fusion reads out only what is selected).
   pub(crate) peek: Vec<BodyId>,
   pub(crate) peek_label: Option<String>,
+  /// Escape dropped the highlight: it stays off until the pointer moves from where it was
+  /// (`Some(None)` until the pointer's place is noted at the end of the frame).
+  peek_held: Option<Option<egui::Pos2>>,
   next_peek: Vec<BodyId>,
   next_label: Option<String>,
   /// Faces and sketches drawn highlighted: what the timeline feature under the pointer made.
@@ -362,8 +365,14 @@ fn set_all_visible(app: &mut App, visible: bool) {
   }
 }
 
-/// Highlights bodies in the viewport, and names them in the status bar, while the pointer is
-/// over a browser or timeline row (call it every frame the row is hovered).
+/// Escape after a pick: the browser or timeline row under the pointer stops highlighting what it
+/// made until the pointer moves, so nothing stays lit, as in Fusion.
+pub(crate) fn hold_peek(app: &mut App) {
+  app.ctx_menu.peek_held = Some(None);
+}
+
+/// Highlights bodies in the viewport while the pointer is over a browser or timeline row (call it
+/// every frame the row is hovered).
 pub(crate) fn peek(app: &mut App, bodies: Vec<BodyId>, label: String) {
   app.ctx_menu.next_peek = bodies;
   app.ctx_menu.next_label = Some(label);
@@ -393,10 +402,19 @@ pub(crate) fn peek_feature(app: &mut App, f: FeatureId, label: String) {
 /// After the panels: takes this frame's hover highlight and notes the last command run.
 pub fn end_frame(app: &mut App, ctx: &egui::Context) {
   let m = &mut app.ctx_menu;
-  let bodies = std::mem::take(&mut m.next_peek);
-  let faces = std::mem::take(&mut m.next_faces);
-  let sketches = std::mem::take(&mut m.next_sketches);
-  let label = m.next_label.take();
+  let mut bodies = std::mem::take(&mut m.next_peek);
+  let mut faces = std::mem::take(&mut m.next_faces);
+  let mut sketches = std::mem::take(&mut m.next_sketches);
+  let mut label = m.next_label.take();
+  if let Some(at) = m.peek_held {
+    let now = ctx.pointer_latest_pos();
+    let at = *m.peek_held.insert(at.or(now));
+    if now.is_some() && now == at {
+      (bodies, faces, sketches, label) = (Vec::new(), Vec::new(), Vec::new(), None);
+    } else {
+      m.peek_held = None;
+    }
+  }
   if m.peek != bodies || m.peek_faces != faces || m.peek_sketches != sketches || m.peek_label != label {
     m.peek = bodies;
     m.peek_faces = faces;
@@ -1294,7 +1312,7 @@ mod tests {
     assert!(app.ctx_menu.peek.is_empty(), "the fillet doesn't tint the whole body");
     assert_eq!(app.ctx_menu.peek_faces.len(), 1, "{:?}", app.ctx_menu.peek_faces);
     assert_eq!(app.ctx_menu.peek_faces[0].0, body);
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("Fillet1"));
+    assert_eq!(panels::selection_text(&app), None, "a hovered icon reads nothing in the status bar");
     // the scene draws that face in the hover colour and the rest in the body's
     let opts = ViewOptions { peek_faces: app.ctx_menu.peek_faces.clone(), ..Default::default() };
     let (sc, _) = SceneBuilder::default().build(&app.s, &opts);
@@ -1378,13 +1396,70 @@ mod tests {
     app.s.design.units = fox_engine::model::LengthUnit::Mm;
     app.s.selection = vec![Sel::Body { body }];
     assert_eq!(panels::selection_text(&app), Some(app.s.body_name(body)));
-    // a hovered timeline or browser row names itself
+    // a hovered timeline or browser row lights its body but reads nothing (ui-status-readouts)
+    app.s.selection.clear();
     peek(&mut app, vec![body], "Box1".into());
     end_frame(&mut app, &egui::Context::default());
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("Box1"));
+    assert_eq!(panels::selection_text(&app), None);
     assert_eq!(app.ctx_menu.peek, vec![body]);
     end_frame(&mut app, &egui::Context::default());
     assert!(app.ctx_menu.peek.is_empty(), "the highlight goes when the pointer leaves");
+  }
+
+  /// ui-status-readouts: two planar faces read their angle, or their distance when parallel; a
+  /// face and an edge (or a vertex) are each counted, face first, with their least distance.
+  #[test]
+  fn status_bar_reads_out_face_pairs_and_mixed_kinds() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let faces: Vec<_> = app.s.model.bodies[0].faces().iter().map(|f| (f.id, f.normal)).collect();
+    let face = |n: [f64; 3]| {
+      let n = fox_engine::kernel::glam::DVec3::from(n);
+      Sel::Face { body, face: faces.iter().find(|f| f.1.dot(n) > 0.99).unwrap().0 }
+    };
+    let (top, bottom, side) = (face([0.0, 0.0, 1.0]), face([0.0, 0.0, -1.0]), face([1.0, 0.0, 0.0]));
+    app.s.selection = vec![top, side];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Faces | Angle : 90.0 deg"));
+    app.s.selection = vec![top, bottom];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Faces | Min Distance : 10.00 mm"));
+    // an edge of the bottom, then Ctrl+click the top: the face is listed first
+    let b = &app.s.model.bodies[0];
+    let low = b.edges().iter().find(|e| e.start.z.abs() < 1e-6 && e.end.z.abs() < 1e-6).unwrap().id;
+    app.s.selection = vec![Sel::Edge { body, edge: low }, top];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face 1 Edge | Min Distance : 10.00 mm"));
+    app.run("design.units", json!({"unit": "in"}));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face 1 Edge | Min Distance : 0.39 in"));
+    app.run("design.units", json!({"unit": "mm"}));
+    // the reading is kept until the model changes
+    assert!(app.readout_distance.get().is_some());
+    // a vertex and a face
+    let corner = Sel::Vertex { body, edge: low, end: false };
+    app.s.selection = vec![top, corner];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face 1 Vertex | Min Distance : 10.00 mm"));
+    // three items read only their number
+    app.s.selection = vec![top, side, Sel::Edge { body, edge: low }];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("Multiple selections | 3"));
+  }
+
+  /// A sketch point and a sketch curve read both kinds, the point first, and how close they come
+  /// at the document precision ("1 Sketch Point 1 Sketch Circle | Min Distance : 0.683 in").
+  #[test]
+  fn status_bar_reads_out_a_sketch_point_and_a_curve() {
+    let mut app = App::with_session(Session::default());
+    app.run("design.units", json!({"unit": "in"}));
+    let sk = app.run("sketch.create", json!({"plane": "xy"})).unwrap()["sketch"].as_u64().unwrap();
+    let sketch = fox_engine::model::FeatureId(sk as u32);
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 20]}));
+    let circle = app.run("sketch.circle", json!({"center": [60, 10], "radius": 5})).unwrap()["curves"][0].clone();
+    let circle = fox_engine::sketch::CurveId(circle.as_u64().unwrap() as u32);
+    let s = app.s.design.sketch(sketch).unwrap();
+    let corner = s.points.iter().find(|p| (p.x - 40.0).abs() < 1e-9 && (p.y - 20.0).abs() < 1e-9).unwrap().id;
+    app.s.selection = vec![Sel::SketchCurve { sketch, curve: circle }, Sel::SketchPoint { sketch, point: corner }];
+    // √(20² + 10²) − 5 = 17.36 mm
+    assert_eq!(
+      panels::selection_text(&app).as_deref(),
+      Some("1 Sketch Point 1 Sketch Circle | Min Distance : 0.683 in")
+    );
   }
 
   /// In a sketch the readout names the curve's kind with its length as Fusion spaces it
@@ -1425,9 +1500,11 @@ mod tests {
     let corner = s.points.iter().find(|p| (p.x - 40.0).abs() < 1e-9 && (p.y - 20.0).abs() < 1e-9).unwrap().id;
     app.s.selection = vec![Sel::SketchPoint { sketch, point: corner }];
     assert_eq!(panels::selection_text(&app).as_deref(), Some("Sketch Point | X: 1.575 Y: 0.787 Z: 0.00 in"));
-    // hovering reads out the same
+    // hovering reads nothing: only the selection reads out, as in Fusion
     app.s.selection.clear();
     app.hover = Some(fox_engine::scene::Pick::SketchCurve { sketch, curve: short });
+    assert_eq!(panels::selection_text(&app), None);
+    app.s.selection = vec![Sel::SketchCurve { sketch, curve: short }];
     assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Sketch Line | Length : 0.787 in"));
   }
 
