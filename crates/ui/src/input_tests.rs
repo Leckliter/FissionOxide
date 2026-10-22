@@ -1697,3 +1697,98 @@ fn sketch_rows_have_eyes_and_hover_quietly() {
   h.move_then_click(folder_eye);
   assert!(crate::panels::sketch_drawn(&h.app, sk));
 }
+
+// ---------------------------------------------------------------- Document Settings and Named Views
+
+/// Where the browser draws row `i` (0 is the root): the header is 26 tall, then 4 of space
+/// and 25 per row.
+fn browser_row(h: &Harness, i: f32) -> Rect {
+  let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("browser"))).expect("the browser is shown");
+  Rect::from_min_size(egui::pos2(area.min.x, area.min.y + 30.0 + 25.0 * i), vec2(270.0, 25.0))
+}
+
+/// Where a depth-2 row's edit pencil sits.
+fn row_pencil_at(row: Rect, label: &str) -> egui::Pos2 {
+  let ctx = egui::Context::default();
+  crate::theme::apply(&ctx);
+  let mut at = egui::Pos2::ZERO;
+  ctx
+    .run_ui(RawInput::default(), |ui| at = crate::doc_dialogs::pencil_rect(ui, row, 2, label).center())
+    .drop_without_applying_deltas();
+  at
+}
+
+#[test]
+fn the_part_design_pencil_opens_convert_and_the_units_row_has_none() {
+  let mut h = Harness::new();
+  // root, Document Settings, Units, Part Design
+  let units = browser_row(&h, 2.0);
+  let spot = row_pencil_at(units, &crate::units::row_label(h.app.s.design.units));
+  h.frame(vec![Event::PointerMoved(units.left_center() + vec2(80.0, 0.0))]);
+  h.move_then_click(spot);
+  assert!(h.app.doc_dialog.is_none(), "hovering Units shows no pencil to click");
+  let part = browser_row(&h, 3.0);
+  h.frame(vec![Event::PointerMoved(part.left_center() + vec2(80.0, 0.0))]);
+  h.move_then_click(row_pencil_at(part, "Part Design"));
+  assert!(crate::doc_dialogs::convert_open(&h.app), "Part Design's pencil is Convert Design Type");
+  assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some(crate::doc_dialogs::CONVERT_PROMPT));
+  h.frame(vec![key(egui::Key::Escape)]);
+  h.frame(vec![]);
+  assert!(h.app.doc_dialog.is_none(), "Escape closes it");
+}
+
+#[test]
+fn change_active_units_is_docked_like_a_command_dialog_and_escape_closes_it() {
+  let mut h = Harness::new();
+  crate::doc_dialogs::open_units(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let r = h.ctx.memory(|m| m.area_rect(egui::Id::new(crate::doc_dialogs::AREA))).expect("the dialog is open");
+  let dock = crate::panels::dialog_dock(h.app.canvas, false);
+  assert!((r.right_top() - dock).length() < 2.0, "docked where command dialogs dock: {r:?} vs {dock:?}");
+  assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some(crate::doc_dialogs::UNITS_PROMPT));
+  h.frame(vec![key(egui::Key::Escape)]);
+  h.frame(vec![]);
+  assert!(h.app.doc_dialog.is_none());
+  assert!(h.app.status.is_none(), "the Units prompt goes with it");
+}
+
+#[test]
+fn new_named_view_names_it_inline_as_fusion_does() {
+  let mut h = Harness::new();
+  let ctx = h.ctx.clone();
+  crate::panels::new_named_view(&mut h.app, &ctx);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let names = |h: &Harness| h.app.s.design.named_views.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
+  assert_eq!(names(&h), ["NamedView"]);
+  assert!(h.app.status.is_none(), "nothing is printed: {:?}", h.app.status);
+  // the name is selected in its editor: typing replaces it, Enter keeps it
+  let mut ev = typing("Corner");
+  ev.push(key(egui::Key::Enter));
+  h.frame(ev);
+  h.frame(vec![]);
+  assert_eq!(names(&h), ["Corner"]);
+  // the next one is NamedView again; Escape keeps that name
+  crate::panels::new_named_view(&mut h.app, &ctx);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  h.frame(vec![key(egui::Key::Escape)]);
+  h.frame(vec![]);
+  assert_eq!(names(&h), ["Corner", "NamedView"]);
+  crate::panels::new_named_view(&mut h.app, &ctx);
+  h.frame(vec![key(egui::Key::Escape)]);
+  assert_eq!(names(&h), ["Corner", "NamedView", "NamedView(1)"]);
+}
+
+#[test]
+fn the_expanded_comments_panel_shrinks_the_browser() {
+  let mut h = Harness::new();
+  let before = crate::panels::browser_max_height(&h.app);
+  h.app.comments.open = true;
+  h.frame(vec![]);
+  assert_eq!(crate::panels::browser_max_height(&h.app), before - crate::comments::BODY_H);
+}

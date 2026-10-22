@@ -1,16 +1,11 @@
-//! Document units in the UI: the Units row of Document Settings, and the helpers that make value
-//! boxes and read-outs follow the design's unit (see `fox_model::units`).
+//! Document units in the UI: the helpers that make value boxes and read-outs follow the design's
+//! unit (see `fox_model::units`). The Units row's dialog is in `crate::doc_dialogs`.
 //!
 //! The unit is published into egui's memory each frame so value boxes deep inside dialogs can
 //! pin a bare number to it without being handed the session.
 
-use egui::{Color32, Stroke, pos2, vec2};
 use fox_engine::model::LengthUnit;
 use fox_engine::model::units::names_length_unit;
-use serde_json::json;
-
-use crate::App;
-use crate::theme;
 
 fn key() -> egui::Id {
   egui::Id::new("doc-units")
@@ -62,54 +57,10 @@ pub(crate) fn row_label(unit: LengthUnit) -> String {
   format!("Units: {}, {}", unit.symbol(), unit.mass_symbol())
 }
 
-/// The Units row of Document Settings: hovering shows a pencil that picks the design's unit.
-pub fn settings_row(app: &mut App, ui: &mut egui::Ui, row: &egui::Response, depth: usize) {
-  let unit = app.s.design.units;
-  let popup_id = popup_id();
-  let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
-  let rect = row.rect;
-  let x = rect.min.x + 8.0 + depth as f32 * 16.0 + 44.0;
-  let label_w = ui.painter().layout_no_wrap(row_label(unit), egui::FontId::proportional(13.0), theme::TEXT).size().x;
-  let pr = egui::Rect::from_center_size(pos2(x + label_w + 36.0, rect.center().y), vec2(20.0, 20.0));
-  let pencil = ui.interact(pr, egui::Id::new("units-pencil"), egui::Sense::click());
-  let hovered = row.hovered() || pencil.hovered() || open;
-  if hovered {
-    let p = ui.painter();
-    if pencil.hovered() || open {
-      p.rect_filled(pr, 2.0, theme::HOVER);
-    }
-    paint_pencil(p, pr.shrink(4.0), if pencil.hovered() { theme::ACCENT } else { theme::GROUP_LABEL });
-  }
-  let pencil = pencil.on_hover_text("Change Active Units");
-  egui::Popup::menu(&pencil).id(popup_id).show(|ui| {
-    ui.label(egui::RichText::new("Change Active Units").strong());
-    ui.separator();
-    for u in LengthUnit::ALL {
-      if ui.radio(u == unit, format!("{} ({})", u.label(), u.symbol())).clicked() {
-        if u != unit {
-          app.run("design.units", json!({"unit": u.symbol()}));
-        }
-        ui.close();
-      }
-    }
-  });
-}
-
-/// The Change Active Units popup's id (the Units row's context menu opens it too).
-pub(crate) fn popup_id() -> egui::Id {
-  egui::Id::new("units-popup")
-}
-
-/// A small pencil: a slanted body with a tip, as Fusion's edit glyph.
-fn paint_pencil(p: &egui::Painter, r: egui::Rect, c: Color32) {
-  let (tip, end) = (pos2(r.left() + 1.0, r.bottom() - 1.0), pos2(r.right() - 1.0, r.top() + 1.0));
-  p.line_segment([tip + vec2(3.0, -3.0), end], Stroke::new(3.2, c));
-  p.add(egui::Shape::convex_polygon(vec![tip, tip + vec2(1.2, -4.4), tip + vec2(4.4, -1.2)], c, Stroke::NONE));
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
+  use egui::vec2;
 
   #[test]
   fn pinning_follows_the_published_unit() {

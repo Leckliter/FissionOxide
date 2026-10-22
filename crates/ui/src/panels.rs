@@ -1373,7 +1373,8 @@ pub fn browser(app: &mut App, ctx: &egui::Context) {
         return;
       }
       // the rows sit directly on the canvas, without a panel behind them
-      let max_h = (canvas.height() - 90.0).max(120.0);
+      // the expanded COMMENTS panel below takes its room from the browser, as in Fusion
+      let max_h = browser_max_height(app);
       egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
         ui.add_space(4.0);
         browser_tree(app, ui);
@@ -1382,6 +1383,11 @@ pub fn browser(app: &mut App, ctx: &egui::Context) {
       });
     },
   );
+}
+
+/// The browser tree's greatest height: the canvas less the room of the COMMENTS panel below it.
+pub(crate) fn browser_max_height(app: &App) -> f32 {
+  (app.canvas.height() - 90.0 - crate::comments::extra_height(app)).max(120.0)
 }
 
 fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
@@ -1429,23 +1435,37 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     marking::peek(app, Vec::new(), "Document Settings".into());
   }
   if is_open(ui, ds, true) {
+    // while Change Active Units is open the row is highlighted with its pencil, as in Fusion;
+    // hovering it shows no pencil
     let label = crate::units::row_label(app.s.design.units);
-    let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, false, theme::TEXT);
+    let units_open = crate::doc_dialogs::units_open(app);
+    let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, units_open, theme::TEXT);
     if let Some(r) = &ev.response {
-      crate::units::settings_row(app, ui, r, 2);
+      let id = egui::Id::new("units-pencil");
+      crate::doc_dialogs::row_pencil(ui, r, 2, &label, id, false, units_open, "Change Active Units");
       if r.hovered() {
         marking::peek(app, Vec::new(), label.clone());
       }
       r.context_menu(|ui| {
-        let ctx = ui.ctx().clone();
-        browser_rows::folder_context_menu(ui, &browser_rows::units_menu(), |cmd| {
-          browser_rows::run_units_cmd(&ctx, cmd)
-        });
+        browser_rows::folder_context_menu(ui, &browser_rows::units_menu(), |cmd| browser_rows::run_units_cmd(app, cmd));
       });
     }
-    let ev = tree_row(ui, ds.with(2), 2, None, None, Icon::Component, "Part Design", false, theme::TEXT);
-    if ev.response.is_some_and(|r| r.hovered()) {
-      marking::peek(app, Vec::new(), "Part Design".into());
+    // Part Design: a pencil on hover and a right-click menu, both Convert Design Type
+    let convert_open = crate::doc_dialogs::convert_open(app);
+    let ev = tree_row(ui, ds.with(2), 2, None, None, Icon::Component, "Part Design", convert_open, theme::TEXT);
+    if let Some(r) = &ev.response {
+      let id = egui::Id::new("design-type-pencil");
+      if crate::doc_dialogs::row_pencil(ui, r, 2, "Part Design", id, true, convert_open, "Convert Design Type") {
+        crate::doc_dialogs::open_convert(app);
+      }
+      if r.hovered() {
+        marking::peek(app, Vec::new(), "Part Design".into());
+      }
+      r.context_menu(|ui| {
+        browser_rows::folder_context_menu(ui, &browser_rows::design_type_menu(), |cmd| {
+          browser_rows::run_design_type_cmd(app, cmd)
+        });
+      });
     }
   }
   // Named Views
@@ -1458,9 +1478,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     r.context_menu(|ui| {
       if menu_item(ui, Icon::Views, "New Named View", None).clicked() {
         ui.close();
-        if app.save_named_view().is_some() {
-          ui.data_mut(|d| d.insert_temp(nv.with("open"), true));
-        }
+        new_named_view(app, ui.ctx());
       }
     });
   }
@@ -1471,7 +1489,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       ("RIGHT", StandardView::Right),
       ("HOME", StandardView::Home),
     ] {
-      let ev = tree_row(ui, nv.with(label), 2, None, None, Icon::Views, label, false, theme::TEXT);
+      let ev = tree_row(ui, nv.with(label), 2, None, None, Icon::NamedView, label, false, theme::TEXT);
       if ev.clicked || ev.double_clicked {
         app.fly_standard_view(v);
       }
@@ -1479,7 +1497,9 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     // the user's views, saved in the design
     let names: Vec<String> = app.s.design.named_views.iter().map(|v| v.name.clone()).collect();
     for name in names {
-      let ev = tree_row(ui, nv.with(("user", &name)), 2, None, None, Icon::Views, &name, false, theme::TEXT);
+      let row = named_view_row(&name);
+      let ev = tree_row(ui, row, 2, None, None, Icon::NamedView, &name, false, theme::TEXT);
+      browser_edit::edit_box(app, ui, &ev, row, 2);
       if ev.double_clicked {
         app.restore_named_view(&name);
       }
@@ -1563,6 +1583,21 @@ pub fn isolate_banner(app: &mut App, ctx: &egui::Context) {
     });
   if unisolate {
     app.ctx_menu.isolate = None;
+  }
+}
+
+/// A user named view's browser row.
+fn named_view_row(name: &str) -> egui::Id {
+  egui::Id::new("tree-views").with(("user", name))
+}
+
+/// Named Views > New Named View, as Fusion's: saves the view as "NamedView", opens the folder
+/// and puts the new row's name in an inline editor, selected, ready to retype (Escape keeps it).
+pub(crate) fn new_named_view(app: &mut App, ctx: &egui::Context) {
+  let Some(name) = app.save_named_view() else { return };
+  ctx.data_mut(|d| d.insert_temp(egui::Id::new("tree-views").with("open"), true));
+  if let Some(i) = app.s.design.named_views.iter().position(|v| v.name == name) {
+    browser_edit::begin_in(ctx, named_view_row(&name), RenameTarget::NamedView(i as u32), &name);
   }
 }
 
@@ -2127,6 +2162,7 @@ pub(crate) enum RowCmd {
   ProjectedVisibility,
   ConstructionVisibility,
   FindInTimeline,
+  ConvertDesignType,
 }
 
 /// One row of a browser context menu.
@@ -3659,6 +3695,11 @@ fn rename_popup(app: &mut App, ctx: &egui::Context) {
             RenameTarget::Group(g) => {
               app.run("timeline.group_rename", json!({"group": g, "name": text}));
             }
+            RenameTarget::NamedView(i) => {
+              if let Some(old) = app.s.design.named_views.get(i as usize).map(|v| v.name.clone()) {
+                app.run("view.named.rename", json!({"name": old, "to": text}));
+              }
+            }
           }
           keep = false;
         }
@@ -3692,7 +3733,7 @@ mod browser_rows;
 mod sketch_rows;
 mod timeline_groups;
 
-pub(crate) use browser_rows::{doc_name, window_title};
+pub(crate) use browser_rows::{doc_name, unsaved as is_unsaved, window_title};
 pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};
 
 #[cfg(test)]

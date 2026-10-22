@@ -18,6 +18,7 @@ mod customize;
 mod cut_ui;
 mod data_panel;
 mod dialogs;
+mod doc_dialogs;
 mod ecad_ui;
 mod explode_ui;
 mod file_dialogs;
@@ -301,6 +302,8 @@ pub struct App {
   pub show_perf: bool,
   /// File ▸ Open... and File ▸ Export..., while open.
   pub files: file_dialogs::Files,
+  /// Change Active Units or Convert Design Type, docked at the right (see `doc_dialogs`).
+  pub(crate) doc_dialog: Option<doc_dialogs::DocDialog>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -310,6 +313,8 @@ enum RenameTarget {
   Component(u32),
   /// A timeline group.
   Group(u32),
+  /// A named view, by its place in the design's list.
+  NamedView(u32),
 }
 
 /// Everything that changes the rendered image.
@@ -534,6 +539,7 @@ impl App {
       show_toolbar: true,
       show_perf: false,
       files: file_dialogs::Files::default(),
+      doc_dialog: None,
     }
   }
 
@@ -1259,7 +1265,10 @@ impl App {
   /// Escape over the canvas: ends whatever is open, innermost first (a pop-up list, a tool's
   /// unfinished shape, the tool, the dialog, the selection).
   pub(crate) fn escape(&mut self) {
-    if self.other.is_some() {
+    if self.doc_dialog.is_some() {
+      // Change Active Units or Convert Design Type closes, changing nothing
+      doc_dialogs::close(self);
+    } else if self.other.is_some() {
       // the Select Other list closes, keeping the selection
       self.other = None;
     } else if self.sel_tool.is_some() {
@@ -1520,12 +1529,16 @@ impl App {
   /// Returns the new view's name.
   pub(crate) fn save_named_view(&mut self) -> Option<String> {
     let c = self.view_now();
+    // Fusion names it "NamedView" (then "NamedView(1)", ...) and prints nothing
+    let views = &self.s.design.named_views;
+    let name = std::iter::once("NamedView".to_string())
+      .chain((1..).map(|i| format!("NamedView({i})")))
+      .find(|n| !views.iter().any(|v| v.name == *n))?;
     let r = self.run(
       "view.named.save",
-      json!({"target": c.target, "yaw": c.yaw, "pitch": c.pitch, "distance": c.distance, "fov": c.fov, "ortho": c.ortho}),
+      json!({"name": name, "target": c.target, "yaw": c.yaw, "pitch": c.pitch, "distance": c.distance, "fov": c.fov, "ortho": c.ortho}),
     )?;
     let name = r.get("name").and_then(Value::as_str)?.to_string();
-    self.status = Some((format!("Saved the view as '{name}'"), false));
     Some(name)
   }
 
@@ -1774,6 +1787,7 @@ impl App {
     panels::warning_toast(self, &ctx);
     notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
+    doc_dialogs::show(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
       if keep && self.dialog.is_none() {

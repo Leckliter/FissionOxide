@@ -7199,7 +7199,7 @@ mod tests {
     };
     let saved = app.cam;
     let name = app.save_named_view().unwrap();
-    assert_eq!(name, "Named View 1");
+    assert_eq!(name, "NamedView");
     assert!(app.s.dirty, "named views save with the design");
     app.cam = fox_engine::render::Camera::default();
     app.restore_named_view(&name);

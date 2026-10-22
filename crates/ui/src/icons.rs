@@ -346,6 +346,10 @@ pub enum Icon {
   DistSpacing,
   DirOne,
   DirSymmetric,
+  /// An edit pencil (Convert Design Type).
+  Pencil,
+  /// A named view: a framed picture.
+  NamedView,
 }
 
 #[derive(Clone, Copy)]
@@ -2523,6 +2527,17 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.arrow_head((0.08, 0.5), (-1.0, 0.0), 0.14, Slate);
       k.line((0.66, 0.5), (0.86, 0.5), Slate);
       k.arrow_head((0.92, 0.5), (1.0, 0.0), 0.14, Slate);
+    }
+    Icon::Pencil => {
+      k.solid(&[(0.62, 0.14), (0.86, 0.38), (0.38, 0.86), (0.14, 0.62)], Blue);
+      k.fill(&[(0.14, 0.62), (0.38, 0.86), (0.08, 0.92)], Ink);
+      k.line((0.54, 0.22), (0.78, 0.46), Ink);
+    }
+    Icon::NamedView => {
+      // a picture in its frame: a hill and the sun
+      k.solid(&[(0.08, 0.16), (0.92, 0.16), (0.92, 0.84), (0.08, 0.84)], White);
+      k.fill(&[(0.18, 0.74), (0.42, 0.4), (0.6, 0.62), (0.7, 0.5), (0.82, 0.74)], Blue);
+      k.circle((0.68, 0.33), 0.07, Some(Blue), None);
     }
   }
 }
