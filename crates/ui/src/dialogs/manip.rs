@@ -289,6 +289,7 @@ impl Dialog {
       Kind::Revolve => self.revolve_handles(s),
       // Box, Cylinder, Sphere, Torus and Coil (see [`super::primitive`])
       k if super::primitive::base_of(k).is_some() => self.primitive_handles(s),
+      Kind::Section if !self.plane.is_null() => self.section_handles(s),
       _ => None,
     }
     .unwrap_or_default()
@@ -367,6 +368,7 @@ impl Dialog {
   pub fn set_handle(&mut self, s: &Session, i: usize, v: f64, step: f64) {
     let v_snapped = snap(v, step);
     match self.kind {
+      Kind::Section => self.set_section_handle(i, v_snapped),
       // a taper stays short of a right angle; none at all is an empty box
       Kind::Extrude => {
         let a = v_snapped.clamp(-89f64.to_radians(), 89f64.to_radians());

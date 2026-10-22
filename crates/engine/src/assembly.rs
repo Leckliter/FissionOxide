@@ -447,14 +447,48 @@ fn interference(s: &mut Session, p: &Value) -> CmdResult {
     overlap_shapes(&s.model.bodies, &|a, b| picked.contains(&a) && picked.contains(&b))
   };
   let mut rows: Vec<Value> = found.iter().map(|(a, b, _, v)| json!({"bodies": [a.0, b.0], "volume_mm3": v})).collect();
-  if !flag("create_bodies", false) || found.is_empty() {
-    return Ok(json!(rows));
+  if flag("create_bodies", false) && !found.is_empty() {
+    return interference_bodies(s, found, rows, flag("components", true));
   }
+  // Include Coincident Faces: pairs that only touch are listed too, with no volume
+  if flag("coincident", false) {
+    let check = |a: BodyId, b: BodyId| {
+      if picked.is_empty() {
+        let comp = |x: BodyId| s.design.component_of(x).map(|c| c.id);
+        comp(a).is_none() || comp(a) != comp(b)
+      } else {
+        picked.contains(&a) && picked.contains(&b)
+      }
+    };
+    let overlapping: Vec<(BodyId, BodyId)> = found.iter().map(|(a, b, _, _)| (*a, *b)).collect();
+    let bodies = &s.model.bodies;
+    for i in 0..bodies.len() {
+      for j in i + 1..bodies.len() {
+        let (a, b) = (&bodies[i], &bodies[j]);
+        if !check(a.id, b.id) || overlapping.contains(&(a.id, b.id)) {
+          continue;
+        }
+        if a.shape.distance_to(&b.shape).is_ok_and(|(d, _, _)| d < 1e-6) {
+          rows.push(json!({"bodies": [a.id.0, b.id.0], "volume_mm3": 0.0, "coincident": true}));
+        }
+      }
+    }
+  }
+  Ok(json!(rows))
+}
+
+/// Adds each overlap `interference` found as a static body (in a new component unless
+/// `components` is false) and notes them on its rows.
+fn interference_bodies(
+  s: &mut Session,
+  found: Vec<(BodyId, BodyId, Shape, f64)>,
+  mut rows: Vec<Value>,
+  components: bool,
+) -> CmdResult {
   let mut breps = Vec::new();
   for (_, _, shape, _) in &found {
     breps.push(shape.to_brep()?);
   }
-  let components = flag("components", true);
   let (fid, made) = s.edit(|d| {
     let fid = d.add_feature(FeatureKind::BaseFeature { bodies: Vec::new(), edits: Vec::new() })?;
     let n = d.components.iter().filter(|c| c.name.starts_with("Interference")).count();

@@ -336,6 +336,10 @@ pub struct App {
   /// Create Base Feature's mode: the ribbon shows BASE FEATURE SOLID / SURFACE and a green
   /// FINISH BASE FEATURE button until it is finished (see [`config_ui::start_base`]).
   pub base_mode: bool,
+  /// The Section Analyses OK kept, in the browser's Analysis folder.
+  pub(crate) sections: Vec<dialogs::KeptSection>,
+  /// The Analysis folder's eye is off: no kept analysis shows.
+  pub(crate) analysis_hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -588,6 +592,8 @@ impl App {
       files: file_dialogs::Files::default(),
       doc_dialog: None,
       base_mode: false,
+      sections: Vec::new(),
+      analysis_hidden: false,
     }
   }
 
@@ -736,6 +742,9 @@ impl App {
     self.data.save = None;
     // the Export window was for the old design
     self.files.export = None;
+    // and the kept analyses
+    self.sections.clear();
+    self.analysis_hidden = false;
   }
 
   /// Opens a design (latest or a given version) from the data panel.

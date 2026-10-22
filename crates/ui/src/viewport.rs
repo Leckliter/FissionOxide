@@ -445,6 +445,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
   let hot_plane = sketch_planes_overlay(app, planes, &painter, &view);
   offset_plane_overlay(app, &painter, &view);
+  section_plane_overlay(app, &painter, &view);
   // Preferences → General → Enable camera pivot: the orbit's centre while orbiting
   if app.preferences.values.camera_pivot
     && matches!(app.drag, Some(Drag::Orbit))
@@ -463,6 +464,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         Some(d) if d.picks_plane() => d.place_on(&app.s, plane),
         // Mirror takes the plane
         Some(d) if d.wants_plane() => d.take_plane(plane),
+        // Section Analysis's cut plane
+        Some(d) if d.wants_cut_plane() => d.set_cut_plane(&app.s, plane),
         _ => {
           app.cancel_dialog();
           app.create_sketch(plane);
@@ -971,7 +974,8 @@ fn view_params(app: &App) -> serde_json::Value {
   if let Some(sim) = crate::sim_ui::view_json(app) {
     v["sim"] = sim;
   }
-  if let Some(sec) = &app.section {
+  // the open Section Analysis, else the newest kept one that shows
+  if let Some(sec) = app.section.as_ref().or_else(|| crate::dialogs::shown_section(app)) {
     v["section"] = sec.clone();
   }
   if let Some(sl) = slice_params(app) {
@@ -4796,9 +4800,10 @@ struct PlanePick {
 /// visible point, axes and planes are drawn and picked by [`crate::origin`], and the one under
 /// the cursor is noted here (`App::hover_origin`, winning over the face highlight too).
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
-  // Create Sketch, Box, Cylinder, Sphere, Torus and Coil before their base is drawn, and Mirror
+  // Create Sketch, Box, Cylinder, Sphere, Torus and Coil before their base is drawn, Mirror, and
+  // Section Analysis waiting for its cut plane
   let sketching = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane());
-  let picking = sketching || app.dialog.as_ref().is_some_and(|d| d.wants_plane());
+  let picking = sketching || app.dialog.as_ref().is_some_and(|d| d.wants_plane() || d.wants_cut_plane());
   app.hover_origin = None;
   app.grid_preview = None;
   if !picking {
@@ -5160,17 +5165,48 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
     return;
   }
   let (Some(pa), Some(pb)) = (view.to_screen(&app.cam, *a), view.to_screen(&app.cam, *b)) else { return };
-  let col = Color32::from_rgb(230, 90, 30);
-  painter.line_segment([pa, pb], Stroke::new(2.0, col));
-  for p in [pa, pb] {
-    painter.circle_filled(p, 3.5, col);
+  // as Fusion draws it: a thin black arrow between the picks, its length in plain black beside
+  // the middle, and small numbered tags at the two picks
+  let col = Color32::from_rgb(20, 20, 20);
+  let stroke = Stroke::new(1.0, col);
+  painter.line_segment([pa, pb], stroke);
+  if (pb - pa).length() > 1.0 {
+    let d = (pb - pa).normalized();
+    let n = Vec2::new(-d.y, d.x);
+    for (tip, back) in [(pa, d), (pb, -d)] {
+      let head = vec![tip, tip + back * 9.0 + n * 3.5, tip + back * 9.0 - n * 3.5];
+      painter.add(egui::Shape::convex_polygon(head, col, Stroke::NONE));
+    }
   }
   let mid = pa + (pb - pa) * 0.5;
-  let galley = painter.layout_no_wrap(label.clone(), egui::FontId::proportional(12.0), Color32::WHITE);
-  let r = Rect::from_center_size(mid + Vec2::new(0.0, -14.0), galley.size() + Vec2::new(10.0, 4.0));
-  painter.rect_filled(r, 3.0, col);
-  painter.galley(r.min + Vec2::new(5.0, 2.0), galley, Color32::WHITE);
+  painter.text(mid + Vec2::new(6.0, -6.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(12.0), col);
+  for (p, n) in [(pa, "1"), (pb, "2")] {
+    let galley = painter.layout_no_wrap(n.to_string(), egui::FontId::proportional(10.0), col);
+    let r = Rect::from_min_size(p + Vec2::new(5.0, -19.0), galley.size() + Vec2::new(6.0, 2.0));
+    painter.rect(r, 2.0, Color32::WHITE, Stroke::new(1.0, Color32::from_gray(90)), egui::StrokeKind::Inside);
+    painter.galley(r.min + Vec2::new(3.0, 1.0), galley, col);
+  }
 }
+
+/// Section Analysis's cut plane while its dialog is open: a large see-through peach square
+/// through the middle of the model, as Fusion draws it.
+fn section_plane_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  let Some(d) = app.dialog.as_ref().filter(|d| d.kind == crate::dialogs::Kind::Section) else { return };
+  let Some(params) = d.section_params(&app.s) else { return };
+  let Ok(o) = fox_engine::scene::view_options(&app.s, &json!({"section": params})) else { return };
+  let Some(pl) = o.section else { return };
+  let half = plane_half_size(app) * 1.4;
+  let Some(pts) =
+    plane_square(&pl, pl.origin, half).iter().map(|c| view.to_screen(&app.cam, *c)).collect::<Option<Vec<Pos2>>>()
+  else {
+    return;
+  };
+  painter.add(egui::Shape::convex_polygon(pts, SECTION_PLANE.0, Stroke::new(1.0, SECTION_PLANE.1)));
+}
+
+/// Section Analysis's plane: fill and edge.
+const SECTION_PLANE: (Color32, Color32) =
+  (Color32::from_rgba_premultiplied(64, 46, 34, 64), Color32::from_rgba_premultiplied(200, 130, 90, 200));
 
 #[cfg(test)]
 mod tests {

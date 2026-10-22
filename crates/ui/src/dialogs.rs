@@ -17,6 +17,9 @@ mod choice;
 mod extrude;
 mod hole_pattern;
 mod icon_row;
+#[cfg(test)]
+mod inspect_tests;
+mod interference;
 mod live;
 mod manip;
 mod move_copy;
@@ -35,12 +38,15 @@ mod newcomp;
 mod primitive;
 mod redefine;
 mod rsl;
+mod section;
 #[cfg(test)]
 mod sketch_row_tests;
 mod solid;
 mod thread;
 pub(crate) use export_dxf::{SaveWindow, save_window};
 pub(crate) use primitive::overlay as place_overlay;
+
+pub(crate) use section::{KeptSection, shown_section};
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
 pub(crate) const PICK_PLANE_HINT: &str = "Select a plane or planar face";
@@ -382,11 +388,9 @@ impl Kind {
         | Kind::Appearance
         | Kind::Material
         | Kind::FlatPattern
-        | Kind::Interference
         | Kind::Bom
         | Kind::MotionStudy
         | Kind::CenterOfMass
-        | Kind::Section
         | Kind::Analysis(_)
     )
   }
@@ -1102,19 +1106,8 @@ impl Dialog {
     {
       d.form.set_drawing(f, &app.s, app.drawing);
     }
-    if kind == Kind::Section && app.section.is_none() {
-      // a picked planar face, else the front plane through the middle of the model
-      let face = app.s.selection.iter().find_map(|x| match x {
-        Sel::Face { body, face } if is_planar(&app.s, *body, *face) => Some(json!({"body": body.0, "face": face})),
-        _ => None,
-      });
-      // (the offset runs along the XZ plane's normal: −Y or +Y, as the design frames it)
-      let n = fox_engine::model::OriginPlane::Xz.plane(app.s.design.frames()).normal();
-      let mid = app.s.model.bounds().map(|(a, b)| n.dot((a + b) / 2.0)).unwrap_or(0.0);
-      app.section = Some(match face {
-        Some(f) => json!({"plane": f, "offset": 0.0, "flip": true}),
-        None => json!({"plane": "xz", "offset": (mid * 1000.0).round() / 1000.0, "flip": false}),
-      });
+    if kind == Kind::Section {
+      d.section_open(&app.s);
     }
     if let Kind::Analysis(a) = kind {
       app.analysis = Some(json!({"analysis": a, "pull": "z", "angle": 1.0}));
@@ -2105,6 +2098,7 @@ impl Dialog {
         let (base, centre) = self.offset_base(s)?;
         Some(Manipulator { origin: centre, dir: self.offset_sign(s) * base.normal(), value: len(&self.distance)? })
       }
+      Kind::Section => self.section_manipulator(s),
       _ => self.more_manipulator(s),
     }
   }
@@ -2119,6 +2113,7 @@ impl Dialog {
         self.distance = manip::mm(self.unit, v);
       }
       Kind::OffsetPlane => self.distance = manip::mm(self.unit, v),
+      Kind::Section => self.set_section_distance(v),
       _ => {
         if !self.set_more_manipulator(v, step) {
           return;
@@ -2312,6 +2307,8 @@ impl Dialog {
       Kind::RectPattern => self.pattern_sync(s),
       Kind::Mirror if self.editing.is_none() => self.mirror_sync(s),
       Kind::CircPattern if self.editing.is_none() => self.circ_sync(s),
+      Kind::Interference => self.interference_sync(s),
+      Kind::Section => self.section_sync(s),
       Kind::Combine | Kind::Mirror | Kind::CircPattern if !self.applied || !self.picks() => {
         let mut b: Vec<u32> = Vec::new();
         for x in &s.selection {
@@ -2483,6 +2480,16 @@ impl Dialog {
       ok = false;
       keep = !self.redefine_ok(app);
     }
+    if ok && matches!(self.kind, Kind::Interference | Kind::Section) {
+      // nothing to apply: OK closes, Section Analysis keeping its cut in the browser
+      if ok_enabled {
+        if self.kind == Kind::Section {
+          self.keep_section(app);
+        }
+        keep = false;
+      }
+      ok = false;
+    }
     if ok {
       if !self.applied {
         self.preview(&mut app.s);
@@ -2564,6 +2571,9 @@ impl Dialog {
     }
     if self.kind == Kind::Inspect {
       return Some(MEASURE_PROMPT.into());
+    }
+    if self.wants_cut_plane() {
+      return Some(section::CUT_PLANE_HINT.into());
     }
     if !self.ready() {
       return Some(match self.kind {
@@ -2671,6 +2681,9 @@ impl Dialog {
   pub(crate) fn ok_enabled(&self) -> bool {
     let input = match self.kind {
       Kind::Extrude if !self.picks_fixed() => !self.profiles.is_empty(),
+      // OK waits for Compute, and Section Analysis for its cut plane
+      Kind::Interference => self.report.is_some(),
+      Kind::Section => !self.plane.is_null(),
       // an offset of 0.00 sits on its curve, a fillet or shell of 0.00 has no size: OK waits
       // for a value
       _ => self.ready() && !self.waits_for_value(),
@@ -2891,7 +2904,7 @@ impl Dialog {
       Kind::Appearance | Kind::Material => {}
       Kind::RedefinePlane => self.redefine_rows(app, ui),
       Kind::ExportDxf => self.dxf_rows(app, ui),
-      Kind::Section => section_fields(app, ui),
+      Kind::Section => self.section_fields(app, ui),
       Kind::Analysis(kind) => analysis_fields(app, ui, kind),
       Kind::Form(f) => {
         let mut dirty = false;
@@ -3675,40 +3688,7 @@ impl Dialog {
         Self::field(ui, "Offset", &mut self.distance, dirty);
         Self::check(ui, "Flip", &mut self.flip, dirty);
       }
-      Kind::Interference => {
-        let rows = self.report.as_ref().and_then(Value::as_array).cloned().unwrap_or_default();
-        ui.label("Result");
-        ui.label(if rows.is_empty() { "No interference".to_string() } else { format!("{} overlaps", rows.len()) });
-        ui.end_row();
-        for r in rows {
-          let ids: Vec<u32> = r
-            .get("bodies")
-            .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|v| v.as_u64().map(|v| v as u32)).collect())
-            .unwrap_or_default();
-          let names: Vec<String> = ids.iter().map(|b| app.s.body_name(BodyId(*b))).collect();
-          if ui.link(names.join(" ↔ ")).clicked() {
-            app.s.selection = ids.iter().map(|b| Sel::Body { body: BodyId(*b) }).collect();
-          }
-          ui.label(format!("{:.3} mm³", r.get("volume_mm3").and_then(Value::as_f64).unwrap_or(0.0)));
-          ui.end_row();
-        }
-        ui.label("");
-        if panels::secondary_button(ui, "Compute").clicked() {
-          self.refresh_report(&mut app.s);
-        }
-        ui.end_row();
-        // adds each overlap as a static body (in a new component when ticked)
-        ui.label("");
-        ui.checkbox(&mut self.flag, "Create components");
-        ui.end_row();
-        ui.label("");
-        let overlap = self.report.as_ref().and_then(Value::as_array).is_some_and(|a| !a.is_empty());
-        if ui.add_enabled(overlap, egui::Button::new("Create Bodies")).clicked() {
-          self.create_interference(&mut app.s);
-        }
-        ui.end_row();
-      }
+      Kind::Interference => self.interference_fields(app, ui),
       Kind::CenterOfMass => {
         let r = self.report.clone().unwrap_or(Value::Null);
         let c: Vec<f64> = r
@@ -4897,27 +4877,21 @@ pub(crate) struct MeasureSection {
   pub rows: Vec<Readout>,
 }
 
-/// Measure's sections for a `measure` result: each pick's own numbers (a face's area and loop
-/// length, an edge's length, a vertex's position, a body's volume), then for two picks the
-/// distance, deltas and angle between them.
+/// Measure's sections for a `measure` result: for two picks first Results, only the distance
+/// (and the angle between planes or lines), as Fusion's; then each pick's own numbers (a face's
+/// area and loop length, an edge's length, a vertex's position, a body's volume).
 pub(crate) fn measure_sections(r: &Value, f: &MeasureFmt) -> Vec<MeasureSection> {
   let selection = |n: usize, e: &Value| {
     let (note, rows) = entity_readouts(e, f);
     MeasureSection { title: format!("Selection {n}"), note, rows }
   };
   let Some(d) = r.get("distance").and_then(Value::as_f64) else { return vec![selection(1, r)] };
-  let mut out: Vec<MeasureSection> =
-    ["a", "b"].iter().filter_map(|k| r.get(*k)).enumerate().map(|(i, e)| selection(i + 1, e)).collect();
   let mut rows = vec![row("Distance", f.len(d))];
-  if let Some(dl) = v3(r, "delta") {
-    for (i, axis) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
-      rows.push(row(axis, f.len(dl[i].abs())));
-    }
-  }
   if let Some(a) = r.get("angle_deg").and_then(Value::as_f64) {
     rows.push(row("Angle", f.angle(a)));
   }
-  out.push(MeasureSection { title: "Results".into(), note: String::new(), rows });
+  let mut out = vec![MeasureSection { title: "Results".into(), note: String::new(), rows }];
+  out.extend(["a", "b"].iter().filter_map(|k| r.get(*k)).enumerate().map(|(i, e)| selection(i + 1, e)));
   out
 }
 
@@ -4958,7 +4932,7 @@ fn entity_readouts(r: &Value, f: &MeasureFmt) -> (String, Vec<Readout>) {
     }
     Some("point") => {
       if let Some(p) = v3(r, "at") {
-        for (i, axis) in ["X", "Y", "Z"].iter().enumerate() {
+        for (i, axis) in ["X Position", "Y Position", "Z Position"].iter().enumerate() {
           out.push(row(axis, f.len(p[i])));
         }
       }
@@ -5157,6 +5131,10 @@ impl Dialog {
       app.s.selection.clear();
       app.measure = None;
     }
+    // Section Analysis's live cut goes (OK kept a copy in the browser)
+    if self.kind == Kind::Section {
+      app.section = None;
+    }
   }
 }
 
@@ -5233,47 +5211,6 @@ pub(crate) fn apply_appearance(app: &mut App, name: &str, color: [u8; 3], faces:
   }
   p["bodies"] = json!(bodies);
   app.run("body.appearance", p).is_some()
-}
-
-/// The section analysis settings, edited in place (the view updates as they change).
-fn section_fields(app: &mut App, ui: &mut egui::Ui) {
-  let mut on = app.section.is_some();
-  let mut sec = app.section.clone().unwrap_or(json!({"plane": "xz", "offset": 0.0, "flip": false}));
-  ui.label("");
-  ui.checkbox(&mut on, "Show section");
-  ui.end_row();
-  ui.label("Plane");
-  let cur = sec["plane"].clone();
-  let mut options: Vec<(Value, String)> = [("xy", "XY plane"), ("xz", "XZ plane"), ("yz", "YZ plane")]
-    .iter()
-    .map(|(k, l)| (json!(k), l.to_string()))
-    .collect();
-  for id in app.s.model.planes.keys() {
-    options.push((json!({"feature": id.0}), app.s.design.feature(*id).map(|f| f.name.clone()).unwrap_or_default()));
-  }
-  let shown = options.iter().find(|(k, _)| *k == cur).map(|(_, l)| l.clone()).unwrap_or("Picked face".into());
-  egui::ComboBox::from_id_salt("section-plane").selected_text(shown).width(140.0).show_ui(ui, |ui| {
-    for (k, l) in &options {
-      if ui.selectable_label(*k == cur, l).clicked() {
-        sec["plane"] = k.clone();
-      }
-    }
-  });
-  ui.end_row();
-  ui.label("Offset");
-  let u = app.s.design.units;
-  let off = sec["offset"].as_f64().unwrap_or(0.0);
-  let mut shown = u.from_mm(off);
-  if ui.add(egui::DragValue::new(&mut shown).speed(0.5 / u.mm()).suffix(format!(" {}", u.symbol()))).changed() {
-    sec["offset"] = json!(shown * u.mm());
-  }
-  ui.end_row();
-  ui.label("");
-  let mut flip = sec["flip"].as_bool().unwrap_or(false);
-  ui.checkbox(&mut flip, "Flip (keep the other side)");
-  sec["flip"] = json!(flip);
-  ui.end_row();
-  app.section = on.then_some(sec);
 }
 
 /// Surface analysis settings: the pull direction and draft angle where they apply.
@@ -5656,7 +5593,7 @@ impl Dialog {
   /// of Fillet and Chamfer, Sketch Scale's factor. None for dialogs without an arrow.
   pub fn value_box_field(&mut self) -> Option<&mut String> {
     match self.kind {
-      Kind::Extrude | Kind::OffsetPlane | Kind::PressPull | Kind::SkOffset => Some(&mut self.distance),
+      Kind::Extrude | Kind::OffsetPlane | Kind::PressPull | Kind::SkOffset | Kind::Section => Some(&mut self.distance),
       Kind::Fillet | Kind::Chamfer => Some(&mut self.radius),
       Kind::SkScale => Some(&mut self.a),
       _ => None,
@@ -7428,8 +7365,11 @@ mod tests {
     let r = s.execute("measure", &json!({"a": {"type": "vertex", "body": b.0, "edge": edge, "end": true}})).unwrap();
     let secs = measure_sections(&r, &mm);
     assert_eq!(secs[0].note, "Vertex selected");
-    assert_eq!(secs[0].rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["X", "Y", "Z"]);
-    assert_eq!(labels(&secs[0].rows)[2], ("Z", "30.000 mm"));
+    assert_eq!(
+      secs[0].rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(),
+      ["X Position", "Y Position", "Z Position"]
+    );
+    assert_eq!(labels(&secs[0].rows)[2], ("Z Position", "30.000 mm"));
     // a body: its volume, in other units and precision
     let cm1 = MeasureFmt { precision: 1, unit: 1, secondary: None };
     let r = s.execute("measure", &json!({"a": {"body": b.0}})).unwrap();
@@ -7441,17 +7381,16 @@ mod tests {
     assert_eq!(both.area(645.16), "1.000 in^2 (645.160 mm^2)");
     assert_eq!(MeasureFmt { secondary: Some(3), ..both }.len(25.4), "1.000 in", "the same unit once");
 
-    // two picks: a section each, then Results with the distance, deltas and angle
+    // two picks: Results with the distance and angle (no deltas), then a section each
     let r = s
       .execute("measure", &json!({"a": {"body": b.0, "face": faces[0]}, "b": {"body": b.0, "face": faces[1]}}))
       .unwrap();
     let inch = MeasureFmt { precision: 2, unit: 3, secondary: None };
     let secs = measure_sections(&r, &inch);
     let titles: Vec<&str> = secs.iter().map(|x| x.title.as_str()).collect();
-    assert_eq!(titles, ["Selection 1", "Selection 2", "Results"]);
-    assert_eq!(secs[1].note, "Face selected");
-    assert_eq!(labels(&secs[2].rows)[0], ("Distance", "1.18 in"));
-    assert!(labels(&secs[2].rows).contains(&("Angle", "180.00 deg")), "{secs:?}");
+    assert_eq!(titles, ["Results", "Selection 1", "Selection 2"]);
+    assert_eq!(secs[2].note, "Face selected");
+    assert_eq!(labels(&secs[0].rows), [("Distance", "1.18 in"), ("Angle", "180.00 deg")]);
     assert_eq!(MeasureFmt { precision: 0, ..MeasureFmt::default() }.len(-0.2), "0 mm");
     // Fusion's Precision list
     assert_eq!((0..=4).map(precision_label).collect::<Vec<_>>(), ["0", "0.1", "0.12", "0.123", "0.1234"]);

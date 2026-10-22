@@ -1567,6 +1567,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   if is_open(ui, og, false) {
     browser_rows::origin_children(app, ui, og);
   }
+  browser_analysis::section(app, ui);
   components_section(app, ui);
   bodies_section(app, ui);
   browser_canvas::section(app, ui);
@@ -4175,6 +4176,7 @@ pub fn toggle_sel(s: &mut Session, item: Sel, add: bool) {
   }
 }
 
+mod browser_analysis;
 mod browser_assembly;
 mod browser_canvas;
 mod browser_config;
