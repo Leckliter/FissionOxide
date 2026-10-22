@@ -226,6 +226,10 @@ pub enum Icon {
   MeshBody,
   /// A mesh feature in the timeline (Insert Mesh's "Base Mesh Feature").
   MeshFeature,
+  /// INSERT MESH's Center: a block on the origin's cross.
+  MeshCenter,
+  /// INSERT MESH's Move To Ground: a block coming down onto the ground line.
+  MoveToGround,
   Flange,
   Hem,
   LoftedFlange,
@@ -1095,6 +1099,17 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.38, 0.64), 0.1, Some(Blue), None);
     }
     Icon::Body => k.block(0.1, 0.38, 0.66, 0.9, 0.26, Light, Fill, Dark),
+    Icon::MeshCenter => {
+      k.block(0.22, 0.4, 0.66, 0.84, 0.18, BlueLight, Blue, BlueDark);
+      k.line((0.5, 0.04), (0.5, 0.96), Ink);
+      k.line((0.04, 0.6), (0.96, 0.6), Ink);
+    }
+    Icon::MoveToGround => {
+      k.block(0.24, 0.2, 0.64, 0.56, 0.16, BlueLight, Blue, BlueDark);
+      k.thick((0.44, 0.6), (0.44, 0.78), Ink, 1.3);
+      k.arrow_head((0.44, 0.84), (0.0, 1.0), 0.12, Ink);
+      k.thick((0.04, 0.94), (0.96, 0.94), Ink, 1.4);
+    }
     Icon::MeshBody | Icon::MeshFeature => {
       // a yellow block cut into triangles on every face
       let (x0, y0, x1, y1, d) =

@@ -36,6 +36,9 @@ mod edit_more;
 #[cfg(test)]
 mod edit_tests;
 mod export_dxf;
+mod insert_mesh;
+#[cfg(test)]
+mod insert_mesh_tests;
 mod newcomp;
 mod primitive;
 mod redefine;
@@ -143,6 +146,8 @@ pub enum Kind {
   RedefinePlane,
   /// Export DXF (a sketch row's menu): the unit and the geometry, then where to save.
   ExportDxf,
+  /// Insert Mesh after its file is picked: the unit and the placement (see [`insert_mesh`]).
+  InsertMesh,
 }
 
 impl Kind {
@@ -168,6 +173,7 @@ impl Kind {
       Kind::Appearance => "APPEARANCE",
       Kind::RedefinePlane => "REDEFINE SKETCH PLANE",
       Kind::ExportDxf => "EXPORT DXF",
+      Kind::InsertMesh => "INSERT MESH",
       Kind::Loft => "LOFT",
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
@@ -245,6 +251,7 @@ impl Kind {
       Kind::Appearance => Icon::Appearance,
       Kind::RedefinePlane => Icon::Plane,
       Kind::ExportDxf => Icon::ExportDxf,
+      Kind::InsertMesh => Icon::InsertMesh,
       Kind::Loft => Icon::Loft,
       Kind::Sweep => Icon::Sweep,
       Kind::Hole => Icon::Hole,
@@ -359,6 +366,7 @@ impl Kind {
       Kind::Appearance => ("Appearance", "Drag appearances onto bodies or faces (A)"),
       Kind::RedefinePlane => ("Redefine Sketch Plane", "Put the sketch on another plane or planar face"),
       Kind::ExportDxf => ("Export DXF", "Save the sketch as a DXF file"),
+      Kind::InsertMesh => ("Insert Mesh", "Place a mesh file in the design: its unit, up direction and position"),
       _ => (self.title(), ""),
     };
     (self.icon(), name, hint)
@@ -657,6 +665,8 @@ pub struct Dialog {
   /// Another command this dialog switches to (a construction dialog's Type or Method): the app
   /// cancels this one and starts that.
   pub(crate) switch_to: Option<Kind>,
+  /// INSERT MESH's file, unit and placement (see [`insert_mesh`]).
+  pub(crate) mesh: insert_mesh::Options,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -791,6 +801,7 @@ impl Dialog {
       last_pick: Value::Null,
       point: None,
       switch_to: None,
+      mesh: insert_mesh::Options::default(),
     }
   }
 
@@ -1856,6 +1867,7 @@ impl Dialog {
       Kind::Move => self.move_command()?,
       Kind::RedefinePlane => self.redefine_command()?,
       Kind::ExportDxf => return None,
+      Kind::InsertMesh => self.insert_mesh_command()?,
     })
   }
 
@@ -1992,6 +2004,9 @@ impl Dialog {
     if switched {
       self.preview(s);
     }
+    if self.kind == Kind::InsertMesh {
+      self.insert_mesh_select(s);
+    }
   }
 
   /// Enough input to try?
@@ -2053,6 +2068,7 @@ impl Dialog {
       Kind::DrawingView => self.target.is_some() && (self.choice != "flat" || !self.bodies.is_empty()),
       Kind::RedefinePlane => self.sketch.is_some() && self.redefine.picked.is_some(),
       Kind::ExportDxf => self.sketch.is_some(),
+      Kind::InsertMesh => self.mesh.path.is_some(),
       _ => true,
     }
   }
@@ -2138,6 +2154,10 @@ impl Dialog {
     self.withdraw(s);
     self.redefine_restore(s);
     self.end_edit(s, false);
+    if self.kind == Kind::InsertMesh {
+      // the previewed mesh is gone with its selection
+      s.selection.clear();
+    }
   }
 
   /// Is a model-picking dialog's preview showing? (Viewport clicks withdraw it first.)
@@ -2515,6 +2535,11 @@ impl Dialog {
             if !self.kind.reports() {
               if self.picks() && !self.picks_fixed() {
                 self.live_checkbox(ui, &mut app.s);
+              }
+              if self.kind == Kind::InsertMesh
+                && crate::icons::icon_button(ui, Icon::Undo, 22.0, "Reset", false, None).clicked()
+              {
+                self.insert_mesh_reset();
               }
               ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if panels::secondary_button(ui, "Cancel").clicked() {
@@ -2998,6 +3023,7 @@ impl Dialog {
       Kind::Appearance | Kind::Material => {}
       Kind::RedefinePlane => self.redefine_rows(app, ui),
       Kind::ExportDxf => self.dxf_rows(app, ui),
+      Kind::InsertMesh => self.insert_mesh_rows(app, ui),
       Kind::Section => self.section_fields(app, ui),
       Kind::Analysis(kind) => analysis_fields(app, ui, kind),
       Kind::Form(f) => {

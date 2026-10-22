@@ -402,6 +402,8 @@ struct RenderKey {
   opacity: Vec<(u32, u8)>,
   /// A Mirror's or pattern's previewed copies, drawn as ghosts.
   ghosts: Vec<u32>,
+  /// Mesh bodies drawn flat-shaded.
+  flat: Vec<u32>,
   /// Faces and sketches highlighted from the timeline.
   peek_faces: Vec<(u32, u32)>,
   peek_sketches: Vec<u32>,
@@ -1047,6 +1049,10 @@ impl App {
   }
 
   pub fn import_path(&mut self, p: &std::path::Path) {
+    if fox_engine::exchange::format_for_path(p).is_some_and(|f| f.kind == fox_engine::exchange::FormatKind::Mesh) {
+      self.insert_mesh(p);
+      return;
+    }
     if let Some(r) = self.run("import", json!({"path": p})) {
       if r.get("warning").is_none() {
         self.status = Some((format!("Inserted {}", p.display()), false));
@@ -1526,6 +1532,18 @@ impl App {
       d.refresh_manip(&self.s);
       d.preview(&mut self.s);
     }
+  }
+
+  /// Opens the INSERT MESH dialog on the mesh file `path`: the mesh previews where the file puts
+  /// it, and is inserted on OK, as in Fusion.
+  pub fn insert_mesh(&mut self, path: &std::path::Path) {
+    self.end_hint();
+    self.cancel_dialog();
+    self.tool = Tool::Select;
+    let mut d = Dialog::open(self, dialogs::Kind::InsertMesh);
+    d.insert_mesh_begin(&self.s, path);
+    d.preview(&mut self.s);
+    self.dialog = Some(d);
   }
 
   /// Opens Trace Image on `path` (an opened or dropped image) in the sketch being edited, or in

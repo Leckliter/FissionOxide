@@ -288,6 +288,7 @@ mod tests {
       peek: Vec::new(),
       isolate: None,
       opacity: Vec::new(),
+      flat: Vec::new(),
       peek_faces: Vec::new(),
       peek_sketches: Vec::new(),
       glyph_hover: Vec::new(),

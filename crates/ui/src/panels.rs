@@ -1983,6 +1983,9 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
     {
       isolate_badge(ui, r.rect);
     }
+    if let Some(r) = &ev.response {
+      open_mesh_badge(app, ui, r.rect, 2, bid, &name);
+    }
     if ev.eye {
       app.run("body.visible", json!({"body": bid.0, "visible": !visible}));
     } else {
@@ -1997,7 +2000,11 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
       if r.hovered() {
         marking::peek(app, vec![bid], name.clone());
       }
-      r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
+      if crate::select::is_mesh(&app.s, bid) {
+        r.context_menu(|ui| mesh_rows::mesh_context_menu(app, ui, row, bid, &name));
+      } else {
+        r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
+      }
     }
   }
 }
@@ -2006,6 +2013,26 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
 /// B-rep one.
 pub(crate) fn body_icon(app: &App, body: BodyId) -> Icon {
   if crate::select::is_mesh(&app.s, body) { Icon::MeshBody } else { Icon::Body }
+}
+
+/// The hover lines of a body row's warning: Fusion's for a mesh body that isn't closed or has no
+/// positive volume; none for a sound body.
+pub(crate) fn body_warning(app: &App, body: BodyId) -> Vec<&'static str> {
+  app.s.model.body(body).map(|b| b.mesh_problems()).unwrap_or_default()
+}
+
+/// Fusion's yellow warning triangle right of a body row's name, its hover the warning's lines.
+fn open_mesh_badge(app: &App, ui: &mut egui::Ui, row: Rect, depth: usize, body: BodyId, name: &str) {
+  let lines = body_warning(app, body);
+  if lines.is_empty() {
+    return;
+  }
+  // where tree_row ends the name's pill
+  let text = ui.painter().layout_no_wrap(name.to_string(), egui::FontId::proportional(13.0), theme::TEXT);
+  let pill_right = row.min.x + 8.0 + depth as f32 * 16.0 + 33.0 + text.size().x + 36.0;
+  let r = Rect::from_center_size(pos2(pill_right + 12.0, row.center().y), Vec2::splat(15.0));
+  warning_glyph(ui.painter(), r);
+  ui.interact(r, egui::Id::new(("mesh-warning", body.0)), egui::Sense::hover()).on_hover_text(lines.join("\n"));
 }
 
 /// A body row's in-place rename (double-click or slow-click) and dragging it onto a component.
@@ -4023,6 +4050,8 @@ pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::PathPattern { .. } => Icon::Pattern,
     FeatureKind::Move { .. } => Icon::Move,
     FeatureKind::Combine { .. } => Icon::Combine,
+    // Insert Mesh's Base Mesh Feature
+    FeatureKind::Import { breps, meshes, .. } if breps.is_empty() && !meshes.is_empty() => Icon::MeshFeature,
     FeatureKind::Import { .. } => Icon::Import,
     FeatureKind::RemoveBodies { .. } => Icon::Remove,
     FeatureKind::Flange { .. }
@@ -4180,11 +4209,13 @@ mod browser_canvas;
 mod browser_config;
 mod browser_edit;
 mod browser_rows;
+mod mesh_rows;
 pub(crate) use browser_rows::lock_glyph;
 mod sketch_rows;
 mod timeline_groups;
 
 pub(crate) use browser_rows::{doc_name, root_label, unsaved as is_unsaved, window_title};
+pub(crate) use mesh_rows::{MeshCmd, OPACITY_LEVELS, mesh_body_menu, run_mesh_cmd};
 #[cfg(test)]
 pub(crate) use sketch_rows::run_sketch_cmd;
 pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};

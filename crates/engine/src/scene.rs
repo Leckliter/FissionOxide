@@ -241,6 +241,9 @@ pub struct ViewOptions {
   pub origin_axis_len: Option<f64>,
   /// Bodies drawn see-through: (body, alpha), as Fusion's Opacity Control.
   pub opacity: Vec<(BodyId, u8)>,
+  /// Mesh bodies drawn flat-shaded (a mesh body's Flat Shaded); the rest draw smooth, as Fusion
+  /// draws mesh bodies.
+  pub flat_meshes: Vec<BodyId>,
   /// Construction planes left out (the one an Offset Plane dialog previews, which the UI fills
   /// itself).
   pub hide_planes: Vec<FeatureId>,
@@ -300,6 +303,8 @@ pub struct SceneBuilder {
   /// Section caps per body, for the plane they were cut with.
   caps: HashMap<BodyId, (Plane, Option<TriMesh>)>,
   curvature: HashMap<BodyId, Vec<[u8; 4]>>,
+  /// Mesh bodies' tessellations with smooth (averaged) normals.
+  smooth: HashMap<BodyId, TriMesh>,
   /// The design's exploded view and its offsets, for the revision they were worked out at.
   explode: Option<(u64, fox_model::explode::ExplodedView, HashMap<BodyId, DVec3>)>,
 }
@@ -308,6 +313,7 @@ impl SceneBuilder {
   pub fn build(&mut self, s: &Session, opts: &ViewOptions) -> (Scene, PickTable) {
     if self.revision != s.revision {
       self.edges.clear();
+      self.smooth.clear();
       self.profiles.clear();
       self.caps.clear();
       self.curvature.clear();
@@ -346,6 +352,9 @@ impl SceneBuilder {
         continue;
       }
       let Some(m) = body.mesh() else { continue };
+      let smooth = (body.is_mesh() && !opts.flat_meshes.contains(&body.id))
+        .then(|| self.smooth.entry(body.id).or_insert_with(|| smooth_shaded(m)).clone());
+      let m = smooth.as_ref().unwrap_or(m);
       let tint = |c: [u8; 4]| {
         let c = if selected_bodies.contains(&body.id) { SELECT_COLOR } else { c };
         let c = if opts.peek.contains(&body.id) { mix(c, HOVER_COLOR, 0.6) } else { c };
@@ -1178,6 +1187,29 @@ pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
         .collect()
     }
   }
+}
+
+/// A mesh with each vertex's normal averaged over the triangles meeting at its point (area
+/// weighted), so a mesh body draws smooth across its facets.
+fn smooth_shaded(m: &TriMesh) -> TriMesh {
+  let key = |p: &[f32; 3]| p.map(|c| (c * 1e4).round() as i64);
+  let mut sums: HashMap<[i64; 3], fox_kernel::glam::Vec3> = HashMap::new();
+  for t in m.indices.chunks_exact(3) {
+    let [a, b, c] = [t[0], t[1], t[2]].map(|i| m.positions.get(i as usize).copied().unwrap_or_default());
+    let (va, vb, vc) =
+      (fox_kernel::glam::Vec3::from(a), fox_kernel::glam::Vec3::from(b), fox_kernel::glam::Vec3::from(c));
+    let n = (vb - va).cross(vc - va);
+    for p in [a, b, c] {
+      *sums.entry(key(&p)).or_default() += n;
+    }
+  }
+  let normals = m
+    .positions
+    .iter()
+    .zip(&m.normals)
+    .map(|(p, n)| sums.get(&key(p)).and_then(|s| s.try_normalize()).map_or(*n, |s| s.to_array()))
+    .collect();
+  TriMesh { normals, ..m.clone() }
 }
 
 fn mesh_of(m: &TriMesh, tri_ids: Vec<u32>, color: [u8; 4], hover: Option<u32>) -> Mesh {

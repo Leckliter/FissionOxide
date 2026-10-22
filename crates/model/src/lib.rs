@@ -2034,6 +2034,8 @@ impl FeatureKind {
       FeatureKind::CircularPattern { .. } => "CircularPattern",
       FeatureKind::Move { .. } => "Move",
       FeatureKind::Combine { .. } => "Combine",
+      // Fusion's Insert Mesh adds a base feature holding the mesh
+      FeatureKind::Import { breps, meshes, .. } if breps.is_empty() && !meshes.is_empty() => "Base Mesh Feature",
       FeatureKind::Import { .. } => "Import",
       FeatureKind::RemoveBodies { .. } => "Remove",
       FeatureKind::Loft { .. } => "Loft",

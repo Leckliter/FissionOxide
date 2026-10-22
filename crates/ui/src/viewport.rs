@@ -831,6 +831,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     peek_sketches: app.ctx_menu.peek_sketches.clone(),
     only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
     opacity: app.ctx_menu.opacity.clone(),
+    flat_meshes: app.ctx_menu.flat_shaded.clone(),
     // Offset Plane's preview is filled over the image (see `offset_plane_overlay`), and so are
     // the construction planes (see `crate::construction`)
     hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
@@ -877,6 +878,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     peek: app.ctx_menu.peek.iter().chain(&crate::select::hover_bodies(app)).map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
     opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
+    flat: app.ctx_menu.flat_shaded.iter().map(|b| b.0).collect(),
     peek_faces: app.ctx_menu.peek_faces.iter().map(|(b, f)| (b.0, *f)).collect(),
     peek_sketches: app.ctx_menu.peek_sketches.iter().map(|s| s.0).collect(),
     glyph_hover: app.glyph_hover.clone(),
