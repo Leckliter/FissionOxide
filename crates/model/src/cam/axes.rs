@@ -15,9 +15,9 @@ use fox_kernel::glam::{DMat3, DMat4, DQuat, DVec2, DVec3};
 use serde::{Deserialize, Serialize};
 
 use super::sim::Heightfield;
-use super::{CLEARANCE, Move, OpKind, Operation, Setup, Toolpath, ToolKind};
-use crate::regen::{Body, Model};
+use super::{CLEARANCE, Move, OpKind, Operation, Setup, ToolKind, Toolpath};
 use crate::FaceRef;
+use crate::regen::{Body, Model};
 
 /// How a machine's rotary axes move the tool relative to the part.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -201,7 +201,12 @@ pub(crate) fn rotary_stock(setup: &Setup, model: &Model) -> Result<Option<(DVec3
 }
 
 /// An operation's toolpath on a setup that may have a 4/5-axis machine.
-pub(super) fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath]) -> Result<Toolpath, String> {
+pub(super) fn toolpath(
+  setup: &Setup,
+  op: &Operation,
+  model: &Model,
+  previous: &[Toolpath],
+) -> Result<Toolpath, String> {
   let kin = setup.machine.map(|m| m.kinematics);
   match &op.kind {
     OpKind::Rotary { around } => {
@@ -222,10 +227,7 @@ pub(super) fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &
         let m = setup.machine.ok_or("a tilted tool axis needs a 4/5-axis machine on the setup")?;
         let t = t.try_normalize().ok_or("the tool axis can't be zero")?;
         if m.solve(t, Angles::default()).is_none() {
-          return Err(format!(
-            "the machine can't point the tool along ({:.3}, {:.3}, {:.3})",
-            t.x, t.y, t.z
-          ));
+          return Err(format!("the machine can't point the tool along ({:.3}, {:.3}, {:.3})", t.x, t.y, t.z));
         }
         tilted(setup, op, model, previous, t)
       }
@@ -373,7 +375,9 @@ fn rotary(setup: &Setup, op: &Operation, model: &Model, around: bool) -> Result<
     let strip = strip_mesh(&meshes, c, th, r + cell);
     let mut hf = Heightfield::new(DVec2::new(x0 - r - cell, -r - cell), DVec2::new(x1 + r + cell, r + cell), cell, 0.0);
     hf.rasterize_over(&[&strip]);
-    drop.push(xs.iter().map(|&x| hf.drop_tool_over(tool, DVec2::new(x, 0.0)).max(0.0) + op.stock_to_leave).collect::<Vec<_>>());
+    drop.push(
+      xs.iter().map(|&x| hf.drop_tool_over(tool, DVec2::new(x, 0.0)).max(0.0) + op.stock_to_leave).collect::<Vec<_>>(),
+    );
   }
   let lowest = drop.iter().flatten().copied().fold(f64::INFINITY, f64::min);
   let levels = super::levels(rs, lowest.max(0.0), op.stepdown);
@@ -460,7 +464,8 @@ fn swarf(setup: &Setup, op: &Operation, model: &Model, faces: &[FaceRef]) -> Res
         let v = m.positions[i as usize];
         DVec3::new(v[0] as f64, v[1] as f64, v[2] as f64)
       };
-      let out: DVec3 = tri.iter().map(|&i| m.normals[i as usize]).map(|n| DVec3::new(n[0] as f64, n[1] as f64, n[2] as f64)).sum();
+      let out: DVec3 =
+        tri.iter().map(|&i| m.normals[i as usize]).map(|n| DVec3::new(n[0] as f64, n[1] as f64, n[2] as f64)).sum();
       let (a, b, c) = (p(tri[0]), p(tri[1]), p(tri[2]));
       let Some(mut n) = (b - a).cross(c - a).try_normalize() else { continue };
       if n.dot(out) < 0.0 {

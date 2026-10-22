@@ -268,7 +268,9 @@ fn source_of(p: &fox_plugin::Installed) -> usize {
 /// The rows the table shows: the plugins the search, Favorites and the filters let through, by
 /// name. Every plugin is an add-in; FissionOxide has no scripts.
 fn rows<'a>(st: &PluginsUi, list: &'a [fox_plugin::Installed]) -> Vec<&'a fox_plugin::Installed> {
-  let any = |ticked: &[bool], has: &dyn Fn(usize) -> bool| !ticked.contains(&true) || (0..ticked.len()).any(|i| ticked[i] && has(i));
+  let any = |ticked: &[bool], has: &dyn Fn(usize) -> bool| {
+    !ticked.contains(&true) || (0..ticked.len()).any(|i| ticked[i] && has(i))
+  };
   let search = st.search.trim().to_lowercase();
   let mut out: Vec<&fox_plugin::Installed> = list
     .iter()
@@ -373,7 +375,9 @@ fn group_header(ui: &mut egui::Ui, st: &mut PluginsUi, name: &'static str, stron
 
 fn left_pane(ui: &mut egui::Ui, st: &mut PluginsUi) {
   ui.spacing_mut().item_spacing = vec2(6.0, 2.0);
-  ui.add(egui::TextEdit::singleline(&mut st.search).hint_text("Search").desired_width(f32::INFINITY).margin(vec2(6.0, 4.0)));
+  ui.add(
+    egui::TextEdit::singleline(&mut st.search).hint_text("Search").desired_width(f32::INFINITY).margin(vec2(6.0, 4.0)),
+  );
   ui.add_space(6.0);
   egui::ScrollArea::vertical().id_salt("scripts-addins-left").auto_shrink([false, false]).show(ui, |ui| {
     if group_header(ui, st, "Browse", true) {
@@ -435,7 +439,8 @@ fn bar_button(ui: &mut egui::Ui, icon: Icon, hint: &str, enabled: bool, caret: b
       let stroke = egui::Stroke::new(1.5, color);
       for (a, b) in [(vec2(-7.0, 5.0), vec2(-1.0, -1.0)), (vec2(1.0, 1.0), vec2(7.0, -5.0))] {
         ui.painter().line_segment([ir.center() + a, ir.center() + b], egui::Stroke::new(4.0, color));
-        ui.painter().line_segment([ir.center() + a * 0.6, ir.center() + b * 0.6], egui::Stroke::new(1.5, Color32::WHITE));
+        ui.painter()
+          .line_segment([ir.center() + a * 0.6, ir.center() + b * 0.6], egui::Stroke::new(1.5, Color32::WHITE));
       }
       ui.painter().line_segment([ir.center() + vec2(-2.0, -6.0), ir.center() + vec2(-1.0, -4.0)], stroke);
       ui.painter().line_segment([ir.center() + vec2(2.0, 6.0), ir.center() + vec2(1.0, 4.0)], stroke);
@@ -523,10 +528,13 @@ fn middle_pane(ui: &mut egui::Ui, st: &mut PluginsUi, list: &[fox_plugin::Instal
       let font = egui::FontId::proportional(12.5);
       let name = ui.painter().layout_no_wrap(p.name().to_string(), font.clone(), color);
       let clip = egui::Rect::from_min_max(rect.left_top(), pos2(rect.left() + RUN_X - 6.0, rect.bottom()));
-      ui.painter()
-        .with_clip_rect(clip)
-        .galley(pos2(rect.left() + 6.0, rect.center().y - name.size().y / 2.0), name, color);
-      let run = switch(ui, pos2(rect.left() + RUN_X + 14.0, rect.center().y), p.record.enabled, ui.id().with(("run", id)));
+      ui.painter().with_clip_rect(clip).galley(
+        pos2(rect.left() + 6.0, rect.center().y - name.size().y / 2.0),
+        name,
+        color,
+      );
+      let run =
+        switch(ui, pos2(rect.left() + RUN_X + 14.0, rect.center().y), p.record.enabled, ui.id().with(("run", id)));
       if run.on_hover_text(if p.record.enabled { "Stop" } else { "Run" }).clicked() {
         *act = Some(Act::Run(id.clone(), !p.record.enabled));
       }
@@ -549,13 +557,7 @@ fn middle_pane(ui: &mut egui::Ui, st: &mut PluginsUi, list: &[fox_plugin::Instal
   });
 }
 
-fn right_pane(
-  ui: &mut egui::Ui,
-  st: &mut PluginsUi,
-  list: &[fox_plugin::Installed],
-  log: &str,
-  act: &mut Option<Act>,
-) {
+fn right_pane(ui: &mut egui::Ui, st: &mut PluginsUi, list: &[fox_plugin::Installed], log: &str, act: &mut Option<Act>) {
   ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
   let picked = st.selected.as_ref().and_then(|id| list.iter().find(|p| &p.record.id == id));
   egui::ScrollArea::vertical().id_salt("scripts-addins-details").auto_shrink([false, false]).show(ui, |ui| {
@@ -671,7 +673,7 @@ fn details(ui: &mut egui::Ui, st: &mut PluginsUi, p: &fox_plugin::Installed, log
   });
   section(ui, "Description", false, |ui| {
     match m.map(|m| m.description.as_str()).filter(|d| !d.is_empty()) {
-      Some(d) => ui.label(d),
+      Some(d) => ui.label(drawable(d)),
       None => ui.label(RichText::new("No description").color(theme::MUTED)),
     };
     if let Some(e) = &p.error {
@@ -724,12 +726,17 @@ fn details(ui: &mut egui::Ui, st: &mut PluginsUi, p: &fox_plugin::Installed, log
   });
 }
 
-/// A command's line in the details and the install window: "Clean Up Sketch (LumenArt > PREPARE)"
-/// (">" since the UI font has no arrow), then its tooltip.
+/// A command's line in the details and the install window: "Clean Up Sketch (LumenArt > PREPARE)",
+/// then its tooltip.
 fn command_line(m: &fox_plugin::Manifest, c: &fox_plugin::manifest::Command) -> String {
   let (tab, panel) = m.placement(c);
   let tip = if c.tooltip.is_empty() { String::new() } else { format!(": {}", c.tooltip) };
-  format!("• {} ({tab} > {panel}){tip}", c.label())
+  drawable(&format!("• {} ({tab} > {panel}){tip}", c.label()))
+}
+
+/// A plugin's text with ">" for the arrows the UI font has no glyph for (it would draw a box).
+fn drawable(text: &str) -> String {
+  text.replace(['→', '➔', '⇒'], ">")
 }
 
 enum Act {

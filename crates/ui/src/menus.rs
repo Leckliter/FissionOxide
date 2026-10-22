@@ -43,7 +43,16 @@ pub(crate) enum E {
 
 /// A command FissionOxide runs.
 const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false, needs_saved: false, bare: false })
+  E::I(Item {
+    label,
+    icon,
+    tint: Tint::Blue,
+    key: "",
+    cmd: Some(cmd),
+    disabled: false,
+    needs_saved: false,
+    bare: false,
+  })
 }
 
 /// A Fusion command FissionOxide doesn't have yet.
@@ -1901,6 +1910,21 @@ mod tests {
     let (own, shared) = groups(Tab::Solid);
     let order: Vec<&str> = own.iter().chain(shared.iter()).map(|g| g.label).collect();
     assert_eq!(order, ["CREATE", "MODIFY", "CONFIGURE", "CONSTRUCT", "INSPECT", "INSERT", "ASSEMBLE", "SELECT"]);
+  }
+
+  #[test]
+  fn add_ins_lists_scripts_and_add_ins_with_shift_s_and_a_bare_marketplace() {
+    let prefs = Prefs::default();
+    let scope = Scope::of(Tab::Utilities);
+    assert_eq!(key_of(&prefs, scope, "Scripts and Add-Ins..."), "Shift+S");
+    let scripts = find(ADD_INS, "Scripts and Add-Ins...").unwrap();
+    let key = key_of(&prefs, scope, scripts.label);
+    assert_eq!(crate::ribbon_tip::title(scripts.label, key), "Scripts and Add-Ins (Shift+S)", "the tooltip's title");
+    let market = find(ADD_INS, "Design and Make Marketplace").unwrap();
+    assert!(!scripts.bare && market.bare, "only the Marketplace row has no icon");
+    let g = UTILITIES.iter().find(|g| g.label == "ADD-INS").unwrap();
+    let quick: Vec<&str> = quick_items(&prefs, Tab::Utilities, g).iter().map(|i| i.label).collect();
+    assert_eq!(quick, ["Scripts and Add-Ins..."], "one icon on the panel");
   }
 
   #[test]

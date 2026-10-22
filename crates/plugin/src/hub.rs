@@ -47,9 +47,7 @@ pub fn available(plugins: &Plugins, st: &Store) -> Vec<HubPlugin> {
     let Ok(bytes) = st.read_version(&item, Some(n)) else { continue };
     let Ok(m) = package::peek_manifest(&bytes) else { continue };
     let installed = plugins.get(&m.id).map(|p| p.record.version.clone());
-    let update = installed
-      .as_ref()
-      .is_some_and(|v| semver::Version::parse(v).is_ok_and(|v| m.version() > v));
+    let update = installed.as_ref().is_some_and(|v| semver::Version::parse(v).is_ok_and(|v| m.version() > v));
     out.push(HubPlugin {
       item,
       hub_version: n,
@@ -100,7 +98,12 @@ pub fn update(plugins: &mut Plugins, st: &Store, id: &str) -> Result<Option<(Man
 
 /// Publishes a package to the hub: a new version of the item already holding this plugin, or a
 /// new item. Returns (item, version).
-pub fn publish(st: &mut Store, bytes: &[u8], project: Option<&str>, folder: Option<&str>) -> Result<(String, u32), String> {
+pub fn publish(
+  st: &mut Store,
+  bytes: &[u8],
+  project: Option<&str>,
+  folder: Option<&str>,
+) -> Result<(String, u32), String> {
   let pkg = Package::read(bytes)?;
   let m = &pkg.manifest;
   let file = format!("{}-{}.{}", m.id, m.version, package::EXTENSION);

@@ -20,6 +20,8 @@ pub(crate) const ILLUSTRATION_H: f32 = 190.0;
 
 /// The tooltip's title: the command's name, with its shortcut in parentheses when it has one.
 pub(crate) fn title(label: &str, key: &str) -> String {
+  // a menu entry's "..." isn't part of the title ("Scripts and Add-Ins (Shift+S)")
+  let label = label.strip_suffix("...").unwrap_or(label);
   if key.is_empty() { label.to_string() } else { format!("{label} ({key})") }
 }
 
@@ -137,6 +139,7 @@ mod tests {
   fn the_title_carries_the_shortcut() {
     assert_eq!(title("Extrude", "E"), "Extrude (E)");
     assert_eq!(title("Revolve", ""), "Revolve");
+    assert_eq!(title("Scripts and Add-Ins...", "Shift+S"), "Scripts and Add-Ins (Shift+S)");
   }
 
   /// Fusion has no illustration for these three: they show the help line at once.
