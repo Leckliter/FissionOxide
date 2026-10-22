@@ -78,6 +78,9 @@ pub enum Tool {
   ChamferAngle,
   /// Two Distance Chamfer.
   Chamfer2,
+  /// A sketch constraint as Fusion's pick command (see [`crate::constrain`]): the constraint's
+  /// kind as `sketch.constrain` names it ("hv" for Horizontal/Vertical).
+  Constrain(&'static str),
 }
 
 impl Tool {
@@ -181,6 +184,10 @@ pub struct ToolState {
   hover_hold: Option<Pos2>,
   /// Fillet / Chamfer: the one just applied, while its value box and arrow show.
   pub(crate) applied: Option<crate::sketch_modify::Applied>,
+  /// Constraint command: how many picks it holds (they live in the selection), and whether
+  /// anything was picked since it started.
+  pub(crate) con_picks: usize,
+  pub(crate) con_any: bool,
 }
 
 /// Fusion's rho for a new conic curve.
@@ -297,6 +304,8 @@ pub fn reset_tool_state(app: &mut App) {
   app.tstate.line_arc = false;
   app.tstate.held.clear();
   app.tstate.rho = None;
+  app.tstate.con_picks = 0;
+  app.tstate.con_any = false;
 }
 
 /// The conic's rho as the tool has it now: typed in its box, dragged with its arrow, or Fusion's
@@ -684,7 +693,11 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
   if sketching && app.tool.picks_curves() {
     // trim / extend / break / tangent circles / blend pick curves
     app.hover = pick_kind(|p| matches!(p, Pick::SketchCurve { .. }));
-  } else if sketching && app.tool != Tool::Select && app.tool != Tool::Dimension {
+  } else if sketching
+    && app.tool != Tool::Select
+    && app.tool != Tool::Dimension
+    && !matches!(app.tool, Tool::Constrain(_))
+  {
     app.hover = app.hover.filter(|p| matches!(p, Pick::SketchPoint { .. }));
   } else if !sketching {
     let (filter, priority) = (app.sel_filter, app.sel_priority);
@@ -1111,6 +1124,13 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   // frame; a drag's release places nothing), as in Fusion
   if sketching && app.dialog.as_ref().is_some_and(|d| d.wants_text_frame()) {
     place_text_corner(app, view, pos);
+    return;
+  }
+  // a constraint command picks the hovered point, curve or profile
+  if let Tool::Constrain(kind) = app.tool
+    && sketching
+  {
+    crate::constrain::click(app, kind);
     return;
   }
   if !sketching || app.tool == Tool::Select {
@@ -2772,6 +2792,10 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       }
       continue;
     }
+    // Fix has no glyph: fixed geometry is drawn green instead, as in Fusion
+    if matches!(c.kind, ConstraintKind::Fix { .. } | ConstraintKind::FixRadius { .. }) {
+      continue;
+    }
     // geometric constraint glyphs: Fusion's small grey line-art symbols where it puts them (one
     // per line for Parallel, Collinear and Equal), in a row with the others on the same curve or
     // point
@@ -3298,7 +3322,9 @@ pub(crate) fn curve_min_distance(
 /// Rubber-band preview of the shape being drawn.
 fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
   let Some((_, plane)) = sketch_plane(app) else { return };
-  if matches!(app.tool, Tool::Select | Tool::Dimension) || app.tool.picks_curves() && app.tool != Tool::Circle2T {
+  if matches!(app.tool, Tool::Select | Tool::Dimension | Tool::Constrain(_))
+    || app.tool.picks_curves() && app.tool != Tool::Circle2T
+  {
     return;
   }
   let Some(pos) = resp.hover_pos() else { return };
@@ -4165,6 +4191,7 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
   let picked = state.curves.len();
   Some(match tool {
     Tool::Select => return None,
+    Tool::Constrain(kind) => crate::constrain::prompt(kind, state.con_picks, state.con_any),
     Tool::Line => {
       if n == 0 {
         "Place first point"
@@ -4368,7 +4395,8 @@ fn cursor_prompt(app: &App, resp: &egui::Response) {
 /// The sketch tools that place points with the cursor (a crosshair), rather than pick curves
 /// or select.
 fn places_points(tool: Tool) -> bool {
-  !matches!(tool, Tool::Select | Tool::Dimension | Tool::Trim | Tool::Extend) && !tool.picks_curves()
+  !matches!(tool, Tool::Select | Tool::Dimension | Tool::Trim | Tool::Extend | Tool::Constrain(_))
+    && !tool.picks_curves()
 }
 
 // ---------------------------------------------------------------- sketch plane picking

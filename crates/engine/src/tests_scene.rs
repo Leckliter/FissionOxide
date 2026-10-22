@@ -231,7 +231,8 @@ fn constrained_sketch_curves_draw_black_and_free_ones_blue() {
   assert_eq!(colour(&free), scene::SKETCH_FREE);
   assert_eq!(colour(&circle), scene::SKETCH_FIXED);
   assert_eq!(colour(&open), scene::SKETCH_FREE, "its radius is still free");
-  assert_eq!(colour(&pinned), scene::SKETCH_FIXED, "Fix holds a circle's radius too");
+  // geometry Fix holds entirely draws green (Fusion's fixed colour), not black
+  assert_eq!(colour(&pinned), scene::SKETCH_FIXED_GREEN, "Fix holds a circle's radius too");
 }
 
 /// A sketch's closed profiles shade light blue seen from outside the sketch and pale blue-white

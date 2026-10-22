@@ -45,6 +45,8 @@ pub const PROFILE_OUTLINE_SELECTED: [u8; 4] = [220, 40, 40, 255];
 pub const SKETCH_HOVER: [u8; 4] = [24, 96, 200, 255];
 pub const SKETCH_FREE: [u8; 4] = [30, 110, 235, 255];
 pub const SKETCH_FIXED: [u8; 4] = [20, 20, 24, 255];
+/// Geometry held by Fix constraints: Fusion's green (no lock glyph).
+pub const SKETCH_FIXED_GREEN: [u8; 4] = [120, 170, 20, 255];
 /// Construction geometry: grey dashed, as Fusion draws it.
 pub const SKETCH_CONSTRUCTION: [u8; 4] = [128, 128, 132, 255];
 pub const SKETCH_IDLE: [u8; 4] = [60, 70, 90, 255];
@@ -766,6 +768,7 @@ fn sketch_lines(
     }
     scene.lines.push(Polyline { points, color, width, id, on_top: editing, dashed, behind: false });
   };
+  let fixed = if editing { fixed_curves(sk) } else { Default::default() };
   for c in &sk.curves {
     // the palette's Construction Geometries and Projected Geometries options
     if !show.construction && c.construction || !show.projected && projected.contains(&c.id) {
@@ -776,7 +779,13 @@ fn sketch_lines(
       continue;
     }
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
-    let idle = if report.curve_free(sk, c.id) || text_free.contains(&c.id) { SKETCH_FREE } else { SKETCH_FIXED };
+    let idle = if report.curve_free(sk, c.id) || text_free.contains(&c.id) {
+      SKETCH_FREE
+    } else if fixed.contains(&c.id) {
+      SKETCH_FIXED_GREEN
+    } else {
+      SKETCH_FIXED
+    };
     let id = if pickable { picks.id(pick) } else { 0 };
     if preview.contains(&c.id.0) && !selected.contains(&pick) {
       // a previewed copy: a thin grey outline until OK draws it blue
@@ -1617,4 +1626,33 @@ pub fn geometry_frame(s: &Session, g: &fox_model::assembly::JointGeometry) -> Op
       assembly::edge_frame(b.edges().iter().find(|e| e.id == id)?, b.faces()).ok()
     }
   }
+}
+
+/// The points a Fix constraint holds (drawn green, as Fusion draws fixed geometry).
+pub fn fixed_points(sk: &Sketch) -> std::collections::HashSet<PointId> {
+  sk.constraints
+    .iter()
+    .filter_map(|c| match c.kind {
+      fox_sketch::ConstraintKind::Fix { p, .. } => Some(p),
+      _ => None,
+    })
+    .collect()
+}
+
+/// The curves Fix holds: every point defining the curve is fixed (and a circle's radius too).
+pub fn fixed_curves(sk: &Sketch) -> std::collections::HashSet<fox_sketch::CurveId> {
+  let pts = fixed_points(sk);
+  let radius_fixed = |c: fox_sketch::CurveId| {
+    sk.constraints.iter().any(|k| matches!(k.kind, fox_sketch::ConstraintKind::FixRadius { curve, .. } if curve == c))
+  };
+  sk.curves
+    .iter()
+    .filter(|c| {
+      let defining = fox_sketch::curve_points(&c.kind);
+      !defining.is_empty()
+        && defining.iter().all(|p| pts.contains(p))
+        && (!matches!(c.kind, CurveKind::Circle { .. }) || radius_fixed(c.id))
+    })
+    .map(|c| c.id)
+    .collect()
 }

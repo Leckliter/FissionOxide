@@ -562,11 +562,15 @@ impl Cmd {
           (Icon::SkChamferAngle, "Distance and Angle Chamfer", "Bevel a corner by a distance and an angle")
         }
         Tool::Chamfer2 => (Icon::SkChamfer2, "Two Distance Chamfer", "Bevel a corner by two distances"),
+        Tool::Constrain(k) => {
+          let (icon, name) = constraint_info(k);
+          (icon, name, "Pick sketch objects to constrain")
+        }
       },
       Cmd::Construction => (Icon::Construction, "Construction", "Toggle construction linetype (X)"),
       Cmd::Constraint(kind) => {
         let (icon, name) = constraint_info(kind);
-        (icon, name, "Applies to the current selection")
+        (icon, name, "Pick sketch objects to constrain (a selection applies at once)")
       }
       Cmd::FinishSketch => (Icon::Finish, "Finish Sketch", "Finish the sketch and return to the model"),
       Cmd::Undo => (Icon::Undo, "Undo", "Undo (Ctrl+Z)"),
@@ -707,6 +711,7 @@ impl Cmd {
   pub(crate) fn active(self, app: &App) -> bool {
     match self {
       Cmd::SketchTool(t) => app.tool == t,
+      Cmd::Constraint(k) => app.tool == Tool::Constrain(k),
       Cmd::Select => false,
       Cmd::Params => app.show_params,
       Cmd::Dialog(k) => app.dialog.as_ref().is_some_and(|d| d.kind == k),
@@ -750,7 +755,7 @@ impl Cmd {
         app.set_tool(t);
       }
       Cmd::Construction => app.toggle_construction(),
-      Cmd::Constraint(kind) => apply_constraint(app, kind),
+      Cmd::Constraint(kind) => crate::constrain::start(app, kind),
       Cmd::FinishSketch => app.finish_sketch(),
       Cmd::Undo => {
         if app.s.can_undo() {
@@ -3649,118 +3654,6 @@ fn paint_marker(p: &egui::Painter, x: f32, top: f32, bottom: f32, c: Color32) {
     c,
     Stroke::NONE,
   ));
-}
-
-/// Applies a constraint to the current sketch selection.
-/// UnFix: when every selected point, and every point of each selected curve, is fixed, deletes
-/// those Fix constraints (and a selected circle's fixed radius). Returns whether it did.
-fn unfix(app: &mut App, sk: FeatureId, points: &[u32], curves: &[u32]) -> bool {
-  use fox_engine::sketch::{ConstraintKind, CurveId, PointId};
-  let Ok(sketch) = app.s.design.sketch(sk) else { return false };
-  let mut pts: Vec<PointId> = points.iter().map(|p| PointId(*p)).collect();
-  for c in curves {
-    pts.extend(sketch.curve_points(CurveId(*c)));
-  }
-  if pts.is_empty() {
-    return false;
-  }
-  let fix_of = |p: PointId| {
-    sketch.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Fix { p: q, .. } if q == p)).map(|c| c.id.0)
-  };
-  // points pinned by the sketch itself (its origin) count as fixed but have nothing to delete
-  let pinned = |p: PointId| sketch.point(p).is_some_and(|pt| pt.fixed);
-  if !pts.iter().all(|p| fix_of(*p).is_some() || pinned(*p)) {
-    return false;
-  }
-  let mut cons: Vec<u32> = pts.iter().filter_map(|p| fix_of(*p)).collect();
-  if cons.is_empty() {
-    return false;
-  }
-  cons.extend(sketch.constraints.iter().filter_map(|c| match c.kind {
-    ConstraintKind::FixRadius { curve, .. } if curves.contains(&curve.0) => Some(c.id.0),
-    _ => None,
-  }));
-  cons.sort_unstable();
-  cons.dedup();
-  app.run("sketch.delete", json!({"sketch": sk.0, "constraints": cons})).is_some()
-}
-
-pub fn apply_constraint(app: &mut App, kind: &str) {
-  let Some(sk) = app.s.edit_sketch else { return };
-  let mut points = Vec::new();
-  let mut curves = Vec::new();
-  for s in &app.s.selection {
-    match s {
-      Sel::SketchPoint { point, .. } => points.push(point.0),
-      Sel::SketchCurve { curve, .. } => curves.push(curve.0),
-      _ => {}
-    }
-  }
-  // Horizontal/Vertical picks per line (or point pair) whichever is closer
-  if kind == "hv" {
-    let Ok(sketch) = app.s.design.sketch(sk) else { return };
-    let mut jobs: Vec<(&'static str, serde_json::Value)> = Vec::new();
-    if points.len() == 2
-      && curves.is_empty()
-      && let (Some(a), Some(b)) =
-        (sketch.pos(fox_engine::sketch::PointId(points[0])), sketch.pos(fox_engine::sketch::PointId(points[1])))
-    {
-      let kind = if (b[0] - a[0]).abs() >= (b[1] - a[1]).abs() { "horizontal" } else { "vertical" };
-      jobs.push((kind, json!({"sketch": sk.0, "type": kind, "points": points})));
-    }
-    for c in &curves {
-      let ends = sketch.curve_points(fox_engine::sketch::CurveId(*c));
-      if let Some(curve) = sketch.curve(fox_engine::sketch::CurveId(*c))
-        && matches!(curve.kind, fox_engine::sketch::CurveKind::Line { .. })
-        && let (Some(a), Some(b)) =
-          (ends.first().and_then(|p| sketch.pos(*p)), ends.get(1).and_then(|p| sketch.pos(*p)))
-      {
-        let kind = if (b[0] - a[0]).abs() >= (b[1] - a[1]).abs() { "horizontal" } else { "vertical" };
-        jobs.push((kind, json!({"sketch": sk.0, "type": kind, "curves": [c]})));
-      }
-    }
-    if jobs.is_empty() {
-      app.hint("Horizontal/Vertical: select lines or two points");
-      return;
-    }
-    let mut any = false;
-    for (_, params) in jobs {
-      any |= app.run("sketch.constrain", params).is_some();
-    }
-    if any {
-      app.s.selection.clear();
-    }
-    return;
-  }
-  // Fix/UnFix: geometry that's already fixed is unfixed
-  if kind == "fix" && unfix(app, sk, &points, &curves) {
-    return;
-  }
-  // H/V on several lines: one constraint each
-  if kind == "fix" || (matches!(kind, "horizontal" | "vertical") && points.len() != 2) {
-    let mut any = false;
-    if kind == "fix" {
-      for p in &points {
-        any |= app.run("sketch.constrain", json!({"sketch": sk.0, "type": kind, "points": [p]})).is_some();
-      }
-      if !curves.is_empty() {
-        any |= app.run("sketch.constrain", json!({"sketch": sk.0, "type": kind, "curves": curves})).is_some();
-      }
-    } else {
-      for c in &curves {
-        any |= app.run("sketch.constrain", json!({"sketch": sk.0, "type": kind, "curves": [c]})).is_some();
-      }
-    }
-    if any {
-      app.s.selection.clear();
-    } else if curves.is_empty() && points.is_empty() {
-      app.hint(format!("Select geometry, then apply {kind}"));
-    }
-    return;
-  }
-  if app.run("sketch.constrain", json!({"sketch": sk.0, "type": kind, "points": points, "curves": curves})).is_some() {
-    app.s.selection.clear();
-  }
 }
 
 fn feature_icon(k: &FeatureKind) -> Icon {

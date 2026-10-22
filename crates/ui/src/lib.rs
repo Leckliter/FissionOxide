@@ -13,6 +13,7 @@ mod clipboard;
 mod comments;
 mod comp_drag;
 mod config_ui;
+mod constrain;
 mod customize;
 mod cut_ui;
 mod data_panel;
@@ -100,6 +101,9 @@ pub struct App {
   /// Trim, Break): shown at the canvas's lower right, with a warning icon at the right end of the
   /// status readout until the next command.
   pub(crate) warning_toast: Option<panels::WarningToast>,
+  /// The red message of the last command [`App::run`] refused: it goes when the next command
+  /// succeeds (Fusion leaves nothing behind a refused command).
+  run_error: Option<String>,
   pub show_params: bool,
   /// Change Parameters' filters, sort, selection and Automatic Compute (see [`params_ui`]).
   pub params_ui: params_ui::Panel,
@@ -412,6 +416,7 @@ impl App {
       status: None,
       hint: None,
       warning_toast: None,
+      run_error: None,
       show_params: false,
       params_ui: params_ui::Panel::default(),
       drawing: None,
@@ -565,21 +570,40 @@ impl App {
     match self.s.execute(cmd, &params) {
       Ok(v) => {
         if let Some(e) = v.get("error").and_then(Value::as_str) {
-          self.status = Some((format!("{cmd}: {e}"), true));
-        } else if let Some(w) = v.get("warning").and_then(Value::as_str) {
-          if v.get("removed").and_then(Value::as_u64).is_some_and(|n| n > 0) {
-            // a sketch Modify command dropped constraints or dimensions: Fusion's warning toast
-            self.warning_toast = Some(panels::WarningToast { warnings: vec![w.to_string()], since: None });
-          } else {
-            self.status = Some((w.to_string(), false));
+          self.refuse(format!("{cmd}: {e}"));
+        } else {
+          // a success clears the last refusal's message; other messages stay
+          self.forget_run_error();
+          if let Some(w) = v.get("warning").and_then(Value::as_str) {
+            if v.get("removed").and_then(Value::as_u64).is_some_and(|n| n > 0) {
+              // a sketch Modify command dropped constraints or dimensions: Fusion's warning toast
+              self.warning_toast = Some(panels::WarningToast { warnings: vec![w.to_string()], since: None });
+            } else {
+              self.status = Some((w.to_string(), false));
+            }
           }
         }
         Some(v)
       }
       Err(e) => {
-        self.status = Some((e.0, true));
+        self.refuse(e.0);
         None
       }
+    }
+  }
+
+  /// Shows a refused command's message in red (until the next command succeeds).
+  fn refuse(&mut self, msg: String) {
+    self.run_error = Some(msg.clone());
+    self.status = Some((msg, true));
+  }
+
+  /// Clears the last refused command's red message, if it is still showing.
+  pub(crate) fn forget_run_error(&mut self) {
+    if let Some(m) = self.run_error.take()
+      && self.status.as_ref().is_some_and(|(t, err)| *err && *t == m)
+    {
+      self.status = None;
     }
   }
 
@@ -968,44 +992,7 @@ impl App {
       self.new_design();
     }
     if pressed(Key::Escape, Modifiers::NONE) {
-      if self.other.is_some() {
-        // the Select Other list closes, keeping the selection
-        self.other = None;
-      } else if self.sel_tool.is_some() {
-        self.sel_tool = None;
-        self.end_hint();
-      } else if self.canvas_ui.cancel() || self.library_ui.cancel() {
-      } else if self.marking.is_some() {
-        self.marking = None;
-      } else if self.dim_edit.is_some() {
-        // a new dimension stays at its current value, as in Fusion
-        viewport::settle_dim_edit(self);
-      } else if self.nav_mode.is_some() {
-        self.nav_mode = None;
-      } else if self.tstate.applied.is_some() {
-        // the fillet or chamfer just applied stays; its value box closes and the tool ends
-        sketch_modify::finish(self);
-        self.tool = Tool::Select;
-      } else if !self.tstate.is_empty() {
-        // an unfinished spline is discarded (Enter or its check mark commits it); with the
-        // Select tool a stray pick state never keeps the selection
-        self.end_hint();
-        viewport::reset_tool_state(self);
-        if self.tool == Tool::Select {
-          self.s.selection.clear();
-        }
-      } else if self.tool != Tool::Select {
-        self.end_hint();
-        self.tool = Tool::Select;
-      } else if self.dialog.is_some() {
-        self.cancel_dialog();
-        self.s.selection.clear();
-      } else {
-        // a picked origin plane, axis or point clears too; the item stays visible
-        self.s.selection.clear();
-        origin::clear(self);
-      }
-      self.dim_edit = None;
+      self.escape();
     }
     // the S toolbox, at the pointer over the canvas (in a sketch and on a drawing sheet too)
     if let Some(p) = ctx.pointer_hover_pos().filter(|p| self.canvas.contains(*p))
@@ -1230,6 +1217,53 @@ impl App {
     self.recent.retain(|r| *r != c);
     self.recent.insert(0, c);
     self.recent.truncate(toolbox::RECENT);
+  }
+
+  /// Escape over the canvas: ends whatever is open, innermost first (a pop-up list, a tool's
+  /// unfinished shape, the tool, the dialog, the selection).
+  pub(crate) fn escape(&mut self) {
+    if self.other.is_some() {
+      // the Select Other list closes, keeping the selection
+      self.other = None;
+    } else if self.sel_tool.is_some() {
+      self.sel_tool = None;
+      self.end_hint();
+    } else if self.canvas_ui.cancel() || self.library_ui.cancel() {
+    } else if self.marking.is_some() {
+      self.marking = None;
+    } else if self.dim_edit.is_some() {
+      // a new dimension stays at its current value, as in Fusion
+      viewport::settle_dim_edit(self);
+    } else if self.nav_mode.is_some() {
+      self.nav_mode = None;
+    } else if self.tstate.applied.is_some() {
+      // the fillet or chamfer just applied stays; its value box closes and the tool ends
+      sketch_modify::finish(self);
+      self.tool = Tool::Select;
+    } else if !self.tstate.is_empty() {
+      // an unfinished spline is discarded (Enter or its check mark commits it); with the
+      // Select tool a stray pick state never keeps the selection
+      self.end_hint();
+      viewport::reset_tool_state(self);
+      if self.tool == Tool::Select {
+        self.s.selection.clear();
+      }
+    } else if self.tool != Tool::Select {
+      self.end_hint();
+      // a constraint command's picks go with it
+      if matches!(self.tool, Tool::Constrain(_)) {
+        self.s.selection.clear();
+      }
+      self.tool = Tool::Select;
+    } else if self.dialog.is_some() {
+      self.cancel_dialog();
+      self.s.selection.clear();
+    } else {
+      // a picked origin plane, axis or point clears too; the item stays visible
+      self.s.selection.clear();
+      origin::clear(self);
+    }
+    self.dim_edit = None;
   }
 
   /// Runs a command from a shortcut, the S toolbox or Repeat. A modelling command the sketch
@@ -2257,15 +2291,22 @@ mod tests {
   fn a_tool_hint_clears_when_the_tool_ends() {
     let mut app = App::with_session(Session::default());
     app.create_sketch(json!("xy"));
-    // Horizontal/Vertical with nothing selected asks for lines
+    // Horizontal/Vertical with nothing selected starts its pick command: the prompt follows the
+    // pointer, nothing is written in the canvas corner
     panels::Cmd::Constraint("hv").run(&mut app);
-    assert!(app.status.as_ref().is_some_and(|s| s.0.starts_with("Horizontal/Vertical")));
-    // picking a tool ends it: the canvas hint describes the tool again
-    app.set_tool(Tool::Trim);
+    assert_eq!(app.tool, Tool::Constrain("hv"));
     assert!(app.status.is_none(), "{:?}", app.status);
+    // picking a tool ends it
+    app.set_tool(Tool::Trim);
+    assert_eq!(app.tool, Tool::Trim);
     panels::Cmd::Constraint("hv").run(&mut app);
     app.finish_sketch();
+    assert_eq!(app.tool, Tool::Select);
     assert!(app.status.is_none(), "no stale hint after Finish Sketch: {:?}", app.status);
+    app.hint("Look At: select a planar face");
+    app.set_tool(Tool::Select);
+    assert!(app.status.is_none(), "a tool change ends the hint: {:?}", app.status);
+
     // other messages stay
     app.hint("Look At: select a planar face");
     app.status = Some(("Saved".into(), false));
