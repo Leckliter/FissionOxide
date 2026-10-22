@@ -1,44 +1,49 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 10:40, session "Parity prober 11"
+## Last stop: 2026-10-22, 10:58, session "Parity prober 12"
 
-Finished this session: "Edit Feature for every feature; feature errors and warnings in the
-timeline" (done, with a not-exercised list) and the first part of "Configure, Construct (every
-plane/axis/point), Inspect, Insert, Assemble, Select menu" (in progress). Report
-`parity/reports/2026-10-22-edit-construct.md`, `map-wave26.json`, batches `ui-edit-more-features`,
-`ui-timeline-failed-items`, `ui-inspect-insert-assemble`, all `ready` in `index.jsonl` with no fixer
-yet. Prober 10's three wave-25 batches (`ui-extrude-manipulator`, `ui-feature-handles`,
-`ui-edit-feature-errors`) were assigned to cloud fixers by the coordinator during this session.
+Finished this session: "Configure, Construct (every plane/axis/point), Inspect, Insert, Assemble,
+Select menu" (done, with a not-exercised list in `coverage.md`). Report
+`parity/reports/2026-10-22-construct-inspect-insert.md`, `map-wave27.json`, batches
+`ui-construct-methods` (5), `ui-inspect-measure-section` (3), `ui-inspect-analyses` (4) and
+`ui-insert-new-design` (4, one P0: "+" replaces the open design), all `ready` in `index.jsonl` with no
+fixer yet. Prober 11's wave-26 batches (`ui-edit-more-features`, `ui-timeline-failed-items`,
+`ui-inspect-insert-assemble`) were assigned to cloud fixers by the coordinator during this session.
 
 ## Next prober: start here
 
-1. Continue "Configure, Construct (every plane/axis/point), Inspect, Insert, Assemble, Select menu"
-   (Design workspace: solid). Done so far: the CONSTRUCT, CONFIGURE, INSPECT, INSERT, ASSEMBLE and
-   SELECT lists (Select submenus verified), the Offset Plane and Axis Through Cylinder dialogs, Measure
-   on one face. Next: each Method of Fusion's single "CONSTRUCTION GEOMETRY" dialog (Plane: At Angle,
-   Tangent, Midplane, Perpendicular Plane, Through Two Edges, Through Three Points, Along Path; Axis:
-   five methods; Point: six) against FissionOxide's separate dialogs (rows, previews, the result's
-   browser row and timeline icon); Measure with two picks (distance, angle); Interference, Section
-   Analysis (manipulator, browser Analysis folder), Curvature Comb / Map, Zebra, Draft, Isocurve,
-   Accessibility, Center of Mass, Minimum Radius; the Insert Decal, Canvas, SVG, DXF, Mesh and Derive
-   dialogs; Configure (the table); Assemble in an assembly document (Fusion's "Add To Assembly" or a
-   new assembly design), joints, motion, contact sets. Then the next `todo` in `coverage.md` (SURFACE
-   tab).
-2. Re-verify in the app the `fixing-merged` keys still not re-checked:
-   `ui:sketch:horizontal-conflict`, `ui:sketch:dimension-label-and-hover` (hover part),
-   `ui:sketch:tangent-arc-snap-marker`, `ui:canvas:vertex-marker-style` (native-resolution crop),
-   plus `ui:canvas:construction-plane-colors` and `ui:canvas:construction-axis-colors` (your area).
-3. Rebuild before probing: the running binary is `main` at `ed3546c5`; kill `fissionoxide.exe`
-   first, `cargo build --release -p fissionoxide` took about 5 minutes this time.
+1. Take the next `todo` in `coverage.md`: "SURFACE tab: every create/modify command and dialog"
+   (Design workspace, SURFACE tab in both apps). Compare the tab's panels and dropdowns, then every
+   command's dialog as it opens and after its first pick, the result's browser row, timeline icon and
+   right-click menu.
+2. Re-verify in the app the `fixing-merged` keys still not re-checked: `ui:sketch:horizontal-conflict`,
+   `ui:sketch:dimension-label-and-hover` (hover part), `ui:sketch:tangent-arc-snap-marker`, plus any
+   key in the SURFACE area marked `fixing-merged`.
+3. Rebuild before probing: the running binary is `main` at `c4d97aa9`; kill `fissionoxide.exe` first,
+   `cargo build --release -p fissionoxide` took about 2 minutes this time.
 
-Where the documents stand: Fusion "Untitled*(1)" (active, inches, Part Design): plate with a hole,
-cylinder (height 0.05 in) with a failed Chamfer1, two spheres after a Combine, a moved torus;
-window at screenshot x 0..907, y 82..733. FissionOxide (built `ed3546c5`) in a new design: Box,
-Cylinder, Chamfer1 (failed at 50 mm), Sketch + Hole1, Mirror1, Move1, Combine1, PressPull1; Data
-Panel closed, window at x 8..1012, y 72..775. Both left of the overlay; Fusion's taskbar button at
-(497,804), FissionOxide's at (572,804).
+Where the documents stand: Fusion has three tabs: "Untitled*" (older), "Untitled*(1)" (Part Design,
+inches: plate, cylinder with a failed Chamfer1, spheres, coil, torus, Plane1, Point1, an Analysis
+folder with Section1 and CenterOfMass1) and "Untitled(2)" (an empty Assembly Design, active); window
+at screenshot x 0..907, y 82..733. FissionOxide (built `c4d97aa9`) holds one new design with a Box
+(the earlier design was lost to "+", see `ui:chrome:new-tab-replaces-design`); Data Panel closed,
+window at x 8..1012, y 103..755. Both left of the overlay; Fusion's taskbar button at (497,803),
+FissionOxide's at (572,803).
 
 ## Traps
+- FissionOxide's "+" (and Ctrl+N) throws the open design away without asking; do not press it
+  with work you still need.
+- FissionOxide's analyses (Draft, Accessibility, Zebra, Curvature Map) stay on after Close and
+  Escape and even into a new design; reopen the command and clear Show analysis before looking at
+  colours.
+- Fusion's INSERT entries (Decal, Canvas, SVG, Mesh) open a modal "Insert" window over the canvas;
+  its Cancel is at (625,568).
+- FissionOxide's Insert SVG / DXF / Mesh open the Windows file dialog and leave the INSERT dropdown
+  open; the next click only closes the dropdown.
+- Fusion's ASSEMBLY tab dropdowns often ignore the first click after Escape: move to the canvas,
+  back onto the label, wait, click (twice if needed).
+- Fusion's Tangent Plane on a sphere would not take a reference pick (browser plane, canvas plane or
+  Plane1).
 - Fusion's construct commands open a single "CONSTRUCTION GEOMETRY" dialog (Type icons Plane / Axis /
   Point, Method dropdown); switching Type clears the picks. Close a Method dropdown by clicking the
   field again (Escape cancels the dialog).

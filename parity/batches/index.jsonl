@@ -81,3 +81,7 @@
 {"name": "ui-edit-more-features", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_4f758622 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-inspect-insert-assemble", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_5e3e7433 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-timeline-failed-items", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_b864e6d7 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-construct-methods", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-insert-new-design", "items": 4, "status": "ready", "pr": null}
+{"name": "ui-inspect-analyses", "items": 4, "status": "ready", "pr": null}
+{"name": "ui-inspect-measure-section", "items": 3, "status": "ready", "pr": null}

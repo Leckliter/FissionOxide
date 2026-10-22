@@ -1,0 +1,18 @@
+{
+  "ui:construct:perpendicular-plane-wrong-dialog": "ui-construct-methods",
+  "ui:construct:plane-method-rows": "ui-construct-methods",
+  "ui:construct:axis-method-rows": "ui-construct-methods",
+  "ui:construct:point-method-rows": "ui-construct-methods",
+  "ui:browser:construction-axes-points-rows": "ui-construct-methods",
+  "ui:inspect:measure-two-picks": "ui-inspect-measure-section",
+  "ui:inspect:interference-dialog": "ui-inspect-measure-section",
+  "ui:inspect:section-analysis-dialog": "ui-inspect-measure-section",
+  "ui:inspect:analysis-dialogs-rows": "ui-inspect-analyses",
+  "ui:inspect:analysis-browser-folder": "ui-inspect-analyses",
+  "ui:inspect:missing-analyses": "ui-inspect-analyses",
+  "ui:inspect:center-of-mass-dialog": "ui-inspect-analyses",
+  "ui:chrome:new-tab-replaces-design": "ui-insert-new-design",
+  "ui:assemble:assembly-design-document": "ui-insert-new-design",
+  "ui:assemble:assembly-new-component": "ui-insert-new-design",
+  "ui:insert:file-chooser": "ui-insert-new-design"
+}

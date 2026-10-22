@@ -496,3 +496,17 @@ or Press Pull (and, from the code, most other kinds), has no Error window or Rev
 lists every assembly command in a Part Design document where Fusion offers only "Add To Assembly".
 18 rows in three batches (`parity/batches/map-wave26.json`), three match rows, three Select menu keys
 verified.
+
+## 2026-10-22, prober 12: Construct methods, Inspect, Insert, Configure, Assemble
+
+Every Method of Fusion's CONSTRUCTION GEOMETRY dialog against FissionOxide's separate dialogs, a
+construction point made in both, Measure with two picks, every Inspect dialog, every Insert entry,
+Configure, and Fusion's new-design chooser and Assembly Design document (report
+`parity/reports/2026-10-22-construct-inspect-insert.md`). Fusion picks everything in the canvas or
+browser with OK disabled until done, keeps analyses in a browser Analysis folder and opens its Insert
+window for files; FissionOxide uses plane dropdowns and coordinate boxes, opens Plane Along Path for
+Perpendicular Plane, lists no construction points or axes in the browser, leaves analysis colours on
+after Close, lacks four analyses, Decal and Derive, and its "+" silently replaces the open design.
+16 rows in four batches (`parity/batches/map-wave27.json`), two match rows, Configure blocked by the
+licence, one key verified. The area is done; joints need an assembly with components (new coverage
+row).
