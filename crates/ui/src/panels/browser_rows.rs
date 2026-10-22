@@ -387,7 +387,7 @@ pub(crate) fn run_origin_folder_cmd(app: &mut App, cmd: RowCmd) {
     RowCmd::ShowHide => origin_show_hide(app),
     RowCmd::ShowAll => {
       app.origin_shown = true;
-      app.objects.origins = true;
+      app.objects.show_origin();
       for item in OriginItem::ALL {
         origin::set_eye(app, item, true);
       }
@@ -496,11 +496,11 @@ pub(crate) fn construction_plane_menu(app: &App, fid: fox_engine::model::Feature
     row_item(Icon::Plane, "Edit Construction Plane", RowCmd::EditFeature),
     row_item(Icon::Configure, "Configure", RowCmd::Configure),
     None,
-    row_key(Icon::Remove, "Delete", RowCmd::Delete, "Del"),
+    row_key(Icon::Remove, "Delete", "Del", RowCmd::Delete),
     row_item(Icon::Params, "Rename", RowCmd::Rename),
     None,
     row_item(Icon::LookAt, "Look At", RowCmd::LookAt),
-    row_key(if shown { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", RowCmd::ShowHide, "V"),
+    row_key(if shown { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", "V", RowCmd::ShowHide),
     row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
     row_item(Icon::History, "Find in Timeline", RowCmd::FindInTimeline),
   ]
@@ -562,10 +562,24 @@ pub(crate) fn units_menu() -> Vec<Option<RowItem>> {
   vec![row_item(Icon::Measure, "Change Active Units", RowCmd::ChangeUnits)]
 }
 
-/// Runs a Units row menu command: Change Active Units opens the row's units popup.
-pub(crate) fn run_units_cmd(ctx: &egui::Context, cmd: RowCmd) {
+/// Runs a Units row menu command: Change Active Units opens its docked dialog.
+pub(crate) fn run_units_cmd(app: &mut App, cmd: RowCmd) {
   if cmd == RowCmd::ChangeUnits {
-    egui::Popup::open_id(ctx, crate::units::popup_id());
+    crate::doc_dialogs::open_units(app);
+  }
+}
+
+// ---------------------------------------------------------------- the Part Design row
+
+/// The Part Design row's menu: Convert Design Type, as Fusion's.
+pub(crate) fn design_type_menu() -> Vec<Option<RowItem>> {
+  vec![row_item(Icon::Pencil, "Convert Design Type", RowCmd::ConvertDesignType)]
+}
+
+/// Runs a Part Design row menu command: Convert Design Type opens its docked dialog.
+pub(crate) fn run_design_type_cmd(app: &mut App, cmd: RowCmd) {
+  if cmd == RowCmd::ConvertDesignType {
+    crate::doc_dialogs::open_convert(app);
   }
 }
 
@@ -846,20 +860,28 @@ mod tests {
     assert_eq!(labels(&origin_item_menu(&app, OriginItem::Z)), ["Show/Hide"]);
     run_origin_item_cmd(&mut app, OriginItem::Z, RowCmd::ShowHide);
     assert!(origin::eye(&app, OriginItem::Z) && !origin::eye(&app, OriginItem::X));
-    app.objects.origins = false;
+    app.objects.origin_planes = false;
+    app.objects.origin_points = false;
     run_origin_folder_cmd(&mut app, RowCmd::ShowAll);
-    assert!(app.origin_shown && app.objects.origins && OriginItem::ALL.iter().all(|i| origin::visible(&app, *i)));
+    assert!(
+      app.origin_shown
+        && app.objects.origin_planes
+        && app.objects.origin_points
+        && OriginItem::ALL.iter().all(|i| origin::visible(&app, *i))
+    );
     run_origin_folder_cmd(&mut app, RowCmd::FindInWindow);
     assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "{:?}", app.status);
   }
 
   #[test]
-  fn units_row_menu_opens_the_units_popup() {
-    let ctx = egui::Context::default();
+  fn units_and_part_design_menus_open_their_dialogs() {
+    let mut app = App::with_session(Session::default());
     assert_eq!(labels(&units_menu()), ["Change Active Units"]);
-    assert!(!egui::Popup::is_id_open(&ctx, crate::units::popup_id()));
-    run_units_cmd(&ctx, RowCmd::ChangeUnits);
-    assert!(egui::Popup::is_id_open(&ctx, crate::units::popup_id()));
+    run_units_cmd(&mut app, RowCmd::ChangeUnits);
+    assert!(crate::doc_dialogs::units_open(&app));
+    assert_eq!(labels(&design_type_menu()), ["Convert Design Type"]);
+    run_design_type_cmd(&mut app, RowCmd::ConvertDesignType);
+    assert!(crate::doc_dialogs::convert_open(&app));
   }
 
   #[test]

@@ -34,7 +34,7 @@ cmds! {
   "new" => "Start a new design", "{name?}";
   "open" => "Open a design (.fox, .foxz) or any importable file as a new design", "{path}";
   "save" => "Save the design to a file (.fox JSON, or .foxz archive)", "{path?}";
-  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool, explode?: bool | {direction?, factor?, ...} (mesh formats: the exploded view's positions)}";
+  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool, explode?: bool | {direction?, factor?, ...} (mesh formats: the exploded view's positions), units?: cm|mm|m|in|ft|yd|um|hm|mi|mil (sketch DXF, default mm), points?: bool, projected?: bool, construction?: bool (sketch DXF: which geometry to write, default all)}";
   "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, units?: mm|cm|m|in|ft (STL, OBJ, PLY), plane?}";
   "formats" => "Every file format with import/export support", "{}";
   "form.insert_tsm" => "Insert T-Spline: a T-Spline Mesh (.tsm) control cage becomes a smooth body (its Catmull-Clark limit surface, one face per region between star points)", "{path? | text?: the file's contents, name?}";
@@ -147,8 +147,8 @@ cmds! {
   "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); an ISO metric designation (M10x1.5) resizes the face to its class-mean diameter; without one, pitch defaults to ISO coarse; length and offset run from the face's low end (high_end or flip: the other end)", "{faces, designation?, class?: 6g|6H|.., pitch?, length?, offset?, modeled?, left? | right_handed?, flip? | location?: low_end|high_end}";
   "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
   "pipe" => "Tube along a path sketch or intersection curve: round, square or triangular, solid or hollow with a wall, along all or the first fraction of the path (round and whole along an intersection curve)", "{path: sketch | intersection curve, path_curves?, diameter | size, section?: circular|square|triangular, wall?, distance?: 0..1, operation?}";
-  "rib" => "Rib from sketch lines: thick across the sketch plane, grown to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
-  "web" => "Web from sketch lines: thick in the sketch plane, grown along its normal to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
+  "rib" => "Rib from sketch lines: thick across the sketch plane, grown to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?, one_side?: all the thickness on one side of the lines}";
+  "web" => "Web from sketch lines: thick in the sketch plane, grown along its normal to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?, one_side?}";
   "scale" => "Scale bodies about a point, uniformly or per axis", "{bodies?|component?, center?: [x,y,z], factor | factors: [x,y,z]}";
   "split_face" => "Split faces along a plane (the body stays one piece)", "{faces, tool: plane}";
   "remove_faces" => "Remove faces and heal the body (fillets, holes, bosses)", "{faces}";
@@ -513,6 +513,7 @@ cmds! {
   "select.by_size" => "Select the visible bodies (bounding box diagonal) or faces (square root of the area) between min and max", "{max, min?, kind?: bodies|faces}";
   "select.by_boundary" => "Select the faces enclosed by a closed chain of edges of one body (the smaller side); default the selected edges", "{edges?: [{body, edge}]}";
   "select.seed_boundary" => "Select the faces connected to a seed face without crossing the boundary edges; defaults: the selected face and edges", "{seed?: {body, face}, edges?: [{body, edge}]}";
+  "sketch.plane" => "Redefine Sketch Plane: put a sketch on another plane or planar face made before it (its curves keep their sketch coordinates); the features after it recompute", "{sketch, plane}";
   "construction.visible" => "Show or hide a construction plane, axis or point (the browser row's eye, V)", "{feature, visible: bool}";
 }
 
@@ -692,6 +693,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "sketch.finish" => {
       if let Some(id) = s.edit_sketch.take() {
+        // as in Fusion, a sketch a feature uses goes back to hidden when it is finished, even
+        // if it was shown (its eye greys; clicking it shows the sketch again)
+        if crate::scene::sketch_consumed(s, id)
+          && let Some(f) = s.design.feature_mut(id)
+          && f.visible == Some(true)
+        {
+          f.visible = None;
+          s.revision += 1;
+        }
         s.finish_sketch_step(id);
       }
       Ok(json!({}))
@@ -1608,6 +1618,35 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         Ok(())
       })?;
       Ok(json!({}))
+    }
+    "sketch.plane" => {
+      let id = FeatureId(req_u32(p, "sketch")?);
+      s.design.sketch(id)?;
+      let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
+      let at = s.design.index_of(id).unwrap_or(0);
+      // a construction plane made after the sketch would be a forward reference
+      if let PlaneRef::Construction { feature } = plane
+        && s.design.index_of(feature).is_none_or(|i| i >= at)
+      {
+        return Err(CmdError::new("that plane comes after the sketch in the timeline"));
+      }
+      let failed = |s: &Session| s.model.status(id).and_then(|st| st.error.clone());
+      let before = failed(s);
+      s.edit(|d| {
+        if let Some(FeatureKind::Sketch { plane: pl, .. }) = d.feature_mut(id).map(|f| &mut f.kind) {
+          *pl = plane;
+        }
+        Ok(())
+      })?;
+      // a face of a body made later in the timeline isn't there for the sketch: refuse it
+      if before.is_none()
+        && let Some(e) = failed(s)
+      {
+        s.undo();
+        s.redo.pop();
+        return Err(CmdError::new(format!("the sketch can't go on that plane: {e}")));
+      }
+      Ok(feature_status(s, id))
     }
     "construction.visible" => {
       let id = FeatureId(req_u32(p, "feature")?);

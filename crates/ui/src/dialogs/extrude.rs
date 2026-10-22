@@ -252,8 +252,11 @@ impl Dialog {
   }
 
   /// "N Profiles | Area : …" for the status bar while an extrude has profiles picked, in the
-  /// design's unit as Fusion shows it ("1 Profile | Area : 1.24 in^2").
+  /// design's unit as Fusion shows it ("1 Profile | Area : 1.24 in^2"); Thread's face radius.
   pub fn profile_status(&self, s: &Session) -> Option<String> {
+    if let Some(t) = self.thread_status(s) {
+      return Some(t);
+    }
     if !matches!(self.kind, super::Kind::Extrude | super::Kind::Revolve) || self.profiles.is_empty() {
       return None;
     }

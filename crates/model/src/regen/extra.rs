@@ -201,7 +201,7 @@ impl Ctx<'_> {
         self.operate(id, pipe, *operation)?;
         Ok(None)
       }
-      FeatureKind::Rib { sketch, curves, thickness, depth, flip, web } => {
+      FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, one_side } => {
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
         let t = self.len(thickness)?;
         if t <= 0.0 {
@@ -233,12 +233,14 @@ impl Ctx<'_> {
           let grow = if *flip { -grow } else { grow };
           let len = (b - a).length();
           let sec = Plane { origin: a, x: u, y: thick };
+          // across the lines: half each side, or all of it on one
+          let (lo, hi) = if *one_side { (0.0, t) } else { (-t / 2.0, t / 2.0) };
           let rect = Loop {
             segs: vec![
-              Seg::Line { a: [0.0, -t / 2.0], b: [len, -t / 2.0] },
-              Seg::Line { a: [len, -t / 2.0], b: [len, t / 2.0] },
-              Seg::Line { a: [len, t / 2.0], b: [0.0, t / 2.0] },
-              Seg::Line { a: [0.0, t / 2.0], b: [0.0, -t / 2.0] },
+              Seg::Line { a: [0.0, lo], b: [len, lo] },
+              Seg::Line { a: [len, lo], b: [len, hi] },
+              Seg::Line { a: [len, hi], b: [0.0, hi] },
+              Seg::Line { a: [0.0, hi], b: [0.0, lo] },
             ],
             src: Vec::new(),
           };
@@ -273,7 +275,12 @@ impl Ctx<'_> {
               break;
             }
           }
-          tools.push(found.ok_or("the rib doesn't meet the body (give it a depth)")?);
+          let what = if *web {
+            "the web doesn't meet the body (give it a depth)"
+          } else {
+            "the rib doesn't meet the body (give it a depth)"
+          };
+          tools.push(found.ok_or(what)?);
         }
         self.operate(id, union_all(tools)?, Operation::Join)?;
         Ok(None)

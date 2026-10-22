@@ -36,14 +36,15 @@ user meets them. Add areas when you find ones that are missing; never delete one
 ## Design workspace: solid
 - [done (2026-10-21)] Extrude, Fillet, Chamfer, Shell, Press Pull, Move, Hole dialogs (first pass)
 - [done (2026-10-22); dialogs as they open (and Box, Cylinder, Sphere, Torus, Coil, Pipe, Revolve, Thread, Mirror, Circular Pattern after their picks); not exercised: the post-pick rows of Sweep, Loft, Rib, Web, Emboss, Thicken, Boundary Fill, Joint Origin, Pattern on Path, each result's timeline icon, undo name and right-click menu, Create Form, Derive, Create PCB; New Component lives under ASSEMBLE] Create: New Component, Revolve, Sweep, Loft, Rib, Web, Emboss, Thread, Box/Cylinder/Sphere/Torus/Coil/Pipe, patterns, Mirror, Thicken, Boundary Fill, Base Feature, Joint Origin
-- [in progress (2026-10-22, prober 9)] Modify: Draft, Scale, Combine, Offset Face, Replace Face, Split Face, Split Body, Silhouette Split, Align, Delete, Remove, Simplify, Physical Material, Appearance, Manage Materials, Change Parameters, Compute All, Direct Edit
-- [todo] Manipulators for every feature: arrows, rings, floating value boxes, drag behaviour, snapping
-- [todo] Edit Feature for every feature; feature errors and warnings in the timeline
-- [todo] Configure, Construct (every plane/axis/point), Inspect (measure, interference, curvature, section, zebra, draft, CoG, CO2), Insert (decal, canvas, SVG, DXF, mesh, STEP, McMaster), Assemble (components, joints, motion, enable contact), Select menu
+- [done (2026-10-22); dialogs as they open and after their first picks, Draft completed and edited; not exercised: Delete, Bill of Materials, Parting Line draft, Non Uniform scale, Combine Cut/Intersect, other Split Face types, completing Replace Face / Split Body / Align, results and right-click menus except Draft, drag-to-apply materials; Direct Edit has no Fusion menu entry with history on (see Timeline)] Modify: Draft, Scale, Combine, Offset Face, Replace Face, Split Face, Split Body, Silhouette Split, Align, Delete, Remove, Simplify, Physical Material, Appearance, Manage Materials, Change Parameters, Compute All, Direct Edit
+- [done (2026-10-22); Extrude, Fillet, Shell, Offset Face, Draft compared; not exercised: Revolve, Chamfer, Scale, Offset Plane, Hole, patterns, the primitives (open batch ui-primitive-dialogs), Incremental Move while dragging] Manipulators for every feature: arrows, rings, floating value boxes, drag behaviour, snapping
+- [done (2026-10-22); Extrude, Fillet, Box, Cylinder, Chamfer, Mirror, Hole, Move, Combine and Press Pull edited in both apps, a failed chamfer's toast, Error window, menu, Suppress / Unsuppress and Roll here; not exercised: Revolve, Shell, Scale, pattern and sketch edits side by side, a yellow warning (none could be made), the More Info target] Edit Feature for every feature; feature errors and warnings in the timeline
+- [done (2026-10-22); prober 11 and 12: CONSTRUCT/CONFIGURE/INSPECT/INSERT/ASSEMBLE/SELECT lists, every Construct method's rows, Measure (one and two picks), every Inspect dialog, every Insert entry, Fusion's Assembly Design menus and New Component; Configure blocked (subscription); not exercised: joints, motion and contact sets (no components to joint), completing any Insert, analyses after a pick, Measure angles, Tangent Plane's reference pick] Configure, Construct (every plane/axis/point), Inspect (measure, interference, curvature, section, zebra, draft, CoG, CO2), Insert (decal, canvas, SVG, DXF, mesh, STEP, McMaster), Assemble (components, joints, motion, enable contact), Select menu
 
 ## Other tabs and workspaces
-- [todo] SURFACE tab: every create/modify command and dialog
-- [todo] MESH tab: every command
+- [todo] ASSEMBLY tab of an Assembly Design: joints (every type), As-Built Joint, Joint Origin, Rigid Group, constraints, Drive Joints, Motion Link, Motion Study, contact sets, Insert Component (needs two saved designs)
+- [done (2026-10-22); dialogs as they open, Fusion's after the first pick, Patch and surface Extrude results; not exercised: completing Revolve, Ruled, Offset, Extend, Stitch, Unstitch, Reverse Normal, Untrim or a cutting Trim, their timeline icons and menus, Edit Feature of surface features, the Analysis tabs, Create Form, Derive; Thicken, Boundary Fill, Pattern and Mirror share the SOLID dialogs] SURFACE tab: every create/modify command and dialog
+- [in progress (2026-10-22, parity prober 14)] MESH tab: every command
 - [todo] SHEET METAL tab: rules, flange, bend, unfold, flat pattern
 - [todo] PLASTIC tab
 - [todo] MANAGE (BOM) and UTILITIES tabs (make, add-ins, scripts, inspect)
@@ -51,4 +52,4 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [todo] Browser: every row type, eye toggles, drag and drop, rename, activate, component rows, joints folder
 - [todo] Workspaces: Render, Animation, Simulation, Manufacture (turning, milling tabs), Drawing, Electronics
 - [todo] Keyboard shortcuts: every default shortcut in Fusion's list vs FissionOxide's
-- [todo] Startup, new design, multiple documents, closing with unsaved changes, recovery, update flow
+- [todo] Startup, new design, multiple documents, closing with unsaved changes, recovery, update flow (seen 2026-10-22: the "+" chooser and the Assembly Design document, batch ui-insert-new-design)

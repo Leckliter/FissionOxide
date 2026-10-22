@@ -390,6 +390,12 @@ pub(crate) fn peek_feature(app: &mut App, f: FeatureId, label: String) {
   app.ctx_menu.next_label = Some(label);
 }
 
+/// Highlights a sketch in the canvas while its browser row is hovered: Fusion lights its curves
+/// and profiles and names it nowhere (no status text).
+pub(crate) fn peek_sketch(app: &mut App, f: FeatureId) {
+  app.ctx_menu.next_sketches = vec![f];
+}
+
 /// After the panels: takes this frame's hover highlight and notes the last command run.
 pub fn end_frame(app: &mut App, ctx: &egui::Context) {
   let m = &mut app.ctx_menu;

@@ -1,0 +1,18 @@
+{
+  "ui:manip:arrow-style": "ui-extrude-manipulator",
+  "ui:manip:extrude-taper-handle": "ui-extrude-manipulator",
+  "ui:manip:distance-dimension-label": "ui-extrude-manipulator",
+  "ui:manip:drag-snap-readout": "ui-extrude-manipulator",
+  "ui:manip:tab-cycles-boxes": "ui-extrude-manipulator",
+  "ui:manip:typed-value-units": "ui-extrude-manipulator",
+  "ui:manip:preview-hover-highlight": "ui-extrude-manipulator",
+  "ui:manip:value-box-covers-arrow": "ui-feature-handles",
+  "ui:manip:arrow-length-offscreen": "ui-feature-handles",
+  "ui:manip:draft-angle-handle": "ui-feature-handles",
+  "ui:manip:zero-default-value": "ui-feature-handles",
+  "ui:timeline:edit-rollback": "ui-edit-feature-errors",
+  "ui:dialogs:edit-selection-rows": "ui-edit-feature-errors",
+  "ui:dialogs:edit-manipulators": "ui-edit-feature-errors",
+  "ui:dialogs:failing-value-ok-disabled": "ui-edit-feature-errors",
+  "ui:timeline:error-toast": "ui-edit-feature-errors"
+}

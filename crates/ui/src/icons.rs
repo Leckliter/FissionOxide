@@ -346,6 +346,25 @@ pub enum Icon {
   DistSpacing,
   DirOne,
   DirSymmetric,
+  /// An edit pencil (Convert Design Type).
+  Pencil,
+  /// A named view: a framed picture.
+  NamedView,
+  // Grid and Snaps' two commands
+  GridSettings,
+  SetIncrements,
+  /// The navigation bar's Zoom Window: a magnifier inside a dashed box.
+  ZoomWindow,
+  // Coil's Rotation toggles
+  RotateCw,
+  RotateCcw,
+  /// Rib's and Web's To Next extent: grown until the body is met.
+  ToNext,
+  // Emboss's Effect toggles: raised or sunk into the face
+  EmbossRaise,
+  EmbossSink,
+  /// Thread's Threads Library: the cloud of custom thread definitions.
+  ThreadsLibrary,
 }
 
 #[derive(Clone, Copy)]
@@ -2523,6 +2542,92 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.arrow_head((0.08, 0.5), (-1.0, 0.0), 0.14, Slate);
       k.line((0.66, 0.5), (0.86, 0.5), Slate);
       k.arrow_head((0.92, 0.5), (1.0, 0.0), 0.14, Slate);
+    }
+    Icon::Pencil => {
+      k.solid(&[(0.62, 0.14), (0.86, 0.38), (0.38, 0.86), (0.14, 0.62)], Blue);
+      k.fill(&[(0.14, 0.62), (0.38, 0.86), (0.08, 0.92)], Ink);
+      k.line((0.54, 0.22), (0.78, 0.46), Ink);
+    }
+    Icon::NamedView => {
+      // a picture in its frame: a hill and the sun
+      k.solid(&[(0.08, 0.16), (0.92, 0.16), (0.92, 0.84), (0.08, 0.84)], White);
+      k.fill(&[(0.18, 0.74), (0.42, 0.4), (0.6, 0.62), (0.7, 0.5), (0.82, 0.74)], Blue);
+      k.circle((0.68, 0.33), 0.07, Some(Blue), None);
+    }
+    Icon::GridSettings => {
+      // a grid with a gear at its lower right
+      for i in 0..3 {
+        let t = 0.1 + i as f32 * 0.3;
+        k.line((t, 0.1), (t, 0.7), Ink);
+        k.line((0.1, t), (0.7, t), Ink);
+      }
+      for i in 0..8 {
+        let a = i as f32 * TAU / 8.0;
+        let (c, s) = (a.cos(), a.sin());
+        k.thick((0.72 + c * 0.13, 0.72 + s * 0.13), (0.72 + c * 0.2, 0.72 + s * 0.2), Blue, 1.6);
+      }
+      k.circle((0.72, 0.72), 0.14, Some(Blue), Some(Ink));
+      k.circle((0.72, 0.72), 0.05, Some(White), None);
+    }
+    Icon::SetIncrements => {
+      // a ruler with an arrow stepping along it
+      k.solid(&[(0.08, 0.56), (0.92, 0.56), (0.92, 0.86), (0.08, 0.86)], White);
+      for i in 0..7 {
+        let x = 0.16 + i as f32 * 0.113;
+        let h = if i % 2 == 0 { 0.7 } else { 0.64 };
+        k.line((x, 0.56), (x, h), Ink);
+      }
+      k.line((0.14, 0.3), (0.76, 0.3), Blue);
+      k.arrow_head((0.86, 0.3), (1.0, 0.0), 0.16, Blue);
+      k.line((0.14, 0.18), (0.14, 0.42), Ink);
+    }
+    Icon::ZoomWindow => {
+      for (a, b) in [
+        ((0.06, 0.06), (0.94, 0.06)),
+        ((0.94, 0.06), (0.94, 0.94)),
+        ((0.94, 0.94), (0.06, 0.94)),
+        ((0.06, 0.94), (0.06, 0.06)),
+      ] {
+        k.dashed(a, b, Ink);
+      }
+      k.circle((0.44, 0.44), 0.2, Some(White), Some(Ink));
+      k.thick((0.59, 0.59), (0.78, 0.78), Ink, 2.0);
+      k.line((0.34, 0.44), (0.54, 0.44), Ink);
+      k.line((0.44, 0.34), (0.44, 0.54), Ink);
+    }
+    // a coil's turn seen down its axis: three quarters of a circle and the arrow at its end
+    Icon::RotateCw => {
+      k.arc((0.5, 0.52), 0.32, 2.4, -2.4, Blue);
+      k.arrow_head((0.26, 0.74), (-0.68, -0.74), 0.18, Blue);
+    }
+    Icon::RotateCcw => {
+      k.arc((0.5, 0.52), 0.32, 0.74, 5.54, Blue);
+      k.arrow_head((0.74, 0.74), (0.68, -0.74), 0.18, Blue);
+    }
+    Icon::ToNext => {
+      // a wall grown down until it meets the floor below
+      k.solid(&[(0.08, 0.7), (0.92, 0.7), (0.92, 0.92), (0.08, 0.92)], Fill);
+      k.solid(&[(0.38, 0.08), (0.62, 0.08), (0.62, 0.42), (0.38, 0.42)], BlueLight);
+      k.thick((0.5, 0.44), (0.5, 0.6), Ink, 1.0);
+      k.arrow_head((0.5, 0.68), (0.0, 1.0), 0.13, Ink);
+    }
+    Icon::EmbossRaise => {
+      // a letter-shaped block standing on the face
+      k.solid(&[(0.06, 0.66), (0.94, 0.66), (0.94, 0.9), (0.06, 0.9)], Light);
+      k.block(0.3, 0.3, 0.7, 0.66, 0.14, BlueLight, Blue, BlueDark);
+    }
+    Icon::EmbossSink => {
+      // the same block sunk into the face
+      k.solid(&[(0.06, 0.4), (0.94, 0.4), (0.94, 0.9), (0.06, 0.9)], Light);
+      k.solid(&[(0.3, 0.4), (0.7, 0.4), (0.7, 0.66), (0.3, 0.66)], White);
+      k.closed(&[(0.3, 0.4), (0.7, 0.4), (0.7, 0.66), (0.3, 0.66)], Blue);
+    }
+    Icon::ThreadsLibrary => {
+      // a cloud
+      k.circle((0.36, 0.56), 0.18, Some(BlueLight), Some(Blue));
+      k.circle((0.6, 0.46), 0.22, Some(BlueLight), Some(Blue));
+      k.solid(&[(0.2, 0.6), (0.82, 0.6), (0.82, 0.74), (0.2, 0.74)], BlueLight);
+      k.line((0.2, 0.74), (0.82, 0.74), Blue);
     }
   }
 }

@@ -58,10 +58,11 @@ pub(crate) fn toggle_eye(app: &mut App, id: FeatureId) {
   app.run("construction.visible", json!({"feature": id.0, "visible": !on}));
 }
 
-/// Shown in the canvas: Object Visibility ▸ Construction on, the folder's eye and the plane's
-/// own on, and the plane built and not suppressed.
+/// Shown in the canvas: Object Visibility ▸ Construction (and its Planes) on, the folder's eye
+/// and the plane's own on, and the plane built and not suppressed.
 pub(crate) fn visible(app: &App, id: FeatureId) -> bool {
   app.objects.construction
+    && app.objects.construction_planes
     && app.construction_shown
     && eye(app, id)
     && app.s.model.planes.contains_key(&id)

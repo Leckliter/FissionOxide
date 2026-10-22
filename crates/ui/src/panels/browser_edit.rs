@@ -40,8 +40,13 @@ fn slow_id() -> egui::Id {
 
 /// Opens the in-place rename box on `row`.
 pub(super) fn begin(ui: &egui::Ui, row: egui::Id, target: RenameTarget, name: &str) {
+  begin_in(ui.ctx(), row, target, name);
+}
+
+/// [`begin`], from outside a browser row (New Named View).
+pub(super) fn begin_in(ctx: &egui::Context, row: egui::Id, target: RenameTarget, name: &str) {
   let e = Editing { row, target, text: name.to_string(), started: false };
-  ui.data_mut(|d| {
+  ctx.data_mut(|d| {
     d.insert_temp(editing_id(), e);
     d.remove::<SlowClick>(slow_id());
   });
@@ -134,6 +139,13 @@ fn commit(app: &mut App, target: RenameTarget, name: &str) {
     }
     RenameTarget::Component(c) => app.run("component.rename", json!({"component": c, "name": name})),
     RenameTarget::Group(g) => app.run("timeline.group_rename", json!({"group": g, "name": name})),
+    RenameTarget::NamedView(i) => {
+      let Some(old) = app.s.design.named_views.get(i as usize).map(|v| v.name.clone()) else { return };
+      if old == name {
+        return;
+      }
+      app.run("view.named.rename", json!({"name": old, "to": name}))
+    }
   };
 }
 

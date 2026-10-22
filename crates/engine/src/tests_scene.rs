@@ -514,6 +514,88 @@ fn sketch_curves_and_profiles_highlight_outside_the_sketch() {
   assert_eq!(picks.id_of(&curve), None);
 }
 
+/// Projected geometry draws Fusion's purple with a dark-purple filled dot at each vertex, in the
+/// sketch and after Finish Sketch alike; the palette's Projected Geometries option hides both.
+/// A fully constrained curve the user drew stays black.
+#[test]
+fn projected_geometry_draws_purple_with_filled_points() {
+  use crate::scene::SketchShow;
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
+  let body = s.model.bodies[0].id.0;
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let sk = s.edit_sketch.unwrap();
+  let made = run(&mut s, "sketch.project", json!({"body": body}))["curves"].clone();
+  let made: Vec<fox_sketch::CurveId> =
+    made.as_array().unwrap().iter().map(|c| fox_sketch::CurveId(c.as_u64().unwrap() as u32)).collect();
+  assert!(made.len() >= 4, "the box's outline: {made:?}");
+  let user = run(&mut s, "sketch.line", json!({"points": [[40, 0], [50, 0]]}))["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.constrain", json!({"type": "fix", "curves": [user]}));
+  let sketch = s.model.sketches[&sk].sketch.clone();
+  let corners: Vec<fox_sketch::PointId> =
+    made.iter().flat_map(|c| fox_sketch::curve_points(&sketch.curve(*c).unwrap().kind)).collect();
+
+  let look = |s: &Session, opts: &ViewOptions| {
+    let (scene, picks) = SceneBuilder::default().build(s, opts);
+    let curve = |c: fox_sketch::CurveId| {
+      scene.lines.iter().find(|l| picks.get(l.id) == Some(Pick::SketchCurve { sketch: sk, curve: c })).map(|l| l.color)
+    };
+    let curves: Vec<Option<[u8; 4]>> = made.iter().map(|c| curve(*c)).collect();
+    let user = curve(fox_sketch::CurveId(user as u32));
+    let points: Vec<(Option<[u8; 4]>, bool)> = corners
+      .iter()
+      .map(|p| {
+        let m = scene.markers.iter().find(|m| picks.get(m.id) == Some(Pick::SketchPoint { sketch: sk, point: *p }));
+        (m.map(|m| m.color), m.is_some_and(|m| !m.hollow))
+      })
+      .collect();
+    (curves, user, points)
+  };
+  for editing in [true, false] {
+    let (curves, user, points) = look(&s, &ViewOptions::default());
+    assert!(curves.iter().all(|c| *c == Some(scene::SKETCH_PROJECTED)), "editing {editing}: {curves:?}");
+    assert!(
+      points.iter().all(|p| *p == (Some(scene::SKETCH_PROJECTED_POINT), true)),
+      "editing {editing}: filled dark-purple vertices {points:?}"
+    );
+    if editing {
+      assert_ne!(user, Some(scene::SKETCH_PROJECTED), "the user's fixed line is not projected geometry");
+      let hide =
+        ViewOptions { sketch_show: SketchShow { projected: false, ..Default::default() }, ..Default::default() };
+      let (curves, _, points) = look(&s, &hide);
+      assert!(curves.iter().all(Option::is_none) && points.iter().all(|p| p.0.is_none()), "hidden: {points:?}");
+      run(&mut s, "sketch.finish", json!({}));
+    }
+  }
+}
+
+#[test]
+fn layout_grid_axes_cross_the_grid_in_red_and_green() {
+  let s = Session::default();
+  let axis_lines = |opts: &ViewOptions| {
+    let (scene, _) = SceneBuilder::default().build(&s, opts);
+    scene
+      .lines
+      .iter()
+      .filter(|l| l.color == scene::ORIGIN_X_COLOR || l.color == scene::ORIGIN_Y_COLOR)
+      .map(|l| (l.color, l.points.clone()))
+      .collect::<Vec<_>>()
+  };
+  // the grid alone: no axis lines (the origin's own axes are drawn by the UI)
+  assert!(axis_lines(&ViewOptions { hide_origin: true, ..Default::default() }).is_empty());
+  let lines = axis_lines(&ViewOptions { hide_origin: true, grid_axes: true, ..Default::default() });
+  assert_eq!(lines.len(), 2, "{lines:?}");
+  let (x_col, x) = &lines[0];
+  let (y_col, y) = &lines[1];
+  assert_eq!(*x_col, scene::ORIGIN_X_COLOR);
+  assert_eq!(*y_col, scene::ORIGIN_Y_COLOR);
+  // each runs across the whole grid through the origin
+  assert!(x[0][0] < 0.0 && x[1][0] > 0.0 && x[0][1] == 0.0 && x[1][1] == 0.0, "{x:?}");
+  assert!(y[0][1] < 0.0 && y[1][1] > 0.0 && y[0][0] == 0.0 && y[1][0] == 0.0, "{y:?}");
+  // a hidden grid takes its axis lines with it
+  assert!(
+    axis_lines(&ViewOptions { hide_grid: true, hide_origin: true, grid_axes: true, ..Default::default() }).is_empty()
+  );
 #[test]
 fn construction_visibility_hides_planes_axes_and_points() {
   let mut s = Session::default();

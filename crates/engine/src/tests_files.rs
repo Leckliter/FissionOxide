@@ -271,3 +271,100 @@ fn an_old_files_control_spline_keeps_its_pieces_and_a_new_one_is_one_edge() {
   assert!((v - w).abs() < 1e-3 * v, "{v} vs {w}");
   let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Fusion's Export DXF: the unit and the Visible Geometry check boxes decide what the file holds.
+#[test]
+fn sketch_dxf_export_takes_a_unit_and_leaves_out_unticked_geometry() {
+  use fox_exchange::dxf::{Entity, read_dxf};
+  let dir = temp_dir("dxf-options");
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 30, "depth": 20, "height": 10}));
+  let b = s.model.bodies[0].id.0;
+  let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 25}));
+  let pl = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
+  let sk = s.edit_sketch.unwrap();
+  run(&mut s, "sketch.project", json!({"body": b, "face": top}));
+  run(&mut s, "sketch.line", json!({"points": [[101.6, 0], [127, 0]]}));
+  run(&mut s, "sketch.line", json!({"points": [[100, 10], [110, 10]]}));
+  run(&mut s, "sketch.point", json!({"at": [200, 200]}));
+  let last = s.design.sketch(sk).unwrap().curves.last().unwrap().id.0;
+  run(&mut s, "sketch.construction", json!({"curves": [last], "on": true}));
+  run(&mut s, "sketch.finish", json!({}));
+  let read = |s: &mut Session, extra: serde_json::Value| {
+    let path = dir.join("out.dxf");
+    let mut p = json!({"path": path, "sketch": sk.0});
+    for (k, v) in extra.as_object().unwrap() {
+      p[k] = v.clone();
+    }
+    run(s, "export", p);
+    let text = std::fs::read_to_string(&path).unwrap();
+    (text.clone(), read_dxf(text.as_bytes()).unwrap().entities)
+  };
+  // everything: 4 projected lines, 2 lines (one construction) and the point
+  let (text, all) = read(&mut s, json!({}));
+  assert_eq!(all.len(), 7, "{all:?}");
+  assert!(text.contains("$INSUNITS\n 70\n4\n"));
+  let (_, e) = read(&mut s, json!({"points": false}));
+  assert_eq!(e.iter().filter(|(e, _)| matches!(e, Entity::Point { .. })).count(), 0);
+  assert_eq!(e.len(), 6);
+  let (_, e) = read(&mut s, json!({"construction": false}));
+  assert!(e.len() == 6 && e.iter().all(|(_, c)| !c), "{e:?}");
+  let (_, e) = read(&mut s, json!({"projected": false}));
+  assert_eq!(e.len(), 3, "{e:?}");
+  // in inches the file holds inches (and reads back as the same millimetres)
+  let (text, e) = read(&mut s, json!({"units": "in", "projected": false, "points": false, "construction": false}));
+  assert!(text.contains("$INSUNITS\n 70\n1\n"), "{text}");
+  assert!(text.contains("\n 10\n4\n") && text.contains("\n 11\n5\n"), "4 and 5 in the file: {text}");
+  match e.as_slice() {
+    [(Entity::Line { a, b }, false)] => assert!((a[0] - 101.6).abs() < 1e-6 && (b[0] - 127.0).abs() < 1e-6),
+    o => panic!("{o:?}"),
+  }
+  let err = s.execute("export", &json!({"path": dir.join("x.dxf"), "sketch": sk.0, "units": "furlong"}));
+  assert!(err.is_err_and(|e| e.0.contains("unknown DXF unit")));
+  let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Redefine Sketch Plane: the sketch moves to another plane or face made before it, keeping its
+/// sketch coordinates, and what is built on it follows.
+#[test]
+fn sketch_plane_moves_a_sketch_and_its_features_follow() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 30, "depth": 20, "height": 10}));
+  let b = s.model.bodies[0].id.0;
+  let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 40}));
+  let pl = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  let sk = s.edit_sketch.unwrap();
+  run(&mut s, "sketch.circle", json!({"center": [100, 100], "radius": 3}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": sk.0, "distance": 5}));
+  let later = s.design.features.last().unwrap().id.0;
+  let undo = s.undo.len();
+
+  // onto the box's top face: the cylinder now starts at z = 10
+  let r = run(&mut s, "sketch.plane", json!({"sketch": sk.0, "plane": {"body": b, "face": top}}));
+  assert!(r["error"].is_null(), "{r}");
+  assert_eq!(s.undo.len(), undo + 1, "one undo step");
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  let z = |s: &Session| s.model.sketches[&sk].plane.origin.z;
+  assert!((z(&s) - 10.0).abs() < 1e-6, "{}", z(&s));
+  // onto the construction plane
+  run(&mut s, "sketch.plane", json!({"sketch": sk.0, "plane": {"feature": pl}}));
+  assert!((z(&s) - 40.0).abs() < 1e-6);
+  // the curves keep their sketch coordinates
+  let c = &s.model.sketches[&sk].sketch;
+  assert!(c.points.iter().any(|p| (p.x - 100.0).abs() < 1e-9 && (p.y - 100.0).abs() < 1e-9));
+
+  // a feature made after the sketch can't be its plane
+  let err = s.execute("sketch.plane", &json!({"sketch": sk.0, "plane": {"feature": later}})).unwrap_err();
+  assert!(!err.0.is_empty());
+  run(&mut s, "plane.offset", json!({"plane": "yz", "offset": 5}));
+  let after = s.design.features.last().unwrap().id.0;
+  let err = s.execute("sketch.plane", &json!({"sketch": sk.0, "plane": {"feature": after}})).unwrap_err();
+  assert!(err.0.contains("after the sketch"), "{}", err.0);
+  assert!((z(&s) - 40.0).abs() < 1e-6, "unchanged");
+  assert!(s.execute("sketch.plane", &json!({"sketch": b, "plane": "xy"})).is_err(), "not a sketch");
+}

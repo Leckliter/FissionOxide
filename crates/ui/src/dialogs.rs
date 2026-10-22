@@ -24,8 +24,16 @@ mod move_copy;
 mod pieces;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
+mod export_dxf;
 mod newcomp;
+mod primitive;
+mod redefine;
+#[cfg(test)]
+mod sketch_row_tests;
 mod solid;
+mod thread;
+pub(crate) use export_dxf::{SaveWindow, save_window};
+pub(crate) use primitive::overlay as place_overlay;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
 pub(crate) const PICK_PLANE_HINT: &str = "Select a plane or planar face";
@@ -112,6 +120,10 @@ pub enum Kind {
   TraceImage,
   /// Appearance: a library of swatches to drag onto bodies and faces, and the design's own.
   Appearance,
+  /// Redefine Sketch Plane (a sketch row's menu): the sketch onto another plane or planar face.
+  RedefinePlane,
+  /// Export DXF (a sketch row's menu): the unit and the geometry, then where to save.
+  ExportDxf,
 }
 
 impl Kind {
@@ -135,6 +147,8 @@ impl Kind {
       Kind::OffsetPlane => construct::TITLE,
       Kind::Inspect => "MEASURE",
       Kind::Appearance => "APPEARANCE",
+      Kind::RedefinePlane => "REDEFINE SKETCH PLANE",
+      Kind::ExportDxf => "EXPORT DXF",
       Kind::Loft => "LOFT",
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
@@ -208,6 +222,8 @@ impl Kind {
       Kind::OffsetPlane => Icon::Plane,
       Kind::Inspect => Icon::Measure,
       Kind::Appearance => Icon::Appearance,
+      Kind::RedefinePlane => Icon::Plane,
+      Kind::ExportDxf => Icon::ExportDxf,
       Kind::Loft => Icon::Loft,
       Kind::Sweep => Icon::Sweep,
       Kind::Hole => Icon::Hole,
@@ -316,6 +332,8 @@ impl Kind {
       Kind::DrawingTitle => ("Title Block", "Fill in the title block"),
       Kind::DrawingSettings => ("Sheet Settings", "Sheet size, scale, projection and tables"),
       Kind::Appearance => ("Appearance", "Drag appearances onto bodies or faces (A)"),
+      Kind::RedefinePlane => ("Redefine Sketch Plane", "Put the sketch on another plane or planar face"),
+      Kind::ExportDxf => ("Export DXF", "Save the sketch as a DXF file"),
       _ => (self.title(), ""),
     };
     (self.icon(), name, hint)
@@ -422,11 +440,11 @@ fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
 }
 
 const OPS: [(&str, &str); 5] = [
-  ("new_body", "New body"),
+  ("new_body", "New Body"),
   ("join", "Join"),
   ("cut", "Cut"),
   ("intersect", "Intersect"),
-  ("new_component", "New component"),
+  ("new_component", "New Component"),
 ];
 const REVOLVE_DIRECTIONS: [(&str, &str); 3] =
   [("one_side", "One side"), ("two_sides", "Two sides"), ("symmetric", "Symmetric")];
@@ -563,6 +581,13 @@ pub struct Dialog {
   /// Text: the frame was just placed, so the Text box takes the keyboard on the next frame (its
   /// sample text selected, so typing replaces it), as in Fusion.
   focus_text: bool,
+  /// Box, Cylinder, Sphere, Torus and Coil: the plane pick and drawing before the dialog shows
+  /// (see [`primitive`]).
+  place: primitive::Step,
+  /// Redefine Sketch Plane's pick and the timeline it rolled back (see [`redefine`]).
+  redefine: redefine::State,
+  /// Export DXF's unit and Visible Geometry check boxes (see [`export_dxf`]).
+  dxf: export_dxf::Options,
   /// Another command this dialog switches to (a construction dialog's Type or Method): the app
   /// cancels this one and starts that.
   pub(crate) switch_to: Option<Kind>,
@@ -689,6 +714,9 @@ impl Dialog {
       center: None,
       dir_lines: Vec::new(),
       focus_text: false,
+      place: primitive::Step::Done,
+      redefine: redefine::State::default(),
+      dxf: export_dxf::Options::default(),
       switch_to: None,
     }
   }
@@ -772,14 +800,14 @@ impl Dialog {
       Kind::Fillet => d.radius = "2 mm".into(),
       Kind::Chamfer => d.radius = "1 mm".into(),
       Kind::Shell => d.radius = "2 mm".into(),
-      Kind::Cylinder => {
-        d.a = "10 mm".into();
-        d.b = "20 mm".into();
-      }
-      Kind::Sphere => d.a = "10 mm".into(),
+      // Fusion's defaults for the values not drawn (0.10 in high, a 0.40 in sphere, a 0.20 in
+      // tube); the drawing sets the rest
+      Kind::Box => d.c = "2.54 mm".into(),
+      Kind::Cylinder => d.b = "2.54 mm".into(),
+      Kind::Sphere => d.a = "10.16 mm".into(),
       Kind::Torus => {
-        d.a = "20 mm".into();
-        d.b = "5 mm".into();
+        d.b = "5.08 mm".into();
+        d.position = "center";
       }
       Kind::Revolve => d.axis = "z".into(),
       Kind::Mirror => {
@@ -959,7 +987,8 @@ impl Dialog {
       }
       Kind::Project => {
         d.flag = true;
-        d.choice = "bodies";
+        // Fusion's Selection Filter opens on Specified Entities (faces and edges)
+        d.choice = "specified";
       }
       Kind::Extrude => {
         // extruding from a face sketch defaults to Join, like Fusion
@@ -1044,6 +1073,7 @@ impl Dialog {
     if let Kind::Analysis(a) = kind {
       app.analysis = Some(json!({"analysis": a, "pull": "z", "angle": 1.0}));
     }
+    d.start_placing(app);
     d.localize(app.s.design.units);
     d.dirty = !d.picks();
     d
@@ -1158,16 +1188,14 @@ impl Dialog {
         d
       }
       FeatureKind::Primitive { shape, at, operation, .. } => {
-        let (kind, a, b, c) = match shape {
-          Primitive::Box { width, depth, height } => (Kind::Box, width.clone(), depth.clone(), height.clone()),
-          Primitive::Cylinder { radius, height } => (Kind::Cylinder, radius.clone(), height.clone(), String::new()),
-          Primitive::Sphere { radius } => (Kind::Sphere, radius.clone(), String::new(), String::new()),
-          Primitive::Torus { major, minor } => (Kind::Torus, major.clone(), minor.clone(), String::new()),
+        let kind = match shape {
+          Primitive::Box { .. } => Kind::Box,
+          Primitive::Cylinder { .. } => Kind::Cylinder,
+          Primitive::Sphere { .. } => Kind::Sphere,
+          Primitive::Torus { .. } => Kind::Torus,
         };
         let mut d = Dialog::blank(kind);
-        d.a = a;
-        d.b = b;
-        d.c = c;
+        d.load_primitive(shape);
         d.at = [fox_engine::sketch::Dim::new(at[0]).expr, fox_engine::sketch::Dim::new(at[1]).expr];
         d.op = op_str(*operation);
         d
@@ -1571,17 +1599,18 @@ impl Dialog {
         ("chamfer", self.chamfer_params(json!({"edges": self.edges, "tangent_chain": !self.solid.no_chain}), false))
       }
       Kind::Shell => ("shell", self.shell_params()),
-      Kind::Box => (
-        "box",
-        json!({"plane": self.plane, "at": self.at_pt()?, "width": self.a, "depth": self.b, "height": self.c, "operation": op}),
-      ),
-      Kind::Cylinder => (
-        "cylinder",
-        json!({"plane": self.plane, "at": self.at_pt()?, "radius": self.a, "height": self.b, "operation": op}),
-      ),
-      Kind::Sphere => ("sphere", json!({"plane": self.plane, "at": self.at_pt()?, "radius": self.a, "operation": op})),
-      Kind::Torus => {
-        ("torus", json!({"plane": self.plane, "at": self.at_pt()?, "major": self.a, "minor": self.b, "operation": op}))
+      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
+        let mut p = self.primitive_shape();
+        p["plane"] = self.plane.clone();
+        p["at"] = json!(self.at_pt()?);
+        p["operation"] = json!(op);
+        let cmd = match self.kind {
+          Kind::Box => "box",
+          Kind::Cylinder => "cylinder",
+          Kind::Sphere => "sphere",
+          _ => "torus",
+        };
+        (cmd, p)
       }
       Kind::OffsetPlane => ("plane.offset", json!({"plane": self.plane, "offset": self.distance})),
       Kind::Mirror if self.choice == "features" => {
@@ -1601,6 +1630,8 @@ impl Dialog {
         ("combine", json!({"target": target, "tools": tools, "operation": op, "keep_tools": self.keep_tools}))
       }
       Kind::Move => self.move_command()?,
+      Kind::RedefinePlane => self.redefine_command()?,
+      Kind::ExportDxf => return None,
     })
   }
 
@@ -1624,15 +1655,15 @@ impl Dialog {
       Kind::Fillet => self.fillet_edit_set(),
       Kind::Chamfer => self.chamfer_params(json!({}), true),
       Kind::Shell => self.shell_edit_set(),
-      Kind::Box => {
-        json!({"shape": {"type": "box", "width": self.a, "depth": self.b, "height": self.c}, "at": self.at_pt()?, "operation": self.op})
-      }
-      Kind::Cylinder => {
-        json!({"shape": {"type": "cylinder", "radius": self.a, "height": self.b}, "at": self.at_pt()?, "operation": self.op})
-      }
-      Kind::Sphere => json!({"shape": {"type": "sphere", "radius": self.a}, "at": self.at_pt()?, "operation": self.op}),
-      Kind::Torus => {
-        json!({"shape": {"type": "torus", "major": self.a, "minor": self.b}, "at": self.at_pt()?, "operation": self.op})
+      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
+        let mut shape = self.primitive_shape();
+        shape["type"] = json!(match self.kind {
+          Kind::Box => "box",
+          Kind::Cylinder => "cylinder",
+          Kind::Sphere => "sphere",
+          _ => "torus",
+        });
+        json!({"shape": shape, "at": self.at_pt()?, "operation": self.op})
       }
       Kind::OffsetPlane => json!({"offset": self.distance}),
       Kind::RectPattern => {
@@ -1660,6 +1691,16 @@ impl Dialog {
   }
 
   /// Offset Plane from `plane` (a `sketch.create` plane: an origin plane, `{feature}`, a face).
+  pub(crate) fn use_plane(&mut self, s: &mut Session, plane: Value, label: String) {
+    self.plane = plane;
+    self.plane_label = label;
+    self.refresh_manip(s);
+    self.preview(s);
+  }
+
+  /// Puts the dialog on any plane reference (an origin plane's name, `{feature}` for a
+  /// construction plane, `{body, face}` for a planar face) and re-previews (a sketch row's
+  /// Offset Plane, on the sketch's plane).
   pub(crate) fn use_plane(&mut self, s: &mut Session, plane: Value, label: String) {
     self.plane = plane;
     self.plane_label = label;
@@ -1719,6 +1760,9 @@ impl Dialog {
     if self.editing.is_some() {
       return true;
     }
+    if self.placing() {
+      return false;
+    }
     match self.kind {
       Kind::Form(f) => self.form.missing(f).is_none(),
       Kind::Extrude => self.sketch.is_some() && !self.profiles.is_empty(),
@@ -1764,6 +1808,8 @@ impl Dialog {
       Kind::NewDrawing => self.view_on.iter().any(|v| *v),
       Kind::DrawingMoveView | Kind::DrawingDimension => self.target.is_some() && self.view.is_some(),
       Kind::DrawingView => self.target.is_some() && (self.choice != "flat" || !self.bodies.is_empty()),
+      Kind::RedefinePlane => self.sketch.is_some() && self.redefine.picked.is_some(),
+      Kind::ExportDxf => self.sketch.is_some(),
       _ => true,
     }
   }
@@ -1841,6 +1887,7 @@ impl Dialog {
 
   pub fn cancel(&mut self, s: &mut Session) {
     self.withdraw(s);
+    self.redefine_restore(s);
   }
 
   /// Is a model-picking dialog's preview showing? (Viewport clicks withdraw it first.)
@@ -1928,7 +1975,10 @@ impl Dialog {
     match self.kind {
       Kind::OffsetPlane => self.sync_offset_base(s),
       Kind::Form(f) if !self.applied || !self.picks() => {
-        if self.form.sync(f, s, last_unconsumed_sketch(s)) {
+        let before = self.form.values.clone();
+        self.form.sync(f, s, last_unconsumed_sketch(s));
+        self.form.chain_path(f, s);
+        if self.form.values != before {
           self.dirty = !self.picks();
         }
       }
@@ -2092,6 +2142,7 @@ impl Dialog {
   pub fn show(&mut self, app: &mut App, ctx: &egui::Context) -> bool {
     self.sync_selection(&app.s);
     self.hole_sync(app);
+    self.redefine_sync(app);
     if self.kind == Kind::PickPlane
       && let Some(Sel::Face { body, face }) = app.s.selection.iter().find(|x| matches!(x, Sel::Face { .. })).copied()
     {
@@ -2105,6 +2156,11 @@ impl Dialog {
     if self.kind == Kind::PickPlane {
       // no dialog, as in Fusion: the ribbon button stays pressed, the planes show and the cursor
       // hint asks; Escape or the button cancels
+      return !self.closed;
+    }
+    if self.placing() {
+      // nor while a primitive's plane is picked and its base drawn
+      self.place_sync(app);
       return !self.closed;
     }
     let mut keep = true;
@@ -2123,13 +2179,7 @@ impl Dialog {
             .is_some_and(|r| r.layer_id == dialog_layer || crate::value_box::is_box_layer(r.layer_id)),
         };
     let mut cancel = false;
-    let base = match self.kind {
-      Kind::Move => self.move_title().unwrap_or(self.kind.title()),
-      // Press Pull on a face is Fusion's Offset Face
-      Kind::PressPull if !self.faces.is_empty() => "OFFSET FACE",
-      _ => self.kind.title(),
-    };
-    let title = if self.editing.is_some() { format!("EDIT {base}") } else { base.to_string() };
+    let title = self.heading();
     // FILLET's selection table needs the extra width, as in Fusion
     let width = if self.kind == Kind::Fillet { 360.0 } else { 300.0 };
     // docked at the canvas's top-right corner when it opens and again after the window is
@@ -2206,6 +2256,16 @@ impl Dialog {
     if self.dirty {
       self.preview(&mut app.s);
     }
+    // Export DXF's OK asks where to save; Redefine Sketch Plane's puts the timeline back first
+    if ok && self.kind == Kind::ExportDxf {
+      ok = false;
+      keep = false;
+      self.dxf_ok(app);
+    }
+    if ok && self.kind == Kind::RedefinePlane {
+      ok = false;
+      keep = !self.redefine_ok(app);
+    }
     if ok {
       if !self.applied {
         self.preview(&mut app.s);
@@ -2251,6 +2311,21 @@ impl Dialog {
     keep && !self.closed
   }
 
+  /// The dialog's title: the command's, or EDIT FEATURE for every feature edited from the
+  /// timeline, as in Fusion.
+  pub(crate) fn heading(&self) -> String {
+    if self.editing.is_some() {
+      return "EDIT FEATURE".into();
+    }
+    match self.kind {
+      Kind::Move => self.move_title().unwrap_or(self.kind.title()),
+      // Press Pull on a face is Fusion's Offset Face
+      Kind::PressPull if !self.faces.is_empty() => "OFFSET FACE",
+      _ => self.kind.title(),
+    }
+    .to_string()
+  }
+
   /// The command family's accent colour, used by this dialog's chips and OK button.
   fn accent(&self) -> egui::Color32 {
     crate::icons::accent_of(self.kind.icon())
@@ -2262,6 +2337,9 @@ impl Dialog {
   pub(crate) fn prompt(&self, hovering: bool) -> Option<String> {
     if self.kind == Kind::PickPlane {
       return Some(PICK_PLANE_HINT.into());
+    }
+    if let Some(p) = self.place_prompt() {
+      return Some(p.into());
     }
     if !self.ready() {
       return Some(match self.kind {
@@ -2277,9 +2355,13 @@ impl Dialog {
         Kind::Combine => "Select tool bodies".into(),
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
         Kind::Draft => "Select faces to draft".into(),
+        Kind::RedefinePlane => redefine::HINT.into(),
         // one prompt for the whole pick, as Fusion words it
         Kind::SkScale => {
           "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
+        }
+        Kind::Form(f) => {
+          crate::forms::pick_prompt(f).map(String::from).unwrap_or_else(|| sentence(self.missing_input()))
         }
         _ => sentence(self.missing_input()),
       });
@@ -2309,6 +2391,7 @@ impl Dialog {
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) && self.form.text_framed(f) => {
         "Adjust text formatting or rotate text frame"
       }
+      Kind::Form(f) => return crate::forms::specify_prompt(f).map(String::from),
       _ => return None,
     };
     Some(specify.into())
@@ -2385,6 +2468,7 @@ impl Dialog {
       Kind::Flange if self.choice == "edge" => "select sheet edges",
       Kind::Flange => "select a profile",
       Kind::Hem | Kind::Rip => "select edges",
+      Kind::Project if self.choice != "bodies" => "select geometry to project",
       Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
       Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
       Kind::AsBuiltJoint => {
@@ -2409,6 +2493,7 @@ impl Dialog {
       Kind::NewDrawing => "pick at least one view",
       Kind::DrawingMoveView | Kind::DrawingDimension => "pick a view",
       Kind::DrawingView if self.choice == "flat" => "select a sheet metal body",
+      Kind::RedefinePlane => "select a planar face or a work plane",
       _ => "missing input",
     }
   }
@@ -2490,42 +2575,7 @@ impl Dialog {
       }
       Kind::Chamfer => self.chamfer_rows(app, ui, creating),
       Kind::Shell => self.shell_rows(ui, creating),
-      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
-        ui.label("Plane");
-        ui.label(&self.plane_label);
-        ui.end_row();
-        let labels: &[&str] = match self.kind {
-          Kind::Box => &["Width (X)", "Depth (Y)", "Height"],
-          Kind::Cylinder => &["Radius", "Height"],
-          Kind::Sphere => &["Radius"],
-          _ => &["Major radius", "Minor radius"],
-        };
-        for (i, l) in labels.iter().enumerate() {
-          ui.label(*l);
-          let f = match i {
-            0 => &mut self.a,
-            1 => &mut self.b,
-            _ => &mut self.c,
-          };
-          if value_edit(ui, f).changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-        }
-        ui.label("Position X, Y");
-        ui.horizontal(|ui| {
-          for v in self.at.iter_mut() {
-            if ui.add(egui::TextEdit::singleline(v).desired_width(64.0)).changed() {
-              self.dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-        ui.label("Operation");
-        self.combo(ui, "op", &OPS, false);
-        ui.end_row();
-        self.comp_name_row(ui);
-      }
+      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => self.primitive_rows(ui, creating),
       Kind::OffsetPlane | Kind::Mirror => {
         ui.label("Plane");
         if self.kind == Kind::OffsetPlane && creating {
@@ -2646,6 +2696,8 @@ impl Dialog {
       Kind::Move => self.move_fields(app, ui),
       Kind::Inspect => self.inspect(app, ui),
       Kind::Appearance => self.appearance(app, ui),
+      Kind::RedefinePlane => self.redefine_rows(app, ui),
+      Kind::ExportDxf => self.dxf_rows(app, ui),
       Kind::Section => section_fields(app, ui),
       Kind::Analysis(kind) => analysis_fields(app, ui, kind),
       Kind::Form(f) => {
@@ -2694,8 +2746,32 @@ impl Dialog {
       if text_form && self.text_form_field(f, i, &params, ui, dirty) {
         continue;
       }
+      if f.cmd == "thread" && self.thread_form_field(f, i, s, ui, dirty) {
+        continue;
+      }
       let v = self.form.values[i].clone();
       let greyed = crate::forms::greyed(f, input.key());
+      // Coil's Profile: the circle drawn before the dialog opened
+      if f.cmd == "coil.form" && input.key() == "plane" {
+        ui.label("Profile");
+        sel_chip(ui, accent, "1 selected", true);
+        ui.end_row();
+        continue;
+      }
+      // Coil's and Pipe's Operation shows each value's icon, as Fusion's
+      if let Input::Choice { key: "operation", label, options } = input
+        && matches!(f.cmd, "coil.form" | "pipe.form")
+      {
+        ui.label(*label);
+        let cur = v.as_str().unwrap_or("");
+        let mut sel: &'static str = options.iter().find(|(k, _)| *k == cur).map_or("new_body", |(k, _)| *k);
+        if choice::combo(ui, "form-op", options, &mut sel, choice::extrude_icon) {
+          *dirty = true;
+        }
+        self.form.values[i] = json!(sel);
+        ui.end_row();
+        continue;
+      }
       match input {
         Input::Faces { label, .. }
         | Input::FacesOpt { label, .. }
@@ -2709,14 +2785,22 @@ impl Dialog {
         Input::Bodies { label, .. } => {
           ui.label(*label);
           let n = v.as_array().map(Vec::len).unwrap_or(0);
+          // Boundary Fill's tools: bodies and construction planes alike
+          let planes = f
+            .inputs
+            .iter()
+            .position(|x| matches!(x, Input::Planes { .. }))
+            .and_then(|j| self.form.values[j].as_array().map(Vec::len))
+            .unwrap_or(0);
           let text = match n {
             // with the Selection Filter on faces, the picks are the faces
             _ if faces_mode => chip_text(faces_picked, if faces_picked == 1 { "face" } else { "faces" }),
+            _ if planes > 0 => format!("{} selected", n + planes),
             0 => "Select".to_string(),
             1 => v[0].as_u64().map(|b| s.body_name(BodyId(b as u32))).unwrap_or_default(),
             n => format!("{n} bodies"),
           };
-          sel_chip(ui, accent, &text, if faces_mode { faces_picked > 0 } else { n > 0 });
+          sel_chip(ui, accent, &text, if faces_mode { faces_picked > 0 } else { n + planes > 0 });
           ui.end_row();
         }
         Input::Face { label, .. } | Input::Edge { label, .. } => {
@@ -2814,6 +2898,13 @@ impl Dialog {
             .response
             .on_disabled_hover_text(why);
             ui.end_row();
+          } else if crate::forms::icon_dropdowns(f) {
+            // an icon before every value, as Fusion's Extent Type, Direction and Operation
+            ui.label(*label);
+            if choice::combo(ui, &format!("form-choice-{i}"), options, &mut sel, choice::form_icon) {
+              *dirty = true;
+            }
+            ui.end_row();
           } else {
             Self::choose(ui, label, &format!("form-choice-{i}"), &mut sel, options, dirty);
           }
@@ -2865,6 +2956,19 @@ impl Dialog {
           self.solid_form_field(f, i, app, ui, dirty);
         }
         Input::Pieces { label, .. } => self.pieces_field(i, label, ui, dirty),
+        Input::Flip { key, label } => {
+          // Fusion's Flip icon button, lit while flipped
+          ui.label(*label);
+          let on = v.as_bool().unwrap_or(false);
+          let tip = if *key == "flip" && f.cmd == "thread" { "Start the thread at the other end" } else { "Flip" };
+          if crate::icons::icon_button(ui, Icon::Flip, 24.0, tip, on, None).clicked() {
+            self.form.values[i] = json!(!on);
+            *dirty = true;
+          }
+          ui.end_row();
+        }
+        // counted on the tools' chip
+        Input::Planes { .. } => {}
       }
     }
     if crate::forms::takes_sheet_points(f) {
@@ -3829,8 +3933,8 @@ impl Dialog {
         let what = if self.faces.is_empty() { "body" } else { "face" };
         chip(ui, self.bodies.len().min(1), what);
         ui.end_row();
-        // Fusion's Selection Filter: whole bodies, or faces and edges
-        let mut filter: &'static str = if self.choice == "faces" { "faces" } else { "bodies" };
+        // Fusion's Selection Filter: specified entities (faces and edges), or whole bodies
+        let mut filter: &'static str = if self.choice == "bodies" { "bodies" } else { "specified" };
         ui.label("Selection Filter");
         if self.filter_row(app, ui, &mut filter) {
           self.choice = filter;
@@ -3855,12 +3959,13 @@ impl Dialog {
     ui.end_row();
   }
 
-  /// Fusion's Selection Filter row (bodies, or faces and edges) as two icon toggles; while the
-  /// dialog is open the choice decides what a click on the model picks. Returns true on a change.
+  /// Fusion's Selection Filter row (Specified Entities, then Bodies) as two icon toggles; while
+  /// the dialog is open the choice decides what a click on the model picks. Returns true on a
+  /// change.
   fn filter_row(&mut self, app: &mut App, ui: &mut egui::Ui, cur: &mut &'static str) -> bool {
     use icon_row::{choice, icon_row};
     const FILTERS: [icon_row::Choice; 2] =
-      [choice("bodies", Icon::FilterBodies, "Bodies"), choice("faces", Icon::FilterFaces, "Faces and edges")];
+      [choice("specified", Icon::FilterFaces, "Specified Entities"), choice("bodies", Icon::FilterBodies, "Bodies")];
     let changed = icon_row(ui, cur, &FILTERS, "");
     self.filter_row_apply(app, cur);
     changed
@@ -3872,7 +3977,7 @@ impl Dialog {
     if self.saved_filter.is_none() {
       self.saved_filter = Some((app.sel_priority, app.sel_filter.vertices));
     }
-    app.sel_priority = if *cur == "faces" { Priority::Face } else { Priority::Body };
+    app.sel_priority = if *cur == "bodies" { Priority::Body } else { Priority::Face };
   }
 
   /// A check box FissionOxide can't act on yet, drawn greyed with the reason as its tooltip.
@@ -4022,8 +4127,7 @@ impl Dialog {
     }
   }
 
-  /// A form dialog's value for input `key` (tests).
-  #[cfg(test)]
+  /// A form dialog's value for input `key`.
   pub(crate) fn form_value(&self, key: &str) -> Option<&Value> {
     let Kind::Form(f) = self.kind else { return None };
     self.form.values.get(f.inputs.iter().position(|x| x.key() == key)?)
@@ -5477,14 +5581,19 @@ fn chip_text(n: usize, what: &str) -> String {
 /// A selection input: a white "Select" chip until something is picked, then a chip tinted with
 /// the command's accent showing the count, with a ✕ beside it.
 fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> egui::Response {
+  sel_chip_lit(ui, accent, text, has, has)
+}
+
+/// A selection chip, lit (the accent's tint) when `lit`, with the clear x after it when `has`.
+fn sel_chip_lit(ui: &mut egui::Ui, accent: egui::Color32, text: &str, lit: bool, has: bool) -> egui::Response {
   let font = egui::FontId::proportional(12.0);
   let tw = ui.painter().layout_no_wrap(text.to_string(), font.clone(), theme::TEXT).size().x;
   let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 52.0, 22.0), egui::Sense::hover());
   let chip = egui::Rect::from_min_size(rect.min, egui::vec2(tw + 32.0, 22.0));
   let p = ui.painter();
   let ir = egui::Rect::from_center_size(chip.left_center() + egui::vec2(12.0, 0.0), egui::Vec2::splat(15.0));
-  let fill = if has { crate::icons::tint_of(accent, 0.84) } else { egui::Color32::WHITE };
-  let stroke = if has { accent } else { theme::BORDER };
+  let fill = if lit { crate::icons::tint_of(accent, 0.84) } else { egui::Color32::WHITE };
+  let stroke = if lit { accent } else { theme::BORDER };
   p.rect(chip, 3.0, fill, egui::Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
   crate::icons::draw(p, ir, Icon::Select, accent);
   p.text(chip.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, theme::TEXT);
@@ -5966,7 +6075,7 @@ mod tests {
     app.run("box", json!({"width": 20, "depth": 20, "height": 10})).unwrap();
     app.run("sketch.create", json!({"plane": "xy"})).unwrap();
     let d = Dialog::open(&mut app, Kind::Project);
-    assert!((d.choice, d.flag) == ("bodies", true) && !d.ready());
+    assert!((d.choice, d.flag) == ("specified", true) && !d.ready());
     let mut d = d;
     d.bodies = vec![app.s.model.bodies[0].id.0];
     assert!(d.ready());
@@ -5977,6 +6086,33 @@ mod tests {
     assert!(!d.form.filter_faces(&crate::forms::SK_INTERSECT));
     d.form.values[2] = json!("faces");
     assert!(d.form.filter_faces(&crate::forms::SK_INTERSECT));
+  }
+
+  /// PROJECT's Selection Filter: Specified Entities (faces and edges) first and lit, then
+  /// Bodies, which picks whole bodies until the dialog closes; the prompt follows the filter.
+  #[test]
+  fn project_filter_starts_on_specified_entities_and_bodies_pick_bodies() {
+    use crate::select::Priority;
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 20, "depth": 20, "height": 10})).unwrap();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let body = app.s.model.bodies[0].id;
+    let mut d = Dialog::open(&mut app, Kind::Project);
+    assert_eq!((d.choice, d.missing_input()), ("specified", "select geometry to project"));
+    assert_eq!(chip_text(d.bodies.len().min(1), "body"), "Select");
+    let mut f = d.choice;
+    d.filter_row_apply(&mut app, &mut f);
+    assert_eq!(app.sel_priority, Priority::Face, "specified entities pick faces and edges");
+    let mut f = "bodies";
+    d.filter_row_apply(&mut app, &mut f);
+    d.choice = f;
+    assert_eq!((app.sel_priority, d.missing_input()), (Priority::Body, "select a body"));
+    // a body pick fills the Geometry chip with the body
+    app.s.selection = vec![Sel::Body { body }];
+    d.sync_selection(&app.s);
+    assert!(d.bodies == [body.0] && d.faces.is_empty(), "{:?} {:?}", d.bodies, d.faces);
+    d.leave(&mut app);
+    assert_eq!(app.sel_priority, Priority::Face, "the filter is put back on close");
   }
 
   /// Previews the dialog's command and checks it applied without an error.
@@ -7174,7 +7310,7 @@ mod tests {
     };
     let saved = app.cam;
     let name = app.save_named_view().unwrap();
-    assert_eq!(name, "Named View 1");
+    assert_eq!(name, "NamedView");
     assert!(app.s.dirty, "named views save with the design");
     app.cam = fox_engine::render::Camera::default();
     app.restore_named_view(&name);

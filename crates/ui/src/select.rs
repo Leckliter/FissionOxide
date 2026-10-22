@@ -201,6 +201,21 @@ pub fn targets(s: &Session, p: Pick, priority: Priority) -> Vec<Sel> {
   }
 }
 
+/// The bodies the pointer lights as a whole: a face, edge or vertex under it while the
+/// selection priority (or a dialog's Selection Filter) picks bodies or components. Fusion lights
+/// the whole body then, not the face under the pointer.
+pub(crate) fn hover_bodies(app: &App) -> Vec<BodyId> {
+  match app.hover {
+    Some(p) if pick_body(&p).is_some() && matches!(app.sel_priority, Priority::Body | Priority::Component) => {
+      targets(&app.s, p, app.sel_priority)
+        .into_iter()
+        .filter_map(|x| if let Sel::Body { body } = x { Some(body) } else { None })
+        .collect()
+    }
+    _ => Vec::new(),
+  }
+}
+
 /// Selects (or with `add`, toggles) what a click on `p` picks.
 pub fn pick(app: &mut App, p: Pick, add: bool) {
   let items = targets(&app.s, p, app.sel_priority);
@@ -988,7 +1003,10 @@ pub(crate) fn joint_glyphs(
   if app.s.edit_sketch.is_some() {
     return false;
   }
-  let marks = fox_engine::scene::joint_marks(&app.s);
+  // Object Visibility ▸ Joints and Joint Origins
+  let (joints, origins) = (app.objects.joints, app.objects.joint_origins);
+  let mut marks = fox_engine::scene::joint_marks(&app.s);
+  marks.retain(|m| if m.joint { joints } else { origins });
   if marks.is_empty() {
     return false;
   }
@@ -1016,15 +1034,17 @@ pub(crate) fn joint_glyphs(
     } else {
       egui::Color32::from_gray(60)
     };
-    // the frame's axes, as short stubs (X red, Y green, Z blue)
+    // the frame's axes, as short stubs (X red, Y green, Z blue); a joint origin's only with
+    // Object Visibility ▸ Joint Origin Axes on
     let o = m.frame.w_axis.truncate();
     let len = joint_axis_len(project, o);
+    let stubs = m.joint || app.objects.joint_origin_axes;
     for (axis, col) in [
       (m.frame.x_axis.truncate(), egui::Color32::from_rgb(220, 70, 60)),
       (m.frame.y_axis.truncate(), egui::Color32::from_rgb(70, 170, 70)),
       (m.frame.z_axis.truncate(), egui::Color32::from_rgb(50, 100, 230)),
     ] {
-      if let Some(t) = project(o + axis * len) {
+      if let Some(t) = project(o + axis * len).filter(|_| stubs) {
         painter.line_segment([*c, t], egui::Stroke::new(1.5, col));
       }
     }

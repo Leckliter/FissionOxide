@@ -461,3 +461,64 @@ selection chips and grow rows after the picks, its primitives start with a plane
 base, and Operation turns to Cut over a body; FissionOxide's open with every row, preset planes
 and axes, sketch dropdowns and "(empty = ...)" fields, and preview at once. 22 rows in four batches
 (`parity/batches/map-wave23.json`), three match rows, six sketch and vertex keys verified.
+
+## 2026-10-22, prober 9: SOLID > MODIFY
+
+Every MODIFY entry in both apps, Draft completed and edited (report
+`parity/reports/2026-10-22-solid-modify.md`). The entries, order and shortcut hints match; Fusion
+has no Direct Edit submenu, fewer separators and Simplify in a different order. As in CREATE,
+Fusion's dialogs open with chips and grow value rows after the picks; FissionOxide presets planes
+and non-zero values, enables OK early, picks faces where Fusion picks bodies, keeps its picks
+selected after Cancel, cannot edit a Draft, and has no Silhouette Split, Replace with Primitives
+or Manage Materials. 24 rows in six batches (`parity/batches/map-wave24.json`), including the
+reopened `ui:toolbar:responsive-collapse` (MODIFY keeps 6 icons at 907 px against 4); one match row.
+
+## 2026-10-22, prober 10: feature manipulators, Edit Feature, feature errors
+
+Extrude, Fillet, Shell, Offset Face and Draft manipulators in both apps, read from
+native-resolution crops while hovering, dragging and tabbing, then Edit Feature on Extrude,
+Fillet and Box and a failing fillet (report `parity/reports/2026-10-22-manipulators.md`). The
+floating value box, live preview while typing, Enter as OK and the failed timeline icon match.
+Fusion draws 3D blue arrows with a dashed drag track, a separate disc-on-arc taper and draft handle,
+a grey dimension in the preview, moves the box with Tab, keeps the box clear of its arrow, rolls the
+timeline back while editing, greys OK on a failing value and shows a "1 error(s)" toast with a
+status-bar badge. 16 rows in three batches (`parity/batches/map-wave25.json`), four match rows,
+five keys verified.
+
+## 2026-10-22, prober 11: Edit Feature finished; Construct, Inspect, Insert, Assemble, Select started
+
+Chamfer, Mirror, Hole, Move, Combine and Press Pull made and double-clicked in both apps, a chamfer
+made to fail, then its toast, Error window, right-click menu, Suppress, Unsuppress and Roll here;
+then the CONSTRUCT, CONFIGURE, INSPECT, INSERT, ASSEMBLE and SELECT lists, Offset Plane, Axis Through
+Cylinder and Measure (report `parity/reports/2026-10-22-edit-construct.md`). Fusion edits every
+feature in its creation dialog titled "EDIT FEATURE"; FissionOxide cannot edit Hole, Mirror, Combine
+or Press Pull (and, from the code, most other kinds), has no Error window or Review warning, and
+lists every assembly command in a Part Design document where Fusion offers only "Add To Assembly".
+18 rows in three batches (`parity/batches/map-wave26.json`), three match rows, three Select menu keys
+verified.
+
+## 2026-10-22, prober 12: Construct methods, Inspect, Insert, Configure, Assemble
+
+Every Method of Fusion's CONSTRUCTION GEOMETRY dialog against FissionOxide's separate dialogs, a
+construction point made in both, Measure with two picks, every Inspect dialog, every Insert entry,
+Configure, and Fusion's new-design chooser and Assembly Design document (report
+`parity/reports/2026-10-22-construct-inspect-insert.md`). Fusion picks everything in the canvas or
+browser with OK disabled until done, keeps analyses in a browser Analysis folder and opens its Insert
+window for files; FissionOxide uses plane dropdowns and coordinate boxes, opens Plane Along Path for
+Perpendicular Plane, lists no construction points or axes in the browser, leaves analysis colours on
+after Close, lacks four analyses, Decal and Derive, and its "+" silently replaces the open design.
+16 rows in four batches (`parity/batches/map-wave27.json`), two match rows, Configure blocked by the
+licence, one key verified. The area is done; joints need an assembly with components (new coverage
+row).
+
+## 2026-10-22, prober 13: SURFACE tab
+
+The SURFACE tab's ribbon, tooltips, dropdowns and every create/modify dialog as it opens (and after
+the first pick in Fusion), a Patch made in both apps and a surface Extrude in FissionOxide (report
+`parity/reports/2026-10-22-surface-tab.md`). The shared panels and the MODIFY order match; Fusion's
+surface dialogs are their own (no Operation row, rows that appear after a pick, manipulators,
+continuity tables) where FissionOxide uses the generic form dialog, its Ruled is a different command,
+surface Sweep and Loft are missing, surface bodies and features get solid icons, the menus carry four
+rows Fusion does not, and Finish Sketch drops back to SOLID. 20 rows in four batches
+(`parity/batches/map-wave28.json`), three match rows, three sketch keys verified (the dimension
+tooltip's light box split out). The area is done.
