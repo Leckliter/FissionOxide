@@ -963,6 +963,7 @@ pub fn draw(scene: &mut fox_render::Scene, picks: &mut crate::scene::PickTable, 
     highlight_color: [0, 0, 0, 0],
     colors,
     analyze: false,
+    unanalyzed: false,
     unlit: false,
   });
   if v.mesh || values.is_none() {

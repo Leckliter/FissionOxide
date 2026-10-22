@@ -1378,6 +1378,10 @@ fn dragging_drafts_arc_turns_the_angle_in_five_degree_steps() {
   let front = h.app.s.model.bodies[0].faces().iter().find(|f| f.normal.y < -0.9).unwrap().id;
   h.app.s.selection = vec![fox_engine::Sel::Face { body, face: front }];
   h.app.start(crate::dialogs::Kind::Draft);
+  // the face is the face to draft; the XY plane, picked in the viewport, the pull direction
+  if let Some(d) = h.app.dialog.as_mut() {
+    d.pick_pull_plane(&mut h.app.s, json!("xy"));
+  }
   h.app.fit_view_now();
   for _ in 0..3 {
     h.frame(vec![]);
@@ -1387,7 +1391,7 @@ fn dragging_drafts_arc_turns_the_angle_in_five_degree_steps() {
   let placed = crate::handles::placed_points(&h.app, &project);
   let (_, arc) = placed[0].clone().expect("the disc on its arc");
   // the arc's 33 points run a quarter turn either side of the pull direction: from 45° before
-  // it to about 17° before it is a 28° turn from 3°, 31° snapped to 30°
+  // it to about 17° before it is a 28° turn from 0.0°, snapped to 30°
   let (from, to) = (arc[8], arc[13]);
   h.drag(from, to);
   assert!(!matches!(h.app.drag, Some(crate::viewport::Drag::Box { .. })), "no window selection");
@@ -2259,7 +2263,7 @@ fn cancel_leaves_nothing_selected() {
   let b = &h.app.s.model.bodies[0];
   let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
   h.app.s.selection = vec![Sel::Face { body: b.id, face: top }];
-  h.app.start(Kind::Form(&crate::forms::OFFSET_FACE));
+  h.app.start(Kind::OffsetFace);
   for _ in 0..3 {
     h.frame(vec![]);
   }
@@ -2347,4 +2351,54 @@ fn the_extrude_preview_is_not_hover_highlighted() {
   assert!(h.app.tstate.over_preview);
   let prompt = h.app.dialog.as_ref().unwrap().prompt(h.app.hover.is_some() || h.app.tstate.over_preview);
   assert_eq!(prompt.as_deref(), Some("Hold Ctrl to modify selection"));
+}
+
+/// `ui:surface:finish-sketch-returns-tab`: a sketch started from the SURFACE tab comes back to
+/// SURFACE on Finish Sketch, and one started from SOLID to SOLID.
+#[test]
+fn finish_sketch_returns_to_the_tab_it_started_from() {
+  use crate::panels::Tab;
+  let mut h = Harness::new();
+  for tab in [Tab::Surface, Tab::Solid, Tab::Surface] {
+    h.app.tab = tab;
+    h.frame(vec![]);
+    h.app.create_sketch(json!("xy"));
+    h.frame(vec![]);
+    assert_eq!(h.app.tab, Tab::Sketch);
+    h.app.finish_sketch();
+    h.frame(vec![]);
+    assert_eq!(h.app.tab, tab);
+  }
+}
+
+/// Resting on a sketch dimension shows its parameter as Fusion does: "d1 = 40.0 mm" in white
+/// on the dark tooltip panel, not egui's light box.
+#[test]
+fn a_hovered_dimensions_tooltip_is_dark() {
+  use crate::theme;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  let line = h.app.run("sketch.line", json!({"points": [[-20, 0], [20, 0]]})).unwrap();
+  let c = line["curves"][0].clone();
+  h.app.run("sketch.dimension", json!({"type": "distance", "curves": [c], "value": "40"})).unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.app.fit_view_now();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let label = h.find(vec![], "40.00").expect("the dimension's value is drawn");
+  let shown = h.rest_rects(label.center(), 1.2);
+  let tip = shown.iter().find(|(_, t)| t == "d1 = 40.0 mm").map(|(r, _)| *r);
+  let tip = tip.unwrap_or_else(|| panic!("the parameter tooltip: {shown:?}"));
+  assert!(tip.top() > label.top(), "under the text: {tip:?} vs {label:?}");
+  let shapes = h.frame_shapes(0.1);
+  assert!(
+    shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.fill == theme::TOOLTIP && r.rect.contains_rect(tip))),
+    "a dark panel behind the tooltip"
+  );
+  let color = shapes.iter().find_map(|s| match s {
+    egui::Shape::Text(t) if t.galley.text() == "d1 = 40.0 mm" => Some(text_color(t)),
+    _ => None,
+  });
+  assert_eq!(color, Some(theme::TOOLTIP_TITLE));
 }

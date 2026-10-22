@@ -1,7 +1,7 @@
 //! Document units and Change Parameters' model parameters (d1, d2, ...), favourites and
 //! comments. User parameters themselves are `param.add` / `param.set` (see `commands.rs`).
 
-use fox_model::{FeatureId, FeatureKind, LengthUnit, ModelParamRef, ParamKind};
+use fox_model::{DesignType, FeatureId, FeatureKind, LengthUnit, ModelParamRef, ParamKind};
 use serde_json::{Value, json};
 
 use crate::commands::{opt_str, req_expr, req_str, req_u32};
@@ -10,6 +10,7 @@ use crate::{CmdError, CmdResult, Session};
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
   Some(match name {
     "design.units" => units(s, p),
+    "design.type" => design_type(s, p),
     "param.model" => Ok(model_list(s)),
     "param.model_set" => model_set(s, p),
     "param.favorite" => favorite(s, p),
@@ -40,6 +41,21 @@ fn units(s: &mut Session, p: &Value) -> CmdResult {
     }
   }
   Ok(json!({"unit": s.design.units.symbol(), "name": s.design.units.label()}))
+}
+
+/// Reads or sets Fusion's design type (Part, Assembly or Hybrid Design).
+fn design_type(s: &mut Session, p: &Value) -> CmdResult {
+  if let Some(t) = opt_str(p, "type") {
+    let ty =
+      DesignType::parse(t).ok_or(CmdError::new(format!("unknown design type '{t}' (part, assembly, hybrid)")))?;
+    if ty != s.design.design_type {
+      s.edit(|d| {
+        d.design_type = ty;
+        Ok(())
+      })?;
+    }
+  }
+  Ok(json!({"type": s.design.design_type.key(), "name": s.design.design_type.label()}))
 }
 
 fn kind_name(k: ParamKind) -> &'static str {
@@ -119,6 +135,7 @@ mod tests {
   use serde_json::{Value, json};
 
   use crate::Session;
+  use fox_model::DesignType;
 
   fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
     match s.execute(cmd, &p) {
@@ -132,6 +149,22 @@ mod tests {
 
   fn volume(s: &Session) -> f64 {
     s.model.bodies.iter().map(|b| b.shape.mass().map(|m| m.volume).unwrap_or(0.0)).sum()
+  }
+
+  #[test]
+  fn design_type_reads_sets_saves_and_undoes() {
+    let mut s = Session::default();
+    assert_eq!(run(&mut s, "design.type", json!({}))["name"], "Part Design");
+    assert_eq!(run(&mut s, "design.type", json!({"type": "assembly"}))["name"], "Assembly Design");
+    assert_eq!(s.design.design_type, DesignType::Assembly);
+    assert!(s.execute("design.type", &json!({"type": "drawing"})).is_err());
+    let text = serde_json::to_string(&s.design).unwrap();
+    assert!(text.contains("\"design_type\":\"assembly\""));
+    let back: fox_model::Design = serde_json::from_str(&text).unwrap();
+    assert_eq!(back.design_type, DesignType::Assembly);
+    s.undo();
+    assert_eq!(s.design.design_type, DesignType::Part);
+    assert!(!serde_json::to_string(&s.design).unwrap().contains("design_type"), "a part design stores nothing");
   }
 
   #[test]

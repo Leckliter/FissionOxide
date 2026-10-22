@@ -225,6 +225,30 @@ fn shell_directions_whole_bodies_and_tangent_chain() {
   assert!(volume(&s) < v0 * 0.5, "{} of {v0}", volume(&s));
 }
 
+/// Draft's Tangent Chain: a picked face brings the faces joined to it across smooth edges (the
+/// rounds at the +x end and the long sides they run into), as Fusion's does.
+#[test]
+fn draft_tangent_chain() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 40, "depth": 20, "height": 10}));
+  let b = &s.model.bodies[0];
+  let edges: Vec<Value> = b
+    .edges()
+    .iter()
+    .filter(|e| (e.mid.x - 20.0).abs() < 1e-6 && (e.mid.y.abs() - 10.0).abs() < 1e-6)
+    .map(|e| json!({"body": b.id.0, "edge": e.id}))
+    .collect();
+  run(&mut s, "fillet", json!({"edges": edges, "radius": 5}));
+  let b = &s.model.bodies[0];
+  let end = b.faces().iter().find(|f| f.normal.x > 0.9).unwrap().id;
+  let pick = json!({"body": b.id.0, "face": end});
+  let v0 = volume(&s);
+  run(&mut s, "draft", json!({"faces": [pick], "plane": "xy", "angle": "3 deg", "tangent_chain": true}));
+  let f = s.design.features.last().unwrap();
+  assert!(matches!(&f.kind, fox_model::FeatureKind::Draft { faces, .. } if faces.len() == 5), "{:?}", f.kind);
+  assert!(volume(&s) < v0, "{} of {v0}", volume(&s));
+}
+
 #[test]
 fn bounding_solid_box_cylinder_and_frame() {
   let mut s = Session::default();
@@ -467,4 +491,78 @@ fn replace_a_curved_face() {
   assert!((volume(&s) - 6400.0).abs() < 1e-3, "{}", volume(&s));
   let m = s.model.bodies[0].shape.mass().unwrap();
   assert!((m.bbox_max.z - 8.0).abs() < 1e-6, "{m:?}");
+}
+
+/// Replace Face's Tangent Chain and a plane as its target, Split Face's Chain Selection, and
+/// Silhouette Split along an edge, a plane and an axis.
+#[test]
+fn tangent_chains_and_silhouette_split() {
+  // a slab whose top's long edges are rounded: the top, the rounds and the long sides below them
+  // are one tangent chain
+  let slab = || {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 40, "depth": 20, "height": 10}));
+    let b = &s.model.bodies[0];
+    let edges: Vec<Value> = b
+      .edges()
+      .iter()
+      .filter(|e| e.length > 39.0 && e.mid.z > 9.0)
+      .map(|e| json!({"body": b.id.0, "edge": e.id}))
+      .collect();
+    run(&mut s, "fillet", json!({"edges": edges, "radius": 2}));
+    let b = &s.model.bodies[0];
+    let top =
+      json!({"body": b.id.0, "face": b.faces().iter().find(|f| f.normal.z > 0.99 && f.origin.z > 9.0).unwrap().id});
+    (s, top)
+  };
+  let faces_of = |s: &Session| match &s.design.features.last().unwrap().kind {
+    fox_model::FeatureKind::ReplaceFace { faces, .. } | fox_model::FeatureKind::SplitFace { faces, .. } => faces.len(),
+    k => panic!("{k:?}"),
+  };
+  let (mut s, top) = slab();
+  run(&mut s, "split_face", json!({"faces": [top], "tool": "yz", "chain": true}));
+  assert_eq!(faces_of(&s), 5, "the rounds continue the top, and the long sides continue the rounds");
+  let (mut s, top) = slab();
+  run(&mut s, "split_face", json!({"faces": [top], "tool": "yz"}));
+  assert_eq!(faces_of(&s), 1);
+
+  // a construction plane named as the target is the plane
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 10}));
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 15}));
+  let up = s.design.features.last().unwrap().id.0;
+  run(
+    &mut s,
+    "replace_face",
+    json!({"faces": [{"point": [0, 0, 10]}], "target": {"feature": up}, "tangent_chain": true}),
+  );
+  assert!((volume(&s) - 6000.0).abs() < 1e-3, "{}", volume(&s));
+  assert_eq!(faces_of(&s), 1, "a box's top has no tangent neighbours");
+
+  // a box seen along its vertical edge: its outline runs down its sides, cut at mid-height
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+  let b = &s.model.bodies[0];
+  let edge = b.edges().iter().find(|e| (e.end - e.start).normalize().z.abs() > 0.99).unwrap().id;
+  let body = b.id.0;
+  run(&mut s, "silhouette_split", json!({"direction": {"body": body, "edge": edge}, "body": body}));
+  assert_eq!(s.model.bodies.len(), 2);
+  for b in &s.model.bodies {
+    let m = b.shape.mass().unwrap();
+    assert!((m.bbox_max.z - m.bbox_min.z - 10.0).abs() < 1e-6, "{m:?}");
+  }
+  // a sphere seen from above: Split Face splits its faces at the equator and keeps one body
+  let mut s = Session::default();
+  run(&mut s, "sphere", json!({"radius": 10}));
+  let body = s.model.bodies[0].id.0;
+  let faces = s.model.bodies[0].faces().len();
+  run(&mut s, "silhouette_split", json!({"direction": "xy", "body": body, "operation": "face"}));
+  assert_eq!(s.model.bodies.len(), 1);
+  assert!(s.model.bodies[0].faces().len() > faces);
+  let mut s = Session::default();
+  run(&mut s, "sphere", json!({"radius": 10}));
+  let body = s.model.bodies[0].id.0;
+  run(&mut s, "silhouette_split", json!({"direction": "z", "body": body}));
+  assert_eq!(s.model.bodies.len(), 2);
+  assert!(s.execute("silhouette_split", &json!({"body": body})).is_err(), "a direction is needed");
 }

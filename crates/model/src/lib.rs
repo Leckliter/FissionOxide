@@ -26,6 +26,7 @@ pub mod groups;
 pub mod include;
 pub mod mechanism;
 pub mod meshops;
+pub mod meshprep;
 pub mod naming;
 pub mod newcomp;
 pub mod pathpattern;
@@ -163,8 +164,55 @@ pub struct Design {
   /// Simulation studies (the Simulation workspace).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub sim: Vec<sim::Study>,
+  /// Fusion's design type (Part, Assembly or Hybrid Design): which toolbar tabs the Design
+  /// workspace shows and what Document Settings names it.
+  #[serde(default, skip_serializing_if = "DesignType::is_part")]
+  pub design_type: DesignType,
   #[serde(default)]
   next_id: u32,
+}
+
+/// Fusion's design types. A Part Design models one part (SOLID, SURFACE, MESH, ... tabs); an
+/// Assembly Design brings components together (the ASSEMBLY tab); a Hybrid Design does both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignType {
+  #[default]
+  Part,
+  Assembly,
+  Hybrid,
+}
+
+impl DesignType {
+  pub fn is_part(&self) -> bool {
+    *self == DesignType::Part
+  }
+
+  pub fn parse(s: &str) -> Option<DesignType> {
+    match s {
+      "part" => Some(DesignType::Part),
+      "assembly" => Some(DesignType::Assembly),
+      "hybrid" => Some(DesignType::Hybrid),
+      _ => None,
+    }
+  }
+
+  pub fn key(self) -> &'static str {
+    match self {
+      DesignType::Part => "part",
+      DesignType::Assembly => "assembly",
+      DesignType::Hybrid => "hybrid",
+    }
+  }
+
+  /// "Part Design", as the browser's Document Settings shows it.
+  pub fn label(self) -> &'static str {
+    match self {
+      DesignType::Part => "Part Design",
+      DesignType::Assembly => "Assembly Design",
+      DesignType::Hybrid => "Hybrid Design",
+    }
+  }
 }
 
 /// A saved camera: one of Fusion's user Named Views.
@@ -327,6 +375,9 @@ pub struct BodySettings {
   pub visible: bool,
   #[serde(default)]
   pub color: Option<[u8; 3]>,
+  /// The body's own physical material; it wins over its component's.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub material: Option<String>,
 }
 
 fn yes() -> bool {
@@ -1109,6 +1160,9 @@ pub enum FeatureKind {
     flip: bool,
     #[serde(default)]
     operation: Operation,
+    /// Fusion's Orientation Center: the sheet straddles the sketch plane (`flip` is ignored).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    center: bool,
   },
   /// Sheet metal contour flange: an open sketch path (lines and arcs) becomes one face of a bent
   /// sheet; sharp corners get the rule's bend radius. The section is extruded `distance` along
@@ -1751,6 +1805,9 @@ pub enum FeatureKind {
     /// Flush: normals point the same way instead of facing. Concentric: reverse the axis.
     #[serde(default)]
     flip: bool,
+    /// Fusion's Object "Bodies": these bodies move instead of `moving` (then unused).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bodies: Vec<BodyId>,
   },
   /// Assembly constraint (Center): moves a component the least it can so its plane lands on a
   /// plane of another component, `offset` apart along the fixed plane's normal. Each side is one
@@ -1902,6 +1959,61 @@ pub enum FeatureKind {
     #[serde(default = "full_opacity")]
     opacity: f64,
   },
+  /// MESH > Tessellate: a solid or surface body becomes a mesh body, triangulated to a
+  /// refinement (see [`meshprep::refinement`]).
+  Tessellate {
+    body: BodyId,
+    /// "high", "medium", "low" or "custom" (the values below).
+    #[serde(default = "medium")]
+    refinement: String,
+    /// Custom refinement values; an empty one takes the refinement's.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    surface_deviation: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    normal_deviation: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    max_edge: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    aspect_ratio: String,
+    /// Create Quads (kept for the dialog: the mesh is triangles).
+    #[serde(default)]
+    quads: bool,
+  },
+  /// MESH > Repair: fixes holes, stray triangles and flipped triangles of mesh bodies.
+  MeshRepair {
+    bodies: Vec<BodyId>,
+    #[serde(default)]
+    repair: meshprep::RepairType,
+  },
+  /// MESH > Generate Face Groups: divides mesh bodies' faces into groups by the angle between
+  /// them (see [`meshprep::face_groups`]).
+  GenerateFaceGroups {
+    bodies: Vec<BodyId>,
+    /// Type Accurate (the group's average normal) instead of Fast (its first face's).
+    #[serde(default)]
+    accurate: bool,
+    #[serde(default = "face_group_angle")]
+    angle: String,
+    /// Minimum Face Group size, as a fraction of an average group's area.
+    #[serde(default = "face_group_size")]
+    min_size: String,
+  },
+  /// MESH > Combine Face Groups: the groups of the picked faces become one.
+  CombineFaceGroups {
+    faces: Vec<FaceRef>,
+  },
+}
+
+fn medium() -> String {
+  "medium".into()
+}
+
+fn face_group_angle() -> String {
+  "25 deg".into()
+}
+
+fn face_group_size() -> String {
+  "0.2".into()
 }
 
 fn full_opacity() -> f64 {
@@ -1987,6 +2099,8 @@ impl FeatureKind {
       FeatureKind::CircularPattern { .. } => "CircularPattern",
       FeatureKind::Move { .. } => "Move",
       FeatureKind::Combine { .. } => "Combine",
+      // Fusion's Insert Mesh adds a base feature holding the mesh
+      FeatureKind::Import { breps, meshes, .. } if breps.is_empty() && !meshes.is_empty() => "Base Mesh Feature",
       FeatureKind::Import { .. } => "Import",
       FeatureKind::RemoveBodies { .. } => "Remove",
       FeatureKind::Loft { .. } => "Loft",
@@ -2019,7 +2133,7 @@ impl FeatureKind {
       FeatureKind::Thicken { .. } => "Thicken",
       FeatureKind::SurfaceExtrude { .. } => "SurfaceExtrude",
       FeatureKind::SurfaceRevolve { .. } => "SurfaceRevolve",
-      FeatureKind::Patch { .. } => "Patch",
+      FeatureKind::Patch { .. } => "SurfacePatch",
       FeatureKind::Stitch { .. } => "Stitch",
       FeatureKind::Unstitch { .. } => "Unstitch",
       FeatureKind::ReverseNormal { .. } => "ReverseNormal",
@@ -2058,6 +2172,10 @@ impl FeatureKind {
       FeatureKind::FullRoundFillet { .. } => "Fillet",
       FeatureKind::IntersectionCurve { .. } => "IntersectionCurve",
       FeatureKind::Canvas { .. } => "Canvas",
+      FeatureKind::Tessellate { .. } => "Tessellate",
+      FeatureKind::MeshRepair { .. } => "MeshRepair",
+      FeatureKind::GenerateFaceGroups { .. } => "GenerateFaceGroups",
+      FeatureKind::CombineFaceGroups { .. } => "CombineFaceGroups",
     }
   }
 
@@ -2223,6 +2341,7 @@ impl Design {
       exploded_view: None,
       render: render::RenderDoc::default(),
       sim: Vec::new(),
+      design_type: DesignType::Part,
       next_id: 1,
     }
   }
@@ -2277,7 +2396,7 @@ impl Design {
       return Err(DesignError::TooMany);
     }
     let id = FeatureId(self.alloc());
-    let name = self.unique_name(kind.base_name());
+    let name = self.unique_name(&kind);
     let at = self.active_len();
     self.features.insert(
       at,
@@ -2298,8 +2417,15 @@ impl Design {
     Ok(id)
   }
 
-  fn unique_name(&self, base: &str) -> String {
-    let n = self.features.iter().filter(|f| f.kind.base_name() == base).count() + 1;
+  fn unique_name(&self, kind: &FeatureKind) -> String {
+    let base = kind.name_stem();
+    // Fusion numbers base, edge and contour flanges with one counter (BaseFlange1, EdgeFlange2)
+    let n = self
+      .features
+      .iter()
+      .filter(|f| if kind.is_flange() { f.kind.is_flange() } else { f.kind.base_name() == kind.base_name() })
+      .count()
+      + 1;
     let mut k = n;
     loop {
       let name = format!("{base}{k}");
@@ -2669,7 +2795,7 @@ impl Design {
     if let Some(i) = self.bodies.iter().position(|b| b.body == id) {
       &mut self.bodies[i]
     } else {
-      self.bodies.push(BodySettings { body: id, name: None, visible: true, color: None });
+      self.bodies.push(BodySettings { body: id, name: None, visible: true, color: None, material: None });
       let last = self.bodies.len() - 1;
       &mut self.bodies[last]
     }
@@ -3029,6 +3155,18 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::IntersectionCurve { .. } => {}
     FeatureKind::Canvas { .. } => {}
     FeatureKind::Pcb { .. } => {}
+    FeatureKind::Tessellate { surface_deviation, normal_deviation, max_edge, aspect_ratio, .. } => {
+      for e in [surface_deviation, normal_deviation, max_edge, aspect_ratio] {
+        if !e.is_empty() {
+          f(e);
+        }
+      }
+    }
+    FeatureKind::MeshRepair { .. } | FeatureKind::CombineFaceGroups { .. } => {}
+    FeatureKind::GenerateFaceGroups { angle, min_size, .. } => {
+      f(angle);
+      f(min_size);
+    }
   }
 }
 
@@ -3060,6 +3198,22 @@ fn rename_ident(expr: &str, old: &str, new: &str) -> String {
     }
   }
   out
+}
+
+impl FeatureKind {
+  /// The stem of a new feature's name: the base name, but Fusion's "BaseFlange" for a flange
+  /// from profiles.
+  pub fn name_stem(&self) -> &'static str {
+    match self {
+      FeatureKind::Flange { .. } => "BaseFlange",
+      _ => self.base_name(),
+    }
+  }
+
+  /// A base, edge or contour flange (the features Fusion's one Flange command makes).
+  pub fn is_flange(&self) -> bool {
+    matches!(self, FeatureKind::Flange { .. } | FeatureKind::EdgeFlange { .. } | FeatureKind::ContourFlange { .. })
+  }
 }
 
 #[cfg(test)]

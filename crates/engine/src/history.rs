@@ -75,6 +75,7 @@ pub fn command_label(name: &str, p: &Value) -> Option<String> {
   let ty = p.get("type").and_then(Value::as_str).unwrap_or("");
   let label = match name {
     "design.units" if has("unit") => "Change Units",
+    "design.type" if has("type") => "Convert Design Type",
     "sketch.create" => "Create Sketch",
     "sketch.line" => "Line",
     "sketch.rect" if has("center") => "Center Rectangle",
@@ -171,6 +172,13 @@ pub fn command_label(name: &str, p: &Value) -> Option<String> {
     "gen.manufacturing" => "Manufacturing",
     "gen.generate" => "Generate",
     "gen.insert" => "Create Design from Outcome",
+    "mesh.tessellate" => "Tessellate",
+    "mesh.repair" => "Repair",
+    "mesh.face_groups" => "Generate Face Groups",
+    "mesh.combine_face_groups" => "Combine Face Groups",
+    "mesh.section_sketch" => "Create Mesh Section Sketch",
+    "mesh.edit.start" => "Direct Edit",
+    "mesh.edit.finish" => "Finish Direct Editing",
     _ => return None,
   };
   Some(label.to_string())

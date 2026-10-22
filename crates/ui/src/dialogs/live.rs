@@ -25,6 +25,8 @@ pub(super) struct Live {
   before_features: Vec<FeatureId>,
   /// The browser's body rows before the preview (id, name): it keeps them until OK.
   before_rows: Vec<(BodyId, String)>,
+  /// Preview was unticked where the session isn't at hand: withdraw it after the frame's rows.
+  pub(super) withdraw: bool,
 }
 
 impl Default for Live {
@@ -36,7 +38,15 @@ impl Default for Live {
       picked: Vec::new(),
       before_features: Vec::new(),
       before_rows: Vec::new(),
+      withdraw: false,
     }
+  }
+}
+
+impl Live {
+  /// Preview ticked again: the command previews even if it is the one tried last.
+  pub(super) fn retry(&mut self) {
+    self.tried = None;
   }
 }
 
@@ -104,13 +114,13 @@ fn find_now(s: &Session, was: Was) -> Option<Pick> {
 
 /// The dialogs whose picked faces and edges stay selected on their preview.
 fn keeps_picks(kind: Kind) -> bool {
-  matches!(kind, Kind::Fillet | Kind::Chamfer | Kind::Shell | Kind::PressPull | Kind::Draft)
+  matches!(kind, Kind::Fillet | Kind::Chamfer | Kind::Shell | Kind::PressPull | Kind::OffsetFace | Kind::Draft)
 }
 
 impl Dialog {
   /// Asks for a preview when live preview is on and the command changed since the last one.
   pub(super) fn live_check(&mut self) {
-    if !self.live.on || !self.picks() || self.picks_fixed() || self.dirty || !self.ready() {
+    if !self.live.on || !self.picks() || self.picks_fixed() || self.dirty || !self.ready() || self.waits_for_value() {
       return;
     }
     let cmd = self.command().map(|(c, p)| json!([c, p]));
@@ -129,7 +139,9 @@ impl Dialog {
     self.live.picked.clear();
     if keeps_picks(self.kind) && !self.picks_fixed() {
       let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
-      for f in &self.faces {
+      // (Draft's pull face stays picked too)
+      let pull = (self.kind == Kind::Draft).then_some(&self.plane);
+      for f in self.faces.iter().chain(pull) {
         if let (Some(b), Some(id)) = (get(f, "body"), get(f, "face"))
           && let Some(x) = s.model.body(BodyId(b)).and_then(|x| x.faces().iter().find(|x| x.id == id))
         {
@@ -167,10 +179,24 @@ impl Dialog {
       .collect();
   }
 
-  /// The Preview checkbox of a model-picking dialog. Fillet, Thread, Emboss, Thicken and
-  /// Boundary Fill have none: they always preview, as in Fusion.
+  /// The Preview checkbox of a model-picking dialog. Fillet, Draft, Offset Face, Hem, Thread,
+  /// Emboss, Thicken and Boundary Fill have none: they always preview, as in Fusion. Fold,
+  /// Convert to Sheet Metal, Rip and Corner Closure show theirs once something is picked (they
+  /// open with their one selection row).
   pub(super) fn live_checkbox(&mut self, ui: &mut egui::Ui, s: &mut Session) {
-    if self.kind == Kind::Fillet || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f)) {
+    if matches!(self.kind, Kind::Fillet | Kind::Draft | Kind::OffsetFace | Kind::Hem)
+      || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f)
+        || crate::mesh_ui::is_mesh_form(f)
+        || !crate::forms::preview_box(f))
+    {
+      return;
+    }
+    let picked = match self.kind {
+      Kind::Form(f) => self.form.missing(f).is_none(),
+      _ => !self.faces.is_empty() || !self.bodies.is_empty() || !self.edges.is_empty(),
+    };
+    let sheet = matches!(self.kind, Kind::Form(f) if std::ptr::eq(f, &crate::forms::CORNER_CLOSURE));
+    if (sheet || matches!(self.kind, Kind::Fold | Kind::ConvertSheet | Kind::Rip)) && !picked {
       return;
     }
     if ui.checkbox(&mut self.live.on, "Preview").changed() {

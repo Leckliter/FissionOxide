@@ -13,6 +13,9 @@ pub struct BaseBody {
   pub name: String,
   /// OCCT BRep text.
   pub brep: String,
+  /// A mesh body (see [`crate::regen::BodyKind`]).
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub mesh: bool,
 }
 
 /// A direct edit inside a base feature. Values are millimetres, not expressions.
@@ -50,9 +53,7 @@ impl Rotation {
     use fox_kernel::glam::{DMat4, DVec3};
     let axis = DVec3::from(self.axis).try_normalize()?;
     let o = DVec3::from(self.origin);
-    Some(
-      DMat4::from_translation(o) * DMat4::from_axis_angle(axis, self.angle.to_radians()) * DMat4::from_translation(-o),
-    )
+    Some(DMat4::from_translation(o) * DMat4::from_axis_angle(axis, self.angle.to_radians()) * DMat4::from_translation(-o))
   }
 }
 

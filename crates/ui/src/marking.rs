@@ -68,6 +68,8 @@ pub(crate) struct MenuState {
   pub(crate) opacity: Vec<(BodyId, u8)>,
   /// Bodies the canvas can't pick (Selectable/Unselectable); the browser still selects them.
   pub(crate) unselectable: Vec<BodyId>,
+  /// Mesh bodies drawn flat-shaded (a mesh body's Flat Shaded; mesh bodies draw smooth).
+  pub(crate) flat_shaded: Vec<BodyId>,
 }
 
 #[derive(Clone)]
@@ -95,6 +97,8 @@ enum Action {
   /// Selectable/Unselectable: stop the canvas picking the body (or let it again).
   ToggleSelectable(BodyId),
   Workspace(&'static str),
+  /// A row of a mesh body's list (see `panels::mesh_body_menu`).
+  Mesh(BodyId, panels::MeshCmd),
   /// A row that only opens its sub-list.
   Open,
 }
@@ -161,7 +165,11 @@ const APPEARANCE: Cmd = Cmd::Dialog(Kind::Form(&crate::forms::APPEARANCE));
 /// menu offers commands for what was clicked.
 pub fn open(app: &mut App, pos: Pos2) {
   if let Some(h) = app.hover {
-    let sel = h.to_sel();
+    // a mesh body is picked whole
+    let sel = match crate::select::pick_body(&h) {
+      Some(body) if crate::select::is_mesh(&app.s, body) => Sel::Body { body },
+      _ => h.to_sel(),
+    };
     if !app.s.selection.contains(&sel) {
       app.s.selection = vec![sel];
     }
@@ -174,6 +182,8 @@ pub fn open(app: &mut App, pos: Pos2) {
 
 /// What the selection is, for the context-aware ring and list.
 struct Context {
+  /// One mesh body is selected, and nothing else: Fusion's mesh body ring and list.
+  mesh: Option<BodyId>,
   face: Option<(BodyId, u32)>,
   planar_face: bool,
   edge: bool,
@@ -196,7 +206,12 @@ fn context(app: &App) -> Context {
   let feature = sel.iter().find_map(|s| if let Sel::Feature { feature } = s { Some(*feature) } else { None });
   let sketch =
     feature.filter(|f| app.s.design.feature(*f).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })));
+  let mesh = match sel.as_slice() {
+    [Sel::Body { body }] if crate::select::is_mesh(&app.s, *body) => Some(*body),
+    _ => None,
+  };
   Context {
+    mesh,
     face,
     planar_face,
     edge: sel.iter().any(|s| matches!(s, Sel::Edge { .. })),
@@ -469,7 +484,10 @@ fn ring_items(app: &App, cx: &Context) -> [Option<Item>; 8] {
   }
   // Fusion's ring: Repeat, Delete, Press Pull, Redo, Hole, Sketch ▾, Move/Copy, Undo; the east
   // and south slots follow the selection
-  let (east, south) = if cx.edge {
+  // a mesh body keeps the plain ring (Press Pull and Hole), as Fusion's does
+  let (east, south) = if cx.mesh.is_some() {
+    (Item::cmd(Cmd::Dialog(Kind::PressPull)), Item::cmd(Cmd::Dialog(Kind::Hole)))
+  } else if cx.edge {
     (Item::cmd(Cmd::Dialog(Kind::Fillet)), Item::cmd(Cmd::Dialog(Kind::Chamfer)))
   } else if cx.body_sel {
     (Item::cmd(Cmd::Dialog(Kind::Combine)), Item::cmd(APPEARANCE))
@@ -552,6 +570,28 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
   };
   let properties = || Item::with_label(Cmd::Dialog(Kind::Inspect), "Properties");
   let show_hide = || Item::new(Action::ShowHide, Icon::Eye, "Show/Hide");
+  if let Some(body) = cx.mesh {
+    // Fusion's mesh body list, and only it, as the browser row's with Find in Browser
+    for it in panels::mesh_body_menu(app, body, true) {
+      v.push(it.map(|it| {
+        Item {
+          action: Action::Mesh(body, it.cmd),
+          icon: it.icon,
+          label: it.label,
+          hint: it.key.map(str::to_string),
+          children: match it.cmd {
+            panels::MeshCmd::Opacity => panels::OPACITY_LEVELS
+              .iter()
+              .map(|p| Item::new(Action::Mesh(body, panels::MeshCmd::OpacityTo(*p)), Icon::Body, &format!("{p}%")))
+              .collect(),
+            _ => Vec::new(),
+          },
+          enabled: it.enabled,
+        }
+      }));
+    }
+    return v;
+  }
   if let Some((body, _)) = cx.face {
     // Fusion's face list, and only it: no navigation section and no recent commands
     v.push(Some(Item::greyed(Icon::Select, "Create Selection Set")));
@@ -746,6 +786,10 @@ fn run(app: &mut App, action: Action) {
       }
     }
     Action::Workspace(w) => panels::switch_workspace(app, w),
+    Action::Mesh(body, panels::MeshCmd::Rename) => {
+      app.rename = Some((crate::RenameTarget::Body(body.0), app.s.body_name(body)));
+    }
+    Action::Mesh(body, cmd) => panels::run_mesh_cmd(app, body, cmd),
     Action::Open => {}
   }
 }
@@ -1125,10 +1169,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
     return;
   }
-  let action = picked.map(|it| it.action.clone());
+  let action = picked.filter(|it| it.enabled).map(|it| it.action.clone());
   app.marking = None;
-  if let Some(a) = action {
-    run(app, a);
+  match action {
+    // Copy puts a note on the system clipboard too, which needs the window
+    Some(Action::Mesh(body, panels::MeshCmd::Copy)) => {
+      app.s.selection = vec![Sel::Body { body }];
+      crate::clipboard::copy(app, ctx);
+    }
+    Some(a) => run(app, a),
+    None => {}
   }
 }
 
@@ -1612,5 +1662,62 @@ mod tests {
     assert_eq!(app.key_for(Cmd::SketchTool(Tool::Arc3)), None);
     assert_eq!(app.key_for(Cmd::Dialog(Kind::Project)).as_deref(), Some("P"));
     assert_eq!(app.key_for(Cmd::Construction).as_deref(), Some("X"));
+  }
+
+  /// A right-click on a mesh body selects it whole and shows Fusion's mesh ring and list: the
+  /// browser row's entries plus Find in Browser, and nothing else.
+  #[test]
+  fn mesh_body_ring_and_list_are_fusions() {
+    let mut app = crate::mesh_body_tests::mesh_and_box();
+    let mesh = app.s.model.bodies.iter().find(|b| b.is_mesh()).unwrap().id;
+    app.hover = Some(fox_engine::scene::Pick::Face { body: mesh, face: 1 });
+    open(&mut app, Pos2::ZERO);
+    assert_eq!(app.s.selection, [Sel::Body { body: mesh }]);
+    let cx = context(&app);
+    let ring = ring_items(&app, &cx);
+    let names: Vec<String> = ring.iter().flatten().map(|i| i.label.clone()).collect();
+    for want in ["Delete", "Undo", "Move/Copy", "Press Pull", "Redo", "Hole", "Sketch"] {
+      assert!(names.iter().any(|n| n == want), "{want} in {names:?}");
+    }
+    let list = overflow_items(&app, &cx);
+    assert_eq!(
+      labels(&list),
+      [
+        "Move/Copy",
+        "Move to Group",
+        "Create Selection Set",
+        "Edit Feature",
+        "Configure",
+        "Physical Material",
+        "Appearance",
+        "Texture Map Controls",
+        "Properties",
+        "Save As Mesh",
+        "Copy",
+        "Cut",
+        "Delete",
+        "Remove",
+        "Rename",
+        "Show/Hide",
+        "Selectable/Unselectable",
+        "Opacity Control",
+        "Find in Browser",
+        "Find in Window",
+        "Flat Shaded",
+        "Direct Edit",
+      ]
+    );
+    let greyed: Vec<&str> = list.iter().flatten().filter(|i| !i.enabled).map(|i| i.label.as_str()).collect();
+    assert_eq!(
+      greyed,
+      ["Move to Group", "Create Selection Set", "Physical Material", "Texture Map Controls", "Cut", "Direct Edit"]
+    );
+    // Flat Shaded toggles the body's shading; Opacity Control's levels set its opacity
+    run(&mut app, Action::Mesh(mesh, panels::MeshCmd::FlatShaded));
+    assert_eq!(app.ctx_menu.flat_shaded, [mesh]);
+    run(&mut app, Action::Mesh(mesh, panels::MeshCmd::OpacityTo(50)));
+    assert_eq!(app.ctx_menu.opacity, [(mesh, 128)]);
+    run(&mut app, Action::Mesh(mesh, panels::MeshCmd::Rename));
+    assert_eq!(app.rename.as_ref().map(|r| r.1.as_str()), Some("lprism"));
   }
 }

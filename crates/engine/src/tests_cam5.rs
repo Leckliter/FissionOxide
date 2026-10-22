@@ -117,10 +117,7 @@ fn turning_a_shaft() {
   assert!(paths[3].turn.iter().any(|m| (m.x - 12.0).abs() < 1e-3 && (m.z + 50.0) > -0.01 && m.z + 50.0 < 1.01));
   assert!(paths[5].turn.iter().any(|m| m.x < 0.0 && (m.z + 63.0).abs() < 1e-6), "parted at the back face");
   let threads: Vec<f64> = paths[4].turn.iter().filter(|m| m.pitch > 0.0).map(|m| m.x).collect();
-  assert!(
-    threads.len() > 4 && (threads.iter().copied().fold(f64::INFINITY, f64::min) - (10.0 - 0.92)).abs() < 0.01,
-    "{threads:?}"
-  );
+  assert!(threads.len() > 4 && (threads.iter().copied().fold(f64::INFINITY, f64::min) - (10.0 - 0.92)).abs() < 0.01, "{threads:?}");
 
   // the simulation: everything cut, nothing gouged, the chuck left alone
   let r = run(&mut s, "cam.simulate", json!({}));
@@ -183,14 +180,10 @@ fn lathe_posts_read_back() {
     match post {
       "fanuc_lathe" => {
         assert!(code.starts_with("%\nO2000") && code.contains("T1111") && code.contains("G50 S3000"));
-        assert!(
-          code.contains("G96 S") && code.contains("G97 S800 M3") && code.contains("G32 ") && code.contains("G99")
-        );
+        assert!(code.contains("G96 S") && code.contains("G97 S800 M3") && code.contains("G32 ") && code.contains("G99"));
       }
       "haas_lathe" => assert!(code.contains("T1111") && code.contains("G97 S800 M03") && code.contains("G28 U0.")),
-      _ => {
-        assert!(code.contains("G7") && code.contains("G33 ") && code.contains("G96 D3000") && code.ends_with("M2\n"))
-      }
+      _ => assert!(code.contains("G7") && code.contains("G33 ") && code.contains("G96 D3000") && code.ends_with("M2\n")),
     }
     if units == "inch" {
       assert!(code.contains("G20") && code.contains(" S820 M3"), "250 m/min is 820 ft/min");
@@ -294,7 +287,8 @@ fn three_plus_two_on_a_tilted_face() {
   let code = g["gcode"].as_str().unwrap();
   assert!(code.contains("G0 A45. C180.") || code.contains("G0 A-45. C0."), "{code}");
   let back = read5(code, &m);
-  let want: Vec<(bool, DVec3)> = paths[..2].iter().flat_map(|t| t.moves.iter().map(|m| (m.rapid, m.to - o))).collect();
+  let want: Vec<(bool, DVec3)> =
+    paths[..2].iter().flat_map(|t| t.moves.iter().map(|m| (m.rapid, m.to - o))).collect();
   assert_eq!(back.len(), want.len());
   for (g, (rapid, p)) in back.iter().zip(&want) {
     assert!(g.0 == *rapid && (g.1 - *p).length() < 2e-3, "{g:?} vs {p}");
@@ -319,11 +313,7 @@ fn rotary_wraps_around_the_fourth_axis() {
   assert_eq!(st["machine"], "rotary");
   assert!(s.execute("cam.swarf", &json!({"faces": [{"body": 1, "face": 1}], "tool_diameter": 6})).is_err());
   run(&mut s, "cam.rotary", json!({"tool_kind": "ball", "tool_diameter": 6, "stepover": 0.3, "stepdown": 1.5}));
-  run(
-    &mut s,
-    "cam.rotary",
-    json!({"tool_kind": "ball", "tool_diameter": 6, "stepover": 0.3, "around": true, "stepdown": 5}),
-  );
+  run(&mut s, "cam.rotary", json!({"tool_kind": "ball", "tool_diameter": 6, "stepover": 0.3, "around": true, "stepdown": 5}));
   let setup = s.design.cam[0].clone();
   let paths = cam::toolpaths(&setup, &s.model).unwrap();
   let o = cam::origin(&setup, &s.model).unwrap();
@@ -353,8 +343,10 @@ fn rotary_wraps_around_the_fourth_axis() {
   let code = g["gcode"].as_str().unwrap();
   assert!(code.contains(" A") && code.contains("G93") && !code.contains(" C"), "around the axis moves A as it cuts");
   let back = read5(code, &m);
-  let want: Vec<(bool, DVec3, DVec3)> =
-    paths.iter().flat_map(|t| t.moves.iter().zip(&t.axes).map(|(mv, a)| (mv.rapid, mv.to - o, *a))).collect();
+  let want: Vec<(bool, DVec3, DVec3)> = paths
+    .iter()
+    .flat_map(|t| t.moves.iter().zip(&t.axes).map(|(mv, a)| (mv.rapid, mv.to - o, *a)))
+    .collect();
   assert_eq!(back.len(), want.len());
   for (g, w) in back.iter().zip(&want) {
     assert!(g.0 == w.0 && (g.1 - w.1).length() < 2e-3 && (g.2 - w.2).length() < 1e-4, "{g:?} vs {w:?}");
@@ -375,13 +367,7 @@ fn swarf_along_a_drafted_boss() {
     let (body, cone) = (b.id.0, b.faces().iter().find(|f| f.kind == SurfaceKind::Cone).expect("a conical wall").id);
     run(&mut s, "cam.setup", json!({"machine": kin, "pivot": pivot, "stock_top": 0, "stock_side": 0}));
     assert!(s.execute("cam.rotary", &json!({"tool_diameter": 6})).is_err(), "rotary needs a 4th axis");
-    assert!(
-      s.execute(
-        "cam.swarf",
-        &json!({"faces": [{"body": body, "face": cone}], "tool_kind": "ball", "tool_diameter": 6})
-      )
-      .is_err()
-    );
+    assert!(s.execute("cam.swarf", &json!({"faces": [{"body": body, "face": cone}], "tool_kind": "ball", "tool_diameter": 6})).is_err());
     run(&mut s, "cam.swarf", json!({"faces": [{"body": body, "face": cone}], "tool_diameter": 6, "stepdown": 8}));
     let setup = s.design.cam[0].clone();
     let paths = cam::toolpaths(&setup, &s.model).unwrap();
@@ -397,8 +383,7 @@ fn swarf_along_a_drafted_boss() {
       assert!((rho - wall - 3.0 / 10f64.to_radians().cos()).abs() < 0.1, "{p}: {rho} vs {wall}");
     }
     let angles: Vec<f64> = tp.axes.iter().map(|a| a.y.atan2(a.x)).collect();
-    let spread =
-      angles.iter().copied().fold(f64::NEG_INFINITY, f64::max) - angles.iter().copied().fold(f64::INFINITY, f64::min);
+    let spread = angles.iter().copied().fold(f64::NEG_INFINITY, f64::max) - angles.iter().copied().fold(f64::INFINITY, f64::min);
     assert!(spread > 5.0, "the axis turns around the boss");
     let r = run(&mut s, "cam.simulate", json!({}));
     assert_eq!(warnings(&r, "gouge") + warnings(&r, "axis_limit"), 0, "{kin}: {r}");

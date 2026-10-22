@@ -772,6 +772,11 @@ fn hub_versions_milestones_and_history() {
   let vs = run(&mut s, "hub.versions", json!({"item": up["item"]}));
   let orig = vs["versions"][0]["original"].as_str().unwrap();
   assert!(orig.starts_with("v1-") && orig.ends_with(".orig.step"), "{orig}");
+  // and downloading it in the original's format gives that file back, byte for byte
+  let back = root.join("back.step");
+  let r = run(&mut s, "hub.download", json!({"item": up["item"], "path": back}));
+  assert_eq!(r["original"], true, "{r}");
+  assert_eq!(std::fs::read(&back).unwrap(), std::fs::read(&step).unwrap());
   // trash and restore
   run(&mut s, "hub.item.delete", json!({}));
   assert!(s.hub.is_none());

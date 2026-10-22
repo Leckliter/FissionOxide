@@ -68,6 +68,8 @@ pub enum Icon {
   Gear,
   Component,
   Body,
+  /// A surface body's browser row: an orange curved sheet, where a solid body has a grey block.
+  SurfaceBody,
   SketchSmall,
   Eye,
   EyeOff,
@@ -226,6 +228,10 @@ pub enum Icon {
   MeshBody,
   /// A mesh feature in the timeline (Insert Mesh's "Base Mesh Feature").
   MeshFeature,
+  /// INSERT MESH's Center: a block on the origin's cross.
+  MeshCenter,
+  /// INSERT MESH's Move To Ground: a block coming down onto the ground line.
+  MoveToGround,
   Flange,
   Hem,
   LoftedFlange,
@@ -418,6 +424,18 @@ pub enum Icon {
   OriginSimple,
   OriginBetween,
   OriginTwoEdge,
+  // Draft's Type row
+  DraftFixedPlane,
+  DraftPartingLine,
+  // Hem's Type drop-down: the sheet's end folded back, seen edge-on
+  HemFlat,
+  HemOpen,
+  HemRolled,
+  HemTeardrop,
+  HemRope,
+  // the timeline's sheet metal flanges: a flat sheet, and a sheet with a flange bent up
+  BaseFlange,
+  EdgeFlange,
 }
 
 #[derive(Clone, Copy)]
@@ -494,6 +512,7 @@ fn family(icon: Icon) -> Tint {
     | Sustainability | Select | WindowSel | FreeformSel | PaintSel => Tint::Green,
     Sketch | SketchSmall | Construction => Tint::Teal,
     MeshBody | MeshFeature => Tint::Gold,
+    SurfaceBody => Tint::Orange,
     _ => Tint::Blue,
   }
 }
@@ -783,8 +802,9 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.arrow_head((0.37, 0.0), (0.0, -1.0), 0.13, Ink);
     }
     Icon::Revolve => {
-      k.band(k.arc_pts((0.5, 0.5), 0.36, 0.3, -2.9, 0.1), 4.6);
-      k.arrow_head((0.92, 0.47), (0.25, -1.0), 0.16, Blue);
+      // a wide revolved sheet, not a thin ring
+      k.band(k.arc_pts((0.5, 0.48), 0.34, 0.28, -2.9, 0.1), 8.0);
+      k.arrow_head((0.92, 0.42), (0.25, -1.0), 0.18, Blue);
       k.dashed((0.5, 0.02), (0.5, 0.98), Ink);
     }
     Icon::Box => k.block(0.1, 0.38, 0.66, 0.9, 0.26, BlueLight, Blue, BlueDark),
@@ -1091,6 +1111,17 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.38, 0.64), 0.1, Some(Blue), None);
     }
     Icon::Body => k.block(0.1, 0.38, 0.66, 0.9, 0.26, Light, Fill, Dark),
+    Icon::MeshCenter => {
+      k.block(0.22, 0.4, 0.66, 0.84, 0.18, BlueLight, Blue, BlueDark);
+      k.line((0.5, 0.04), (0.5, 0.96), Ink);
+      k.line((0.04, 0.6), (0.96, 0.6), Ink);
+    }
+    Icon::MoveToGround => {
+      k.block(0.24, 0.2, 0.64, 0.56, 0.16, BlueLight, Blue, BlueDark);
+      k.thick((0.44, 0.6), (0.44, 0.78), Ink, 1.3);
+      k.arrow_head((0.44, 0.84), (0.0, 1.0), 0.12, Ink);
+      k.thick((0.04, 0.94), (0.96, 0.94), Ink, 1.4);
+    }
     Icon::MeshBody | Icon::MeshFeature => {
       // a yellow block cut into triangles on every face
       let (x0, y0, x1, y1, d) =
@@ -1099,6 +1130,19 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.line((x0, y1), (x1, y0), BlueDark);
       k.line((x0, y0), (x1 + d, y0 - d * 0.7), BlueDark);
       k.line((x1, y1), (x1 + d, y0 - d * 0.7), BlueDark);
+    }
+    Icon::SurfaceBody => {
+      // a thin sheet curving up at its back, drawn in strips so each fill is convex
+      let near = |t: f32| (0.06 + 0.6 * t, 0.86 - 0.22 * (t * PI).sin());
+      let far = |t: f32| (0.34 + 0.6 * t, 0.5 - 0.22 * (t * PI).sin());
+      let n = 8;
+      for i in 0..n {
+        let (a, b) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
+        k.fill(&[near(a), near(b), far(b), far(a)], Blue);
+      }
+      let mut outline: Vec<(f32, f32)> = (0..=n).map(|i| near(i as f32 / n as f32)).collect();
+      outline.extend((0..=n).rev().map(|i| far(i as f32 / n as f32)));
+      k.p.add(Shape::closed_line(k.pts(&outline), Stroke::new(w * 0.8, k.edge(Blue))));
     }
     Icon::SketchSmall => {
       k.solid(&[(0.08, 0.2), (0.92, 0.2), (0.92, 0.84), (0.08, 0.84)], White);
@@ -1690,8 +1734,9 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       }
     }
     Icon::Patch => {
-      k.solid(&[(0.08, 0.2), (0.56, 0.2), (0.56, 0.56), (0.08, 0.56)], Blue);
-      k.solid(&[(0.56, 0.2), (0.92, 0.5), (0.92, 0.9), (0.56, 0.56)], BlueDark);
+      // a folded sheet, both halves in the family colour
+      k.solid(&[(0.06, 0.16), (0.52, 0.16), (0.52, 0.66), (0.06, 0.66)], Blue);
+      k.solid(&[(0.52, 0.16), (0.94, 0.42), (0.94, 0.92), (0.52, 0.66)], BlueLight);
     }
     Icon::Ruled => {
       k.solid(&[(0.06, 0.66), (0.46, 0.2), (0.94, 0.2), (0.54, 0.66)], BlueLight);
@@ -1702,10 +1747,14 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.p.add(Shape::line(k.arc_pts((0.5, 1.1), 0.8, 0.8, 0.6, PI - 0.6), Stroke::new(w * 1.3, k.col(Blue))));
     }
     Icon::Trim => {
-      k.circle((0.24, 0.78), 0.14, None, Some(Ink));
-      k.circle((0.76, 0.78), 0.14, None, Some(Ink));
-      k.thick((0.32, 0.66), (0.78, 0.06), Ink, 1.3);
-      k.thick((0.68, 0.66), (0.22, 0.06), Ink, 1.3);
+      // a sheet with a piece cut away along the dashed line, scissors over it
+      k.solid(&[(0.04, 0.3), (0.62, 0.3), (0.62, 0.96), (0.04, 0.96)], Blue);
+      k.solid(&[(0.7, 0.3), (0.96, 0.3), (0.96, 0.96), (0.7, 0.96)], BlueLight);
+      k.dashed((0.66, 0.24), (0.66, 1.0), Ink);
+      k.circle((0.3, 0.2), 0.1, Some(White), Some(Ink));
+      k.circle((0.3, 0.52), 0.1, Some(White), Some(Ink));
+      k.thick((0.38, 0.24), (0.9, 0.5), Ink, 1.3);
+      k.thick((0.38, 0.48), (0.9, 0.2), Ink, 1.3);
     }
     Icon::Untrim | Icon::Unstitch => {
       if icon == Icon::Untrim {
@@ -2834,7 +2883,59 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.thick((0.12, 0.8), (0.88, 0.2), Ink, 1.2);
       k.circle((0.5, 0.5), 0.08, Some(Blue), None);
     }
+    Icon::DraftFixedPlane => {
+      // a block tapering down from the fixed plane across its top
+      k.solid(&[(0.26, 0.32), (0.74, 0.32), (0.9, 0.9), (0.1, 0.9)], Fill);
+      k.thick((0.04, 0.32), (0.96, 0.32), Blue, 1.4);
+    }
+    Icon::DraftPartingLine => {
+      // two tapers meeting at the parting line
+      k.solid(&[(0.22, 0.1), (0.78, 0.1), (0.92, 0.5), (0.08, 0.5)], Fill);
+      k.solid(&[(0.08, 0.5), (0.92, 0.5), (0.78, 0.9), (0.22, 0.9)], Fill);
+      k.thick((0.04, 0.5), (0.96, 0.5), Blue, 1.4);
+    }
+    Icon::HemFlat | Icon::HemOpen => {
+      // folded flat onto the sheet, or back with a gap
+      let g = if icon == Icon::HemFlat { 0.08 } else { 0.18 };
+      let mut pts = vec![(0.06, 0.5 + g)];
+      pts.extend(unit_arc((0.74, 0.5), g, -std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2));
+      pts.push((0.3, 0.5 - g));
+      k.band(k.pts(&pts), 3.4);
+    }
+    Icon::HemRolled | Icon::HemTeardrop | Icon::HemRope => {
+      use std::f32::consts::{FRAC_PI_2, PI};
+      // a roll round the sheet's end: three quarters, a teardrop closing on the sheet, a full rope
+      let (c, r) = ((0.62, 0.48), 0.24);
+      let mut pts = vec![(0.06, 0.48 + r)];
+      let sweep = match icon {
+        Icon::HemRolled => 1.5 * PI,
+        Icon::HemTeardrop => 1.75 * PI,
+        _ => 2.1 * PI,
+      };
+      pts.extend(unit_arc(c, r, -FRAC_PI_2, -FRAC_PI_2 + sweep));
+      if icon == Icon::HemTeardrop {
+        pts.push((0.44, 0.48 + r - 0.04));
+      }
+      k.band(k.pts(&pts), 3.4);
+    }
+    Icon::BaseFlange => {
+      // a flat sheet seen from above, its thickness along the front
+      k.solid(&[(0.06, 0.52), (0.44, 0.3), (0.94, 0.48), (0.56, 0.72)], BlueLight);
+      k.solid(&[(0.06, 0.52), (0.56, 0.72), (0.56, 0.82), (0.06, 0.62)], Blue);
+      k.solid(&[(0.56, 0.72), (0.94, 0.48), (0.94, 0.58), (0.56, 0.82)], BlueDark);
+    }
+    Icon::EdgeFlange => {
+      // the sheet with a wall bent up along its back edge
+      k.solid(&[(0.06, 0.62), (0.44, 0.44), (0.94, 0.6), (0.56, 0.8)], BlueLight);
+      k.solid(&[(0.06, 0.62), (0.56, 0.8), (0.56, 0.88), (0.06, 0.7)], Blue);
+      k.solid(&[(0.44, 0.44), (0.44, 0.08), (0.94, 0.24), (0.94, 0.6)], Blue);
+    }
   }
+}
+
+/// Points along an arc in unit-square coordinates, angles counter-clockwise from +x (screen y up).
+fn unit_arc(c: (f32, f32), r: f32, a0: f32, a1: f32) -> Vec<(f32, f32)> {
+  (0..=16).map(|i| a0 + (a1 - a0) * i as f32 / 16.0).map(|t| (c.0 + t.cos() * r, c.1 - t.sin() * r)).collect()
 }
 
 /// A five-pointed star's outline (unit-square coordinates), its first point straight up.

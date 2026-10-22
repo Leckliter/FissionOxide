@@ -34,6 +34,8 @@ pub const EDGE_HOVER_COLOR: [u8; 4] = [10, 10, 10, 255];
 /// A Mirror's or pattern's previewed copy: Fusion's see-through grey ghost with dark edges.
 pub const GHOST_COLOR: [u8; 4] = [150, 150, 150, 90];
 pub const GHOST_EDGE_COLOR: [u8; 4] = [60, 60, 60, 255];
+/// A previewed new sheet metal body (Base Flange): Fusion's solid preview blue.
+pub const PREVIEW_COLOR: [u8; 4] = [104, 154, 222, 255];
 /// A visible sketch's closed profiles, seen from outside the sketch and in it alike: Fusion's
 /// pale blue, drawn unlit so it reads the same from every angle.
 pub const PROFILE_COLOR: [u8; 4] = [230, 245, 250, 255];
@@ -241,9 +243,15 @@ pub struct ViewOptions {
   pub origin_axis_len: Option<f64>,
   /// Bodies drawn see-through: (body, alpha), as Fusion's Opacity Control.
   pub opacity: Vec<(BodyId, u8)>,
+  /// Mesh bodies drawn flat-shaded (a mesh body's Flat Shaded); the rest draw smooth, as Fusion
+  /// draws mesh bodies.
+  pub flat_meshes: Vec<BodyId>,
   /// Construction planes left out (the one an Offset Plane dialog previews, which the UI fills
   /// itself).
   pub hide_planes: Vec<FeatureId>,
+  /// Draw no construction planes: the caller draws them itself (the app fills them over the
+  /// image at a fixed size on screen, as Fusion does).
+  pub planes_drawn_by_caller: bool,
   /// Bodies' exploded-view offsets; `None` = the design's exploded view (`view.explode`).
   pub explode: Option<HashMap<BodyId, DVec3>>,
   /// Sketch curves and points also drawn in the hover colour: what a hovered constraint glyph
@@ -266,6 +274,10 @@ pub struct ViewOptions {
   /// Section Analysis's Section Color: `None` colours each cut face from its body (Fusion's
   /// "From Component"), else this one colour.
   pub section_color: Option<[u8; 4]>,
+  /// The analysis's bodies, opacity, vertex colours, combs and isocurves (see [`crate::analysis`]).
+  pub analysis_view: crate::analysis::AnalysisView,
+  /// Bodies drawn in [`PREVIEW_COLOR`]: a Base Flange's previewed sheet.
+  pub preview: Vec<BodyId>,
 }
 
 /// What the Sketch Palette shows of the sketch being edited (every option on by default, as
@@ -296,7 +308,10 @@ pub struct SceneBuilder {
   profiles: HashMap<(FeatureId, usize), Option<TriMesh>>,
   /// Section caps per body, for the plane they were cut with.
   caps: HashMap<BodyId, (Plane, Option<TriMesh>)>,
-  curvature: HashMap<BodyId, Vec<[u8; 4]>>,
+  /// Per-vertex curvature estimates of each body's mesh (see [`crate::analysis::principal`]).
+  curvature: HashMap<BodyId, Vec<[f32; 3]>>,
+  /// Mesh bodies' tessellations with smooth (averaged) normals.
+  smooth: HashMap<BodyId, TriMesh>,
   /// The design's exploded view and its offsets, for the revision they were worked out at.
   explode: Option<(u64, fox_model::explode::ExplodedView, HashMap<BodyId, DVec3>)>,
 }
@@ -305,6 +320,7 @@ impl SceneBuilder {
   pub fn build(&mut self, s: &Session, opts: &ViewOptions) -> (Scene, PickTable) {
     if self.revision != s.revision {
       self.edges.clear();
+      self.smooth.clear();
       self.profiles.clear();
       self.caps.clear();
       self.curvature.clear();
@@ -343,6 +359,9 @@ impl SceneBuilder {
         continue;
       }
       let Some(m) = body.mesh() else { continue };
+      let smooth = (body.is_mesh() && !opts.flat_meshes.contains(&body.id))
+        .then(|| self.smooth.entry(body.id).or_insert_with(|| smooth_shaded(m)).clone());
+      let m = smooth.as_ref().unwrap_or(m);
       let tint = |c: [u8; 4]| {
         let c = if selected_bodies.contains(&body.id) { SELECT_COLOR } else { c };
         let c = if opts.peek.contains(&body.id) { mix(c, HOVER_COLOR, 0.6) } else { c };
@@ -351,6 +370,7 @@ impl SceneBuilder {
       let ghost = opts.ghosts.contains(&body.id);
       let base = tint(s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR));
       let base = if ghost { GHOST_COLOR } else { base };
+      let base = if opts.preview.contains(&body.id) { PREVIEW_COLOR } else { base };
       let tri_ids: Vec<u32> = m.tri_face.iter().map(|f| picks.id(Pick::Face { body: body.id, face: *f })).collect();
       // per-face highlight: hover one face; selected faces get their own meshes' colour via split
       let hover = match opts.hover {
@@ -382,8 +402,9 @@ impl SceneBuilder {
         }
       } else if sel_faces.is_empty() {
         let mut mesh = mesh_of(m, tri_ids, base, hover);
-        if opts.curvature {
-          mesh.colors = self.curvature.entry(body.id).or_insert_with(|| curvature_colors(m)).clone();
+        if let Some(c) = opts.analysis_view.coloring.filter(|_| opts.analysis_view.covers(body.id)) {
+          let k = self.curvature.entry(body.id).or_insert_with(|| crate::analysis::principal(m));
+          mesh.colors = crate::analysis::colors(k, c, base, opts.analysis_view.fade);
         }
         scene.meshes.push(mesh);
       } else {
@@ -393,8 +414,10 @@ impl SceneBuilder {
         scene.meshes.push(mesh_of(&b.0, b.1, SELECT_COLOR, hover));
       }
       let alpha = opts.opacity.iter().find(|o| o.0 == body.id).map(|o| o.1).or(ghost.then_some(GHOST_COLOR[3]));
+      let unanalyzed = !opts.analysis_view.covers(body.id);
       for mesh in &mut scene.meshes[first..] {
         mesh.analyze = true;
+        mesh.unanalyzed = unanalyzed;
         if let Some(a) = alpha {
           mesh.color[3] = a;
         }
@@ -599,10 +622,13 @@ impl SceneBuilder {
     }
 
     // construction planes
+    // hidden ones (the browser row's eye, V) are left out
+    let hidden = |id: &FeatureId| s.design.feature(*id).is_some_and(|f| f.suppressed || f.visible == Some(false));
     for (id, pl) in &s.model.planes {
       if opts.hide_construction
         || opts.hide_construction_planes
-        || s.design.feature(*id).is_some_and(|f| f.suppressed)
+        || opts.planes_drawn_by_caller
+        || hidden(id)
         || opts.hide_planes.contains(id)
       {
         continue;
@@ -629,7 +655,7 @@ impl SceneBuilder {
     // construction axes (dashed, through the model), points and cosmetic threads
     let reach = scene_size(s) * 0.4;
     for (id, (o, d)) in &s.model.axes {
-      if opts.hide_construction || opts.hide_construction_axes || s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || opts.hide_construction_axes || hidden(id) {
         continue;
       }
       scene.lines.push(Polyline {
@@ -644,8 +670,7 @@ impl SceneBuilder {
       });
     }
     for (id, p) in &s.model.points {
-      if opts.hide_construction || opts.hide_construction_points || s.design.feature(*id).is_some_and(|f| f.suppressed)
-      {
+      if opts.hide_construction || opts.hide_construction_points || hidden(id) {
         continue;
       }
       scene.markers.push(Marker {
@@ -711,7 +736,19 @@ impl SceneBuilder {
     if let Some(v) = &opts.sim {
       crate::sim::draw(&mut scene, &mut picks, s, v);
     }
+    let edges = &mut self.edges;
+    crate::analysis::draw(&mut scene, s, &opts.analysis_view, &mut |b| {
+      let Some(body) = s.model.body(b) else { return Vec::new() };
+      edges
+        .entry(b)
+        .or_insert_with(|| {
+          let tol = (body.diagonal() * 0.001).clamp(0.002, 0.5);
+          body.shape.edge_lines(tol).unwrap_or_default()
+        })
+        .clone()
+    });
     scene.analysis = opts.analysis;
+    scene.analysis_fade = opts.analysis_view.fade;
     (scene, picks)
   }
 
@@ -1175,6 +1212,29 @@ pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
   }
 }
 
+/// A mesh with each vertex's normal averaged over the triangles meeting at its point (area
+/// weighted), so a mesh body draws smooth across its facets.
+fn smooth_shaded(m: &TriMesh) -> TriMesh {
+  let key = |p: &[f32; 3]| p.map(|c| (c * 1e4).round() as i64);
+  let mut sums: HashMap<[i64; 3], fox_kernel::glam::Vec3> = HashMap::new();
+  for t in m.indices.chunks_exact(3) {
+    let [a, b, c] = [t[0], t[1], t[2]].map(|i| m.positions.get(i as usize).copied().unwrap_or_default());
+    let (va, vb, vc) =
+      (fox_kernel::glam::Vec3::from(a), fox_kernel::glam::Vec3::from(b), fox_kernel::glam::Vec3::from(c));
+    let n = (vb - va).cross(vc - va);
+    for p in [a, b, c] {
+      *sums.entry(key(&p)).or_default() += n;
+    }
+  }
+  let normals = m
+    .positions
+    .iter()
+    .zip(&m.normals)
+    .map(|(p, n)| sums.get(&key(p)).and_then(|s| s.try_normalize()).map_or(*n, |s| s.to_array()))
+    .collect();
+  TriMesh { normals, ..m.clone() }
+}
+
 fn mesh_of(m: &TriMesh, tri_ids: Vec<u32>, color: [u8; 4], hover: Option<u32>) -> Mesh {
   Mesh {
     positions: m.positions.clone(),
@@ -1187,6 +1247,7 @@ fn mesh_of(m: &TriMesh, tri_ids: Vec<u32>, color: [u8; 4], hover: Option<u32>) -
     highlight_color: hover_of(color),
     colors: Vec::new(),
     analyze: false,
+    unanalyzed: false,
     unlit: false,
   }
 }
@@ -1405,47 +1466,6 @@ fn hatch_segments(cap: &TriMesh, pl: &Plane, step: f64) -> Vec<([f64; 2], [f64; 
     }
   }
   out
-}
-
-/// Per-vertex colours from how sharply the surface curves there: blue flat, through green and
-/// yellow, to red tight.
-fn curvature_colors(m: &TriMesh) -> Vec<[u8; 4]> {
-  let pos: Vec<DVec3> = m.positions.iter().map(|p| DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64)).collect();
-  let nor: Vec<DVec3> = m.normals.iter().map(|n| DVec3::new(n[0] as f64, n[1] as f64, n[2] as f64)).collect();
-  let mut sum = vec![0.0f64; pos.len()];
-  let mut cnt = vec![0.0f64; pos.len()];
-  for t in m.indices.chunks_exact(3) {
-    for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
-      let (a, b) = (a as usize, b as usize);
-      let (Some(pa), Some(pb), Some(na), Some(nb)) = (pos.get(a), pos.get(b), nor.get(a), nor.get(b)) else {
-        continue;
-      };
-      let l = (*pb - *pa).length();
-      if l > 1e-9 {
-        // normal turn per unit length: about 1/radius
-        let k = (*nb - *na).length() / l;
-        for v in [a, b] {
-          sum[v] += k;
-          cnt[v] += 1.0;
-        }
-      }
-    }
-  }
-  let ks: Vec<f64> = sum.iter().zip(&cnt).map(|(s, c)| if *c > 0.0 { s / c } else { 0.0 }).collect();
-  let mut sorted: Vec<f64> = ks.iter().copied().filter(|k| *k > 1e-6).collect();
-  sorted.sort_by(f64::total_cmp);
-  let top = sorted.get(sorted.len() * 95 / 100).copied().unwrap_or(1.0).max(1e-6);
-  ks.iter()
-    .map(|k| {
-      let t = (k / top).clamp(0.0, 1.0) as f32;
-      let ramp = [[40.0, 80.0, 220.0], [40.0, 190.0, 90.0], [240.0, 210.0, 40.0], [225.0, 50.0, 40.0]];
-      let x = t * 3.0;
-      let i = (x.floor() as usize).min(2);
-      let f = x - i as f32;
-      let c: [f32; 3] = [0, 1, 2].map(|j| ramp[i][j] + (ramp[i + 1][j] - ramp[i][j]) * f);
-      [c[0] as u8, c[1] as u8, c[2] as u8, 255]
-    })
-    .collect()
 }
 
 /// Splits a mesh's triangles into (not in `ids`, in `ids`) keeping per-triangle pick ids.
@@ -1701,8 +1721,11 @@ pub fn tilt_plane(pl: Plane, angle1: f64, angle2: f64) -> Plane {
 
 /// View options from render parameters: `section: {plane, offset?, flip?, angle1?, angle2?
 /// (degrees, about `center` when given), hatch?, color?: "component" | "single"}` and
-/// `analysis: zebra | draft | accessibility | curvature` (with `pull`: "x" | "y" | "z" | [x,y,z]
-/// and `angle` in degrees for draft).
+/// `analysis: zebra | draft | accessibility | curvature | environment | min_radius | comb |
+/// isocurve` with its settings: `pull` ("x" | "y" | "z" | [x,y,z]) for draft and accessibility,
+/// `lo`/`hi`/`tol` (or a symmetric `angle`) in degrees for draft, `repeats`/`vertical` for zebra,
+/// `rotate`/`mirror`/`environment` for an environment map, and `bodies`, `opacity` and the rest
+/// as [`crate::analysis::parse`] reads them.
 pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, String> {
   let mut o = ViewOptions::default();
   if let Some(sec) = p.get("section") {
@@ -1752,16 +1775,39 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
     Some(serde_json::Value::Array(a)) if a.len() == 3 => [0, 1, 2].map(|i| a[i].as_f64().unwrap_or(0.0) as f32),
     _ => [0.0, 0.0, 1.0],
   };
-  match p.get("analysis").and_then(serde_json::Value::as_str) {
+  let num = |k: &str| p.get(k).and_then(serde_json::Value::as_f64);
+  let flag = |k: &str, or: bool| p.get(k).and_then(serde_json::Value::as_bool).unwrap_or(or);
+  let kind = p.get("analysis").and_then(serde_json::Value::as_str);
+  match kind {
     None => {}
-    Some("zebra") => o.analysis = Some(fox_render::Analysis::Zebra { stripes: 24.0 }),
+    Some("zebra") => {
+      let stripes = num("repeats").unwrap_or(24.0).clamp(1.0, 200.0) as f32;
+      o.analysis = Some(fox_render::Analysis::Zebra { stripes, vertical: flag("vertical", false) })
+    }
     Some("draft") => {
-      let a = p.get("angle").and_then(serde_json::Value::as_f64).unwrap_or(1.0).to_radians() as f32;
-      o.analysis = Some(fox_render::Analysis::Draft { pull, angle: a })
+      // a symmetric `angle` (the earlier parameter) is the yellow band either side of no draft
+      let a = num("angle").unwrap_or(1.0);
+      let (lo, hi) = (num("lo").unwrap_or(-a), num("hi").unwrap_or(a));
+      let tol = num("tol").unwrap_or(if p.get("lo").is_some() { 0.0 } else { a });
+      let r = |d: f64| d.to_radians() as f32;
+      o.analysis = Some(fox_render::Analysis::Draft { pull, lo: r(lo.min(hi)), hi: r(hi.max(lo)), tol: r(tol.abs()) })
     }
     Some("accessibility") => o.analysis = Some(fox_render::Analysis::Accessibility { dir: pull }),
+    Some("environment") => {
+      let sharp = p.get("environment").and_then(serde_json::Value::as_str).is_none_or(|e| e.contains("Highlights"));
+      let rotate = num("rotate").unwrap_or(0.0).to_radians() as f32;
+      o.analysis = Some(fox_render::Analysis::Environment { rotate, mirror: flag("mirror", true), sharp })
+    }
     Some("curvature") => o.curvature = true,
-    Some(other) => return Err(format!("unknown analysis '{other}' (zebra, draft, accessibility, curvature)")),
+    Some("min_radius" | "comb" | "isocurve") => {}
+    Some(other) => {
+      return Err(format!(
+        "unknown analysis '{other}' (zebra, draft, accessibility, curvature, environment, min_radius, comb, isocurve)"
+      ));
+    }
+  }
+  if let Some(k) = kind {
+    o.analysis_view = crate::analysis::parse(k, p);
   }
   Ok(o)
 }
@@ -1864,6 +1910,7 @@ fn simulated_stock(scene: &mut Scene, s: &Session) {
     highlight_color: [0, 0, 0, 0],
     colors: m.colors,
     analyze: false,
+    unanalyzed: false,
     unlit: false,
   });
 }

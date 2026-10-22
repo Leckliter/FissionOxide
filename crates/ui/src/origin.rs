@@ -181,7 +181,10 @@ pub(crate) fn picked(app: &App) -> Option<OriginItem> {
 /// Selects the item (clearing the model's selection), or clears it when it is the one picked.
 pub(crate) fn pick(app: &mut App, item: OriginItem) {
   let again = picked(app) == Some(item);
-  app.s.selection.clear();
+  // a dialog with selection rows keeps its picks: the plane or axis goes to its active row
+  if !app.dialog.as_ref().is_some_and(|d| d.routes_picks()) {
+    app.s.selection.clear();
+  }
   clear(app);
   if !again {
     match item.sketch_plane() {
@@ -364,7 +367,7 @@ pub(crate) fn plane_quads(app: &App) -> Vec<Quad> {
 }
 
 /// A square's fill and its edge (`px` world units wide, inside the square).
-fn square(out: &mut Vec<Quad>, c: [DVec3; 4], sample: [u8; 3], px: f64) {
+pub(crate) fn square(out: &mut Vec<Quad>, c: [DVec3; 4], sample: [u8; 3], px: f64) {
   let f = |p: DVec3| p.as_vec3().to_array();
   out.push(Quad { corners: c.map(f), color: plane_rgba(sample) });
   let [r, g, b] = sample;

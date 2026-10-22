@@ -121,12 +121,16 @@ pub(crate) fn materials() -> Vec<Swatch> {
 }
 
 /// The physical materials the design's bodies are made of (how many bodies each), in the order
-/// first met: a body's component's material, Steel outside a component or without one.
+/// first met: a body's own material, else its component's, else Steel.
 pub(crate) fn materials_in_design(app: &App) -> Vec<(Swatch, usize)> {
   let d = &app.s.design;
   let mut out: Vec<(Swatch, usize)> = Vec::new();
   for b in &app.s.model.bodies {
-    let m = d.component_of(b.id).map(|c| c.material.as_str()).filter(|m| !m.is_empty()).unwrap_or(DEFAULT_MATERIAL);
+    let m = d
+      .body_settings(b.id)
+      .and_then(|s| s.material.as_deref())
+      .or_else(|| d.component_of(b.id).map(|c| c.material.as_str()).filter(|m| !m.is_empty()))
+      .unwrap_or(DEFAULT_MATERIAL);
     match out.iter_mut().find(|x| x.0.name == m) {
       Some(x) => x.1 += 1,
       None => {
@@ -138,7 +142,8 @@ pub(crate) fn materials_in_design(app: &App) -> Vec<(Swatch, usize)> {
 }
 
 /// Applies a physical material to the components of the bodies in `targets` (the material is the
-/// component's). Returns how many components took it, or what is missing.
+/// component's), and to the bodies outside a component themselves. Returns how many components
+/// and bodies took it, or what is missing.
 pub(crate) fn apply_material(app: &mut App, name: &str, targets: &[Sel]) -> Result<usize, String> {
   let mut bodies: Vec<BodyId> = Vec::new();
   for t in targets {
@@ -152,22 +157,23 @@ pub(crate) fn apply_material(app: &mut App, name: &str, targets: &[Sel]) -> Resu
     return Err("Select bodies first, or drag the material onto a body".into());
   }
   let mut comps: Vec<u32> = Vec::new();
+  let mut loose: Vec<u32> = Vec::new();
   for b in &bodies {
-    if let Some(c) = app.s.design.component_of(*b).map(|c| c.id.0)
-      && !comps.contains(&c)
-    {
-      comps.push(c);
+    match app.s.design.component_of(*b).map(|c| c.id.0) {
+      Some(c) if !comps.contains(&c) => comps.push(c),
+      Some(_) => {}
+      None => loose.push(b.0),
     }
-  }
-  if comps.is_empty() {
-    return Err("The body isn't in a component: a body's own material isn't in FissionOxide yet".into());
   }
   for c in &comps {
     if app.run("component.material", json!({"component": c, "material": name})).is_none() {
       return Err(format!("Couldn't apply {name}"));
     }
   }
-  Ok(comps.len())
+  if !loose.is_empty() && app.run("body.material", json!({"bodies": loose, "material": name})).is_none() {
+    return Err(format!("Couldn't apply {name}"));
+  }
+  Ok(comps.len() + loose.len())
 }
 
 /// The swatches of `lib` in `folder` (any with `None`) whose name contains `search`, ignoring case.
@@ -757,13 +763,18 @@ mod tests {
     assert_eq!(app.s.design.component(fox_engine::model::ComponentId(comp)).unwrap().material, "Aluminum");
     let used = materials_in_design(&app);
     assert_eq!(used.iter().map(|(s, n)| (s.name.as_str(), *n)).collect::<Vec<_>>(), [("Steel", 1), ("Aluminum", 1)]);
-    // a body outside a component can't take one yet
+    // a body outside a component takes its own
     drop_swatch(&mut app, &drag, loose, 0);
-    assert!(app.status.as_ref().is_some_and(|(m, _)| m.contains("isn't in a component")));
-    // a click applies to the selection
+    assert_eq!(app.s.design.body_settings(loose).and_then(|s| s.material.as_deref()), Some("Aluminum"));
+    assert_eq!(
+      materials_in_design(&app).iter().map(|(s, n)| (s.name.as_str(), *n)).collect::<Vec<_>>(),
+      [("Aluminum", 2)]
+    );
+    // a click applies to the selection: the component and the loose body
     assert!(apply_material(&mut app, "Brass", &[]).is_err());
-    assert_eq!(apply_material(&mut app, "Brass", &[Sel::Body { body: part }, Sel::Body { body: loose }]), Ok(1));
+    assert_eq!(apply_material(&mut app, "Brass", &[Sel::Body { body: part }, Sel::Body { body: loose }]), Ok(2));
     assert_eq!(app.s.design.component_of(part).unwrap().material, "Brass");
+    assert_eq!(app.s.design.body_settings(loose).and_then(|s| s.material.as_deref()), Some("Brass"));
 
     // searching lists matches across folders
     d.palette_mut().search = "ny".into();

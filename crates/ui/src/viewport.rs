@@ -466,6 +466,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         Some(d) if d.wants_plane() => d.take_plane(plane),
         // Section Analysis's cut plane
         Some(d) if d.wants_cut_plane() => d.set_cut_plane(&app.s, plane),
+        // Draft's pull direction
+        Some(d) if d.wants_pull_plane() => d.pick_pull_plane(&mut app.s, plane),
         _ => {
           app.cancel_dialog();
           app.create_sketch(plane);
@@ -479,7 +481,18 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if !consumed && let Some(item) = app.hover_origin {
     consumed = true;
     if resp.clicked() && !app.dialog.as_mut().is_some_and(|d| d.take_origin(item) || d.pick_origin_axis(item)) {
-      crate::origin::pick(app, item);
+      match item.sketch_plane() {
+        // an open Offset Plane takes it as its plane
+        Some(plane) if app.dialog.as_ref().is_some_and(|d| d.takes_plane()) => crate::panels::pick_plane(app, plane),
+        _ => crate::origin::pick(app, item),
+      }
+    }
+  }
+  // and so does one on a construction plane (or Mirror, Offset Plane take it)
+  if !consumed && let Some(id) = app.hover_cplane {
+    consumed = true;
+    if resp.clicked() {
+      crate::panels::pick_plane(app, serde_json::json!({"feature": id.0}));
     }
   }
   let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
@@ -817,13 +830,18 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     peek_faces: app.ctx_menu.peek_faces.clone(),
     peek_sketches: app.ctx_menu.peek_sketches.clone(),
     only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
-    opacity: app.ctx_menu.opacity.clone(),
-    // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
+    opacity: app.ctx_menu.opacity.iter().copied().chain(crate::mesh_ui::ghosted(app)).collect(),
+    flat_meshes: app.ctx_menu.flat_shaded.clone(),
+    // Offset Plane's preview is filled over the image (see `offset_plane_overlay`), and so are
+    // the construction planes (see `crate::construction`)
     hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
+    planes_drawn_by_caller: true,
     hover_more: app.glyph_hover.clone(),
     preview_curves: app.dialog.as_ref().map(|d| d.preview_curves().to_vec()).unwrap_or_default(),
     sketch_show: app.palette.show(),
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies()).unwrap_or_default(),
+    // a base flange's previewed sheet is Fusion's solid preview blue
+    preview: app.dialog.as_ref().map(|d| d.sheet_preview_bodies(&app.s)).unwrap_or_default(),
     // the palette's Slice reaches the scene as the `slice` render parameter (see `slice_params`)
     ..analysis
   }
@@ -861,14 +879,15 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().chain(&crate::select::hover_bodies(app)).map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
-    opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
+    opacity: app.ctx_menu.opacity.iter().copied().chain(crate::mesh_ui::ghosted(app)).map(|(b, a)| (b.0, a)).collect(),
+    flat: app.ctx_menu.flat_shaded.iter().map(|b| b.0).collect(),
     peek_faces: app.ctx_menu.peek_faces.iter().map(|(b, f)| (b.0, *f)).collect(),
     peek_sketches: app.ctx_menu.peek_sketches.iter().map(|s| s.0).collect(),
     glyph_hover: app.glyph_hover.clone(),
     palette: app.palette,
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies().iter().map(|b| b.0).collect()).unwrap_or_default(),
     grid_plane: app.grid_preview,
-    quads: crate::origin::plane_quads(app),
+    quads: [crate::origin::plane_quads(app), crate::construction::quads(app)].concat(),
   };
   if crate::gpu::active(app) {
     crate::gpu::set_quads(app, &key.quads);
@@ -954,7 +973,7 @@ fn sketch_3d_manipulator(app: &App, painter: &egui::Painter, view: &View) {
 
 /// The section and analysis settings as render parameters.
 fn view_params(app: &App) -> serde_json::Value {
-  let mut v = app.analysis.clone().unwrap_or(json!({}));
+  let mut v = crate::analyses::render_params(app).unwrap_or(json!({}));
   // a Sweep's or Loft's Analysis tab shows its analysis while the dialog is open
   if let Some(a) = app.dialog.as_ref().and_then(|d| d.tab_analysis())
     && v.get("analysis").is_none()
@@ -2978,9 +2997,12 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
         paint_dim(painter, s, if hot { DIM_INK_HOT } else { DIM_INK });
       }
       text.paint(painter, r.min + Vec2::new(4.0, 2.0), if hot { DIM_TEXT_HOT } else { DIM_TEXT });
-      // Fusion's tooltip under the text names the parameter with its full value
+      // Fusion's tooltip under the text names the parameter with its full value, light text on
+      // its dark tooltip panel
       let resp = match dim_param_name(app, c.id.0) {
-        Some(name) => resp.on_hover_text(dim_tooltip(&name, c.kind.is_angle(), dim.value, app.s.design.units)),
+        Some(name) => {
+          crate::navbar::dark_tip(resp, &dim_tooltip(&name, c.kind.is_angle(), dim.value, app.s.design.units))
+        }
         None => resp,
       };
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {
@@ -4711,9 +4733,10 @@ fn sketch_planes(app: &App) -> Vec<(serde_json::Value, Plane)> {
   out
 }
 
-/// Half the side of a plane's square: the size the scene draws construction planes at.
+/// Half the side of a construction plane's square: its side is twice an origin plane's, as Fusion
+/// draws them (the same on screen whatever the zoom or the model's size).
 pub(crate) fn plane_half_size(app: &App) -> f64 {
-  app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0) * 0.35
+  origin_plane_size(app)
 }
 
 /// How far an origin plane's square reaches from the origin on screen, in points: Fusion keeps
@@ -4800,17 +4823,20 @@ struct PlanePick {
 /// visible point, axes and planes are drawn and picked by [`crate::origin`], and the one under
 /// the cursor is noted here (`App::hover_origin`, winning over the face highlight too).
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
-  // Create Sketch, Box, Cylinder, Sphere, Torus and Coil before their base is drawn, Mirror, and
-  // Section Analysis waiting for its cut plane
+  // Create Sketch, Box, Cylinder, Sphere, Torus and Coil before their base is drawn, Mirror,
+  // Section Analysis waiting for its cut plane, and Draft's Pull Direction row
   let sketching = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane());
-  let picking = sketching || app.dialog.as_ref().is_some_and(|d| d.wants_plane() || d.wants_cut_plane());
+  let picking =
+    sketching || app.dialog.as_ref().is_some_and(|d| d.wants_plane() || d.wants_cut_plane() || d.wants_pull_plane());
   app.hover_origin = None;
   app.grid_preview = None;
+  app.hover_cplane = None;
   if !picking {
     // with Revolve open only the axes it takes light up: the planes stay shown without getting
-    // in the way of the profiles on them
+    // in the way of the profiles on them; an open Offset Plane takes a plane clicked here
     let takes_axis = app.dialog.as_ref().map(|d| d.takes_origin_axis());
-    if app.dialog.as_ref().is_none_or(|d| d.wants_origin() || d.takes_origin_axis())
+    let offset = app.dialog.as_ref().is_some_and(|d| d.takes_plane());
+    if app.dialog.as_ref().is_none_or(|d| d.wants_origin() || d.takes_origin_axis() || offset)
       && app.drag.is_none()
       && let Some(pos) = resp.hover_pos()
     {
@@ -4818,8 +4844,12 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
       let project = |p| view.to_screen(&cam, p);
       let ray = |p| view.ray(&cam, p);
       app.hover_origin = crate::origin::under(app, pos, &project, &ray)
-        .filter(|i| takes_axis != Some(true) || crate::origin::OriginItem::AXES.contains(i));
-      if app.hover_origin.is_some() {
+        .filter(|i| takes_axis != Some(true) || crate::origin::OriginItem::AXES.contains(i))
+        .filter(|i| !offset || i.plane().is_some());
+      if app.hover_origin.is_none() && app.sel_filter.construction && takes_axis != Some(true) {
+        app.hover_cplane = crate::construction::under(app, pos, &ray);
+      }
+      if app.hover_origin.is_some() || app.hover_cplane.is_some() {
         app.hover = None;
       }
     }
@@ -5143,9 +5173,7 @@ pub(crate) fn axis_param(origin: DVec3, dir: DVec3, o: DVec3, d: DVec3) -> Optio
 
 /// The Measure dialog's result: a line between the closest points with the distance.
 fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
-  if let Some(c) = app.dialog.as_ref().and_then(|d| d.marker())
-    && let Some(p) = view.to_screen(&app.cam, c)
-  {
+  for p in crate::analyses::centers(app).into_iter().filter_map(|c| view.to_screen(&app.cam, c)) {
     // centre of mass: Fusion's quartered circle
     let col = Color32::from_rgb(30, 30, 30);
     painter.circle_filled(p, 8.0, Color32::WHITE);
@@ -5303,8 +5331,8 @@ mod tests {
     app.cam.distance *= 3.0;
     let far = origin_plane_size(&app);
     assert!((far / half - 3.0).abs() < 1e-9, "{far} vs {half}");
-    // construction planes keep the model-sized square the scene draws them at
-    assert!((plane_half_size(&app) - 100.0 * 0.35).abs() < 1e-9);
+    // construction planes are twice an origin plane's square, as in Fusion
+    assert!((plane_half_size(&app) - far).abs() < 1e-9);
   }
 
   /// The labelled grid positions are the major lines (every fifth) within the grid's extent.

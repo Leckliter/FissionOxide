@@ -74,6 +74,12 @@ impl Body {
     Body::named(id, name, shape, feature, None)
   }
 
+  /// A surface body: B-rep faces with no solid inside (a surface Extrude, a Patch, an open
+  /// import); never a mesh body.
+  pub fn is_surface(&self) -> bool {
+    !self.is_mesh() && self.shape.solid_count() == 0
+  }
+
   /// [`Body::new`]; faces the history can't name take the names of the faces of `before` they are.
   fn named(id: BodyId, name: String, mut shape: Shape, feature: FeatureId, before: Option<&Body>) -> Body {
     let names = naming::from_history(&shape, feature)
@@ -302,6 +308,8 @@ struct State {
   tools: BTreeMap<FeatureId, Vec<pathpattern::Tool>>,
   /// Intersection curves: their wires (drawn with the 3D curves; pipes follow them).
   intersections: BTreeMap<FeatureId, Vec<Shape>>,
+  /// Mesh face groups: a group per face of each body that has them.
+  face_groups: BTreeMap<BodyId, Vec<u32>>,
 }
 
 /// The regenerated design.
@@ -330,11 +338,19 @@ pub struct Model {
   pub placed: BTreeMap<crate::ComponentId, DMat4>,
   /// 3D curves (Project To Surface), as wires.
   pub curves3d: BTreeMap<FeatureId, Vec<Shape>>,
+  /// Mesh face groups (Generate Face Groups): a group number per face of each body that has
+  /// them, face 1 first.
+  pub face_groups: BTreeMap<BodyId, Vec<u32>>,
 }
 
 impl Model {
   pub fn body(&self, id: BodyId) -> Option<&Body> {
     self.bodies.iter().find(|b| b.id == id)
+  }
+
+  /// The face group a face of a mesh body is in, once Generate Face Groups has run on it.
+  pub fn face_group(&self, body: BodyId, face: u32) -> Option<u32> {
+    self.face_groups.get(&body)?.get((face as usize).checked_sub(1)?).copied()
   }
 
   pub fn status(&self, id: FeatureId) -> Option<&FeatureStatus> {
@@ -480,6 +496,7 @@ impl Regenerator {
       joint_origins: state.joint_origins,
       placed: state.placed,
       curves3d: state.curves3d.into_iter().chain(state.intersections).collect(),
+      face_groups: state.face_groups,
     }
   }
 }
@@ -1452,7 +1469,7 @@ impl Ctx<'_> {
         }
         Ok(missing.then(|| "some faces could not be found".to_string()))
       }
-      FeatureKind::Flange { sketch, profiles, rule, flip, operation } => {
+      FeatureKind::Flange { sketch, profiles, rule, flip, operation, center } => {
         let info = self.sheet_info(rule)?;
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
         let (chosen, missing) = pick_profiles(&sk, profiles);
@@ -1463,10 +1480,13 @@ impl Ctx<'_> {
             "the selected profiles no longer exist".into()
           });
         }
-        let n = sk.plane.normal() * if *flip { -info.thickness } else { info.thickness };
+        let n = sk.plane.normal() * if *flip && !*center { -info.thickness } else { info.thickness };
         let mut tools = Vec::new();
         for p in &chosen {
-          tools.push(Shape::face(&sk.plane, p).map_err(ke)?.extrude(n).map_err(ke)?);
+          let face = Shape::face(&sk.plane, p).map_err(ke)?;
+          // Orientation Center: half the thickness either side of the sketch
+          let face = if *center { face.translated(-n / 2.0).map_err(ke)? } else { face };
+          tools.push(face.extrude(n).map_err(ke)?);
         }
         self.operate(id, union_all(tools)?, *operation)?;
         self.tag_sheet(id, &info);
@@ -1516,11 +1536,18 @@ impl Ctx<'_> {
         })
       }
       FeatureKind::Hem { edges, length, gap, flip } => {
-        let (l, g) = (self.len(length)?, self.len(gap)?);
-        if !(g >= 0.01) {
-          return Err("the hem gap must be at least 0.01 mm (a closed hem would fuse to the sheet)".into());
-        }
+        // the values may name the sheet's thickness, as Fusion's default length "Thickness * 4"
+        // does (a parameter of that name wins)
+        let (length, gap) = (length.clone(), gap.clone());
+        let base = self.params.clone();
         self.edge_flanges(id, edges, *flip, (0.0, 0.0), CornerMode::Miter, |info| {
+          let mut params = base.clone();
+          params.entry("Thickness".into()).or_insert(info.thickness);
+          let len = |e: &str| fox_expr::eval(e, fox_expr::Kind::Length, &params).map_err(|err| format!("'{e}': {err}"));
+          let (l, g) = (len(&length)?, len(&gap)?);
+          if !(g >= 0.01) {
+            return Err("the hem gap must be at least 0.01 mm (a closed hem would fuse to the sheet)".into());
+          }
           let (t, r) = (info.thickness, g / 2.0);
           let straight = l - (r + t);
           if straight < -1e-9 {
@@ -2699,3 +2726,5 @@ mod tests_offset;
 
 mod made;
 pub use made::Made;
+
+mod mesh_prep;

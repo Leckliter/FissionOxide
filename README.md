@@ -83,7 +83,7 @@ change a parameter and watch the whole history rebuild.
 - **Meshes.** Inserted meshes stay mesh bodies named after their file (picked whole, drawn
   smooth); reduce, smooth, or convert them to clean B-rep (coplanar triangles merged into faces).
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
-  Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
+  Base Flange from closed profiles (either side of the sketch or centred on it), Contour Flange from an open path (corners become bends), Edge
   Flange (any angle, adjacent/inside/outside bend position, offsets), Lofted Flange between two
   profiles (die-formed or press-brake with a bend count, sharp or rounded bends), Miter Flange (a sketch profile swept
   along a chain of edges), Hem, Bend along a sketch line, Rip, Convert to Sheet Metal (sharp
@@ -1049,7 +1049,7 @@ These exist so code driving the engine can inspect and tag what it builds (see
   perimeter and bounding curves, and the curves outside every profile; `samples` and `loops`
   add points along curves and profile boundaries.
 - `sketch.transform` (move, rotate, scale) and `sketch.insert` (copy curves from a sketch, a
-  DXF, an SVG or a `.fox`); `sketch.trace` (an image); `sketch.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
+  DXF, an SVG or a `.fox`); `sketch.trace` (an image); `sketch.visible`; `construction.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
 - `view.render` writes a PNG with a chosen camera, only some bodies, no sketches or grid.
 - `view.render` also takes a named view's camera (`camera`) and an exploded view (`explode`):
   `{"view": "top", "ortho": true}` for a top view, `{"yaw": 45, "pitch": 30, "ortho": true,

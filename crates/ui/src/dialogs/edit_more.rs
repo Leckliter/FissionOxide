@@ -40,7 +40,9 @@ pub(super) fn load(s: &Session, kind: &FeatureKind) -> Option<Dialog> {
     }
     FeatureKind::Combine { target, tools, operation, keep_tools } => {
       let mut d = Dialog::blank(Kind::Combine);
-      d.bodies = std::iter::once(target).chain(tools).map(|b| b.0).collect();
+      d.target = Some(target.0);
+      d.bodies = tools.iter().map(|b| b.0).collect();
+      d.pick_row = 1;
       d.op = op_str(*operation);
       d.keep_tools = *keep_tools;
       d
@@ -77,7 +79,7 @@ impl Dialog {
     let picks = match self.kind {
       Kind::Move if self.mv.object == "bodies" => &self.bodies,
       Kind::Mirror if self.choice == "bodies" => &self.bodies,
-      Kind::Combine => &self.bodies,
+      Kind::Combine => &self.target.iter().chain(&self.bodies).copied().collect(),
       _ => return None,
     };
     let sel: Vec<Sel> =
@@ -253,7 +255,10 @@ mod tests {
     run(&mut s, "combine", json!({"target": t, "tools": [tool], "operation": "join"}));
     let (mut app, _) = edit_last(s);
     let d = app.dialog.as_ref().unwrap();
-    assert_eq!((d.kind, d.bodies.clone(), d.op, d.keep_tools), (Kind::Combine, vec![t, tool], "join", false));
+    assert_eq!(
+      (d.kind, d.target, d.bodies.clone(), d.op, d.keep_tools),
+      (Kind::Combine, Some(t), vec![tool], "join", false)
+    );
     assert_eq!(app.s.selection, vec![Sel::Body { body: fox_engine::model::BodyId(t) }]);
     texts(&mut app);
     let d = app.dialog.as_mut().unwrap();

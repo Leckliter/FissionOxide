@@ -471,6 +471,7 @@ fn plate_flange(d: &mut Design) {
     rule: String::new(),
     flip: false,
     operation: Operation::NewBody,
+    center: false,
   })
   .unwrap();
 }
@@ -649,6 +650,23 @@ fn hem_folds_back_and_unfolds() {
   let fm = flat.shape.mass().unwrap();
   assert!(((fm.bbox_max - fm.bbox_min).x - len).abs() < 1e-3, "{fm:?} {len}");
   assert!((fm.volume - mm.volume).abs() < 0.05);
+}
+
+/// A hem's values may name the sheet's thickness, as Fusion's default length "Thickness * 4".
+#[test]
+fn hem_values_can_name_the_thickness() {
+  let mut d = sheet_design();
+  plate_flange(&mut d);
+  let m = regenerate(&mut d);
+  let e = edge_near(&m, [100.0, 25.0, 2.0]);
+  let hem =
+    FeatureKind::Hem { edges: vec![e], length: "Thickness * 6".into(), gap: "Thickness / 2".into(), flip: false };
+  d.add_feature(hem).unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  // the 2 mm sheet: as a 12 long hem with a 1 gap
+  let mm = m.bodies[0].shape.mass().unwrap();
+  assert!((mm.bbox_max.x - 102.5).abs() < 1e-6 && (mm.bbox_max.z - 5.0).abs() < 1e-6, "{mm:?}");
 }
 
 #[test]

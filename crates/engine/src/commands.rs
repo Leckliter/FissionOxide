@@ -35,7 +35,7 @@ cmds! {
   "open" => "Open a design (.fox, .foxz) or any importable file as a new design", "{path}";
   "save" => "Save the design to a file (.fox JSON, or .foxz archive)", "{path?}";
   "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool, explode?: bool | {direction?, factor?, ...} (mesh formats: the exploded view's positions), units?: cm|mm|m|in|ft|yd|um|hm|mi|mil (sketch DXF, default mm), points?: bool, projected?: bool, construction?: bool (sketch DXF: which geometry to write, default all)}";
-  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (mesh bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, units?: mm|cm|m|in|ft (STL, OBJ, PLY), plane?}";
+  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (mesh bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, units?: mm|cm|m|in|ft (STL, OBJ, PLY), flip_up?: bool, rotate?: [x, y, z] angles about the mesh centre, translate?: [x, y, z], plane?}";
   "formats" => "Every file format with import/export support", "{}";
   "form.insert_tsm" => "Insert T-Spline: a T-Spline Mesh (.tsm) control cage becomes a smooth body (its Catmull-Clark limit surface, one face per region between star points)", "{path? | text?: the file's contents, name?}";
   "inspect" => "Describe a file without opening it (Fusion .f3d contents, mesh sizes, DXF entities)", "{path}";
@@ -68,7 +68,7 @@ cmds! {
   "hub.search" => "Find items by name, version description or milestone", "{query}";
   "hub.activity" => "Activity feed", "{project?, item?, limit?}";
   "hub.upload" => "Upload a file: designs and importable formats become designs, others (e.g. .f3d) are stored as files", "{path, project?, folder?, name?}";
-  "hub.download" => "Write an item version to a file; the extension picks the format (.foxz includes history)", "{item?, version?, path, ...export options}";
+  "hub.download" => "Write an item version to a file; the extension picks the format (.foxz includes history; a translated upload gives back its original file in that file's extension)", "{item?, version?, path, ...export options}";
   "compute_all" => "Recompute the whole timeline from scratch", "{}";
   "undo" => "Undo", "{}";
   "redo" => "Redo", "{}";
@@ -130,7 +130,7 @@ cmds! {
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), rail2?: sketch id | {sketch, curves?} (second guide rail: sections anchored on rail, reaching rail2), guide_surface?: face (the profile keeps its angle to the surface normal), profile_scaling?: scale|stretch|none (with rails; stretch, the two-rail default, only across them), twist?: angle, taper?: angle (outward per path length), orientation?: perpendicular|parallel, operation?, targets?: [body] (bodies join/cut may change)}";
   "hole" => "Holes at sketch points (into the face the sketch is on), or one hole on a face (Fusion's single hole) held at offsets from its edges", "{sketch?, points?: [id] | face: {body, face}, at?: [x,y,z], offsets?: [{edge, distance}], diameter, depth? | through_all? | to?: plane, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, drill_point?: angle|flat, tap?: simple|clearance|tapped (tapped: a cosmetic thread on the walls), pitch? (tapped; default ISO coarse), flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
-  "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?}";
+  "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?, tangent_chain?: bool (adds the faces joined to them across smooth edges)}";
   "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius; distance2 makes it asymmetric (radius, or distance, along each edge's first face: the one whose outward normal sorts first by x, y, z; flipped swaps them); full_round replaces each centre face with a round tangent to it and its side faces", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius | distance, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?, distance2?, flipped?: bool} | {full_round: [{center: face, side_one: [face], side_two: [face]}]} (a face is {body, face} or {point, normal?})";
   "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle (as in Fusion, distance and the angle are measured on an extrusion's cap; flipped swaps the faces); faces chamfer all their edges; tangent_chain adds the edges that continue them smoothly", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], distance, distance2? | angle?, flipped?: bool, tangent_chain?: bool}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
@@ -216,6 +216,7 @@ cmds! {
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
   "body.rename" => "Rename a body", "{body, name}";
   "body.visible" => "Show or hide a body", "{body, visible}";
+  "body.material" => "Set bodies' own physical material (it wins over their component's; nothing clears it)", "{bodies: [id], material?}";
   "body.topology" => "A body's faces and edges: surface/curve kind, area, normal, centre, endpoints, length and which faces meet at each edge", "{body, faces?: bool, edges?: bool}";
   "feature.edit" => "Change feature properties (fields merged into the feature); a fillet's or chamfer's picks give its edges again, resolved on the model as it is (roll the marker to before the feature first); marker_after leaves the marker just after the feature, as Edit Feature shows it", "{feature, set: {...}, picks?: {edges?, faces?, sets?, radius?, tangent_chain?}, marker_after?: bool}";
   "feature.delete" => "Delete a feature and the features that depend on it; a deleted sketch's features stay, built from its cached geometry with a warning, unless cascade", "{feature, cascade?: bool}";
@@ -285,7 +286,7 @@ cmds! {
   "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?, corner_relief?: none|round|square|tear, corner_relief_size?}";
   "sheet.rules" => "List the sheet metal rules", "{}";
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
-  "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join, targets?: [body] (bodies join/cut may change)}";
+  "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, center? (the sheet straddles the sketch), operation?: new_body|join, targets?: [body] (bodies join/cut may change)}";
   "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
   "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open|closed|overlap|butt}";
   "sheet.hem" => "Fold sheet edges back 180° (flat hem)", "{edges: [{body, edge} | {point}], length, gap?, flip?}";
@@ -317,7 +318,7 @@ cmds! {
   "contact_set.enable" => "Turn a contact set on or off", "{contact_set, enabled?}";
   "contact_set.delete" => "Delete a contact set", "{contact_set}";
   "contact_set.list" => "List the contact sets", "{}";
-  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version; a configured source inserts the named configuration", "{item (id, or a unique design name), version?, configuration?, name?, translate?: [x,y,z], link?: bool}";
+  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version; a configured source inserts the named configuration", "{item (id, or a unique design name), version?, configuration?, name?, translate?: [x,y,z], link?: bool, empty?: bool (allow a design without bodies: an assembly's external component)}";
   "component.configuration" => "Switch which configuration of its source design a linked component uses (null: the design as modelled); without 'configuration' lists the source's configurations", "{component, configuration?: name | null}";
   "component.links" => "Inserted components: source item, version, configuration and whether a newer version is in the hub", "{}";
   "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
@@ -471,8 +472,10 @@ cmds! {
   "form.weld" => "Weld Vertices: merge control points closer than the tolerance", "{feature?, tolerance? (0.01 mm)}";
   "form.flip" => "Reverse Normal: turn the form inside out", "{feature?}";
   "form.display" => "Display mode, as Alt+1/2/3: box (the control cage), control_frame (smooth with the cage) or smooth", "{feature?, mode: box|control_frame|smooth}";
-  "align" => "Align (assembly) constraint: make a moving component's face, axis or point flush, concentric or coincident with one on a fixed component (or the world), moving it only along what the relation fixes; the rest of its position stays", "{moving_geometry: {face}|{edge}|{at, z?, x?}|{origin}, fixed_geometry, moving? (default: the geometry's component), fixed? (default: the geometry's component; null = the world), relation?: auto|flush|coincident|concentric, offset?, flip?, name?}";
+  "align" => "Align (assembly) constraint: make a moving component's face, axis or point flush, concentric or coincident with one on a fixed component (or the world), moving it only along what the relation fixes; the rest of its position stays", "{moving_geometry: {face}|{edge}|{at, z?, x?}|{origin}, fixed_geometry, moving? (default: the geometry's component), fixed? (default: the geometry's component; null = the world), objects?: components|bodies (bodies: the moving geometry's body moves instead, as Fusion's Object Bodies), bodies?: [id] (these bodies move), relation?: auto|flush|coincident|concentric, offset?, flip?, name?}";
   "bounding_solid" => "Bounding Solid: a new box or cylinder body enclosing bodies (default all), lined up with a plane's frame (default world XY; its normal is the cylinder's axis) and grown by an offset; the bodies stay", "{bodies?: [body], component?, shape?: box|cylinder, plane?, offset?, sides?: [-x, +x, -y, +y, -z, +z] (per-side offsets instead of offset; the cylinder takes -z, +z for its ends)}";
+  "remove_features" => "Remove Features (Simplify): find fillets (rounds tangent to a neighbour, corner blends) and holes (concave cylinders, both halves of a split one) on bodies and remove their faces, healing the body (a Remove Faces feature); chamfer, extrude, revolve and other aren't recognised yet; dry_run only lists them with their size (fillet radius, hole diameter)", "{bodies: [id], types?: [fillet|hole|chamfer|extrude|revolve|other] (default all), dry_run?: bool}";
+  "replace_with_primitives" => "Replace with Primitives (Simplify): each body becomes a box or cylinder (axis along world Z) enclosing it, and the bodies are removed, in one undo step", "{bodies: [id], shape?: box|cylinder}";
   "pattern.path" => "Pattern on Path: copies of bodies, or features (their cut/join tools) re-applied, spaced by arc length along a sketch path; copies past its ends follow its straight extensions", "{path: sketch id, path_curves?: [id] (chained; default every line and arc), count, spacing | distance, extent?: bool (distance is the whole pattern's length) | distance_type?: spacing|extent, start?: 0..1 (where the original sits along the path), flip?, symmetric?, orientation?: identical|along_path, bodies? | features?: [feature id], join?}";
   "arrange" => "Arrange: copies of components laid flat on their largest planar face and packed on a rectangular envelope on a plane (length along its X, width along its Y) for manufacturing, by bounding rectangle or true shape; the sources stay put and the copies go under a new Arrange<n> > Envelope<n> component", "{components: [id | {component, rotation?, quantity?}], plane?: (default xy), length, width, solver?: rectangular|true_shape, spacing?, frame?, rotation?: none|180|90|all (default all)}";
   "inspect.properties" => "Properties of entities (default the selection): type, id, parent component and geometry (face area, surface, normal at centre, box; edge length, curve, ends; vertex point; body kind, volume, area, mass with a material, box; component totals; sketch plane; sketch curve ends, centre, radius, length); export writes .json or .txt", "{items?: [selection item | {type: component, component} | {type: sketch, sketch}], export?: path}";
@@ -514,6 +517,17 @@ cmds! {
   "select.by_boundary" => "Select the faces enclosed by a closed chain of edges of one body (the smaller side); default the selected edges", "{edges?: [{body, edge}]}";
   "select.seed_boundary" => "Select the faces connected to a seed face without crossing the boundary edges; defaults: the selected face and edges", "{seed?: {body, face}, edges?: [{body, edge}]}";
   "sketch.plane" => "Redefine Sketch Plane: put a sketch on another plane or planar face made before it (its curves keep their sketch coordinates); the features after it recompute", "{sketch, plane}";
+  "design.type" => "Fusion's design type: part, assembly or hybrid (which toolbar tabs show); no type reads it", "{type?: part|assembly|hybrid}";
+  "construction.visible" => "Show or hide a construction plane, axis or point (the browser row's eye, V)", "{feature, visible: bool}";
+  "silhouette_split" => "Silhouette Split: split a body (or its faces) where its outline lies seen along a direction (a plane's normal or an axis)", "{direction: plane | axis | edge, body, operation?: shelled|solid|face}";
+  "mesh.tessellate" => "Tessellate: a solid or surface body becomes a mesh body, triangulated to a refinement (custom takes the values given)", "{body, refinement?: \"high\"|\"medium\"|\"low\"|\"custom\", surface_deviation?, normal_deviation?, max_edge?, aspect_ratio?, quads?}";
+  "mesh.repair" => "Repair mesh bodies: close holes, stitch and remove (the default), wrap, one-touch fix or rebuild", "{bodies, type?: \"close_holes\"|\"stitch_and_remove\"|\"wrap\"|\"one_touch_fix\"|\"rebuild\"}";
+  "mesh.analyze" => "Repair's Quick Analysis of a mesh body: open edges, holes, non-manifold edges, degenerate and flipped triangles, pieces", "{body}";
+  "mesh.face_groups" => "Generate Face Groups on mesh bodies: faces within the angle of their group's first face (fast) or its average (accurate) form a group; groups under min_size of an average group join a neighbour", "{bodies, type?: \"fast\"|\"accurate\", angle?, min_size?}";
+  "mesh.combine_face_groups" => "Combine Face Groups: the groups of the picked faces become one", "{faces: [{body, face}]}";
+  "mesh.section_sketch" => "Create Mesh Section Sketch: a sketch on the plane (moved by offset along its normal) with the lines where it cuts the mesh body", "{body, plane, offset?}";
+  "mesh.edit.start" => "Direct Edit / Create Base Mesh Feature: a base feature for direct mesh edits", "{}";
+  "mesh.edit.finish" => "Finish Direct Editing: the edited mesh body is kept as \"<name>_Edited\" in the base feature, and the marker goes back to the end", "{body?, feature?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -532,11 +546,17 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   if let Some(r) = crate::inspect::run(s, name, p) {
     return r;
   }
+  if let Some(r) = crate::simplify::run(s, name, p) {
+    return r;
+  }
   // before features: it takes surface.trim with a body or sketch tool
   if let Some(r) = crate::surfaces::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::features::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::mesh_prep::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::sim::run(s, name, p) {
@@ -1070,8 +1090,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       add_feature(s, FeatureKind::SplitBody { bodies: body_sel(p), plane })
     }
     "draft" => {
+      let mut picked = p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))?.clone();
+      if p.get("tangent_chain").and_then(Value::as_bool).unwrap_or(false) {
+        picked = crate::solid::tangent_faces(s, picked);
+      }
       let mut faces = Vec::new();
-      for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
+      for f in &picked {
         faces.push(face_ref(s, f)?);
       }
       let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
@@ -1255,6 +1279,32 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let v = p.get("visible").and_then(Value::as_bool).unwrap_or(true);
       s.design.body_settings_mut(b).visible = v;
       s.dirty = true;
+      Ok(json!({}))
+    }
+    "body.material" => {
+      let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
+      if bodies.is_empty() {
+        return Err(CmdError::new("missing 'bodies'"));
+      }
+      if let Some(b) = bodies.iter().find(|b| s.model.body(**b).is_none()) {
+        return Err(CmdError::new(format!("no body {}", b.0)));
+      }
+      let material = match p.get("material").and_then(Value::as_str) {
+        Some(m) => Some(
+          fox_model::assembly::MATERIALS
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(m))
+            .map(|(n, _)| n.to_string())
+            .ok_or_else(|| CmdError::new(format!("unknown material '{m}'")))?,
+        ),
+        None => None,
+      };
+      s.edit(|d| {
+        for b in &bodies {
+          d.body_settings_mut(*b).material = material.clone();
+        }
+        Ok(())
+      })?;
       Ok(json!({}))
     }
     "body.topology" => body_topology(s, p),
@@ -1501,7 +1551,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       let rule = rule_name(s, p)?;
       let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-      add_op_feature(s, FeatureKind::Flange { sketch: sk, profiles, rule, flip, operation }, p)
+      let center = p.get("center").and_then(Value::as_bool).unwrap_or(false);
+      add_op_feature(s, FeatureKind::Flange { sketch: sk, profiles, rule, flip, operation, center }, p)
     }
     "sheet.contour_flange" => {
       let sk = sketch_for_feature(s, p)?;
@@ -1659,6 +1710,25 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         return Err(CmdError::new(format!("the sketch can't go on that plane: {e}")));
       }
       Ok(feature_status(s, id))
+    }
+    "construction.visible" => {
+      let id = FeatureId(req_u32(p, "feature")?);
+      let v = p.get("visible").and_then(Value::as_bool).unwrap_or(true);
+      s.edit(|d| {
+        let f = d.feature_mut(id).ok_or(CmdError::new("no such feature"))?;
+        if !matches!(
+          f.kind,
+          FeatureKind::ConstructionPlane { .. }
+            | FeatureKind::ConstructionAxis { .. }
+            | FeatureKind::ConstructionPoint { .. }
+        ) {
+          return Err(CmdError::new("not a construction plane, axis or point"));
+        }
+        // shown is the default: no flag to save
+        f.visible = (!v).then_some(false);
+        Ok(())
+      })?;
+      Ok(json!({}))
     }
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }

@@ -225,8 +225,10 @@ pub(crate) fn is_mesh(s: &Session, body: BodyId) -> bool {
 pub(crate) fn hover_bodies(app: &App) -> Vec<BodyId> {
   match app.hover {
     Some(p)
-      if pick_body(&p)
-        .is_some_and(|b| matches!(app.sel_priority, Priority::Body | Priority::Component) || is_mesh(&app.s, b)) =>
+      if pick_body(&p).is_some_and(|b| {
+        matches!(app.sel_priority, Priority::Body | Priority::Component)
+          || is_mesh(&app.s, b) && crate::mesh_ui::face_pick(app, p).is_none()
+      }) =>
     {
       targets(&app.s, p, app.sel_priority)
         .into_iter()
@@ -239,7 +241,7 @@ pub(crate) fn hover_bodies(app: &App) -> Vec<BodyId> {
 
 /// Selects (or with `add`, toggles) what a click on `p` picks.
 pub fn pick(app: &mut App, p: Pick, add: bool) {
-  let items = targets(&app.s, p, app.sel_priority);
+  let items = crate::mesh_ui::face_pick(app, p).unwrap_or_else(|| targets(&app.s, p, app.sel_priority));
   if items.len() == 1 {
     crate::panels::toggle_sel(&mut app.s, items[0], add);
     return;

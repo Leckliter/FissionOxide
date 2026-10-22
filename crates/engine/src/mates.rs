@@ -385,12 +385,14 @@ fn source_design(st: &Store, item: &str, version: u32) -> Result<Design, CmdErro
 }
 
 /// The bodies of a hub design version in one of its configurations (`None`: as modelled), as
-/// BRep text, with its first physical material and its assembly structure.
+/// BRep text, with its first physical material and its assembly structure. A design without
+/// bodies is refused unless `allow_empty` (an assembly's new external component starts empty).
 fn source_bodies(
   st: &Store,
   item: &str,
   version: u32,
   configuration: Option<&str>,
+  allow_empty: bool,
 ) -> Result<(Vec<String>, String, Source), CmdError> {
   let it = st.item(item)?;
   let d = source_design(st, item, version)?;
@@ -400,7 +402,7 @@ fn source_bodies(
   for b in &src.model.bodies {
     breps.push(b.shape.to_brep().map_err(|e| CmdError::new(e.to_string()))?);
   }
-  if breps.is_empty() {
+  if breps.is_empty() && !allow_empty {
     return Err(CmdError::new(format!("{} v{version} has no bodies", it.name)));
   }
   let material = src.design.components.iter().map(|c| c.material.clone()).find(|m| !m.is_empty()).unwrap_or_default();
@@ -438,7 +440,8 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
     None | Some(Value::Null) => None,
     Some(v) => Some(v.as_str().ok_or(CmdError::new("'configuration' is a name"))?.to_string()),
   };
-  let (breps, material, structure) = source_bodies(&st, &item.id, version, configuration.as_deref())?;
+  let empty = p.get("empty").and_then(Value::as_bool).unwrap_or(false);
+  let (breps, material, structure) = source_bodies(&st, &item.id, version, configuration.as_deref(), empty)?;
   let t = match p.get("translate").and_then(Value::as_array) {
     Some(a) if a.len() == 3 => [expr_of(&a[0])?, expr_of(&a[1])?, expr_of(&a[2])?],
     Some(_) => return Err(CmdError::new("translate needs [x, y, z]")),
@@ -564,7 +567,10 @@ fn reload(
   version: u32,
   configuration: Option<String>,
 ) -> Result<(), CmdError> {
-  let (breps, _, structure) = source_bodies(st, item, version, configuration.as_deref())?;
+  // an external component that is still empty may stay so
+  let empty =
+    matches!(s.design.feature(fid).map(|f| &f.kind), Some(FeatureKind::InsertDesign { breps, .. }) if breps.is_empty());
+  let (breps, _, structure) = source_bodies(st, item, version, configuration.as_deref(), empty)?;
   let n = breps.len();
   s.edit(|d| {
     if let Some(FeatureKind::InsertDesign { source: Some(h), breps: b, .. }) = d.feature_mut(fid).map(|f| &mut f.kind) {

@@ -499,6 +499,7 @@ fn interference_bodies(
         id: BodyId(fid.0 * 1000 + k as u32),
         name: format!("Interference{}", n + k + 1),
         brep,
+        mesh: false,
       })
       .collect();
     let mut made = Vec::new();

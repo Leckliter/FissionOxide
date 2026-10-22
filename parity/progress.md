@@ -1,41 +1,66 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 13:00, session "Parity prober 17"
+## Last stop: 2026-10-22, 13:55, session "Parity prober 19"
 
-Finished this session: "Timeline" and "Browser" (both done, with not-exercised lists in `coverage.md`).
-Report `parity/reports/2026-10-22-timeline-browser.md`, `map-wave32.json`, batches
-`ui-timeline-menus-groups` (6), `ui-timeline-rollback-play` (7) and `ui-browser-body-rows` (3), all `ready`
-in `index.jsonl` with no fixer yet. The two timeline batches both edit the timeline in
-`crates/ui/src/panels.rs` (different functions) and `ui-timeline-menus-groups` also
-`panels/timeline_groups.rs`: start them one after the other, or tell the second to rebase.
-`ui-browser-body-rows` shares `body_menu` with `ui-surface-results` (fixing).
-Verified 13 keys (three timeline, ten browser). Still `fixing-merged` in these areas:
-`ui:timeline:error-toast`, `ui:timeline:error-dialog`, `ui:timeline:failed-item-menu`,
-`ui:timeline:suppressed-item-menu`, `ui:timeline:hole-extra-sketch` (need a failed feature or a hole),
+Finished this session: "Keyboard shortcuts" (done, with a not-exercised list in `coverage.md`). Report
+`parity/reports/2026-10-22-keyboard-shortcuts.md`, `map-wave34.json`, batches `ui-shortcut-sketch-scope`
+(4, three P1: sketch keys from 3D, a sketch key on a selected face, X construction mode, 3D commands that
+keep the sketch open), `ui-shortcut-extra-keys` (7, P2: J in a Part Design, Home, V details, Shift+S,
+Shift+N, Help menu) and `ui-documents-tabs-close` (3, P2: tab star, tab numbering, close-unsaved Save
+dialog), all `ready` in `index.jsonl` with no fixer yet. `ui-shortcut-sketch-scope` and
+`ui-shortcut-extra-keys` both edit `crates/ui/src/lib.rs` (different functions): start one first or tell
+the second to rebase. The wave-33 batches are as `index.jsonl` says.
+Verified: `ui:chrome:new-tab-replaces-design`, `ui:sketch:move-copy-shortcut`,
+`ui:toolbar:shortcuts-toolbox-style`. Still `fixing-merged` and not re-checked: the seven `ui:manip:*` keys
+(a sketch profile works: Extrude with a typed value worked this session), `ui:inspect:measure-two-picks`,
+the `ui-origin-display` and `ui-construction-display` keys (`ui:canvas:visibility-v-key` needs a
+construction plane), the other three `ui-insert-new-design` keys, `ui:timeline:*` error keys,
 `ui:browser:convert-design-type`, `ui:browser:new-named-view-inline-name`.
-The wave-31 batches (`ui-manage-bom-palette`, `ui-utilities-addins-make`, `ui-utilities-tips-status`) have
-cloud fixers (`fixing`).
 
 ## Next prober: start here
 
-1. Take the next `todo` in `coverage.md` (the ASSEMBLY row still needs two saved designs; leave it):
-   "Workspaces: Render, Animation, Simulation, Manufacture (turning, milling tabs), Drawing, Electronics".
-   Switch with the DESIGN dropdown at the toolbar's left in both apps; some Fusion workspaces may be
-   blocked on the Personal licence (record `blocked`).
-2. Re-verify any wave-31/32 key a fixer has set to `fixing-merged` since this stop (history entries
-   dated after 2026-10-22 13:00 local), and the timeline keys listed above if a failed feature is easy
-   to make (a fillet larger than the edge allows).
-3. Rebuild before probing: the running binary is `main` at `f1f9ed56`; kill `fissionoxide.exe` first,
-   `cargo build --release -p fissionoxide` took about 3 minutes.
+1. Take the next `todo` in `coverage.md`: "Startup, new design, multiple documents, closing with unsaved
+   changes, recovery, update flow". Already seen: Ctrl+N opens a Part Design tab in both apps; Fusion
+   closes a never-saved changed tab through its Save dialog (batch `ui-documents-tabs-close`). Still to do:
+   the start-up screen of each app (quit and relaunch FissionOxide; do not quit Fusion, it holds four
+   unsaved tabs), switching tabs, the tab overflow "v" menu, tab right-click menus, File > New Design
+   variants, closing the last tab, the window's own close with unsaved tabs (Cancel), Open Recovered
+   Documents, Check for Updates.
+2. Re-verify the `fixing-merged` keys above that this area touches (`ui-insert-new-design`'s
+   `ui:assemble:*`, `ui:insert:file-chooser`), then `ui:manip:*` on a sketch profile if context allows.
+3. Rebuild before probing: the running binary is `main` at `c3d74430`; kill `fissionoxide.exe` first,
+   `cargo build --release -p fissionoxide` took 2 m 38 s.
+4. The ASSEMBLY row still needs two saved designs; leave it unless the owner allows saving to the
+   Default Project.
 
-Where the documents stand: Fusion has four tabs: "Untitled*" (active, inches, Body1, Sketch1..4, Plane1,
-a timeline group "Group1" of three sketches, Fillet1 moved to the end), "Untitled*(1)" (the MESH-tab
-design), "Untitled(2)" (an empty Assembly Design) and "Untitled*(3)" (sheet metal). Both windows sit at
-screenshot x 0..908: Fusion at y 80..730, FissionOxide at y 0..785 (mm design with Body1..3, a
-pattern, Plane1, Sketch1..3, a one-sketch timeline group, Body2 hidden, SOLID tab, Data Panel closed).
-Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
+Where the documents stand: Fusion has four tabs ("Untitled*": Part Design, inches, Body1, Sketch1..5 with
+the new empty Sketch5 on the body's end face; "Untitled*(1)" mesh, active when this session ended;
+"Untitled(2)" empty Assembly Design; "Untitled*(3)" sheet metal), DESIGN workspace. FissionOxide: one tab,
+a mm design with Sketch1 (a rectangle) and Body1 (extruded 20 mm), Data Panel closed. Both windows sit at
+screenshot x 0..908: Fusion at y 80..730, FissionOxide at y 0..785. Fusion's taskbar button at (497,803),
+FissionOxide's at (572,803).
 
 ## Traps
+- Closing a Fusion tab with changes opens the Save dialog (Name, Location, Don't Save / Cancel / Save);
+  Cancel at (632,500). Do not press Don't Save on the owner's tabs.
+- Until `ui-shortcut-sketch-scope` lands, A, E, F, H and Q in a FissionOxide sketch finish the sketch;
+  double-click the sketch's browser row to edit it again. Fusion keeps the sketch open.
+- Clicking a row in Fusion's browser gives the browser the keyboard: Home and the arrows then move in the
+  tree. Click the canvas before testing keys.
+- FissionOxide's V hides a selected body and drops the selection; show it again from its browser eye.
+- `zoom` does not magnify: a 90 px region comes back about 90 px; icons that small cannot be told apart.
+- Fusion's Render (teapot), Drawing > From Design and the BOM all need a saved design; From Design jumps
+  back to DESIGN and opens the Save dialog (Cancel at (634,501)). Probers have not saved to the owner's
+  Default Project; ask the owner before doing so.
+- Fusion's Generative Design and Simulation open an upgrade card at the upper left (x at (247,201)).
+- Fusion's New Electronics Design opens a new document tab; New Schematic another. The schematic tab
+  closes without asking; the electronics design tab asks Save / Don't Save / Cancel (Don't Save at
+  (563,498)).
+- Fusion's In-canvas Render keeps rendering until its (now stop) button is pressed again.
+- Fusion's docked dialogs at the right (New Setup, Scene Settings) put OK/Cancel near y 678 / 549; a
+  Cancel click that lands on a tab label leaves the dialog open: take a screenshot after cancelling.
+- FissionOxide's DESIGN > RENDER turns In-Canvas Render on and opens Appearance; Finish Render or the
+  dropdown leaves it. FissionOxide's CREATE > Box now waits for a plane pick like Fusion's.
 - Shift+click and Ctrl+click from the automation tool did not extend FissionOxide's timeline selection
   (recorded as `ui:timeline:multi-select`); Fusion took them. A Ctrl+click once made Explorer the
   frontmost app for the tool (the next right-click was refused at tier "click"): click FissionOxide's
@@ -53,8 +78,7 @@ Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
   edge did nothing twice this session.
 - Double-clicking a snapped window's title bar restores it to its old size rather than maximising it.
 - Fusion's PLASTIC tab on this licence is SOLID's menus; do not hunt for Boss or Snap Fit again.
-- Fusion's Bill of Materials needs a saved design for rows; FissionOxide's "+" is still unsafe
-  (`ui-insert-new-design` is `fixing`), so do not start a new design there to get a clean one.
+- Fusion's Bill of Materials needs a saved design for rows.
 - A fresh FissionOxide window can reach past screenshot x 1040, where its right edge is under the
   Claude overlay and cannot be grabbed: drag the title bar left first (part of the window off screen),
   narrow the right edge, then drag it back.
@@ -78,8 +102,9 @@ Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
 - Fusion's Ctrl+Z right after Finish Sketch reopens the sketch rather than removing it.
 - Win+Left on FissionOxide opens Windows snap assist over the right half (File Explorer, click tier):
   click FissionOxide's own canvas to dismiss it; a drag that ends over Explorer is refused.
-- FissionOxide's "+" (and Ctrl+N) throws the open design away without asking; do not press it
-  with work you still need.
+- FissionOxide's "+" opens the "What do you want to design?" chooser and Ctrl+N a new tab; the old
+  design stays in its tab (verified 2026-10-22). Fusion's Ctrl+N opens a Part Design tab at once; an
+  untouched new tab closes from its x without asking.
 - FissionOxide's analyses (Draft, Accessibility, Zebra, Curvature Map) stay on after Close and
   Escape and even into a new design; reopen the command and clear Show analysis before looking at
   colours.

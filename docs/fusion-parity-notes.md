@@ -574,3 +574,27 @@ rolled-back rows from the browser all differ. In the browser the solid body menu
 differ. 16 rows in three batches (`parity/batches/map-wave32.json`), seven match rows, 13 fixing-merged
 keys verified. Component rows, Activate and the Joints folder need an Assembly Design with saved
 designs and are left for the ASSEMBLY row. Both areas are done; Workspaces is next.
+
+## 2026-10-22, prober 18: Workspaces
+
+Every entry of the DESIGN dropdown in both apps at 908 px (report `parity/reports/2026-10-22-workspaces.md`).
+The list itself matches; Generative Design and Simulation are blocked on the Personal licence and
+Drawing needs a saved design. Render differs in its panels, the entry state (FissionOxide opens
+Appearance and turns In-canvas Render on), the Rendering Gallery, Scene Settings and the in-canvas
+progress bar; Manufacture has two of Fusion's six tabs, different MILLING and TURNING lists, no CAM
+browser and a flat Setup dialog; Electronics stays in the design's tab with a text-button editor where
+Fusion opens a new document and an icon ribbon; Animation is missing. Re-verifying found that Extrude
+refuses a box's planar face. 27 rows in six batches (`parity/batches/map-wave33.json`), three match
+rows, four blocked rows, two fixing-merged keys verified. The area is done; Keyboard shortcuts is next.
+
+## 2026-10-22, prober 19: Keyboard shortcuts
+
+Every letter on the canvas of both apps, in 3D with and without a selected face and inside a sketch,
+plus F6, Home, Shift+S/J/N, Ctrl+N, Ctrl+B and Ctrl+A (report `parity/reports/2026-10-22-keyboard-shortcuts.md`).
+Fusion has no window listing its keys. The command keys mostly match; the differences are where a key
+works: Fusion's sketch keys (C, L, R, T, P, O) start a sketch from 3D or on a selected face, and its 3D
+keys run over an open sketch and return to it on Escape, where FissionOxide ignores the first and finishes
+the sketch for the second. FissionOxide also binds J in a Part Design and Home, and lacks Shift+S, Shift+N
+and X's construction mode. Closing a never-saved tab and the tab names differ too. 14 rows in three
+batches (`parity/batches/map-wave34.json`), six match rows, three fixing-merged keys verified. The area is
+done; Startup and documents is next.

@@ -541,6 +541,10 @@ impl Ctx<'_> {
         self.state.canvases.insert(id, pl);
         Ok(None)
       }
+      FeatureKind::Tessellate { .. }
+      | FeatureKind::MeshRepair { .. }
+      | FeatureKind::GenerateFaceGroups { .. }
+      | FeatureKind::CombineFaceGroups { .. } => self.apply_mesh_prep(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

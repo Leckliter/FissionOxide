@@ -29,6 +29,11 @@ pub(crate) struct Item {
   disabled: bool,
   /// Greyed out while the design is unsaved.
   needs_saved: bool,
+  /// The SURFACE tab's own command of a SOLID label (Fusion's surface Extrude and Sweep): its
+  /// own tooltip, and no shortcut shown.
+  surface: bool,
+  /// Carries Fusion's blue round subscription badge (a command of the paid Fusion subscription).
+  paid: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -39,14 +44,41 @@ pub(crate) enum E {
   Sub(&'static str, &'static [E]),
 }
 
+impl Item {
+  /// The label its tooltip texts are found under.
+  fn tip_label(&self) -> &'static str {
+    if self.surface { tips::surface_label(self.label) } else { self.label }
+  }
+}
+
 /// A command FissionOxide runs.
 const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false, needs_saved: false })
+  E::I(Item {
+    label,
+    icon,
+    tint: Tint::Blue,
+    key: "",
+    cmd: Some(cmd),
+    disabled: false,
+    needs_saved: false,
+    surface: false,
+    paid: false,
+  })
 }
 
 /// A Fusion command FissionOxide doesn't have yet.
 const fn x(label: &'static str, icon: Icon) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false, needs_saved: false })
+  E::I(Item {
+    label,
+    icon,
+    tint: Tint::Blue,
+    key: "",
+    cmd: None,
+    disabled: false,
+    needs_saved: false,
+    surface: false,
+    paid: false,
+  })
 }
 
 impl E {
@@ -94,11 +126,33 @@ impl E {
     }
   }
 
+  /// The SURFACE tab's own version of a SOLID command: see [`Item::surface`].
+  const fn surface(self) -> E {
+    match self {
+      E::I(mut i) => {
+        i.surface = true;
+        E::I(i)
+      }
+      other => other,
+    }
+  }
+
   /// Greyed out.
   const fn off(self) -> E {
     match self {
       E::I(mut i) => {
         i.disabled = true;
+        E::I(i)
+      }
+      other => other,
+    }
+  }
+
+  /// With Fusion's subscription badge.
+  const fn p(self) -> E {
+    match self {
+      E::I(mut i) => {
+        i.paid = true;
         E::I(i)
       }
       other => other,
@@ -119,6 +173,8 @@ pub(crate) struct Group {
 
 use crate::form_ui::{self, Act as FormAct};
 use crate::forms;
+use crate::insert_window::Target;
+use crate::mesh_ui::{self, Act as MeshAct};
 use crate::select::{Priority, SelTool};
 use Cmd::Dialog as D;
 
@@ -129,9 +185,9 @@ const PATTERN: &[E] = &[
 ];
 
 const SIMPLIFY: &[E] = &[
-  c("Remove Features", Icon::RemoveFeatures, D(Kind::Form(&forms::REMOVE_FACES))),
+  c("Remove Features", Icon::RemoveFeatures, D(Kind::Form(&forms::REMOVE_FEATURES))),
   c("Remove Faces", Icon::RemoveFaces, D(Kind::Form(&forms::REMOVE_FACES))),
-  x("Replace with Primitives", Icon::ReplacePrimitives),
+  c("Replace with Primitives", Icon::ReplacePrimitives, D(Kind::Form(&forms::REPLACE_PRIMITIVES))),
 ];
 
 const CREATE_PCB: &[E] = &[x("Associative PCB", Icon::InsertComponent), x("Create 3D PCB", Icon::InsertComponent)];
@@ -180,13 +236,13 @@ macro_rules! solid_modify {
       E::Sep,
       c("Shell", Icon::Shell, D(Kind::Shell)),
       c("Draft", Icon::Draft, D(Kind::Draft)),
-      c("Scale", Icon::Scale, D(Kind::Form(&forms::SCALE))),
+      c("Scale", Icon::Scale, D(Kind::Scale)),
       c("Combine", Icon::Combine, D(Kind::Combine)),
-      c("Offset Face", Icon::OffsetFace, D(Kind::Form(&forms::OFFSET_FACE))),
+      c("Offset Face", Icon::OffsetFace, D(Kind::OffsetFace)),
       c("Replace Face", Icon::ReplaceFace, D(Kind::Form(&forms::REPLACE_FACE))),
       c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
       c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
-      x("Silhouette Split", Icon::SilhouetteSplit),
+      c("Silhouette Split", Icon::SilhouetteSplit, D(Kind::Form(&forms::SILHOUETTE_SPLIT))),
       E::Sep,
       c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
       c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
@@ -260,16 +316,16 @@ const INSPECT: &[E] = &[
   c("Interference", Icon::Interference, D(Kind::Interference)),
   c("Section Analysis", Icon::Section, D(Kind::Section)),
   E::Sep,
-  x("Curvature Comb Analysis", Icon::CurvComb),
+  c("Curvature Comb Analysis", Icon::CurvComb, D(Kind::Analysis("comb"))),
   c("Curvature Map Analysis", Icon::CurvMap, D(Kind::Analysis("curvature"))),
   c("Draft Analysis", Icon::DraftAnalysis, D(Kind::Analysis("draft"))),
-  x("Environment Map Analysis", Icon::EnvMap),
-  x("Isocurve Analysis", Icon::Isocurve),
+  c("Environment Map Analysis", Icon::EnvMap, D(Kind::Analysis("environment"))),
+  c("Isocurve Analysis", Icon::Isocurve, D(Kind::Analysis("isocurve"))),
   c("Zebra Analysis", Icon::Zebra, D(Kind::Analysis("zebra"))),
   E::Sep,
   c("Accessibility Analysis", Icon::Accessibility, D(Kind::Analysis("accessibility"))),
   c("Center of Mass", Icon::CenterOfMass, D(Kind::CenterOfMass)),
-  x("Minimum Radius Analysis", Icon::MinRadius),
+  c("Minimum Radius Analysis", Icon::MinRadius, D(Kind::Analysis("min_radius"))),
   E::Sep,
   x("Navigator", Icon::Navigator),
   E::Sep,
@@ -281,16 +337,16 @@ const INSPECT: &[E] = &[
 ];
 
 const INSERT: &[E] = &[
-  x("Decal", Icon::Decal),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
   c("Canvas", Icon::Canvas, Cmd::Canvas),
-  c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
-  c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
-  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
+  c("Insert SVG", Icon::InsertSvg, Cmd::Insert(Target::Svg)),
+  c("Insert DXF", Icon::InsertDxf, Cmd::InsertDxf),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
   // greyed until the design is saved, as Fusion's
   c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent).saved(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
-  x("Insert Derive", Icon::Derive),
+  c("Insert Derive", Icon::Derive, Cmd::Insert(Target::Derive)),
   x("Insert McMaster-Carr Component", Icon::McMaster).off(),
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
@@ -389,15 +445,13 @@ const SURFACE_CREATE: &[E] = &[
   c("Create Form", Icon::CreateForm, Cmd::Form(FormAct::Enter)),
   x("Derive", Icon::Derive),
   E::Sep,
-  c("Extrude", Icon::Extrude, D(Kind::Form(&forms::SURFACE_EXTRUDE))).o(),
+  c("Extrude", Icon::Extrude, D(Kind::Form(&forms::SURFACE_EXTRUDE))).o().surface(),
   c("Revolve", Icon::Revolve, D(Kind::Form(&forms::SURFACE_REVOLVE))).o(),
-  x("Sweep", Icon::Sweep).o(),
+  x("Sweep", Icon::Sweep).o().surface(),
   x("Loft", Icon::Loft).o(),
   c("Patch", Icon::Patch, D(Kind::Form(&forms::PATCH))).o(),
-  c("Patch from Sketch", Icon::Patch, D(Kind::Form(&forms::PATCH_SKETCH))).o(),
   c("Ruled", Icon::Ruled, D(Kind::Form(&forms::RULED))).o(),
   c("Offset", Icon::SurfOffset, D(Kind::Form(&forms::SURFACE_OFFSET))).o(),
-  c("Variable Offset", Icon::SurfOffset, D(Kind::Form(&forms::VARIABLE_OFFSET))).o(),
   E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
@@ -412,15 +466,13 @@ const SURFACE_MODIFY: &[E] = &[
   c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
-  c("Trim", Icon::Trim, D(Kind::Form(&forms::TRIM))),
-  c("Trim with Body", Icon::Trim, D(Kind::Form(&forms::TRIM_BODY))),
-  c("Trim with Sketch", Icon::Trim, D(Kind::Form(&forms::TRIM_SKETCH))),
+  c("Trim", Icon::Trim, D(Kind::Form(&forms::TRIM))).o(),
   c("Untrim", Icon::Untrim, D(Kind::Form(&forms::UNTRIM))).o(),
   c("Extend", Icon::Extend, D(Kind::Form(&forms::EXTEND))).o(),
   c("Stitch", Icon::Stitch, D(Kind::Form(&forms::STITCH))).o(),
   c("Unstitch", Icon::Unstitch, D(Kind::Form(&forms::UNSTITCH))).o(),
   c("Reverse Normal", Icon::ReverseNormal, D(Kind::Form(&forms::REVERSE_NORMAL))).o(),
-  c("Scale", Icon::Scale, D(Kind::Form(&forms::SCALE))),
+  c("Scale", Icon::Scale, D(Kind::Scale)),
   c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
   c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
   E::Sep,
@@ -440,17 +492,17 @@ const SURFACE_MODIFY: &[E] = &[
 ];
 
 const MESH_CREATE: &[E] = &[
-  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
-  x("Tessellate", Icon::Tessellate).g(),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
+  c("Tessellate", Icon::Tessellate, D(Kind::Form(&mesh_ui::TESSELLATE))).g(),
   E::Sep,
-  x("Create Mesh Section Sketch", Icon::MeshSection).g(),
-  x("Create Base Mesh Feature", Icon::BaseMesh).g(),
+  c("Create Mesh Section Sketch", Icon::MeshSection, D(Kind::Form(&mesh_ui::SECTION_SKETCH))).g(),
+  c("Create Base Mesh Feature", Icon::BaseMesh, Cmd::MeshEdit(MeshAct::BaseMesh)).g(),
 ];
 
 const MESH_PREPARE: &[E] = &[
-  x("Repair", Icon::Repair).g(),
-  x("Generate Face Groups", Icon::GenFaceGroups),
-  x("Combine Face Groups", Icon::CombineFaceGroups),
+  c("Repair", Icon::Repair, D(Kind::Form(&mesh_ui::REPAIR))).g(),
+  c("Generate Face Groups", Icon::GenFaceGroups, D(Kind::Form(&mesh_ui::GENERATE_FACE_GROUPS))),
+  c("Combine Face Groups", Icon::CombineFaceGroups, D(Kind::Form(&mesh_ui::COMBINE_FACE_GROUPS))),
 ];
 
 const EXPORT: &[E] = &[c("3D Print", Icon::Print3d, Cmd::Print3d)];
@@ -460,7 +512,6 @@ const SHEET_CREATE: &[E] = &[
   c("Flange (Base/Edge/Contour)", Icon::Flange, D(Kind::Flange)),
   c("Hem", Icon::Hem, D(Kind::Hem)),
   c("Lofted Flange", Icon::LoftedFlange, D(Kind::Form(&forms::LOFTED_FLANGE))),
-  c("Miter Flange", Icon::Flange, D(Kind::Form(&forms::MITER_FLANGE))),
   c("Fold", Icon::Fold, D(Kind::Fold)),
   c("Convert to Sheet Metal", Icon::ConvertSheet, D(Kind::ConvertSheet)).k("Ctrl+Alt+S"),
   x("Derive", Icon::Derive),
@@ -469,27 +520,32 @@ const SHEET_CREATE: &[E] = &[
   E::Sep,
   c("Hole", Icon::Hole, D(Kind::Hole)).k("H"),
   c("Thread", Icon::Thread, D(Kind::Form(&forms::THREAD))),
-  E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
   c("Create Flat Pattern", Icon::FlatPattern, D(Kind::FlatPattern)),
-  c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
+];
+
+/// Sheet metal commands FissionOxide has that Fusion's CREATE and MODIFY dropdowns don't list:
+/// not in the dropdowns, still found by the S toolbox and the keyboard shortcuts.
+const SHEET_MORE: &[E] = &[
+  c("Miter Flange", Icon::Flange, D(Kind::Form(&forms::MITER_FLANGE))),
+  c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
   c("All Flat Patterns on One Sheet", Icon::FlatPattern, D(Kind::Form(&forms::COLLECT_FLAT))),
   c("Cut Service Check", Icon::Interference, Cmd::CutCheck),
+  c("Refold Faces", Icon::Refold, D(Kind::Refold)),
 ];
 
 const SHEET_MODIFY: &[E] = &[
   c("Unfold", Icon::Unfold, D(Kind::Unfold)),
-  c("Refold Faces", Icon::Refold, D(Kind::Refold)),
   c("Sheet Metal Rules", Icon::SmRules, D(Kind::SheetRules)),
   c("Corner Closure", Icon::CornerClosure, D(Kind::Form(&forms::CORNER_CLOSURE))),
-  c("Join by bend", Icon::Fold, D(Kind::Form(&forms::JOIN_BY_BEND))),
+  c("Join by bend", Icon::Fold, D(Kind::Form(&forms::JOIN_BY_BEND))).p(),
   c("Rip", Icon::Rip, D(Kind::Rip)),
   E::Sep,
-  c("Sheet Metal Fillet", Icon::Fillet, D(Kind::Form(&forms::SHEET_FILLET))),
-  c("Sheet Metal Chamfer", Icon::Chamfer, D(Kind::Form(&forms::SHEET_CHAMFER))),
+  c("Sheet Metal Fillet", Icon::Fillet, D(Kind::Form(&forms::SHEET_FILLET))).p(),
+  c("Sheet Metal Chamfer", Icon::Chamfer, D(Kind::Form(&forms::SHEET_CHAMFER))).p(),
   c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
@@ -509,7 +565,7 @@ const SHEET_MODIFY: &[E] = &[
 ];
 
 const MESH_MODIFY: &[E] = &[
-  x("Direct Edit", Icon::DirectEdit).g(),
+  c("Direct Edit", Icon::DirectEdit, Cmd::MeshEdit(MeshAct::DirectEdit)).g(),
   x("Remesh", Icon::Remesh).g(),
   c("Reduce", Icon::Reduce, D(Kind::Form(&forms::MESH_REDUCE))).g(),
   c("Plane Cut", Icon::PlaneCut, D(Kind::SplitBody)).g(),
@@ -557,6 +613,93 @@ macro_rules! shared_groups {
 
 const SHARED: [Group; 6] = shared_groups!();
 
+// ---------------------------------------------------------------- Assembly Design
+
+// an Assembly Design's ASSEMBLY tab, in Fusion's order
+const ASM_INSERT: &[E] = &[
+  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
+  x("Insert Fastener", Icon::Fastener).off(),
+  x("Duplicate With Joints", Icon::DuplicateJoints).off(),
+  c("Insert Derive", Icon::Derive, Cmd::Insert(Target::Derive)),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
+  c("Canvas", Icon::Canvas, Cmd::Canvas),
+  E::Sep,
+  x("Add To Assembly", Icon::AddToAssembly),
+  E::Sep,
+  x("Insert McMaster-Carr Component", Icon::McMaster).off(),
+];
+
+const ASM_CREATE: &[E] = &[
+  c("New Component", Icon::Component, D(Kind::NewComponent)),
+  c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
+  E::Sub("Pattern", PATTERN),
+  x("Create Linked PCB", Icon::InsertComponent),
+  x("Derive", Icon::Derive),
+];
+
+const ASM_RELATIONSHIPS: &[E] = &[
+  x("Constrain Components", Icon::Coincident),
+  c("Align Constraint", Icon::Align, D(Kind::Form(&forms::ALIGN))),
+  x("Angle Constraint", Icon::AngleDim),
+  x("Center Constraint", Icon::Concentric),
+  x("Tangent Constraint", Icon::Tangent),
+  E::Sep,
+  c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
+  c("As-built Joint", Icon::JointOrigin, D(Kind::AsBuiltJoint)).k("Shift+J"),
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
+  c("Rigid Group", Icon::Component, D(Kind::Form(&assembly_forms::RIGID_GROUP))),
+];
+
+const ASM_MOTION: &[E] = &[
+  c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
+  c("Motion Link", Icon::DriveJoint, D(Kind::Form(&assembly_forms::MOTION_LINK))),
+  c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
+];
+
+const ASM_MODIFY: &[E] = &[
+  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
+  c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
+  c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
+  c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
+  E::Sep,
+  c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
+  E::Sep,
+  c("Change Parameters", Icon::Params, Cmd::Params),
+  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
+  c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
+  E::Sep,
+  x("Manage Materials", Icon::ManageMaterials),
+  E::Sep,
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
+];
+
+const ASM_CONTACT: &[E] = &[x("Enable Contact Sets", Icon::Interference), x("Enable All Contact", Icon::Interference)];
+
+const ASSEMBLY: [Group; 6] = [
+  Group { label: "INSERT", quick: &["Insert Component", "Insert Derive", "Canvas"], menu: ASM_INSERT },
+  Group { label: "CREATE", quick: &["New Component", "Create Sketch"], menu: ASM_CREATE },
+  Group {
+    label: "RELATIONSHIPS",
+    quick: &["Constrain Components", "Joint", "As-built Joint", "Rigid Group"],
+    menu: ASM_RELATIONSHIPS,
+  },
+  Group { label: "MOTION", quick: &["Drive Joints", "Motion Link", "Motion Study"], menu: ASM_MOTION },
+  Group { label: "MODIFY", quick: &["Move/Copy", "Align", "Bill of Materials"], menu: ASM_MODIFY },
+  Group { label: "CONTACT", quick: &["Enable Contact Sets"], menu: ASM_CONTACT },
+];
+
+// the ASSEMBLY tab ends with CONFIGURE, CONSTRUCT, INSPECT and SELECT (INSERT comes first)
+const ASSEMBLY_SHARED: [Group; 4] = [
+  Group {
+    label: "CONFIGURE",
+    quick: &["Configure", "Display Configuration Table", "Create Configuration Rules"],
+    menu: CONFIGURE,
+  },
+  Group { label: "CONSTRUCT", quick: &["Offset Plane"], menu: CONSTRUCT },
+  Group { label: "INSPECT", quick: &["Measure", "Section Analysis"], menu: INSPECT },
+  Group { label: "SELECT", quick: &["Select"], menu: SELECT },
+];
+
 // as in Fusion, only MESH has an EXPORT panel (elsewhere 3D Print is under UTILITIES > MAKE)
 const MESH_SHARED: [Group; 7] = shared_groups!(Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT });
 
@@ -571,16 +714,8 @@ const SOLID: [Group; 2] = [
 ];
 
 const SURFACE: [Group; 2] = [
-  Group {
-    label: "CREATE",
-    quick: &["Create Sketch", "Patch", "Extrude", "Revolve", "Offset", "Create Form"],
-    menu: SURFACE_CREATE,
-  },
-  Group {
-    label: "MODIFY",
-    quick: &["Stitch", "Unstitch", "Trim", "Extend", "Bill of Materials"],
-    menu: SURFACE_MODIFY,
-  },
+  Group { label: "CREATE", quick: &["Create Sketch", "Patch", "Extrude", "Revolve", "Sweep"], menu: SURFACE_CREATE },
+  Group { label: "MODIFY", quick: &["Stitch", "Unstitch", "Trim", "Extend"], menu: SURFACE_MODIFY },
 ];
 
 use Cmd::SketchTool as T;
@@ -694,7 +829,8 @@ const SKETCH_MODIFY_MORE: &[E] = &[
 fn extra_commands(tab: Tab) -> &'static [&'static [E]] {
   match tab {
     Tab::Sketch => &[SKETCH_MODIFY_MORE, ASSEMBLE_MORE],
-    Tab::Solid | Tab::Surface | Tab::Mesh | Tab::SheetMetal | Tab::Plastic => &[ASSEMBLE_MORE],
+    Tab::SheetMetal => &[ASSEMBLE_MORE, SHEET_MORE],
+    Tab::Solid | Tab::Surface | Tab::Mesh | Tab::Plastic => &[ASSEMBLE_MORE],
     _ => &[],
   }
 }
@@ -718,15 +854,15 @@ const SKETCH_CONSTRAINTS: &[E] = &[
 // the sketch tab's INSERT has no Insert Component
 const SKETCH_INSERT: &[E] = &[
   c("Trace Image", Icon::TraceImage, D(Kind::TraceImage)),
-  x("Decal", Icon::Decal),
+  c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
   c("Canvas", Icon::Canvas, Cmd::Canvas),
-  c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
-  c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
+  c("Insert SVG", Icon::InsertSvg, Cmd::Insert(Target::Svg)),
+  c("Insert DXF", Icon::InsertDxf, Cmd::InsertDxf),
   c("Sketch Library...", Icon::SketchLibrary, Cmd::SketchLibrary),
-  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
-  x("Insert Derive", Icon::Derive),
+  c("Insert Derive", Icon::Derive, Cmd::Insert(Target::Derive)),
   x("Insert McMaster-Carr Component", Icon::McMaster).off(),
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
@@ -1012,15 +1148,15 @@ const UTIL_INSPECT: &[E] = &[
   c("Interference", Icon::Interference, D(Kind::Interference)),
   c("Section Analysis", Icon::Section, D(Kind::Section)),
   E::Sep,
-  x("Curvature Comb Analysis", Icon::CurvComb),
+  c("Curvature Comb Analysis", Icon::CurvComb, D(Kind::Analysis("comb"))),
   c("Curvature Map Analysis", Icon::CurvMap, D(Kind::Analysis("curvature"))),
   c("Draft Analysis", Icon::DraftAnalysis, D(Kind::Analysis("draft"))),
-  x("Isocurve Analysis", Icon::Isocurve),
+  c("Isocurve Analysis", Icon::Isocurve, D(Kind::Analysis("isocurve"))),
   c("Zebra Analysis", Icon::Zebra, D(Kind::Analysis("zebra"))),
   E::Sep,
   c("Accessibility Analysis", Icon::Accessibility, D(Kind::Analysis("accessibility"))),
   c("Center of Mass", Icon::CenterOfMass, D(Kind::CenterOfMass)),
-  x("Minimum Radius Analysis", Icon::MinRadius),
+  c("Minimum Radius Analysis", Icon::MinRadius, D(Kind::Analysis("min_radius"))),
   E::Sep,
   x("Navigator", Icon::Navigator),
   E::Sep,
@@ -1130,7 +1266,14 @@ const SHEET_METAL: [Group; 2] = [
   Group { label: "CREATE", quick: &["Flange (Base/Edge/Contour)", "Create Flat Pattern"], menu: SHEET_CREATE },
   Group {
     label: "MODIFY",
-    quick: &["Sheet Metal Rules", "Join by bend", "Sheet Metal Fillet", "Fillet", "Chamfer", "Bill of Materials"],
+    quick: &[
+      "Sheet Metal Rules",
+      "Sheet Metal Fillet",
+      "Sheet Metal Chamfer",
+      "Fillet",
+      "Chamfer",
+      "Bill of Materials",
+    ],
     menu: SHEET_MODIFY,
   },
 ];
@@ -1169,6 +1312,56 @@ const MESH: [Group; 3] = [
   },
 ];
 
+const MESH_EDIT_CREATE: &[E] = &[x("Texture Extrude", Icon::Extrude).g()];
+
+const MESH_EDIT_PREPARE: &[E] = &[
+  c("Repair", Icon::Repair, D(Kind::Form(&mesh_ui::REPAIR))).g(),
+  c("Generate Face Groups", Icon::GenFaceGroups, D(Kind::Form(&mesh_ui::GENERATE_FACE_GROUPS))),
+  c("Combine Face Groups", Icon::CombineFaceGroups, D(Kind::Form(&mesh_ui::COMBINE_FACE_GROUPS))),
+  x("Close Cracks", Icon::Stitch).g(),
+];
+
+const MESH_EDIT_MODIFY: &[E] = &[
+  x("Erase And Fill", Icon::Patch).g(),
+  x("Bridge", Icon::Loft).g(),
+  c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
+  x("Separate", Icon::Separate).g(),
+  E::Sep,
+  x("Remesh", Icon::Remesh).g(),
+  c("Reduce", Icon::Reduce, D(Kind::Form(&forms::MESH_REDUCE))).g(),
+  c("Smooth", Icon::Smooth, D(Kind::Form(&forms::MESH_SMOOTH))).g(),
+  c("Reverse Normal", Icon::ReverseNormal, D(Kind::Form(&forms::REVERSE_NORMAL))).g(),
+  E::Sep,
+  x("Mesh Align", Icon::Align).g(),
+  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
+];
+
+const MESH_EDIT_FINISH: &[E] = &[c("Finish Direct Editing", Icon::Finish, Cmd::MeshEdit(MeshAct::Finish))];
+
+/// The DIRECT MESH EDITING contextual tab's own groups.
+const MESH_EDIT: [Group; 3] = [
+  Group { label: "CREATE", quick: &["Texture Extrude"], menu: MESH_EDIT_CREATE },
+  Group {
+    label: "PREPARE",
+    quick: &["Repair", "Generate Face Groups", "Combine Face Groups"],
+    menu: MESH_EDIT_PREPARE,
+  },
+  Group {
+    label: "MODIFY",
+    quick: &["Erase And Fill", "Bridge", "Delete", "Smooth", "Move/Copy"],
+    menu: MESH_EDIT_MODIFY,
+  },
+];
+
+/// What the tab ends with: CONSTRUCT, INSPECT, SELECT and EXPORT, then FINISH DIRECT EDITING.
+const MESH_EDIT_END: [Group; 5] = [
+  Group { label: "CONSTRUCT", quick: &["Offset Plane"], menu: CONSTRUCT },
+  Group { label: "INSPECT", quick: &["Measure", "Section Analysis"], menu: INSPECT },
+  Group { label: "SELECT", quick: &["Select"], menu: SELECT },
+  Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT },
+  Group { label: "FINISH DIRECT EDITING", quick: &["Finish Direct Editing"], menu: MESH_EDIT_FINISH },
+];
+
 fn find(menu: &[E], label: &str) -> Option<Item> {
   menu.iter().find_map(|e| match e {
     E::I(i) if i.label == label => Some(*i),
@@ -1196,7 +1389,16 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Generative => (&GENERATIVE, &[]),
     Tab::Render => (&RENDER, &[]),
     Tab::Turning => (&TURNING, &[]),
+    Tab::Assembly => (&ASSEMBLY, &ASSEMBLY_SHARED),
+    Tab::MeshEdit => (&MESH_EDIT, &MESH_EDIT_END),
   }
+}
+
+/// The labels of a tab's tool groups, in order.
+#[cfg(test)]
+pub(crate) fn group_labels(tab: Tab) -> Vec<&'static str> {
+  let (own, shared) = groups(tab);
+  own.iter().chain(shared).map(|g| g.label).collect()
 }
 
 /// A command FissionOxide runs, as the toolbar lists it (for the S toolbox's search).
@@ -1219,7 +1421,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 14] = [
+const ALL_TABS: [Tab; 16] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
@@ -1234,6 +1436,8 @@ const ALL_TABS: [Tab; 14] = [
   Tab::Generative,
   Tab::Render,
   Tab::Turning,
+  Tab::Assembly,
+  Tab::MeshEdit,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that
@@ -1266,7 +1470,7 @@ pub(crate) fn key_of<'a>(prefs: &'a Prefs, scope: Scope, label: &str) -> &'a str
 
 /// A command's tooltip, as in Fusion: see [`crate::ribbon_tip`].
 fn rich_tip(resp: egui::Response, scope: Scope, it: &Item, key: &str) -> egui::Response {
-  crate::ribbon_tip::show(resp, scope, it.label, it.icon, it.tint, it.cmd.is_none(), key)
+  crate::ribbon_tip::show(resp, scope, it.label, it.tip_label(), it.icon, it.tint, it.cmd.is_none(), key)
 }
 
 /// The ribbon's tooltip on a sketch tool's toggle elsewhere (the Sketch Palette's Feature
@@ -1281,6 +1485,8 @@ pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -
     cmd: Some(Cmd::SketchTool(tool)),
     disabled: false,
     needs_saved: false,
+    surface: false,
+    paid: false,
   };
   let key = key_of(prefs, Scope::Sketch, label);
   rich_tip(resp, Scope::Sketch, &it, key)
@@ -1387,7 +1593,13 @@ impl At<'_> {
   }
 
   fn key(&self, it: &Item) -> &str {
-    if it.cmd.is_some() { key_of(self.prefs, self.scope(), it.label) } else { it.key }
+    if it.surface {
+      ""
+    } else if it.cmd.is_some() {
+      key_of(self.prefs, self.scope(), it.label)
+    } else {
+      it.key
+    }
   }
 
   /// A command's ⋮ options.
@@ -1500,6 +1712,9 @@ fn show_group(
         } else {
           icons::tool_button_bare(ui, it.icon, it.tint, active)
         };
+        if it.paid {
+          paid_badge(ui.painter(), resp.rect.shrink(4.0));
+        }
         let resp = rich_tip(resp, at.scope(), it, at.key(it));
         if it.cmd.is_some() {
           resp.context_menu(|ui| at.options(ui, it, act));
@@ -1638,6 +1853,9 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
     } else {
       icons::draw_tinted(p, ir, i.icon, i.tint);
     }
+    if i.paid {
+      paid_badge(p, ir);
+    }
     if !key.is_empty() {
       p.text(
         pos2(rect.right() - 90.0, rect.center().y),
@@ -1667,6 +1885,18 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
   resp
 }
 
+/// Fusion's subscription badge on a command's icon: a small blue disc with a white rim and a
+/// white four-pointed sparkle, at the icon's top right.
+fn paid_badge(p: &egui::Painter, icon: Rect) {
+  let c = icon.right_top() + vec2(-1.0, 2.0);
+  p.circle(c, 4.5, theme::ACCENT, Stroke::new(1.0, Color32::WHITE));
+  // the sparkle: a tall and a wide diamond across each other
+  for (w, h) in [(0.9, 3.0), (3.0, 0.9)] {
+    let pts = vec![c + vec2(0.0, -h), c + vec2(w, 0.0), c + vec2(0.0, h), c + vec2(-w, 0.0)];
+    p.add(egui::Shape::convex_polygon(pts, Color32::WHITE, Stroke::NONE));
+  }
+}
+
 /// The icon the toolbar menus draw for the command labelled `label` on any tab (the Undo list
 /// shows a step's command with it).
 pub(crate) fn icon_of_label(label: &str) -> Option<Icon> {
@@ -1689,7 +1919,7 @@ pub(crate) fn options_dots(p: &egui::Painter, c: egui::Pos2, color: Color32) {
 /// menu, level with the row, holding the command's description and instructions as paragraphs
 /// with a blank line between them. No title and no shortcut line: the row shows both.
 fn menu_tip(resp: egui::Response, scope: Scope, it: &Item) -> egui::Response {
-  let paragraphs = tips::menu_paragraphs(scope, it.label);
+  let paragraphs = tips::menu_paragraphs(scope, it.tip_label());
   if paragraphs.is_empty() && it.cmd.is_some() {
     return resp;
   }
@@ -1742,6 +1972,11 @@ mod tests {
         labels(g.menu, &mut all);
       }
       for l in all {
+        // Fusion's Bill of Materials tooltip is its bare name
+        if l == "Bill of Materials" {
+          assert!(tips::tip(Scope::of(tab), l).is_none());
+          continue;
+        }
         match tips::tip(Scope::of(tab), l) {
           // Fusion's Press Pull and Display Configuration Table have a description only
           Some(t)
@@ -2113,6 +2348,81 @@ mod tests {
     );
   }
 
+  /// A menu's rows as `label` / `label (key)`, `|` for a separator and `name >` for a submenu.
+  fn menu_rows(tab: Tab, menu: &[E]) -> Vec<String> {
+    let prefs = Prefs::default();
+    let at = At { prefs: &prefs, tab, group: "", quick: &[], unsaved: false };
+    menu
+      .iter()
+      .map(|e| match e {
+        E::I(i) if at.key(i).is_empty() => i.label.to_string(),
+        E::I(i) => format!("{} ({})", i.label, at.key(i)),
+        E::Sep => "|".into(),
+        E::Sub(l, _) => format!("{l} >"),
+      })
+      .collect()
+  }
+
+  /// Fusion's SURFACE CREATE and MODIFY dropdowns, row for row: no Patch from Sketch, Variable
+  /// Offset or separate Trim with Body / Sketch, and no E on the surface Extrude.
+  #[test]
+  fn surface_menus_are_fusions() {
+    assert_eq!(
+      menu_rows(Tab::Surface, SURFACE_CREATE).join(", "),
+      "Create Sketch, Create Form, Derive, |, Extrude, Revolve, Sweep, Loft, Patch, Ruled, Offset, |, Pattern >, \
+       Mirror, |, Thicken, Boundary Fill, Joint Origin"
+    );
+    assert_eq!(
+      menu_rows(Tab::Surface, SURFACE_MODIFY).join(", "),
+      "Press Pull (Q), Fillet (F), Chamfer, |, Trim, Untrim, Extend, Stitch, Unstitch, Reverse Normal, Scale, \
+       Split Face, Split Body, |, Move/Copy (M), Align, Delete (Del), Remove, |, Physical Material, Appearance (A), \
+       Manage Materials, |, Change Parameters, Compute All (Ctrl+B), |, Bill of Materials"
+    );
+    // the SOLID Extrude keeps its E
+    assert!(menu_rows(Tab::Solid, SOLID_CREATE).contains(&"Extrude (E)".to_string()));
+  }
+
+  /// Fusion's SURFACE ribbon: five CREATE buttons and four MODIFY ones, the surface commands
+  /// in orange.
+  #[test]
+  fn surface_quick_buttons_are_fusions() {
+    let prefs = Prefs::default();
+    let shown = |g: &Group| quick_items(&prefs, Tab::Surface, g).iter().map(|i| i.label).collect::<Vec<_>>();
+    assert_eq!(shown(&SURFACE[0]), ["Create Sketch", "Patch", "Extrude", "Revolve", "Sweep"]);
+    assert_eq!(shown(&SURFACE[1]), ["Stitch", "Unstitch", "Trim", "Extend"]);
+    let modify = quick_items(&prefs, Tab::Surface, &SURFACE[1]);
+    for it in quick_items(&prefs, Tab::Surface, &SURFACE[0]).iter().skip(1).chain(&modify) {
+      assert_eq!(it.tint, Tint::Orange, "{}", it.label);
+    }
+  }
+
+  /// The SURFACE buttons' tooltips are Fusion's, the surface Extrude and Sweep their own rather
+  /// than the SOLID ones.
+  #[test]
+  fn surface_tooltips_are_fusions() {
+    let prefs = Prefs::default();
+    let tip = |g: &Group, label: &str| {
+      let it = quick_items(&prefs, Tab::Surface, g).into_iter().find(|i| i.label == label).unwrap();
+      tips::tip(Scope::Design, it.tip_label()).unwrap_or_else(|| panic!("{label} has a tooltip"))
+    };
+    let patch = tip(&SURFACE[0], "Patch");
+    assert_eq!(patch.line, "Creates a planar or 3D surface within the boundary of a specified closed loop.");
+    assert!(tips::illustrated(Scope::Design, "Patch"), "Fusion's Patch tooltip grows an illustration");
+    let extrude = tip(&SURFACE[0], "Extrude");
+    assert_eq!(extrude.line, "Adds depth to open or closed sketch profiles or planar faces.");
+    assert_eq!(
+      extrude.paragraphs().collect::<Vec<_>>()[1..],
+      ["Select the profile or planar face then specify the distance to extrude.", tips::MORE_HELP]
+    );
+    assert_ne!(tips::tip(Scope::Design, "Extrude").unwrap().line, extrude.line, "SOLID keeps its own");
+    assert!(tip(&SURFACE[0], "Revolve").line.starts_with("Revolves a sketch profile or planar face around"));
+    assert!(tip(&SURFACE[0], "Sweep").line.starts_with("Sweeps a sketch profile or planar face along a"));
+    assert!(tip(&SURFACE[1], "Stitch").line.starts_with("Joins surfaces to make a single surface body or solid body"));
+    assert_eq!(tip(&SURFACE[1], "Unstitch").line, "Breaks joined surfaces into individual surfaces.");
+    assert!(tip(&SURFACE[1], "Trim").line.starts_with("Removes the selected area of a surface body using"));
+    assert!(tip(&SURFACE[1], "Extend").line.starts_with("Enlarges a surface by extending its edges a specified"));
+  }
+
   /// The sketch MODIFY tooltips carry Fusion's wording: a first line, then the instruction and,
   /// where Fusion shows it, "Press Ctrl+/ for more help." as its own paragraph.
   #[test]
@@ -2200,5 +2510,150 @@ mod tests {
     for (i, (label, icon)) in icons.iter().enumerate() {
       assert!(!icons[i + 1..].iter().any(|(_, o)| o == icon), "{label}'s {icon:?} is shared");
     }
+  }
+
+  #[test]
+  fn an_assembly_design_has_fusions_assembly_tab() {
+    let (own, shared) = groups(Tab::Assembly);
+    let labels: Vec<&str> = own.iter().chain(shared.iter()).map(|g| g.label).collect();
+    assert_eq!(
+      labels,
+      [
+        "INSERT",
+        "CREATE",
+        "RELATIONSHIPS",
+        "MOTION",
+        "MODIFY",
+        "CONTACT",
+        "CONFIGURE",
+        "CONSTRUCT",
+        "INSPECT",
+        "SELECT"
+      ]
+    );
+    let names = |g: &str| -> Vec<&str> {
+      own
+        .iter()
+        .find(|x| x.label == g)
+        .unwrap()
+        .menu
+        .iter()
+        .filter_map(|e| match e {
+          E::I(i) => Some(i.label),
+          E::Sub(l, _) => Some(*l),
+          _ => None,
+        })
+        .collect()
+    };
+    assert_eq!(
+      names("INSERT"),
+      [
+        "Insert Component",
+        "Insert Fastener",
+        "Duplicate With Joints",
+        "Insert Derive",
+        "Decal",
+        "Canvas",
+        "Add To Assembly",
+        "Insert McMaster-Carr Component"
+      ]
+    );
+    assert_eq!(names("CREATE"), ["New Component", "Create Sketch", "Pattern", "Create Linked PCB", "Derive"]);
+    assert_eq!(
+      names("RELATIONSHIPS"),
+      [
+        "Constrain Components",
+        "Align Constraint",
+        "Angle Constraint",
+        "Center Constraint",
+        "Tangent Constraint",
+        "Joint",
+        "As-built Joint",
+        "Joint Origin",
+        "Rigid Group"
+      ]
+    );
+    assert_eq!(names("MOTION"), ["Drive Joints", "Motion Link", "Motion Study"]);
+    assert_eq!(
+      names("MODIFY"),
+      [
+        "Move/Copy",
+        "Align",
+        "Delete",
+        "Remove",
+        "Bill of Materials",
+        "Change Parameters",
+        "Physical Material",
+        "Appearance",
+        "Manage Materials",
+        "Compute All"
+      ]
+    );
+    assert_eq!(names("CONTACT"), ["Enable Contact Sets", "Enable All Contact"]);
+    assert_eq!(cmd_of(Tab::Assembly, "RELATIONSHIPS", "Joint"), Some(D(Kind::Joint)));
+    assert_eq!(cmd_of(Tab::Assembly, "CREATE", "New Component"), Some(D(Kind::NewComponent)));
+  }
+
+  #[test]
+  fn insert_entries_open_the_insert_window() {
+    use crate::insert_window::Target;
+    for tab in [Tab::Solid, Tab::Sketch] {
+      let group = "INSERT";
+      assert_eq!(cmd_of(tab, group, "Decal"), Some(Cmd::Insert(Target::Decal)), "{tab:?}");
+      assert_eq!(cmd_of(tab, group, "Insert SVG"), Some(Cmd::Insert(Target::Svg)));
+      assert_eq!(cmd_of(tab, group, "Insert DXF"), Some(Cmd::InsertDxf));
+      assert_eq!(cmd_of(tab, group, "Insert Mesh"), Some(Cmd::Insert(Target::Mesh)));
+      assert_eq!(cmd_of(tab, group, "Insert Derive"), Some(Cmd::Insert(Target::Derive)));
+    }
+    assert_eq!(cmd_of(Tab::Mesh, "CREATE", "Insert Mesh"), Some(Cmd::Insert(Target::Mesh)));
+  }
+
+  /// A dropdown as Fusion's reads: each row with its shortcut in brackets, submenus with ">",
+  /// separators as "|".
+  fn listing(menu: &[E]) -> String {
+    let rows: Vec<String> = menu
+      .iter()
+      .map(|e| match e {
+        E::I(i) if i.key.is_empty() => i.label.to_string(),
+        E::I(i) => format!("{} ({})", i.label, i.key),
+        E::Sub(l, _) => format!("{l} >"),
+        E::Sep => "|".into(),
+      })
+      .collect();
+    rows.join(", ").replace(", |, ", " | ")
+  }
+
+  /// The SHEET METAL tab's ribbon and dropdowns are Fusion's, its subscription commands carry the
+  /// badge, and the commands Fusion doesn't list stay reachable (S toolbox, shortcuts).
+  #[test]
+  fn sheet_metal_lists_are_fusions() {
+    assert_eq!(
+      listing(SHEET_CREATE),
+      "Create Sketch, Flange (Base/Edge/Contour), Hem, Lofted Flange, Fold, Convert to Sheet Metal (Ctrl+Alt+S), \
+       Derive | Extrude (E) | Hole (H), Thread, Pattern >, Mirror | Create Flat Pattern, Joint Origin"
+    );
+    assert_eq!(
+      listing(SHEET_MODIFY),
+      "Unfold, Sheet Metal Rules, Corner Closure, Join by bend, Rip | Sheet Metal Fillet, Sheet Metal Chamfer, \
+       Fillet (F), Chamfer | Move/Copy (M), Align, Delete (Del), Remove | Physical Material, Appearance (A), \
+       Manage Materials | Change Parameters, Compute All (Ctrl+B) | Bill of Materials"
+    );
+    let quick =
+      |g: &Group| quick_items(&Prefs::default(), Tab::SheetMetal, g).iter().map(|i| i.label).collect::<Vec<_>>();
+    assert_eq!(quick(&SHEET_METAL[0]), ["Flange (Base/Edge/Contour)", "Create Flat Pattern"]);
+    assert_eq!(
+      quick(&SHEET_METAL[1]),
+      ["Sheet Metal Rules", "Sheet Metal Fillet", "Sheet Metal Chamfer", "Fillet", "Chamfer", "Bill of Materials"]
+    );
+    let paid: Vec<&str> =
+      SHEET_MODIFY.iter().filter_map(|e| if let E::I(i) = e { i.paid.then_some(i.label) } else { None }).collect();
+    assert_eq!(paid, ["Join by bend", "Sheet Metal Fillet", "Sheet Metal Chamfer"]);
+    let offered: Vec<&str> = commands(&[Tab::SheetMetal]).iter().map(|e| e.label).collect();
+    for l in
+      ["Miter Flange", "Flat Pattern Sketch", "All Flat Patterns on One Sheet", "Cut Service Check", "Refold Faces"]
+    {
+      assert!(offered.contains(&l), "{l} stays reachable");
+    }
+    assert!(tips::tip(Scope::Design, "Bill of Materials").is_none(), "the tooltip is the bare name");
   }
 }

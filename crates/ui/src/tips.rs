@@ -1092,11 +1092,7 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        in the Timeline, to ensure all assembly relationships are calculated properly.\n\nPress Ctrl+/ \
        for more help.",
     ),
-    (_, "Bill of Materials") => (
-      "Lists the components with their quantities, materials and masses.",
-      "The list updates with the design. Set each component's material first for the masses to be \
-       right.",
-    ),
+    // (Fusion's Bill of Materials tooltip is its bare name: no text here)
 
     // DIRECT EDIT
     (_, "Move Face") => (
@@ -1658,13 +1654,19 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // SURFACE CREATE
     (_, "Patch") => (
-      "Creates a surface filling a closed boundary of edges.",
-      "Pick the edges that form a closed loop; a surface spans them. Set how it meets the neighbouring \
-       faces, such as tangent, to close holes smoothly.",
+      "Creates a planar or 3D surface within the boundary of a specified closed loop.",
+      "Select the loop to patch then apply connected (G0), tangent (G1), and curvature (G2) boundary \
+       conditions.",
     ),
-    (_, "Patch from Sketch") => (
-      "Creates a flat surface filling a closed sketch profile.",
-      "Pick closed profiles; each becomes a surface body. Use it for caps and flat panels.",
+    (_, SURFACE_EXTRUDE) => (
+      "Adds depth to open or closed sketch profiles or planar faces.",
+      "Select the profile or planar face then specify the distance to extrude.\n\nPress Ctrl+/ for more \
+       help.",
+    ),
+    (_, SURFACE_SWEEP) => (
+      "Sweeps a sketch profile or planar face along a selected path.",
+      "Select the profile then select the sweep path. The distance for the sweep is a decimal percentage \
+       of the selected path.",
     ),
     (_, "Ruled") => (
       "Creates a ruled surface from an edge.",
@@ -1676,28 +1678,11 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick faces and set the distance and side. The originals stay; use the copies as walls or \
        references.",
     ),
-    (_, "Variable Offset") => (
-      "Offsets surface bodies, with chosen faces at distances of their own.",
-      "Pick the body and the base distance, then add faces with their own distances. Neighbouring faces \
-       adjust to keep it joined.",
-    ),
 
     // SURFACE MODIFY
     (_, "Trim") => (
-      "Trims surface bodies where they cross a plane or another surface.",
-      "Pick the cutting tool, then click the pieces to remove. Use it to cut surfaces back to where \
-       they meet.",
-    ),
-    (_, "Trim with Body") => (
-      "Trims surface bodies with a solid or another surface.",
-      "Pick the surfaces and the body to cut with, then the pieces to keep or remove. Use it when the \
-       cutting shape is already modelled as a body.",
-    ),
-    (_, "Trim with Sketch") => (
-      "Trims surface bodies with sketch curves projected onto them.",
-      "Pick the surfaces and the curves; the curves are projected onto the surfaces to cut them, or \
-       switch on picking and click the pieces to remove. Use it for openings and outlines on curved \
-       surfaces.",
+      "Removes the selected area of a surface body using the specified cutting tool.",
+      "Select the cutting tool to use then select faces or surface bodies to remove.",
     ),
     (_, "Untrim") => (
       "Removes holes from faces or restores their original boundary.",
@@ -1706,20 +1691,18 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        close holes in a surface.",
     ),
     (_, "Extend") => (
-      "Extends open surface edges by a distance.",
-      "Pick the edges, set the distance and choose whether the extension continues the curvature or \
-       goes straight; Close corners fills the gap where two extended edges meet. Use it so surfaces \
-       overlap before trimming.",
+      "Enlarges a surface by extending its edges a specified distance.",
+      "Select the edges of a surface, select an extension type, then specify the distance to extend. \
+       Select an edge alignment option to control the curvature continuity between faces.",
     ),
     (_, "Stitch") => (
-      "Sews surface bodies together along their edges.",
-      "Pick the surfaces and set the gap tolerance. When the surfaces close up completely, the result \
-       becomes a solid.",
+      "Joins surfaces to make a single surface body or solid body.",
+      "Select the surfaces to join. Edges within the tolerance are highlighted green.",
     ),
     (_, "Unstitch") => (
-      "Breaks bodies apart into one surface per face.",
-      "Pick the bodies or faces. Use it to replace or rebuild individual faces, then stitch them back \
-       together.",
+      "Breaks joined surfaces into individual surfaces.",
+      "Select faces to unstitch. The selected face is unhooked from the parent body and the result body \
+       contains the unhooked face.",
     ),
     (_, "Reverse Normal") => (
       "Flips which way faces point.",
@@ -1729,12 +1712,12 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // MESH
     (_, "Tessellate") => (
-      "Converts solid or surface bodies into mesh bodies.",
-      "Pick the bodies and the refinement. Use it to edit a body with mesh tools or export it as \
-       triangles.",
+      "Converts an existing solid or surface body into a mesh body.",
+      "Select the solid or surface body to tessellate, then adjust the mesh refinement settings to \
+       convert the body to a mesh body.",
     ),
     (_, "Create Mesh Section Sketch") => (
-      "Sketches the cross-section of a mesh along a plane.",
+      "Creates a sketch that contains a section line where a plane intersects a mesh body.",
       "Pick the mesh and a plane; the section's outline becomes sketch curves. Use them to rebuild a \
        scanned part as a solid.",
     ),
@@ -1760,6 +1743,32 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     (_, "Direct Edit") => (
       "Edits a mesh's triangles directly.",
       "Select triangles, then delete, move or fill them. Use it for small fixes to scanned meshes.",
+    ),
+    (_, "Finish Direct Editing") => (
+      "Finishes direct mesh editing and returns to the MESH tab.",
+      "The edited mesh is kept as a new body named after the original with _Edited, in the base \
+       feature the editing started.",
+    ),
+    (_, "Texture Extrude") => (
+      "Extrudes a texture into or out of the selected mesh faces.",
+      "Select mesh faces and a texture image; the faces are pushed in or out by the image's \
+       brightness.",
+    ),
+    (_, "Close Cracks") => (
+      "Closes narrow cracks between mesh faces.",
+      "Select the mesh body; open edges that nearly touch are joined so the mesh closes.",
+    ),
+    (_, "Erase And Fill") => (
+      "Deletes the selected mesh faces and fills the hole they leave.",
+      "Select faces with the Mesh Selection Palette; the hole is filled with a smooth patch.",
+    ),
+    (_, "Bridge") => (
+      "Connects two open boundaries of a mesh with new faces.",
+      "Select an open edge on each side; the faces between them are filled in.",
+    ),
+    (_, "Mesh Align") => (
+      "Aligns a mesh body to another body.",
+      "Select points on the mesh and matching points on the target; the mesh moves to fit them.",
     ),
     (_, "Remesh") => (
       "Rebuilds a mesh with evenly sized triangles.",
@@ -1945,9 +1954,64 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick a part, set its angle, then click in the sketch to drop it there, as often as you like. Parts \
        are DXF, SVG or .fox files in the hub's library folder, folders from settings or an add-in's pack.",
     ),
+    // an Assembly Design's ASSEMBLY tab
+    (_, "Create Linked PCB") => (
+      "Creates a printed circuit board linked to an electronics design.",
+      "Pick the board's outline and plane; the board stays linked to its electronics design and updates \
+       when the design changes. FissionOxide doesn't link boards to electronics designs yet.",
+    ),
+    (_, "Constrain Components") => (
+      "Positions components relative to each other with constraints.",
+      "Pick faces, edges or points on two components and a relation between them, such as mate, flush \
+       or offset. FissionOxide places components with joints instead.",
+    ),
+    (_, "Align Constraint") => (
+      "Lines up faces, edges or axes of two components.",
+      "Pick a face, edge or axis on the component that moves, then one on the other; choose flush, \
+       coincident or concentric. The constraint stays in the timeline.",
+    ),
+    (_, "Angle Constraint") => (
+      "Holds two components at an angle to each other.",
+      "Pick a face or edge on each component and type the angle between them. FissionOxide places \
+       components with joints instead.",
+    ),
+    (_, "Center Constraint") => (
+      "Centres one component's cylindrical face or axis on another's.",
+      "Pick a round face, edge or axis on each component; their centre lines are made to coincide. \
+       FissionOxide places components with joints instead.",
+    ),
+    (_, "Tangent Constraint") => (
+      "Keeps a face of one component touching a curved face of another.",
+      "Pick the two faces; the moving component rolls or slides along the other while staying in \
+       contact. FissionOxide places components with joints instead.",
+    ),
+    (_, "Enable Contact Sets") => (
+      "Turns contact sets on, so the components in them stop where they touch.",
+      "With contact sets on, dragging or driving joints stops a component when it meets another in the \
+       same set. FissionOxide's contact sets are always on.",
+    ),
+    (_, "Enable All Contact") => (
+      "Makes every component stop where it touches any other.",
+      "Treats all components as one contact set while you drag or drive joints. FissionOxide checks \
+       contact only within the contact sets you make.",
+    ),
     _ => return None,
   };
   Some(Tip { line, more })
+}
+
+/// The SURFACE tab's Extrude and Sweep: Fusion's surface commands of those names, whose
+/// tooltips differ from the SOLID ones.
+pub(crate) const SURFACE_EXTRUDE: &str = "Surface Extrude";
+pub(crate) const SURFACE_SWEEP: &str = "Surface Sweep";
+
+/// The label the SURFACE tab's own version of the command `label` has its tooltip under.
+pub(crate) fn surface_label(label: &'static str) -> &'static str {
+  match label {
+    "Extrude" => SURFACE_EXTRUDE,
+    "Sweep" => SURFACE_SWEEP,
+    other => other,
+  }
 }
 
 /// What a dropdown row's tooltip says, as Fusion's: its paragraphs, then "Press Ctrl+/ for more

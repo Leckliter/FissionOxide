@@ -1716,10 +1716,29 @@ mod tests {
       let b = &s.model.bodies[i];
       Sel::Face { body: b.id, face: b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id }
     };
-    let sel = vec![top(&s, 0), top(&s, 1)];
-    let mut d = form(&mut s, &REPLACE_FACE, sel);
+    // Fusion's rows: Source Faces stays active after a pick and OK waits for a target (no
+    // error line); the target is picked once its chip is clicked
+    let source = top(&s, 0);
+    let mut d = form(&mut s, &REPLACE_FACE, vec![source]);
+    let labels: Vec<&str> = REPLACE_FACE
+      .inputs
+      .iter()
+      .map(|x| match x {
+        Input::Pick { label, .. } | Input::Check { label, .. } => *label,
+        _ => "",
+      })
+      .collect();
+    assert_eq!(labels, ["Source Faces", "Tangent Chain", "Target Faces"]);
+    assert_eq!((d.form.row, d.form.values[1].clone()), (0, json!(false)), "Tangent Chain starts off");
+    assert_eq!(d.prompt(false).as_deref(), Some("Select faces to replace"));
+    assert!(!d.ok_enabled() && d.error.is_none());
+    d.form.row = 2;
+    let target = top(&s, 1);
+    s.selection.push(target);
+    d.form.sync(&REPLACE_FACE, &s, None);
     assert_eq!(d.form.values[0].as_array().unwrap().len(), 1, "the target is not a source face");
-    assert!(!d.form.values[1].is_null());
+    assert!(!d.form.values[2].is_null());
+    assert!(d.ok_enabled());
     apply(&mut s, &mut d);
     assert!((s.model.bodies[0].shape.mass().unwrap().volume - 6000.0).abs() < 1e-3);
   }

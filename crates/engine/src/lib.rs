@@ -16,6 +16,7 @@ mod commands;
 pub mod config;
 mod cut;
 pub use cut::{CutLine, CutLineKind, CutPreview};
+pub mod analysis;
 mod cut_service;
 pub mod diff;
 mod drag;
@@ -34,13 +35,16 @@ mod inspect;
 pub mod library;
 mod made;
 mod mates;
+pub mod mesh_prep;
 mod newcomp;
 mod params;
 pub mod properties;
 pub mod rendering;
 pub mod scene;
 mod sheet2;
+mod silhouette;
 pub mod sim;
+mod simplify;
 mod solid;
 mod step;
 mod subassembly;
@@ -592,6 +596,11 @@ impl Session {
       .unwrap_or_else(|| format!("Body {}", id.0))
   }
 
+  /// Whether `id` is a surface body (no solid inside), which Fusion's browser marks orange.
+  pub fn body_is_surface(&self, id: BodyId) -> bool {
+    self.model.body(id).is_some_and(|b| b.is_surface())
+  }
+
   pub fn body_visible(&self, id: BodyId) -> bool {
     self.design.body_settings(id).map(|s| s.visible).unwrap_or(true)
   }
@@ -651,6 +660,8 @@ mod tests_include;
 mod tests_mechanism;
 #[cfg(test)]
 mod tests_mesh_body;
+#[cfg(test)]
+mod tests_mesh_prep;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
