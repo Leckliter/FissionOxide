@@ -30,6 +30,7 @@ mod redefine;
 #[cfg(test)]
 mod sketch_row_tests;
 mod solid;
+mod thread;
 pub(crate) use export_dxf::{SaveWindow, save_window};
 pub(crate) use primitive::overlay as place_overlay;
 
@@ -2346,6 +2347,9 @@ impl Dialog {
         Kind::SkScale => {
           "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
         }
+        Kind::Form(f) => {
+          crate::forms::pick_prompt(f).map(String::from).unwrap_or_else(|| sentence(self.missing_input()))
+        }
         _ => sentence(self.missing_input()),
       });
     }
@@ -2374,6 +2378,7 @@ impl Dialog {
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) && self.form.text_framed(f) => {
         "Adjust text formatting or rotate text frame"
       }
+      Kind::Form(f) => return crate::forms::specify_prompt(f).map(String::from),
       _ => return None,
     };
     Some(specify.into())
@@ -2726,6 +2731,9 @@ impl Dialog {
       if text_form && self.text_form_field(f, i, &params, ui, dirty) {
         continue;
       }
+      if f.cmd == "thread" && self.thread_form_field(f, i, s, ui, dirty) {
+        continue;
+      }
       let v = self.form.values[i].clone();
       let greyed = crate::forms::greyed(f, input.key());
       // Coil's Profile: the circle drawn before the dialog opened
@@ -2762,14 +2770,22 @@ impl Dialog {
         Input::Bodies { label, .. } => {
           ui.label(*label);
           let n = v.as_array().map(Vec::len).unwrap_or(0);
+          // Boundary Fill's tools: bodies and construction planes alike
+          let planes = f
+            .inputs
+            .iter()
+            .position(|x| matches!(x, Input::Planes { .. }))
+            .and_then(|j| self.form.values[j].as_array().map(Vec::len))
+            .unwrap_or(0);
           let text = match n {
             // with the Selection Filter on faces, the picks are the faces
             _ if faces_mode => chip_text(faces_picked, if faces_picked == 1 { "face" } else { "faces" }),
+            _ if planes > 0 => format!("{} selected", n + planes),
             0 => "Select".to_string(),
             1 => v[0].as_u64().map(|b| s.body_name(BodyId(b as u32))).unwrap_or_default(),
             n => format!("{n} bodies"),
           };
-          sel_chip(ui, accent, &text, if faces_mode { faces_picked > 0 } else { n > 0 });
+          sel_chip(ui, accent, &text, if faces_mode { faces_picked > 0 } else { n + planes > 0 });
           ui.end_row();
         }
         Input::Face { label, .. } | Input::Edge { label, .. } => {
@@ -2867,6 +2883,13 @@ impl Dialog {
             .response
             .on_disabled_hover_text(why);
             ui.end_row();
+          } else if crate::forms::icon_dropdowns(f) {
+            // an icon before every value, as Fusion's Extent Type, Direction and Operation
+            ui.label(*label);
+            if choice::combo(ui, &format!("form-choice-{i}"), options, &mut sel, choice::form_icon) {
+              *dirty = true;
+            }
+            ui.end_row();
           } else {
             Self::choose(ui, label, &format!("form-choice-{i}"), &mut sel, options, dirty);
           }
@@ -2918,6 +2941,19 @@ impl Dialog {
           self.solid_form_field(f, i, app, ui, dirty);
         }
         Input::Pieces { label, .. } => self.pieces_field(i, label, ui, dirty),
+        Input::Flip { key, label } => {
+          // Fusion's Flip icon button, lit while flipped
+          ui.label(*label);
+          let on = v.as_bool().unwrap_or(false);
+          let tip = if *key == "flip" && f.cmd == "thread" { "Start the thread at the other end" } else { "Flip" };
+          if crate::icons::icon_button(ui, Icon::Flip, 24.0, tip, on, None).clicked() {
+            self.form.values[i] = json!(!on);
+            *dirty = true;
+          }
+          ui.end_row();
+        }
+        // counted on the tools' chip
+        Input::Planes { .. } => {}
       }
     }
     if crate::forms::takes_sheet_points(f) {

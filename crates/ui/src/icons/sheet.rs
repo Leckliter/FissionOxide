@@ -299,6 +299,10 @@ const ALL: &[Icon] = &[
   Icon::ZoomWindow,
   Icon::RotateCw,
   Icon::RotateCcw,
+  Icon::ToNext,
+  Icon::EmbossRaise,
+  Icon::EmbossSink,
+  Icon::ThreadsLibrary,
 ];
 
 fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

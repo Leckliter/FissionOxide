@@ -1342,6 +1342,10 @@ pub enum FeatureKind {
     /// A web (in-plane thickness, grows along the sketch normal) instead of a rib.
     #[serde(default)]
     web: bool,
+    /// The whole thickness on one side of the lines (Fusion's one-side Thickness Direction)
+    /// instead of half on each.
+    #[serde(default)]
+    one_side: bool,
   },
   /// Scales bodies about a point, uniformly or per axis.
   Scale {

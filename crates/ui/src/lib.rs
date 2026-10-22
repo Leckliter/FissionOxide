@@ -61,6 +61,7 @@ mod sheet;
 mod sim_ui;
 mod sketch_modify;
 mod theme;
+mod thread_form;
 mod tips;
 mod toolbox;
 mod trace;

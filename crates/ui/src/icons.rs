@@ -358,6 +358,13 @@ pub enum Icon {
   // Coil's Rotation toggles
   RotateCw,
   RotateCcw,
+  /// Rib's and Web's To Next extent: grown until the body is met.
+  ToNext,
+  // Emboss's Effect toggles: raised or sunk into the face
+  EmbossRaise,
+  EmbossSink,
+  /// Thread's Threads Library: the cloud of custom thread definitions.
+  ThreadsLibrary,
 }
 
 #[derive(Clone, Copy)]
@@ -2596,6 +2603,31 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     Icon::RotateCcw => {
       k.arc((0.5, 0.52), 0.32, 0.74, 5.54, Blue);
       k.arrow_head((0.74, 0.74), (0.68, -0.74), 0.18, Blue);
+    }
+    Icon::ToNext => {
+      // a wall grown down until it meets the floor below
+      k.solid(&[(0.08, 0.7), (0.92, 0.7), (0.92, 0.92), (0.08, 0.92)], Fill);
+      k.solid(&[(0.38, 0.08), (0.62, 0.08), (0.62, 0.42), (0.38, 0.42)], BlueLight);
+      k.thick((0.5, 0.44), (0.5, 0.6), Ink, 1.0);
+      k.arrow_head((0.5, 0.68), (0.0, 1.0), 0.13, Ink);
+    }
+    Icon::EmbossRaise => {
+      // a letter-shaped block standing on the face
+      k.solid(&[(0.06, 0.66), (0.94, 0.66), (0.94, 0.9), (0.06, 0.9)], Light);
+      k.block(0.3, 0.3, 0.7, 0.66, 0.14, BlueLight, Blue, BlueDark);
+    }
+    Icon::EmbossSink => {
+      // the same block sunk into the face
+      k.solid(&[(0.06, 0.4), (0.94, 0.4), (0.94, 0.9), (0.06, 0.9)], Light);
+      k.solid(&[(0.3, 0.4), (0.7, 0.4), (0.7, 0.66), (0.3, 0.66)], White);
+      k.closed(&[(0.3, 0.4), (0.7, 0.4), (0.7, 0.66), (0.3, 0.66)], Blue);
+    }
+    Icon::ThreadsLibrary => {
+      // a cloud
+      k.circle((0.36, 0.56), 0.18, Some(BlueLight), Some(Blue));
+      k.circle((0.6, 0.46), 0.22, Some(BlueLight), Some(Blue));
+      k.solid(&[(0.2, 0.6), (0.82, 0.6), (0.82, 0.74), (0.2, 0.74)], BlueLight);
+      k.line((0.2, 0.74), (0.82, 0.74), Blue);
     }
   }
 }

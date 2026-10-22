@@ -137,6 +137,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           depth: opt_expr(p, "depth").unwrap_or_default(),
           flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
           web: name == "web",
+          one_side: p.get("one_side").and_then(Value::as_bool).unwrap_or(false),
         },
       )
     })(),

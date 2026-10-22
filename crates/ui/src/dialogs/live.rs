@@ -157,10 +157,10 @@ impl Dialog {
       .collect();
   }
 
-  /// The Preview checkbox of a model-picking dialog. Fillet has none: it always previews, as in
-  /// Fusion.
+  /// The Preview checkbox of a model-picking dialog. Fillet, Thread, Emboss, Thicken and
+  /// Boundary Fill have none: they always preview, as in Fusion.
   pub(super) fn live_checkbox(&mut self, ui: &mut egui::Ui, s: &mut Session) {
-    if self.kind == Kind::Fillet {
+    if self.kind == Kind::Fillet || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f)) {
       return;
     }
     if ui.checkbox(&mut self.live.on, "Preview").changed() {
