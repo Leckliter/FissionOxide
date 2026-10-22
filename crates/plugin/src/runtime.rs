@@ -80,8 +80,7 @@ pub fn compile(wasm: &[u8]) -> Result<Module, String> {
       return Err(format!("plugin.wasm imports '{module}.{name}', which plugins don't have"));
     };
     let ok = imp.ty().func().is_some_and(|f| {
-      f.params().map(|p| kind(&p)).eq(params.iter().copied())
-        && f.results().map(|r| kind(&r)).eq(results.iter().copied())
+      f.params().map(|p| kind(&p)).eq(params.iter().copied()) && f.results().map(|r| kind(&r)).eq(results.iter().copied())
     });
     if !ok {
       return Err(format!("plugin.wasm imports 'fox.{name}' with the wrong signature"));
@@ -224,14 +223,14 @@ fn call(store: &mut Store<Host>, module: &Module, entry: Entry<'_>, fuel: u64) -
   let instance = linker.instantiate(&mut *store, module).map_err(|e| trap_message(store, e))?;
   let reply = match entry {
     Entry::Run { command, inputs } => {
-      let f =
-        instance.get_typed_func::<(i32, i32, i32, i32), i64>(&mut *store, "fox_run").map_err(|e| e.to_string())?;
+      let f = instance.get_typed_func::<(i32, i32, i32, i32), i64>(&mut *store, "fox_run").map_err(|e| e.to_string())?;
       let (a, b) = pass(store, &instance, command.as_bytes())?;
       let (c, d) = pass(store, &instance, inputs.to_string().as_bytes())?;
       f.call(&mut *store, (a, b, c, d)).map_err(|e| trap_message(store, e))?
     }
     Entry::InputChanged { command, input, inputs } => {
-      let Ok(f) = instance.get_typed_func::<(i32, i32, i32, i32, i32, i32), i64>(&mut *store, "fox_input_changed")
+      let Ok(f) =
+        instance.get_typed_func::<(i32, i32, i32, i32, i32, i32), i64>(&mut *store, "fox_input_changed")
       else {
         return Ok(json!({}));
       };
@@ -246,9 +245,12 @@ fn call(store: &mut Store<Host>, module: &Module, entry: Entry<'_>, fuel: u64) -
   }
   let memory = instance.get_memory(&mut *store, "memory").ok_or("plugin.wasm has no memory")?;
   let (ptr, len) = unpack(reply);
-  let bytes =
-    memory.data(&*store).get(ptr..ptr.saturating_add(len)).ok_or("the plugin returned a reply outside its memory")?;
-  let reply: Value = serde_json::from_slice(bytes).map_err(|e| format!("the plugin's reply is not JSON ({e})"))?;
+  let bytes = memory
+    .data(&*store)
+    .get(ptr..ptr.saturating_add(len))
+    .ok_or("the plugin returned a reply outside its memory")?;
+  let reply: Value =
+    serde_json::from_slice(bytes).map_err(|e| format!("the plugin's reply is not JSON ({e})"))?;
   match (reply.get("ok"), reply.get("error")) {
     (_, Some(Value::String(e))) => Err(e.clone()),
     (Some(v), _) => Ok(v.clone()),
@@ -300,8 +302,7 @@ fn read(caller: &mut Caller<'_, Host>, ptr: i32, len: i32) -> wasmtime::Result<V
 }
 
 fn read_str(caller: &mut Caller<'_, Host>, ptr: i32, len: i32) -> wasmtime::Result<String> {
-  String::from_utf8(read(caller, ptr, len)?)
-    .map_err(|_| wasmtime::Error::msg("the plugin passed a string that isn't UTF-8"))
+  String::from_utf8(read(caller, ptr, len)?).map_err(|_| wasmtime::Error::msg("the plugin passed a string that isn't UTF-8"))
 }
 
 /// Hands bytes to the module: allocated with `fox_alloc`, returned packed.

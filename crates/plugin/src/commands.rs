@@ -130,9 +130,7 @@ pub fn run(plugins: &mut Plugins, s: &mut Session, name: &str, p: &Value) -> Res
         _ => return Err("give 'path' (a .foxplugin) or 'item' (a hub item)".into()),
       };
       let granted = plugins.get(&m.id).map(|i| i.record.granted.clone()).unwrap_or_default();
-      Ok(
-        json!({"id": m.id, "name": m.name, "version": m.version, "plan": plan, "permissions": m.permissions, "granted": granted}),
-      )
+      Ok(json!({"id": m.id, "name": m.name, "version": m.version, "plan": plan, "permissions": m.permissions, "granted": granted}))
     }
     "plugin.uninstall" => {
       plugins.uninstall(req(p, "id")?)?;
@@ -149,8 +147,7 @@ pub fn run(plugins: &mut Plugins, s: &mut Session, name: &str, p: &Value) -> Res
       Ok(json!({"id": id, "granted": plugins.get(id).map(|i| i.record.granted.clone())}))
     }
     "plugin.run" => {
-      let opts =
-        RunOptions { folder: p.get("folder").and_then(Value::as_str).map(PathBuf::from), ..Default::default() };
+      let opts = RunOptions { folder: p.get("folder").and_then(Value::as_str).map(PathBuf::from), ..Default::default() };
       let r = plugins.run(s, req(p, "command")?, p.get("inputs").unwrap_or(&Value::Null), opts)?;
       serde_json::to_value(r).map_err(|e| e.to_string())
     }
