@@ -52,6 +52,7 @@ mod plugins_ui;
 mod preferences;
 mod props_ui;
 mod render_ui;
+mod ribbon_tip;
 mod scale_to_ui;
 mod select;
 mod service_ui;

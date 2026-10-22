@@ -385,32 +385,127 @@ impl Harness {
   }
 }
 
-#[test]
-fn the_extrude_tooltip_shows_its_shortcut_then_grows() {
-  let mut h = Harness::new();
-  let label = h.create_label();
-  let tip = crate::tips::tip(crate::tips::Scope::Design, "Extrude").unwrap();
-  // the toolbar icons sit above the group label; find Extrude's by hovering along them
-  let y = label.top() - 22.0;
-  let mut found = None;
-  let mut x = label.left() - 80.0;
-  while x < label.right() + 200.0 && found.is_none() {
-    let shown = h.rest(Pos2::new(x, y), 0.8);
-    if shown.iter().any(|t| t == "Extrude") {
-      found = Some((x, shown));
+impl Harness {
+  /// Every shape drawn `dt` seconds after the last frame, groups flattened.
+  fn frame_shapes(&mut self, dt: f64) -> Vec<egui::Shape> {
+    fn walk(s: egui::Shape, out: &mut Vec<egui::Shape>) {
+      match s {
+        egui::Shape::Vec(v) => v.into_iter().for_each(|s| walk(s, out)),
+        s => out.push(s),
+      }
     }
-    x += 12.0;
+    self.time += dt;
+    let input = RawInput {
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width, 900.0))),
+      time: Some(self.time),
+      ..Default::default()
+    };
+    let app = &mut self.app;
+    let out = self.ctx.run_ui(input, |ui| app.draw(ui));
+    let mut all = Vec::new();
+    for c in out.shapes {
+      walk(c.shape, &mut all);
+    }
+    all
   }
-  let (x, shown) = found.expect("an icon shows the Extrude tooltip");
-  assert!(shown.iter().any(|t| t == tip.line), "the one-line description: {shown:?}");
-  assert!(shown.iter().any(|t| t == "Shortcut: E"), "{shown:?}");
-  assert!(!shown.iter().any(|t| t == tip.more), "not expanded yet");
-  let shown = h.rest(Pos2::new(x, y), 2.5);
-  assert!(shown.iter().any(|t| t == tip.more), "expanded after resting: {shown:?}");
+
+  /// Rests along the ribbon above the panel whose name starts with `panel` until a button shows
+  /// the tooltip titled `title`; returns the first such pointer x, the y and the texts drawn.
+  fn ribbon_tip(&mut self, panel: &str, title: &str) -> (f32, f32, Vec<(Rect, String)>) {
+    let all = self.frame_texts(1.0 / 60.0, vec![]);
+    let label = all
+      .into_iter()
+      .find(|(r, t)| t.starts_with(panel) && r.top() < 140.0)
+      .map(|(r, _)| r)
+      .unwrap_or_else(|| panic!("{panel} is on the toolbar"));
+    // the toolbar icons sit above the group label; find the button by hovering along them
+    let y = label.top() - 22.0;
+    let mut x = label.left() - 80.0;
+    while x < label.right() + 200.0 {
+      let shown = self.rest_rects(Pos2::new(x, y), 1.2);
+      if shown.iter().any(|(_, t)| t == title) {
+        return (x, y, shown);
+      }
+      x += 12.0;
+    }
+    panic!("no button shows the {title} tooltip");
+  }
+}
+
+/// The colour a text shape is drawn in.
+fn text_color(t: &egui::epaint::TextShape) -> egui::Color32 {
+  t.override_text_color
+    .or_else(|| t.galley.job.sections.first().map(|s| s.format.color).filter(|c| *c != egui::Color32::PLACEHOLDER))
+    .unwrap_or(t.fallback_color)
+}
+
+/// The Extrude button's tooltip is Fusion's: a dark panel under the button with its left edge
+/// at the button's, "Extrude (E)" in white, the description and usage in light grey at once, and
+/// after resting longer a large illustration with "Press Ctrl+/ for more help." under it.
+#[test]
+fn the_extrude_tooltip_is_fusions_dark_panel_then_grows() {
+  use crate::{ribbon_tip, theme, tips};
+  let mut h = Harness::new();
+  let tip = tips::tip(tips::Scope::Design, "Extrude").unwrap();
+  let (x, y, shown) = h.ribbon_tip("CREATE", "Extrude (E)");
+  let at = |shown: &[(Rect, String)], text: &str| {
+    shown.iter().find(|(_, t)| t == text).map(|(r, _)| *r).unwrap_or_else(|| panic!("{text:?} in {shown:?}"))
+  };
+  let title = at(&shown, "Extrude (E)");
+  assert!(title.top() > y, "under the button: {title:?}");
+  // the first x that shows it is within a step of the button's left edge; the panel's 10 px
+  // margin sits inside that edge
+  assert!((title.left() - 10.0 - x).abs() < 14.0, "left edges aligned: {title:?} vs x {x}");
+  let mut bottom = title.bottom();
+  for p in tip.paragraphs() {
+    let r = at(&shown, p);
+    assert!(r.top() > bottom, "{p:?} below the one before");
+    bottom = r.bottom();
+  }
+  assert!(!shown.iter().any(|(_, t)| t.starts_with("Shortcut:")), "the key is in the title: {shown:?}");
+  assert!(!shown.iter().any(|(_, t)| t == tips::MORE_HELP), "not expanded yet");
+  // the panel is the dark tooltip fill, the title white and the paragraphs light grey
+  h.frame_texts(1.0 / 60.0, vec![egui::Event::PointerMoved(Pos2::new(x, y))]);
+  let shapes = h.frame_shapes(0.1);
+  assert!(
+    shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.fill == theme::TOOLTIP && r.rect.contains_rect(title))),
+    "a dark panel behind the title"
+  );
+  let color = |text: &str| {
+    shapes.iter().find_map(|s| match s {
+      egui::Shape::Text(t) if t.galley.text() == text => Some(text_color(t)),
+      _ => None,
+    })
+  };
+  assert_eq!(color("Extrude (E)"), Some(theme::TOOLTIP_TITLE));
+  assert_eq!(color(tip.line), Some(theme::TOOLTIP_TEXT));
+  assert_eq!(color(tip.more), Some(theme::TOOLTIP_TEXT));
+  // resting longer adds the illustration and the help line under it
+  let shown = h.rest_rects(Pos2::new(x, y), 2.5);
+  let help = at(&shown, tips::MORE_HELP);
+  assert!(help.top() > at(&shown, tip.more).bottom() + ribbon_tip::ILLUSTRATION_H, "under the picture: {help:?}");
   // the user's key shows instead
   h.app.prefs.keys.set("design.Extrude", "Shift+X", "E");
-  let shown = h.rest(Pos2::new(x + 1.0, y), 0.8);
-  assert!(shown.iter().any(|t| t == "Shortcut: Shift+X"), "{shown:?}");
+  let shown = h.rest(Pos2::new(x + 1.0, y), 1.2);
+  assert!(shown.iter().any(|t| t == "Extrude (Shift+X)"), "{shown:?}");
+}
+
+/// Commands without Fusion's illustration, such as Offset Plane, show the help line at once and
+/// never grow; commands without a shortcut, such as Revolve, show the bare name.
+#[test]
+fn the_offset_plane_tooltip_never_grows() {
+  use crate::tips;
+  let mut h = Harness::new();
+  let (x, y, shown) = h.ribbon_tip("CONSTRUCT", "Offset Plane");
+  let tip = tips::tip(tips::Scope::Design, "Offset Plane").unwrap();
+  let texts: Vec<String> = shown.into_iter().map(|(_, t)| t).collect();
+  for p in tip.paragraphs().chain([tips::MORE_HELP]) {
+    assert!(texts.iter().any(|t| t == p), "{p:?} in {texts:?}");
+  }
+  let later = h.rest(Pos2::new(x, y), 3.0);
+  assert_eq!(later, texts, "the panel doesn't grow");
+  let (_, _, shown) = h.ribbon_tip("CREATE", "Revolve");
+  assert!(!shown.iter().any(|(_, t)| t.starts_with("Revolve (")), "no shortcut: {shown:?}");
 }
 
 /// A menu row's tooltip is Fusion's: the description and instructions as paragraphs in a panel

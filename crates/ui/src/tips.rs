@@ -18,7 +18,8 @@ pub(crate) enum Scope {
 pub(crate) struct Tip {
   /// One line under the name.
   pub line: &'static str,
-  /// The fuller explanation shown after resting on the command.
+  /// The usage paragraphs (a blank line between them); empty for a command whose Fusion tooltip
+  /// has only the description, such as Press Pull.
   pub more: &'static str,
 }
 
@@ -848,9 +849,10 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // SOLID CREATE
     (_, "Create Sketch") => (
-      "Starts a new sketch on a plane or planar face.",
-      "Pick an origin plane, a construction plane or a flat face of the model. Draw closed profiles in \
-       the sketch, then finish it to use them in features.",
+      "Enters Sketch mode, where you create geometric profiles that define the foundation of a design. Then use \
+       commands like Extrude, Revolve, and Loft to create 3D bodies from sketches.",
+      "Select a construction plane, then create lines, arcs, or points to create sketch and construction geometry. \
+       Constrain sketches with dimensions and constraints. Select Finish Sketch to exit Sketch mode.",
     ),
     (_, "Create Form") => (
       "Starts a freeform modelling space for sculpted T-spline shapes.",
@@ -863,15 +865,14 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        changes.",
     ),
     (_, "Extrude") => (
-      "Adds depth to a closed sketch profile or a planar face.",
-      "Pick profiles or faces, then drag the arrow or type the distance. Choose to join, cut, intersect \
-       or make a new body, and set taper, two sides or extents up to a face. On the Surface tab it \
-       makes surfaces from open or closed curves.",
+      "Adds depth to open or closed sketch profiles or faces.",
+      "Select an extrusion type, select sketch profiles or faces to extrude, then specify the distance and taper \
+       angle. For the Thin Extrude type, specify the wall thickness.",
     ),
     (_, "Revolve") => (
-      "Spins a sketch profile around an axis.",
-      "Pick the profile, then the axis: a sketch line, an edge or a construction axis. Set a full turn \
-       or an angle. Good for shafts, knobs and turned parts.",
+      "Revolves a sketch profile or planar face around a selected axis.",
+      "Select a profile or planar face and an axis to revolve around, then specify the extent type, direction, and \
+       operation.",
     ),
     (_, "Sweep") => (
       "Sweeps a profile along a path.",
@@ -899,9 +900,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        wraps onto curved faces.",
     ),
     (_, "Hole") => (
-      "Drills holes, with counterbores, countersinks or threads.",
-      "Pick a face and click, or pick sketch points to place several. Set the diameter, depth, tip \
-       angle and head type. Turn on thread for tapped holes.",
+      "Creates a hole based on user-specified values and selections.",
+      "Select a face to place the hole then select edges to position the hole on the face, or select sketch points \
+       to place multiple holes. Specify the hole type, tap type and size values.",
     ),
     (_, "Thread") => (
       "Adds a thread to cylindrical faces.",
@@ -966,9 +967,11 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // PATTERN
     (_, "Rectangular Pattern") => (
-      "Copies bodies, faces or features in rows and columns.",
-      "Pick what to copy, then one or two directions, the number of copies and their spacing. Turn off \
-       copies you don't need by clicking them.",
+      "Duplicates faces, bodies, features, or components in a design and distributes them along linear axes in rows \
+       and columns to create a rectangular pattern.",
+      "Select the object type, then select objects to pattern in the canvas, Browser, or Timeline. Select one or \
+       more axes to distribute the pattern instances along, then adjust Suppression, quantity, and distance. \
+       Check Suppression, then uncheck instances in the canvas to remove them from the pattern.",
     ),
     (_, "Circular Pattern") => (
       "Copies bodies, faces or features around an axis.",
@@ -983,14 +986,15 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // SOLID MODIFY
     (_, "Press Pull") => (
-      "Pushes or pulls faces along their normals.",
-      "Pick a face and drag; flat faces offset, edges become fillets and profiles extrude. A quick way \
-       to adjust a model without opening its sketches.",
+      "Modifies the selected geometry using offset, extrude, or fillet commands. The operation depends on the \
+       geometry selected.",
+      "",
     ),
     (_, "Fillet") => (
-      "Rounds the selected edges.",
-      "Pick edges or faces and drag or type the radius. Add more sets with different radii in one go. \
-       Fillets on edges that meet at a corner are blended together.",
+      "Rounds the edges of a solid body by adding material to interior edges and removing material from exterior \
+       edges.",
+      "Select edges, faces, or features, then specify a radius. Use the Rule Fillet type to add fillets based on \
+       specified rules. Use the Full Round Fillet type to round the edges over three adjacent faces.",
     ),
     (_, "Chamfer") => (
       "Bevels the selected edges.",
@@ -998,9 +1002,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        outside edges for comfort and assembly.",
     ),
     (_, "Shell") => (
-      "Hollows a body to a wall thickness, removing the faces you pick.",
-      "Pick the faces to open up and set the thickness inside or outside. Pick no faces to make a \
-       closed hollow body.",
+      "Offsets the walls of a solid body to create a hollow cavity with walls of a specified thickness.",
+      "Select a body to shell or faces to remove to create an opening, then specify a type, direction, and wall \
+       thickness.",
     ),
     (_, "Draft") => (
       "Tapers faces about a pull direction.",
@@ -1013,9 +1017,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        shrinkage allowances or resizing imported parts.",
     ),
     (_, "Combine") => (
-      "Joins, cuts or intersects bodies.",
-      "Pick the target body, then the tool bodies, and choose join, cut or intersect. Turn on keep \
-       tools to leave the tool bodies in place.",
+      "Joins, cuts, or intersects two or more solid bodies to create a single solid body.",
+      "Select the target body, select one or more tool bodies to combine with the target body, then select the \
+       operation to use to combine the bodies together.",
     ),
     (_, "Offset Face") => (
       "Moves faces outwards or inwards along their normals.",
@@ -1117,26 +1121,26 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // CONFIGURE
     (_, "Configure") => (
-      "Sets up variants of the design, such as sizes, in one table.",
-      "Each row is a configuration with its own parameter values, suppressed features and materials. \
-       Switch between them to see each variant.",
+      "Opens the Configuration Table, enters Configuration Mode, and highlights configurable features and objects \
+       in the Timeline and Browser.",
+      "Add Configurations as rows in the table to create different variants of a design. Click highlighted features \
+       and objects to add their configurable aspects as columns in the table.",
     ),
-    (_, "Display Configuration Table") => (
-      "Shows the table of the design's configurations.",
-      "Edit the values for each configuration in the table, or add rows and columns. Click a row to \
-       switch the design to that configuration.",
-    ),
+    (_, "Display Configuration Table") => {
+      ("Shows or hides the Configure dialog without entering Configuration Mode.", "")
+    }
     (_, "Create Configuration Rules") => (
-      "Sets rules that work out configuration values from others.",
-      "Write a condition and the values it sets, such as a larger fillet when the height passes a \
-       limit. The rules apply whenever a configuration is chosen.",
+      "Creates logical Configuration Rules that drive or limit configured aspect values in a Configured Design, to \
+       ensure only valid configurations can be created.",
+      "Drag and drop blocks into the Configuration Rules canvas to create logical rules, then apply them to the set \
+       of configurations.",
     ),
 
     // ASSEMBLE
     (_, "Add To Assembly") => (
-      "Places this design in an assembly as a component.",
-      "Pick the assembly; the design goes into it as a linked component that updates when you change it \
-       here. Joint it into place in the assembly once it's there.",
+      "Inserts the active design into an Assembly Design as an external component.",
+      "Select an Assembly Design to insert into, then use the manipulators in the canvas or Initial Position fields \
+       to place the component in the target design.",
     ),
     (_, "New Component") => (
       "Makes a new component, or one from the selected bodies.",
@@ -1202,9 +1206,8 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        moves that don't line up with the main origin.",
     ),
     (_, "Offset Plane") => (
-      "Creates a plane parallel to a plane or face at a distance.",
-      "Pick a plane or planar face and drag or type the distance. Use it to sketch at a height above \
-       the model.",
+      "Creates a Construction Plane that is offset from the selected face or plane.",
+      "Select a face, plane or sketch profile, then specify the offset distance.",
     ),
     (_, "Plane at Angle") => (
       "Creates a plane through an edge or axis, turned by an angle.",
@@ -1296,9 +1299,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // INSPECT
     (_, "Measure") => (
-      "Measures distances, angles, areas and lengths of the selection.",
-      "Pick one item for its size or two for the distance and angle between them. Click a value to copy \
-       it.",
+      "Measures the distance, angle, area, or position of selected objects.",
+      "Select an object to measure it, and optionally select a second object to measure it and the distance between \
+       them.",
     ),
     (_, "Interference") => (
       "Finds where bodies of different components overlap.",
@@ -1306,8 +1309,11 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        you can fix clashes before making parts.",
     ),
     (_, "Section Analysis") => (
-      "Cuts the view open along a plane to show the inside.",
-      "Pick a plane or face and drag to move the cut. The model isn't changed; only the view is cut.",
+      "Creates a view that cuts through all visible objects in a design to reveal interior details and obscured \
+       features.",
+      "Select a planar object to define the cut plane, then adjust the distance and angles to position it in the \
+       design. In the Browser, the Section Analysis displays in the Analysis folder, where you can adjust its \
+       visibility, edit it, or delete it.",
     ),
     (_, "Curvature Comb Analysis") => (
       "Shows how curvature varies along edges or curves as a comb.",
@@ -1384,11 +1390,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick an image and a face, then position, scale and rotate it. It follows the face's curvature \
        and changes only the appearance.",
     ),
-    (_, "Canvas") => (
-      "Places a reference image on a plane to sketch over.",
-      "Pick an image and a plane, then size it with a known distance. Use it to trace products from \
-       photos.",
-    ),
+    (_, "Canvas") => {
+      ("Places an image on a planar face or sketch plane.", "Select a face then select an image to import.")
+    }
     (_, "Insert SVG") => (
       "Inserts an SVG file's shapes as sketch curves.",
       "Pick the file and the plane or face, then scale and position it. Closed shapes become profiles \
@@ -1399,9 +1403,10 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick the file, the plane and the units. Use it for outlines drawn in other CAD software.",
     ),
     (_, "Insert Mesh") => (
-      "Inserts an STL, OBJ or 3MF file as a mesh body.",
-      "Pick the file, then set its units and position. Use the mesh tools to clean it up or convert it \
-       to a solid.",
+      "Inserts an existing STL, OBJ, or 3MF file as a mesh body into the active component in a design.",
+      "Select a file to insert. The contents of the file display as a mesh body in the canvas and the \
+       browser.\n\nFor STL or OBJ files, select the unit type that matches the units from the original design \
+       that generated the STL or OBJ.",
     ),
     (_, "Insert Fastener") => (
       "Inserts standard screws, nuts and washers from a library.",
@@ -1413,9 +1418,11 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        suits fasteners.",
     ),
     (_, "Insert Derive") => (
-      "Brings bodies, sketches or parameters in from another design, linked.",
-      "Pick the design and the items to bring in; they update when the source changes. Use it to share \
-       a skeleton or parameters between related designs.",
+      "Pulls and links design features from another design into the active design. When you update the derived \
+       features in the original design, the changes are reflected in the destination design.",
+      "Before you start, activate the component that you want to contain the derived design features. Select a \
+       design, then select a set of components, bodies, sketches, construction geometry, flat patterns, or \
+       parameters to derive into the current design.",
     ),
     (_, "Insert McMaster-Carr Component") => (
       "Inserts a part from the McMaster-Carr catalogue.",
@@ -1992,11 +1999,31 @@ pub(crate) fn menu_paragraphs(scope: Scope, label: &str) -> Vec<&'static str> {
   };
   match fusion {
     Some(p) => p.iter().copied().chain(std::iter::once(MORE_HELP)).collect(),
-    None => {
-      tip(scope, label).map(|t| std::iter::once(t.line).chain(t.more.split("\n\n")).collect()).unwrap_or_default()
-    }
+    None => tip(scope, label).map(|t| t.paragraphs().collect()).unwrap_or_default(),
   }
 }
 
 /// The last line of Fusion's tooltips for commands with a help page.
 pub(crate) const MORE_HELP: &str = "Press Ctrl+/ for more help.";
+
+impl Tip {
+  /// The description, then each usage paragraph.
+  pub(crate) fn paragraphs(&self) -> impl Iterator<Item = &'static str> {
+    std::iter::once(self.line).chain(self.more.split("\n\n").filter(|p| !p.is_empty()))
+  }
+}
+
+/// Whether the ribbon tooltip of `label` grows, after resting on it, with Fusion's illustration
+/// (a rendered picture of the command's result; FissionOxide paints the command's icon large
+/// until pictures exist). Fusion has none for Display Configuration Table, Offset Plane and Add
+/// To Assembly, which show "Press Ctrl+/ for more help." at once and never grow, nor for the
+/// commands whose usage text already ends with that line.
+pub(crate) fn illustrated(scope: Scope, label: &str) -> bool {
+  match tip(scope, label) {
+    None => false,
+    Some(t) => {
+      !matches!(label, "Display Configuration Table" | "Offset Plane" | "Add To Assembly")
+        && !t.more.ends_with(MORE_HELP)
+    }
+  }
+}

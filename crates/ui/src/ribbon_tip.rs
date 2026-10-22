@@ -1,0 +1,154 @@
+//! A ribbon button's tooltip, as in Fusion: a dark grey rounded panel under the button, its left
+//! edge at the button's, holding a white bold title with the shortcut in parentheses ("Extrude
+//! (E)") and the description and usage paragraphs in light grey. After resting on the button for
+//! [`EXPAND_SECS`] the panel grows downward with a large illustration in a light grey frame and
+//! "Press Ctrl+/ for more help." under it; a command without an illustration shows that line at
+//! once and never grows.
+
+use egui::{Rect, RichText, Stroke, Vec2, vec2};
+
+use crate::icons::{self, Icon, Tint};
+use crate::theme;
+use crate::tips::{self, Scope};
+
+/// Resting this long on a command expands its tooltip.
+pub(crate) const EXPAND_SECS: f64 = 2.0;
+/// The panel's width, as Fusion's.
+pub(crate) const WIDTH: f32 = 300.0;
+/// The height of the expanded tooltip's illustration, as Fusion's.
+pub(crate) const ILLUSTRATION_H: f32 = 190.0;
+
+/// The tooltip's title: the command's name, with its shortcut in parentheses when it has one.
+pub(crate) fn title(label: &str, key: &str) -> String {
+  if key.is_empty() { label.to_string() } else { format!("{label} ({key})") }
+}
+
+/// Shows the tooltip of the ribbon button `resp` for the command `label` on the `scope` toolbar;
+/// `missing` adds "Not in FissionOxide yet", `key` is its shortcut (empty for none).
+pub(crate) fn show(
+  resp: egui::Response,
+  scope: Scope,
+  label: &'static str,
+  icon: Icon,
+  tint: Tint,
+  missing: bool,
+  key: &str,
+) -> egui::Response {
+  let tip = tips::tip(scope, label);
+  let illustrated = tips::illustrated(scope, label);
+  let ctx = resp.ctx.clone();
+  let now = ctx.input(|i| i.time);
+  // (hovered since, last seen hovered): a gap means the pointer left and came back
+  let id = resp.id.with("tip-rest");
+  let since = if resp.hovered() {
+    ctx.data_mut(|d| {
+      let (since, last) = d.get_temp::<(f64, f64)>(id).unwrap_or((now, now));
+      let since = if now - last > 0.25 { now } else { since };
+      d.insert_temp(id, (since, now));
+      since
+    })
+  } else {
+    now
+  };
+  let rested = now - since;
+  let style = ctx.global_style();
+  let frame = egui::Frame::new()
+    .fill(theme::TOOLTIP)
+    .corner_radius(egui::CornerRadius::same(4))
+    .inner_margin(egui::Margin::symmetric(10, 8))
+    .shadow(style.visuals.popup_shadow);
+  let mut tooltip = egui::Tooltip::for_enabled(&resp);
+  tooltip.popup =
+    tooltip.popup.anchor(resp.rect).align(egui::RectAlign::BOTTOM_START).gap(4.0).width(WIDTH).frame(frame);
+  tooltip.show(|ui| {
+    ui.set_max_width(WIDTH);
+    ui.spacing_mut().item_spacing.y = 10.0;
+    let title = title(label, key);
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let r = ui.label(RichText::new(&title).font(font.clone()).color(theme::TOOLTIP_TITLE)).rect;
+    // the font has no bold face: a second pass half a pixel over gives the weight
+    ui.painter().text(r.left_top() + vec2(0.6, 0.0), egui::Align2::LEFT_TOP, &title, font, theme::TOOLTIP_TITLE);
+    let text = |ui: &mut egui::Ui, s: &str, c| ui.add(egui::Label::new(RichText::new(s).color(c)).wrap());
+    if let Some(t) = tip {
+      // a usage text ending in the help line has it drawn as the panel's last line below
+      for p in t.paragraphs().filter(|p| *p != tips::MORE_HELP) {
+        text(ui, p, theme::TOOLTIP_TEXT);
+      }
+    }
+    if missing {
+      text(ui, "Not in FissionOxide yet", theme::TOOLTIP_MUTED);
+    }
+    if tip.is_none() {
+      return;
+    }
+    if illustrated && rested < EXPAND_SECS {
+      ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(EXPAND_SECS - rested));
+      return;
+    }
+    if illustrated {
+      let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), ILLUSTRATION_H), egui::Sense::hover());
+      ui.painter().rect(
+        r,
+        2.0,
+        theme::ILLUSTRATION,
+        Stroke::new(1.0, theme::ILLUSTRATION_FRAME),
+        egui::StrokeKind::Inside,
+      );
+      // until pictures of each command's result exist, its icon painted large
+      let side = ILLUSTRATION_H - 40.0;
+      icons::draw_tinted(ui.painter(), Rect::from_center_size(r.center(), Vec2::splat(side)), icon, tint);
+    }
+    text(ui, tips::MORE_HELP, theme::TOOLTIP_TEXT);
+  });
+  resp
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// The SOLID tab's buttons carry Fusion's texts, word for word.
+  #[test]
+  fn solid_tab_tooltips_are_fusions_texts() {
+    let tip = |l| tips::tip(Scope::Design, l).unwrap_or_else(|| panic!("{l} has a tooltip"));
+    let extrude = tip("Extrude");
+    assert_eq!(extrude.line, "Adds depth to open or closed sketch profiles or faces.");
+    assert_eq!(
+      extrude.more,
+      "Select an extrusion type, select sketch profiles or faces to extrude, then specify the distance and taper \
+       angle. For the Thin Extrude type, specify the wall thickness."
+    );
+    assert_eq!(tip("Revolve").line, "Revolves a sketch profile or planar face around a selected axis.");
+    assert_eq!(tip("Hole").line, "Creates a hole based on user-specified values and selections.");
+    assert_eq!(tip("Measure").line, "Measures the distance, angle, area, or position of selected objects.");
+    assert_eq!(tip("Canvas").more, "Select a face then select an image to import.");
+    // one paragraph only
+    for l in ["Press Pull", "Display Configuration Table"] {
+      assert_eq!(tip(l).paragraphs().count(), 1, "{l}");
+    }
+    // Insert Mesh has two usage paragraphs
+    let mesh: Vec<_> = tip("Insert Mesh").paragraphs().collect();
+    assert_eq!(mesh.len(), 3, "{mesh:?}");
+    assert!(mesh[2].starts_with("For STL or OBJ files, select the unit type"), "{mesh:?}");
+  }
+
+  /// The title carries the shortcut in parentheses; commands without one show the bare name.
+  #[test]
+  fn the_title_carries_the_shortcut() {
+    assert_eq!(title("Extrude", "E"), "Extrude (E)");
+    assert_eq!(title("Revolve", ""), "Revolve");
+  }
+
+  /// Fusion has no illustration for these three: they show the help line at once.
+  #[test]
+  fn which_commands_have_an_illustration() {
+    for l in ["Display Configuration Table", "Offset Plane", "Add To Assembly"] {
+      assert!(!tips::illustrated(Scope::Design, l), "{l}");
+    }
+    for l in ["Create Sketch", "Extrude", "Fillet", "Measure", "Insert Mesh"] {
+      assert!(tips::illustrated(Scope::Design, l), "{l}");
+    }
+    // sketch commands whose text already ends with the help line don't grow either
+    assert!(!tips::illustrated(Scope::Sketch, "Trim"));
+  }
+}

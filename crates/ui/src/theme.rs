@@ -49,6 +49,13 @@ pub const TIMELINE: Color32 = color(app::TIMELINE);
 pub const TRIM_PIECE: Color32 = color(fox_brand::PURPLE.deep);
 /// A menu row's tooltip: Fusion's dark panel with white text.
 pub const TOOLTIP: Color32 = color(fox_brand::neutral::GRAPHITE);
+/// The ribbon tooltip on [`TOOLTIP`]: a white title, light grey paragraphs, a dimmer note.
+pub const TOOLTIP_TITLE: Color32 = color(fox_brand::neutral::WHITE);
+pub const TOOLTIP_TEXT: Color32 = color(fox_brand::neutral::BORDER);
+pub const TOOLTIP_MUTED: Color32 = color(fox_brand::neutral::SILVER);
+/// The expanded ribbon tooltip's illustration and its light grey frame.
+pub const ILLUSTRATION: Color32 = color(fox_brand::neutral::CLOUD);
+pub const ILLUSTRATION_FRAME: Color32 = color(fox_brand::neutral::BORDER);
 /// A curve under the pointer with Extend or Break: Fusion's bold blue.
 pub const MODIFY_HOVER: Color32 = color(fox_brand::BLUE.base);
 /// The piece Extend will add, previewed in Fusion's light red.
