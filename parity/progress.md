@@ -1,52 +1,42 @@
 # Prober progress
 
-## Last stop: 2026-10-21, 22:30, session "Parity prober 7" (seven areas this session)
+## Last stop: 2026-10-22, 09:10, session "Parity prober 8" (two areas)
 
-Finished this session, in order: "Sketch display", "Sketch browser rows, context menus, Edit
-Sketch, Redefine Sketch Plane, Save As DXF" (report
-`parity/reports/2026-10-21-sketch-display-browser-rows.md`, batches `map-wave13.json`); "Tooltips
-on every ribbon button, pin/unpin, customise shortcuts" for the SOLID tab (report
-`2026-10-21-ribbon-tooltips.md`, `map-wave14.json`); "Data Panel" (report
-`2026-10-21-data-panel.md`, `map-wave15.json`); the File menu dialogs (report
-`2026-10-21-file-dialogs.md`, `map-wave16.json`); "Document Settings, units change, Named Views,
-Comments panel" (report `2026-10-21-document-settings-views.md`, `map-wave17.json`). Every batch
-from wave 13 on is `ready` in `index.jsonl` with no fixer yet. "Status bar readouts" is done (report
-`2026-10-21-status-readouts.md`, `map-wave18.json`); "Camera" is done (report `2026-10-21-camera-navbar.md`,
-`map-wave19.json`); "Display settings" is done (report
-`2026-10-21-display-settings.md`, `map-wave20.json`); "Grid and snaps" is done (report `2026-10-21-grid-snaps.md`,
-`map-wave21.json`). Earlier: chrome, toolbar, ViewCube and
-navigation bar, marking menus, browser and timeline menus, Preferences, the basic sketch flow, the
-first-pass feature dialogs, face/edge/body colours, every sketch CREATE and MODIFY tool, the
-selection remainder, every constraint, the palette, the heads-up input (reports in
-`parity/reports/`).
+Finished this session: "Origin planes/axes visibility, construction geometry display, sketch
+visibility" (report `parity/reports/2026-10-22-origin-construction.md`, `map-wave22.json`, batches
+`ui-origin-display` and `ui-construction-display`) and "Create: New Component, Revolve, Sweep,
+Loft, ..." (report `parity/reports/2026-10-22-solid-create.md`, `map-wave23.json`, batches
+`ui-primitive-dialogs`, `ui-sweep-loft-revolve`, `ui-rib-emboss-thread`,
+`ui-pattern-mirror-misc`). All six are `ready` in `index.jsonl` with no fixer yet. Earlier probers
+covered the chrome, canvas, sketch areas and the first-pass feature dialogs (reports in
+`parity/reports/`); waves 13 to 21 have fixers.
 
 ## Next prober: start here
 
-1. Next `todo` in `coverage.md`, from the top: "Data Panel: projects, folders, upload, versions,
-   search, Recent/Activity/Trash" (chrome section), then "Save, Save As, Open, Open Recent, Export,
-   New Drawing, Insert into Design, Capture Image, 3D Print dialogs". Mark the area `in progress`,
-   commit, probe. Fusion's Data Panel needs the cloud (Personal licence: record `blocked` where it
-   refuses).
-2. Re-verify in the app any key marked `fixing-merged` once fixers have pushed
-   (`parity/batches/index.jsonl`). Still not re-checked: `ui:sketch:horizontal-conflict`,
-   `ui:sketch:dimension-label-and-hover` (hover part), `ui:toolbar:responsive-collapse` (narrow
-   FissionOxide to 920 px and count the icons), the remaining `ui-sketch-hud-prompts` keys
-   (`create-tool-cursor-prompts`, `spline-accept-check`, `conic-rho-box`, `tangent-arc-snap-marker`)
-   and the `ui-vertex-and-construction` canvas keys (`hover-vertex`, `vertex-filter-default`,
-   `vertex-marker-style`, `construction-plane-colors`, `construction-axis-colors`).
-3. Rebuild before probing: the running binary is `main` at `42dec181`; commits after it are not
-   in it. Kill `fissionoxide.exe` first (the link step fails while it runs).
+1. Next `todo` in `coverage.md`, from the top: "Modify: Draft, Scale, Combine, Offset Face,
+   Replace Face, Split Face, Split Body, Silhouette Split, Align, Delete, Remove, Simplify, Physical
+   Material, Appearance, Manage Materials, Change Parameters, Compute All, Direct Edit" (Design
+   workspace: solid). Mark it `in progress`, commit, probe. Expect the same pattern as CREATE:
+   Fusion dialogs open with selection chips and add rows after the picks (see the solid-create
+   report's "How Fusion's Create dialogs behave").
+2. Re-verify in the app the keys marked `fixing-merged` that belong to your area (141 rows carry
+   that status; most are sketch keys from fixed batches). Still not re-checked from the last list:
+   `ui:sketch:horizontal-conflict`, `ui:sketch:dimension-label-and-hover` (hover part),
+   `ui:sketch:tangent-arc-snap-marker`, `ui:toolbar:responsive-collapse` (narrow FissionOxide to
+   920 px and count the icons), `ui:canvas:vertex-marker-style` (in Fusion the pointer landed on a
+   construction plane; hide Plane1 first).
+3. Rebuild before probing: the running binary is `main` at `0c453dd1`; commits after it are not in
+   it. Kill `fissionoxide.exe` first (the link step fails while it runs); the build takes about
+   3 minutes.
 
-Where the documents stand: Fusion is in the earlier probers' document, 3D view (home orbit), Body1,
-Sketch1 (consumed, hidden), Sketch2, Sketch3 (dimensions shown), Sketch4; its CREATE panel now
-shows Create Sketch, Revolve, Hole, Rectangular Pattern, Create Form (Extrude was unpinned and
-re-pinned but has not come back into the visible slots at 907 px; widen the window or unpin Create
-Form to check). Window restored at screenshot x 0..907, y 82..733, palette floating. FissionOxide
-(process started 20:56, build `42dec181`) is in a NEW document: Sketch1 (rectangle) extruded 10 mm
-into Body1, Sketch2 on XY with the body projected (black) and a fully constrained 20 x 15 mm
-rectangle on the origin with its dimensions shown in 3D; Extrude unpinned and pinned back (in
-place); window at screenshot x 8..1010, y 63..769, Data Panel closed. Both apps are left of the
-overlay; no window needs moving.
+Where the documents stand: Fusion has two tabs. "Untitled*" is the earlier probers' design;
+"Untitled(1)*" (active) is this session's: Origin hidden (expanded in the browser), Plane1
+(offset 1 in from XZ), Sketch1 (a rectangle on XY), Bodies from Box, Cylinder, Sphere, Torus and
+Coil, and an empty base feature at the end of the timeline. Window restored at screenshot x
+0..907, y 82..733. FissionOxide (built `0c453dd1`) is in a new design: Origin on, Plane1 (25 mm
+over XY), Body1 (20 mm box at the origin), Body2 (cylinder at X 45), Sketch1 (empty, on Plane1),
+Sketch2 (a rectangle on XZ), Sketch3 (empty, on XY). Window at screenshot x 8..1011, y 82..785,
+Data Panel closed. Both apps are left of the overlay.
 
 ## Traps
 - Fusion's ribbon tooltip needs the pointer to rest on the icon from a cold start: move onto the
@@ -93,3 +83,16 @@ overlay; no window needs moving.
   (`git worktree add <scratchpad>/wt origin/main`, cherry-pick, push, remove). A rebase conflict
   in `ui-features.jsonl` is almost always both sides appending rows: keep both, drop the markers,
   check for duplicate keys.
+- Screenshots taken with `scale` < 1 still use the full 1456 x 819 frame for clicks; divide the
+  scaled image's pixels by the scale. `zoom` output is too small to read dash patterns; a
+  native-resolution crop (`CopyFromScreen` of the region, upscaled 4x with nearest-neighbour) reads
+  them, and is only a capture, not input.
+- A fresh FissionOxide window opened at x 145..1228 this time, with the Data Panel open: drag the
+  title bar left, then drag the right edge at y 700 (below the overlay) to x 1012. The Data
+  Panel's x at its top-right closes it; the grid button at (45,118) opened INSPECT instead once.
+- Fusion's primitives (Box, Cylinder, Sphere, Torus, Coil) open no dialog until a plane is picked
+  and the base drawn; Create Sketch's chooser picks infinite planes, so any canvas click picks one.
+- FissionOxide's CREATE menu sometimes ignores the first click on an entry (Coil): click again.
+  Its sketch palette grows when a tool's Feature Options show, which moves the Finish Sketch
+  button down; use the ribbon's FINISH SKETCH.
+- Escape cancels Fusion's Create dialogs (when no dropdown is open) and FissionOxide's.

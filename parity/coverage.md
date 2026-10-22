@@ -21,7 +21,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [done (2026-10-21)] Marking menus on empty canvas, face, edge; todo: body, vertex, sketch point, construction geometry, timeline feature, in-sketch
 - [done (2026-10-21); not exercised: the look of each visual style and environment, each effect toggled, object visibility toggles, the ground plane offset value] Display settings: every visual style, environment, effects, object visibility, ground plane, full screen
 - [done (2026-10-21); not exercised: Snap to Grid while sketching, lock while zooming, Fixed fields, Incremental Move during a drag] Grid and snaps: layout grid in 3D and sketch, lock, snap, grid settings, incremental move
-- [in progress (2026-10-22, prober 8)] Origin planes/axes visibility, construction geometry display, sketch visibility
+- [done (2026-10-22); not exercised: construction axes and points, Origin Plane Names, sketch row eyes beyond the Sketches folder] Origin planes/axes visibility, construction geometry display, sketch visibility
 
 ## Design workspace: sketch
 - [done (2026-10-21)] Create Sketch flow, rectangle, circle, line, trim, offset, polygon, dimension edit, Horizontal
@@ -35,7 +35,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 
 ## Design workspace: solid
 - [done (2026-10-21)] Extrude, Fillet, Chamfer, Shell, Press Pull, Move, Hole dialogs (first pass)
-- [in progress (2026-10-22, prober 8)] Create: New Component, Revolve, Sweep, Loft, Rib, Web, Emboss, Thread, Box/Cylinder/Sphere/Torus/Coil/Pipe, patterns, Mirror, Thicken, Boundary Fill, Base Feature, Joint Origin
+- [done (2026-10-22); dialogs as they open (and Box, Cylinder, Sphere, Torus, Coil, Pipe, Revolve, Thread, Mirror, Circular Pattern after their picks); not exercised: the post-pick rows of Sweep, Loft, Rib, Web, Emboss, Thicken, Boundary Fill, Joint Origin, Pattern on Path, each result's timeline icon, undo name and right-click menu, Create Form, Derive, Create PCB; New Component lives under ASSEMBLE] Create: New Component, Revolve, Sweep, Loft, Rib, Web, Emboss, Thread, Box/Cylinder/Sphere/Torus/Coil/Pipe, patterns, Mirror, Thicken, Boundary Fill, Base Feature, Joint Origin
 - [todo] Modify: Draft, Scale, Combine, Offset Face, Replace Face, Split Face, Split Body, Silhouette Split, Align, Delete, Remove, Simplify, Physical Material, Appearance, Manage Materials, Change Parameters, Compute All, Direct Edit
 - [todo] Manipulators for every feature: arrows, rings, floating value boxes, drag behaviour, snapping
 - [todo] Edit Feature for every feature; feature errors and warnings in the timeline

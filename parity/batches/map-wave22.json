@@ -1,0 +1,13 @@
+{
+  "ui:canvas:origin-planes-size": "ui-origin-display",
+  "ui:canvas:origin-draw-order": "ui-origin-display",
+  "ui:canvas:origin-axis-style": "ui-origin-display",
+  "ui:canvas:origin-in-sketch": "ui-origin-display",
+  "ui:browser:origin-row-hover-canvas": "ui-origin-display",
+  "ui:canvas:create-sketch-plane-grid-preview": "ui-origin-display",
+  "ui:canvas:construction-plane-display": "ui-construction-display",
+  "ui:browser:construction-folder-eyes": "ui-construction-display",
+  "ui:canvas:visibility-v-key": "ui-construction-display",
+  "ui:browser:construction-plane-menu": "ui-construction-display",
+  "ui:construct:construction-geometry-dialog": "ui-construction-display"
+}
