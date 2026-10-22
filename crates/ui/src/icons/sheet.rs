@@ -303,6 +303,10 @@ const ALL: &[Icon] = &[
   Icon::EmbossRaise,
   Icon::EmbossSink,
   Icon::ThreadsLibrary,
+  Icon::PathPattern,
+  Icon::OriginSimple,
+  Icon::OriginBetween,
+  Icon::OriginTwoEdge,
 ];
 
 fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

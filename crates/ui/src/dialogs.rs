@@ -23,6 +23,7 @@ mod move_copy;
 mod pieces;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
+mod copies;
 mod export_dxf;
 mod newcomp;
 mod primitive;
@@ -592,6 +593,14 @@ pub struct Dialog {
   redefine: redefine::State,
   /// Export DXF's unit and Visible Geometry check boxes (see [`export_dxf`]).
   dxf: export_dxf::Options,
+  /// The patterns' Type row picked another pattern: the dialog becomes that one next frame
+  /// (see [`copies`]).
+  switch: Option<Kind>,
+  /// Bodies the previewed Mirror or pattern added: drawn as ghosts until OK (see [`copies`]).
+  ghosts: Vec<BodyId>,
+  /// Mirror's plane or Circular Pattern's axis as last picked from the selection: only a new
+  /// pick replaces the one in the dialog (see [`copies`]).
+  last_pick: Value,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -718,6 +727,9 @@ impl Dialog {
       place: primitive::Step::Done,
       redefine: redefine::State::default(),
       dxf: export_dxf::Options::default(),
+      switch: None,
+      ghosts: Vec::new(),
+      last_pick: Value::Null,
     }
   }
 
@@ -815,8 +827,13 @@ impl Dialog {
       Kind::Mirror => {
         d.join = false;
         d.choice = "bodies";
+        // Fusion: Objects take picked bodies, and the Mirror Plane starts empty (Select)
+        d.bodies = sel_only_bodies(s);
+        d.plane = Value::Null;
+        d.plane_label = String::new();
       }
-      Kind::RectPattern | Kind::CircPattern => d.join = false,
+      Kind::RectPattern => d.join = false,
+      Kind::CircPattern => d.circ_defaults(s),
       Kind::Combine => d.op = "join",
       // Move turns by nothing until asked (the blank dialog's angle is a full turn)
       Kind::Move => {
@@ -1617,13 +1634,7 @@ impl Dialog {
       }
       Kind::Mirror => ("mirror", json!({"plane": self.plane, "bodies": self.bodies, "join": self.join})),
       Kind::RectPattern => ("pattern.rectangular", self.pattern_params()?),
-      Kind::CircPattern => (
-        "pattern.circular",
-        json!({
-          "bodies": self.bodies, "axis": self.axis, "count": self.count, "angle": self.angle,
-          "symmetric": self.symmetric[0], "join": self.join,
-        }),
-      ),
+      Kind::CircPattern => ("pattern.circular", self.circ_params()?),
       Kind::Combine => {
         let (target, tools) = self.bodies.split_first()?;
         ("combine", json!({"target": target, "tools": tools, "operation": op, "keep_tools": self.keep_tools}))
@@ -1724,7 +1735,9 @@ impl Dialog {
       return;
     }
     self.live_applying(s, cmd, &params);
+    let before: Vec<BodyId> = s.model.bodies.iter().map(|b| b.id).collect();
     let result = s.execute(cmd, &params);
+    self.note_copies(s, &before, result.is_ok());
     if let Some(t) = self.trace.as_mut() {
       t.result = result.as_ref().ok().cloned();
     }
@@ -1766,7 +1779,9 @@ impl Dialog {
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty() || !self.bodies.is_empty(),
       Kind::Combine => self.bodies.len() >= 2,
-      Kind::Mirror if self.choice == "features" => !self.mirror_features.is_empty(),
+      Kind::Mirror if self.choice == "features" => !self.mirror_features.is_empty() && !self.plane.is_null(),
+      Kind::Mirror => !self.bodies.is_empty() && !self.plane.is_null(),
+      Kind::CircPattern => !self.bodies.is_empty() && self.circ_axis().is_some(),
       Kind::Move => self.move_ready(),
       Kind::Loft => self.sections.len() >= 2,
       Kind::Sweep => self.sketch.is_some() && self.path.is_some(),
@@ -2111,6 +2126,8 @@ impl Dialog {
       }
       Kind::Move => self.sync_move(s),
       Kind::RectPattern => self.pattern_sync(s),
+      Kind::Mirror if self.editing.is_none() => self.mirror_sync(s),
+      Kind::CircPattern if self.editing.is_none() => self.circ_sync(s),
       Kind::Combine | Kind::Mirror | Kind::CircPattern if !self.applied || !self.picks() => {
         let mut b: Vec<u32> = Vec::new();
         for x in &s.selection {
@@ -2134,6 +2151,12 @@ impl Dialog {
   /// Draws the dialog. Returns false when it closed.
   pub fn show(&mut self, app: &mut App, ctx: &egui::Context) -> bool {
     self.sync_selection(&app.s);
+    // an origin plane or axis picked in the browser: Mirror's plane, Circular Pattern's axis
+    if let Some(item) = crate::origin::picked(app)
+      && self.take_origin(item)
+    {
+      crate::origin::clear(app);
+    }
     self.hole_sync(app);
     self.redefine_sync(app);
     if self.kind == Kind::PickPlane
@@ -2256,6 +2279,10 @@ impl Dialog {
     // typing no value box took (a dialog without one) is dropped
     ctx.data_mut(|d| d.remove::<String>(egui::Id::new(TYPING)));
     self.live_check();
+    if let Some(k) = self.switch.take() {
+      self.switch_pattern(app, k);
+      return true;
+    }
     if self.dirty {
       self.preview(&mut app.s);
     }
@@ -2355,6 +2382,15 @@ impl Dialog {
         Kind::Sweep if self.sketch.is_none() => "Select sketch profiles or planar faces to sweep".into(),
         Kind::Sweep => "Select path".into(),
         Kind::Combine if self.bodies.is_empty() => "Select target body".into(),
+        Kind::Mirror if self.choice == "features" && self.mirror_features.is_empty() => {
+          "Select features to mirror".into()
+        }
+        Kind::Mirror if self.choice != "features" && self.bodies.is_empty() => "Select bodies to mirror".into(),
+        Kind::Mirror => "Select mirror plane".into(),
+        Kind::CircPattern if self.bodies.is_empty() => {
+          "Select solid or surface bodies in the canvas or browser to pattern".into()
+        }
+        Kind::CircPattern => "Select axis".into(),
         Kind::Combine => "Select tool bodies".into(),
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
         Kind::Draft => "Select faces to draft".into(),
@@ -2372,6 +2408,10 @@ impl Dialog {
     // Offset's prompt names its values whatever the pointer is over, as Fusion's does
     if self.kind == Kind::SkOffset {
       return Some("Modify offset distance or side settings".into());
+    }
+    // Mirror's prompt once both picks are in, whatever the pointer is over, as Fusion words it
+    if self.kind == Kind::Mirror && self.editing.is_none() {
+      return Some("Hold Ctrl to modify object selection or mirror plane".into());
     }
     if hovering && self.selects() {
       return Some("Hold Ctrl to modify selection".into());
@@ -2583,6 +2623,8 @@ impl Dialog {
       Kind::Chamfer => self.chamfer_rows(app, ui, creating),
       Kind::Shell => self.shell_rows(ui, creating),
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => self.primitive_rows(ui, creating),
+      Kind::Mirror if creating => self.mirror_rows(app, ui),
+      Kind::CircPattern if creating => self.circ_rows(ui),
       Kind::OffsetPlane | Kind::Mirror => {
         ui.label("Plane");
         if creating {
@@ -2654,7 +2696,12 @@ impl Dialog {
           }
         }
       }
-      Kind::RectPattern => self.pattern_fields(app, ui),
+      Kind::RectPattern => {
+        if creating {
+          self.pattern_type_row(ui);
+        }
+        self.pattern_fields(app, ui)
+      }
       Kind::CircPattern => {
         ui.label("Bodies");
         sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
@@ -2711,6 +2758,7 @@ impl Dialog {
       Kind::Form(f) => {
         let mut dirty = false;
         self.form_fields(f, app, ui, &mut dirty);
+        self.path_type_switch(f);
         if dirty && (!self.picks() || self.applied) {
           self.dirty = true;
         }
@@ -2922,9 +2970,18 @@ impl Dialog {
           ui.label(*label);
           let cur = v.as_str().unwrap_or("");
           let mut sel: &'static str = options.iter().find(|(k, _, _)| *k == cur).map(|(k, _, _)| *k).unwrap_or("");
-          let choices: Vec<icon_row::Choice> =
-            options.iter().map(|(k, icon, name)| icon_row::choice(k, *icon, name)).collect();
-          if icon_row::icon_row(ui, &mut sel, &choices, "") {
+          let mut why = "";
+          let choices: Vec<icon_row::Choice> = options
+            .iter()
+            .map(|(k, icon, name)| match crate::forms::greyed_option(f, key, k) {
+              Some(w) => {
+                why = w;
+                icon_row::greyed(k, *icon, name)
+              }
+              None => icon_row::choice(k, *icon, name),
+            })
+            .collect();
+          if icon_row::icon_row(ui, &mut sel, &choices, why) {
             *dirty = true;
           }
           if *key == "filter" {
@@ -4618,7 +4675,8 @@ impl Dialog {
   }
 
   fn bodies_label(&self) -> String {
-    if self.bodies.is_empty() { "all bodies".into() } else { format!("{} selected", self.bodies.len()) }
+    // nothing picked is nothing to copy, as in Fusion (no "all bodies" default)
+    if self.bodies.is_empty() { "Select".into() } else { format!("{} selected", self.bodies.len()) }
   }
 
   fn sketch_lines(&self, app: &App) -> Vec<(u32, String)> {

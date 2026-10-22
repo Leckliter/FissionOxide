@@ -233,6 +233,8 @@ impl State {
         Input::Check { .. } | Input::Flip { .. } => json!(false),
         Input::CheckOn { .. } => json!(true),
         Input::Choice { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
+        // (Pattern on Path is the pattern dialog's last Type)
+        Input::Icons { key: "pattern_type", .. } => json!("path"),
         Input::Icons { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         Input::Vec3 { default, .. } => json!(default),
         Input::Faces { .. }
@@ -552,6 +554,14 @@ impl State {
       "thread" if matches!(key, "length" | "offset" | "flip") => {
         get("full_length").and_then(Value::as_bool) == Some(false)
       }
+      // Pattern on Path: Type, Object Type, Objects and Path until both are picked
+      "pattern.path" => {
+        let picked = |k: &str| get(k).and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+        matches!(key, "pattern_type" | "object_type" | "bodies" | "path_curves" | "path")
+          || picked("bodies") && picked("path_curves")
+      }
+      // Joint Origin: Origin Mode and Snap until the snap is picked, as in Fusion
+      "joint_origin" => matches!(key, "mode" | "face") || get("face").is_some_and(|v| !v.is_null()),
       "drawing.feature_control" if key.starts_with("lower_") => {
         get("composite").and_then(Value::as_bool).unwrap_or(false)
       }
@@ -587,6 +597,9 @@ impl State {
       "rib" | "web" => key == "sketch",
       "emboss" => matches!(key, "sketch" | "wrap"),
       "boundary_fill" => key == "planes",
+      // (Fusion names joint origins itself; the browser renames them)
+      "joint_origin" => key == "name",
+      "pattern.path" => matches!(key, "path" | "start" | "join"),
       _ => false,
     }
   }
@@ -750,6 +763,17 @@ impl State {
         } else {
           "Place first corner of text frame"
         });
+      }
+    }
+    // Pattern on Path: the path is picked, not every curve of a sketch
+    if form.cmd == "pattern.path" {
+      let at = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
+      let empty = |k: &str| at(k).and_then(Value::as_array).is_none_or(Vec::is_empty);
+      if empty("bodies") {
+        return Some("Objects");
+      }
+      if empty("path_curves") {
+        return Some("Path");
       }
     }
     for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
@@ -2842,6 +2866,13 @@ pub static FORM_BOX: Form = Form {
   picks_model: false,
 };
 
+/// The solid patterns' Type row (the pattern dialog switches kind on it; see `dialogs::copies`).
+const PATTERN_TYPES: &[(&str, Icon, &str)] = &[
+  ("rectangular", Icon::Pattern, "Rectangular Pattern"),
+  ("circular", Icon::CircPattern, "Circular Pattern"),
+  ("path", Icon::PathPattern, "Pattern on Path"),
+];
+
 pub static PATH_PATTERN: Form = Form {
   title: "PATTERN ON PATH",
   name: "Pattern on Path",
@@ -2849,25 +2880,30 @@ pub static PATH_PATTERN: Form = Form {
   icon: Icon::Pattern,
   cmd: "pattern.path",
   fixed: &[],
+  // Fusion: the pattern dialog with Type on path: Type, Object Type, Objects and Path, then
+  // Distribution, Quantity, Distance and Orientation once both are picked (the path's sketch,
+  // start point and join are passed but not rows; see `State::hidden`)
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies", required: true },
+    Input::Icons { key: "pattern_type", label: "Type", options: PATTERN_TYPES },
+    Input::Choice { key: "object_type", label: "Object Type", options: &[("bodies", "Bodies")] },
+    Input::Bodies { key: "bodies", label: "Objects", required: true },
+    Input::Curves { key: "path_curves", label: "Path" },
     Input::Sketch { key: "path", label: "Path sketch" },
-    Input::Curves { key: "path_curves", label: "Path curves (default all)" },
-    Input::Expr { key: "count", label: "Quantity", default: "3" },
     Input::Choice {
       key: "distance_type",
-      label: "Distance type",
-      options: &[("spacing", "Spacing"), ("extent", "Extent")],
+      label: "Distribution",
+      options: &[("extent", "Extent"), ("spacing", "Spacing")],
     },
+    Input::Expr { key: "count", label: "Quantity", default: "3" },
     Input::Expr { key: "distance", label: "Distance", default: "10 mm" },
-    Input::Expr { key: "start", label: "Start point (0 to 1)", default: "0" },
-    Input::Check { key: "flip", label: "Flip" },
-    Input::Check { key: "symmetric", label: "Symmetric" },
     Input::Choice {
       key: "orientation",
       label: "Orientation",
-      options: &[("identical", "Identical"), ("along_path", "Path direction")],
+      options: &[("identical", "Identical"), ("along_path", "Path Direction")],
     },
+    Input::Check { key: "flip", label: "Flip" },
+    Input::Check { key: "symmetric", label: "Symmetric" },
+    Input::Expr { key: "start", label: "Start point (0 to 1)", default: "0" },
     Input::Check { key: "join", label: "Join to the original" },
   ],
   picks_model: true,
@@ -2968,6 +3004,17 @@ pub static SK_ISOPARAMETRIC: Form = Form {
   ],
   picks_model: true,
 };
+
+/// Why one option of a form's icon row is drawn greyed (not pickable): what FissionOxide can't
+/// do yet.
+pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static str> {
+  match (form.cmd, key, option) {
+    ("joint_origin", "mode", "between" | "two_edge") => {
+      Some("Only the Simple mode is in FissionOxide yet: a joint origin sits on one picked face")
+    }
+    _ => None,
+  }
+}
 
 /// Why a form's input is drawn greyed: what FissionOxide can't act on yet, or always does.
 /// The command's parameters from the values of Fusion's rows: Rib's Thickness Direction and

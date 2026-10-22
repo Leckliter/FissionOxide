@@ -152,7 +152,7 @@ const SOLID_CREATE: &[E] = &[
   c("Thicken", Icon::Thicken, D(Kind::Form(&forms::THICKEN))),
   c("Boundary Fill", Icon::BoundaryFill, D(Kind::Form(&forms::BOUNDARY_FILL))),
   E::Sep,
-  c("Create Base Feature", Icon::BaseFeature, D(Kind::Form(&config_ui::BASE_START))),
+  c("Create Base Feature", Icon::BaseFeature, Cmd::BaseFeature(true)),
   E::Sub("Create PCB", CREATE_PCB),
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
@@ -197,8 +197,8 @@ const DIRECT_EDIT: &[E] = &[
   c("Press Pull", Icon::PressPull, D(Kind::Form(&config_ui::DIRECT_PRESS_PULL))),
   c("Delete Face", Icon::RemoveBody, D(Kind::Form(&config_ui::DIRECT_DELETE_FACE))),
   E::Sep,
-  c("Create Base Feature", Icon::Box, D(Kind::Form(&config_ui::BASE_START))),
-  c("Finish Base Feature", Icon::Box, D(Kind::Form(&config_ui::BASE_FINISH))),
+  c("Create Base Feature", Icon::Box, Cmd::BaseFeature(true)),
+  c("Finish Base Feature", Icon::Box, Cmd::BaseFeature(false)),
   c("Capture Design History", Icon::Box, Cmd::CaptureHistory),
 ];
 
@@ -1085,6 +1085,12 @@ const FORM_UTILITIES: &[E] = &[
 
 const FORM_FINISH: &[E] = &[c("Finish Form", Icon::Finish, Cmd::Form(FormAct::Finish))];
 
+const BASE_FINISH: &[E] = &[c("Finish Base Feature", Icon::Finish, Cmd::BaseFeature(false))];
+
+/// The green group closing the BASE FEATURE SOLID / SURFACE tabs while a base feature is open.
+const BASE_FEATURE_FINISH: Group =
+  Group { label: "FINISH BASE FEATURE", quick: &["Finish Base Feature"], menu: BASE_FINISH };
+
 /// The Form workspace's contextual tab.
 const FORM: [Group; 5] = [
   Group {
@@ -1294,7 +1300,10 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bo
   let (own, shared) = groups(tab);
   let mut pick: Option<Item> = None;
   let mut act: Option<Action> = None;
-  let all: Vec<&Group> = own.iter().chain(shared.iter()).collect();
+  let mut all: Vec<&Group> = own.iter().chain(shared.iter()).collect();
+  if app.base_mode && matches!(tab, Tab::Solid | Tab::Surface) {
+    all.push(&BASE_FEATURE_FINISH);
+  }
   let items: Vec<Vec<Item>> = all.iter().map(|g| quick_items(&app.prefs, tab, g)).collect();
   let font = egui::FontId::proportional(12.0);
   let panels: Vec<PanelSize> = all
@@ -1433,7 +1442,7 @@ fn show_group(
   let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
   // FINISH SKETCH sits on light blue, like the contextual SKETCH tab
   let bg = ui.painter().add(egui::Shape::Noop);
-  let finish = matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING");
+  let finish = matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING" | "FINISH BASE FEATURE");
   let inner = ui.vertical(|ui| {
     ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
     ui.add_space(2.0);
@@ -1467,8 +1476,9 @@ fn show_group(
     toggles(g.menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
   egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, &at, g.menu, pick, act, &on));
   if finish {
-    ui.painter()
-      .set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
+    // FINISH BASE FEATURE is Fusion's green
+    let fill = if g.label == "FINISH BASE FEATURE" { theme::BASE_FEATURE } else { theme::CONTEXT_TAB };
+    ui.painter().set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, fill));
   }
   panels::separator(ui);
 }
@@ -1791,7 +1801,7 @@ mod tests {
       (Tab::Solid, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
       (Tab::Surface, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
       (Tab::SheetMetal, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
-      (Tab::Solid, "CREATE", "Create Base Feature", D(Kind::Form(&config_ui::BASE_START))),
+      (Tab::Solid, "CREATE", "Create Base Feature", Cmd::BaseFeature(true)),
       (Tab::Solid, "SELECT", "Construction Geometry", Cmd::Filter("construction")),
     ];
     for (tab, group, label, cmd) in wired {

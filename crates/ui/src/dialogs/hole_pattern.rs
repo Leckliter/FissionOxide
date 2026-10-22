@@ -577,11 +577,18 @@ impl Dialog {
 
   pub(super) fn pattern_ready(&self) -> bool {
     let dirs_ok = (0..2).all(|k| !self.edge_mode(k) || self.solid.hp.edges[k].is_some());
-    dirs_ok && (self.pattern_kind() != "components" || !self.solid.hp.comps.is_empty())
+    // bodies: nothing picked is nothing to pattern (Fusion has no "all bodies" default)
+    let objects = match self.pattern_kind() {
+      "components" => !self.solid.hp.comps.is_empty(),
+      _ => !self.bodies.is_empty(),
+    };
+    dirs_ok && objects
   }
 
   pub(super) fn pattern_missing(&self) -> &'static str {
-    if (0..2).any(|k| self.edge_mode(k) && self.solid.hp.edges[k].is_none()) {
+    if self.pattern_kind() != "components" && self.bodies.is_empty() {
+      "select solid or surface bodies in the canvas or browser to pattern"
+    } else if (0..2).any(|k| self.edge_mode(k) && self.solid.hp.edges[k].is_none()) {
       "select a straight edge for the direction"
     } else {
       "select bodies of the components to pattern"

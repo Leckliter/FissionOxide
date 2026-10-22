@@ -1045,6 +1045,33 @@ fn finish_sketch_takes_a_click_beside_its_icon() {
   assert!(h.app.s.edit_sketch.is_none(), "the click beside the icon finishes the sketch");
 }
 
+/// Create Base Feature is a mode, as in Fusion: no dialog; the ribbon shows BASE FEATURE SOLID /
+/// BASE FEATURE SURFACE with a FINISH BASE FEATURE panel, and the base feature joins the
+/// timeline. Finish brings the SOLID tab back.
+#[test]
+fn create_base_feature_switches_the_ribbon() {
+  let mut h = Harness::new();
+  crate::panels::Cmd::BaseFeature(true).run(&mut h.app);
+  assert!(h.app.dialog.is_none(), "no dialog");
+  assert!(h.app.base_mode);
+  let has_base = |h: &Harness| {
+    h.app.s.design.features.iter().any(|f| matches!(f.kind, fox_engine::model::FeatureKind::BaseFeature { .. }))
+  };
+  assert!(has_base(&h), "a base feature in the timeline");
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  let tabs: Vec<&str> = all.iter().filter(|(r, _)| r.top() < 60.0).map(|(_, t)| t.as_str()).collect();
+  assert!(tabs.contains(&"BASE FEATURE SOLID") && tabs.contains(&"BASE FEATURE SURFACE"), "{tabs:?}");
+  assert!(!tabs.contains(&"MESH") && !tabs.contains(&"SOLID"), "{tabs:?}");
+  let label = panel_label(&all, "FINISH BASE FEATURE").expect("the FINISH BASE FEATURE panel");
+  h.move_then_click(Pos2::new(label.center().x, label.top() - 20.0));
+  assert!(!h.app.base_mode, "Finish leaves the mode");
+  assert_eq!(h.app.tab, crate::panels::Tab::Solid);
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  assert!(all.iter().any(|(r, t)| t == "SOLID" && r.top() < 60.0), "the SOLID tab is back");
+  assert!(panel_label(&all, "FINISH BASE FEATURE").is_none());
+  assert!(has_base(&h), "the base feature stays in the timeline");
+}
+
 /// The DESIGN switcher lists Fusion's workspaces in upper case, with submenus for the
 /// documents DRAWING and ELECTRONICS create, and says "Change Workspace" on hover.
 #[test]

@@ -365,6 +365,12 @@ pub enum Icon {
   EmbossSink,
   /// Thread's Threads Library: the cloud of custom thread definitions.
   ThreadsLibrary,
+  // the solid patterns' Type row (rectangular and circular use `Pattern` / `CircPattern`)
+  PathPattern,
+  // Joint Origin's Origin Mode row
+  OriginSimple,
+  OriginBetween,
+  OriginTwoEdge,
 }
 
 #[derive(Clone, Copy)]
@@ -2628,6 +2634,35 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.6, 0.46), 0.22, Some(BlueLight), Some(Blue));
       k.solid(&[(0.2, 0.6), (0.82, 0.6), (0.82, 0.74), (0.2, 0.74)], BlueLight);
       k.line((0.2, 0.74), (0.82, 0.74), Blue);
+    }
+    Icon::PathPattern => {
+      // copies along a curve
+      k.sk(&[(0.08, 0.82), (0.3, 0.5), (0.5, 0.42), (0.7, 0.5), (0.92, 0.2)], Slate);
+      for (i, (x, y)) in [(0.12, 0.72), (0.46, 0.36), (0.8, 0.28)].into_iter().enumerate() {
+        k.solid(
+          &[(x - 0.1, y - 0.1), (x + 0.1, y - 0.1), (x + 0.1, y + 0.1), (x - 0.1, y + 0.1)],
+          if i == 0 { BlueDark } else { Blue },
+        );
+      }
+    }
+    Icon::OriginSimple => {
+      // an origin snapped on a face
+      k.solid(&[(0.08, 0.62), (0.56, 0.4), (0.92, 0.6), (0.44, 0.84)], BlueLight);
+      k.thick((0.5, 0.62), (0.5, 0.12), Blue, 1.3);
+      k.circle((0.5, 0.62), 0.07, Some(Blue), None);
+    }
+    Icon::OriginBetween => {
+      // midway between two faces
+      k.solid(&[(0.08, 0.3), (0.56, 0.12), (0.92, 0.28), (0.44, 0.46)], BlueLight);
+      k.solid(&[(0.08, 0.72), (0.56, 0.54), (0.92, 0.7), (0.44, 0.88)], BlueLight);
+      k.dashed((0.5, 0.3), (0.5, 0.7), Ink);
+      k.circle((0.5, 0.5), 0.07, Some(Blue), None);
+    }
+    Icon::OriginTwoEdge => {
+      // where two edges cross
+      k.thick((0.12, 0.2), (0.88, 0.8), Ink, 1.2);
+      k.thick((0.12, 0.8), (0.88, 0.2), Ink, 1.2);
+      k.circle((0.5, 0.5), 0.08, Some(Blue), None);
     }
   }
 }

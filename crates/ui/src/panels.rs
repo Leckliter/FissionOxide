@@ -467,6 +467,8 @@ pub(crate) enum Cmd {
   /// SELECT > Selection Tools: Select By Name, Select By Boundary, Select By Size, Seed And
   /// Boundary (each opens a small dialog).
   SelTool(crate::select::SelTool),
+  /// Create Base Feature (true), a mode rather than a dialog, and Finish Base Feature (false).
+  BaseFeature(bool),
 }
 
 impl Cmd {
@@ -684,6 +686,14 @@ impl Cmd {
         };
         (Icon::Select, t.name(), hint)
       }
+      Cmd::BaseFeature(true) => (
+        Icon::BaseFeature,
+        "Create Base Feature",
+        "Start a base feature: direct edits collect in it until you finish it",
+      ),
+      Cmd::BaseFeature(false) => {
+        (Icon::Finish, "Finish Base Feature", "Finish editing the base feature and go back to the parametric tabs")
+      }
     }
   }
 
@@ -817,6 +827,7 @@ impl Cmd {
       Cmd::Render(r) => r.run(app),
       Cmd::CutCheck => crate::service_ui::open(app),
       Cmd::SelTool(t) => crate::select::open_tool(app, t),
+      Cmd::BaseFeature(start) => crate::config_ui::base_mode(app, start),
     }
   }
 }
@@ -870,6 +881,7 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
   if !app.form.active && app.tab == Tab::Form {
     app.tab = Tab::Solid;
   }
+  crate::config_ui::check_base_mode(app);
   egui::Panel::top("toolbar")
     .exact_size(96.0)
     .frame(egui::Frame::NONE.fill(theme::TOOLBAR).inner_margin(egui::Margin { left: 6, right: 6, top: 0, bottom: 0 }))
@@ -1178,6 +1190,13 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     if app.form.active {
       tabs.push(Tab::Form);
     }
+    if app.base_mode {
+      // Fusion: BASE FEATURE SOLID and BASE FEATURE SURFACE replace the modelling tabs
+      tabs.retain(|t| matches!(t, Tab::Solid | Tab::Surface | Tab::Sketch));
+      if !matches!(app.tab, Tab::Solid | Tab::Surface | Tab::Sketch) {
+        app.tab = Tab::Solid;
+      }
+    }
     for t in tabs {
       let font = egui::FontId::proportional(12.5);
       let active = app.tab == t;
@@ -1186,6 +1205,7 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       let color = if active { theme::TAB_ACTIVE } else { Color32::from_gray(45) };
       let label = match t {
         Tab::Plugin(i) => crate::plugins_ui::tab_label(app, i),
+        Tab::Solid | Tab::Surface if app.base_mode => format!("BASE FEATURE {}", t.label()),
         _ => t.label().to_string(),
       };
       let tw = ui.painter().layout_no_wrap(label.clone(), font.clone(), color).size().x;
@@ -2315,11 +2335,14 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
 }
 
 /// A click on a plane in the browser: while Create Sketch waits for a plane it starts the sketch
-/// there, else it selects the plane (Create Sketch then starts on it).
+/// there, with Mirror open it is the mirror plane, else it selects the plane (Create Sketch then
+/// starts on it).
 pub(super) fn pick_plane(app: &mut App, plane: Value) {
   if app.dialog.as_ref().is_some_and(|d| d.kind == Kind::PickPlane) {
     app.cancel_dialog();
     app.create_sketch(plane);
+  } else if let Some(d) = app.dialog.as_mut().filter(|d| d.wants_plane()) {
+    d.take_plane(plane);
   } else {
     let again = app.picked_plane.as_ref() == Some(&plane);
     app.s.selection.clear();

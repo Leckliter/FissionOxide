@@ -457,6 +457,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
       match app.dialog.as_mut() {
         // a primitive's base is drawn on the plane
         Some(d) if d.picks_plane() => d.place_on(&app.s, plane),
+        // Mirror takes the plane
+        Some(d) if d.wants_plane() => d.take_plane(plane),
         _ => {
           app.cancel_dialog();
           app.create_sketch(plane);
@@ -464,10 +466,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
       }
     }
   }
-  // a click on a visible origin plane, axis or point selects it (again: clears it), as in Fusion
+  // a click on a visible origin plane, axis or point selects it (again: clears it), as in Fusion;
+  // with Mirror or Circular Pattern open it is the plane or axis they ask for
   if !consumed && let Some(item) = app.hover_origin {
     consumed = true;
-    if resp.clicked() {
+    if resp.clicked() && !app.dialog.as_mut().is_some_and(|d| d.take_origin(item)) {
       crate::origin::pick(app, item);
     }
   }
@@ -798,6 +801,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hover_more: app.glyph_hover.clone(),
     preview_curves: app.dialog.as_ref().map(|d| d.preview_curves().to_vec()).unwrap_or_default(),
     sketch_show: app.palette.show(),
+    ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies()).unwrap_or_default(),
     // the palette's Slice reaches the scene as the `slice` render parameter (see `slice_params`)
     ..analysis
   }
@@ -840,6 +844,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     peek_sketches: app.ctx_menu.peek_sketches.iter().map(|s| s.0).collect(),
     glyph_hover: app.glyph_hover.clone(),
     palette: app.palette,
+    ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies().iter().map(|b| b.0).collect()).unwrap_or_default(),
   };
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
@@ -4719,11 +4724,14 @@ struct PlanePick {
 /// visible point, axes and planes are drawn and picked by [`crate::origin`], and the one under
 /// the cursor is noted here (`App::hover_origin`, winning over the face highlight too).
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
-  // Create Sketch, and Box, Cylinder, Sphere, Torus and Coil before their base is drawn
-  let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane());
+  // Create Sketch, Box, Cylinder, Sphere, Torus and Coil before their base is drawn, and Mirror
+  let picking = app
+    .dialog
+    .as_ref()
+    .is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane() || d.wants_plane());
   app.hover_origin = None;
   if !picking {
-    if app.dialog.is_none()
+    if app.dialog.as_ref().is_none_or(|d| d.wants_origin())
       && app.drag.is_none()
       && let Some(pos) = resp.hover_pos()
     {

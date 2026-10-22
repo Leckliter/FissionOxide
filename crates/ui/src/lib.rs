@@ -320,6 +320,9 @@ pub struct App {
   pub files: file_dialogs::Files,
   /// Change Active Units or Convert Design Type, docked at the right (see `doc_dialogs`).
   pub(crate) doc_dialog: Option<doc_dialogs::DocDialog>,
+  /// Create Base Feature's mode: the ribbon shows BASE FEATURE SOLID / SURFACE and a green
+  /// FINISH BASE FEATURE button until it is finished (see [`config_ui::start_base`]).
+  pub base_mode: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -360,6 +363,8 @@ struct RenderKey {
   peek: Vec<u32>,
   isolate: Option<Vec<u32>>,
   opacity: Vec<(u32, u8)>,
+  /// A Mirror's or pattern's previewed copies, drawn as ghosts.
+  ghosts: Vec<u32>,
   /// Faces and sketches highlighted from the timeline.
   peek_faces: Vec<(u32, u32)>,
   peek_sketches: Vec<u32>,
@@ -561,6 +566,7 @@ impl App {
       show_perf: false,
       files: file_dialogs::Files::default(),
       doc_dialog: None,
+      base_mode: false,
     }
   }
 

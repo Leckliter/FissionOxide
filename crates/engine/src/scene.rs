@@ -31,6 +31,9 @@ pub const EDGE_SELECT_HALO: [u8; 4] = [214, 235, 255, 255];
 /// Body edges: a 1 px light grey silhouette on the body, a 2 px black line under the pointer.
 pub const EDGE_COLOR: [u8; 4] = [179, 178, 173, 255];
 pub const EDGE_HOVER_COLOR: [u8; 4] = [10, 10, 10, 255];
+/// A Mirror's or pattern's previewed copy: Fusion's see-through grey ghost with dark edges.
+pub const GHOST_COLOR: [u8; 4] = [150, 150, 150, 90];
+pub const GHOST_EDGE_COLOR: [u8; 4] = [60, 60, 60, 255];
 /// A visible sketch's closed profiles, seen from outside the sketch and in it alike: Fusion's
 /// pale blue, drawn unlit so it reads the same from every angle.
 pub const PROFILE_COLOR: [u8; 4] = [230, 245, 250, 255];
@@ -252,6 +255,9 @@ pub struct ViewOptions {
   /// Draw the X (red) and Y (green) axis lines across the grid, as Fusion's Layout Grid in the
   /// 3D view has them.
   pub grid_axes: bool,
+  /// Bodies drawn as ghosts ([`GHOST_COLOR`], dark edges): a Mirror's or pattern's previewed
+  /// copies.
+  pub ghosts: Vec<BodyId>,
 }
 
 /// What the Sketch Palette shows of the sketch being edited (every option on by default, as
@@ -334,7 +340,9 @@ impl SceneBuilder {
         let c = if opts.peek.contains(&body.id) { mix(c, HOVER_COLOR, 0.6) } else { c };
         if editing { mix(c, [255, 255, 255, 255], 0.35) } else { c }
       };
+      let ghost = opts.ghosts.contains(&body.id);
       let base = tint(s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR));
+      let base = if ghost { GHOST_COLOR } else { base };
       let tri_ids: Vec<u32> = m.tri_face.iter().map(|f| picks.id(Pick::Face { body: body.id, face: *f })).collect();
       // per-face highlight: hover one face; selected faces get their own meshes' colour via split
       let hover = match opts.hover {
@@ -350,7 +358,7 @@ impl SceneBuilder {
       let first = scene.meshes.len();
       let face_cols = crate::views::body_face_colors(s, body.id);
       let peek_faces: Vec<u32> = opts.peek_faces.iter().filter(|(b, _)| *b == body.id).map(|(_, f)| *f).collect();
-      if !face_cols.is_empty() || !peek_faces.is_empty() {
+      if !ghost && (!face_cols.is_empty() || !peek_faces.is_empty()) {
         // faces with an appearance of their own (and selected or peeked faces) draw as meshes of
         // their colour
         let color_of = |t: usize, id: u32| {
@@ -376,7 +384,7 @@ impl SceneBuilder {
         scene.meshes.push(mesh_of(&a.0, a.1, base, hover));
         scene.meshes.push(mesh_of(&b.0, b.1, SELECT_COLOR, hover));
       }
-      let alpha = opts.opacity.iter().find(|o| o.0 == body.id).map(|o| o.1);
+      let alpha = opts.opacity.iter().find(|o| o.0 == body.id).map(|o| o.1).or(ghost.then_some(GHOST_COLOR[3]));
       for mesh in &mut scene.meshes[first..] {
         mesh.analyze = true;
         if let Some(a) = alpha {
@@ -440,6 +448,8 @@ impl SceneBuilder {
             (EDGE_SELECT_COLOR, 1.0)
           } else if opts.hover == Some(pick) {
             (EDGE_HOVER_COLOR, 2.0)
+          } else if ghost {
+            (GHOST_EDGE_COLOR, 1.0)
           } else {
             (EDGE_COLOR, 1.0)
           };

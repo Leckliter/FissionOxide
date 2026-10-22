@@ -69,6 +69,8 @@ pub const ICON_BLUE: Color32 = color(fox_brand::BLUE.base);
 pub const ICON_ORANGE: Color32 = color(fox_brand::ORANGE.base);
 pub const ICON_GREEN: Color32 = color(fox_brand::GREEN.base);
 pub const ICON_RED: Color32 = color(fox_brand::RED.base);
+/// The FINISH BASE FEATURE group's ground, Fusion's green.
+pub const BASE_FEATURE: Color32 = color(fox_brand::GREEN.light);
 
 /// The light style (the default) and the dark one, for Preferences → General → Theme.
 pub fn apply(ctx: &egui::Context) {

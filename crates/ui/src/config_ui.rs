@@ -53,27 +53,39 @@ pub static DIRECT_DELETE_FACE: Form = Form {
   picks_model: true,
 };
 
-pub static BASE_START: Form = Form {
-  title: "BASE FEATURE",
-  name: "Create Base Feature",
-  hint: "Start a base feature: direct edits collect in it until you finish it",
-  icon: Icon::Box,
-  cmd: "base.start",
-  fixed: &[],
-  inputs: &[],
-  picks_model: false,
-};
+/// Create Base Feature is a mode, as in Fusion: no dialog. A base feature joins the timeline and
+/// the ribbon shows BASE FEATURE SOLID / BASE FEATURE SURFACE with a green FINISH BASE FEATURE
+/// button (`start` false), which closes it and brings the SOLID tab back.
+pub fn base_mode(app: &mut App, start: bool) {
+  app.cancel_dialog();
+  if start {
+    if app.base_mode {
+      return;
+    }
+    if app.s.edit_sketch.is_some() {
+      app.finish_sketch();
+    }
+    if app.run("base.start", json!({})).is_some() {
+      app.base_mode = true;
+      app.tab = crate::panels::Tab::Solid;
+    }
+  } else {
+    if app.run("base.finish", json!({})).is_none() {
+      return;
+    }
+    app.base_mode = false;
+    app.tab = crate::panels::Tab::Solid;
+  }
+}
 
-pub static BASE_FINISH: Form = Form {
-  title: "FINISH BASE FEATURE",
-  name: "Finish Base Feature",
-  hint: "Finish editing the base feature: the timeline marker goes back to the end",
-  icon: Icon::Box,
-  cmd: "base.finish",
-  fixed: &[],
-  inputs: &[],
-  picks_model: false,
-};
+/// Leaves the base feature mode when its base feature is gone (undone or deleted).
+pub fn check_base_mode(app: &mut App) {
+  if app.base_mode
+    && !app.s.design.features.iter().any(|f| matches!(f.kind, fox_engine::model::FeatureKind::BaseFeature { .. }))
+  {
+    app.base_mode = false;
+  }
+}
 
 /// Whether the configuration table window is showing.
 static TABLE_OPEN: AtomicBool = AtomicBool::new(false);
@@ -255,8 +267,7 @@ pub fn table_window(app: &mut App, ctx: &egui::Context) {
               let failed = r["errors"].as_array().and_then(|e| e.iter().find(|e| e["column"] == c["column"]));
               match failed {
                 Some(e) => {
-                  ui.label(RichText::new("error").color(theme::ERROR))
-                    .on_hover_text(e["error"].as_str().unwrap_or(""));
+                  ui.label(RichText::new("error").color(theme::ERROR)).on_hover_text(e["error"].as_str().unwrap_or(""));
                 }
                 None => {
                   ui.label(RichText::new(if cur.is_empty() { "default" } else { &cur }).italics());
