@@ -2881,7 +2881,7 @@ impl Dialog {
       Kind::Hem => "FissionOxide folds flat and open hems only so far",
       Kind::Rip => "select edges",
       Kind::Project if self.choice != "bodies" => "select geometry to project",
-      Kind::ConvertSheet | Kind::NewComponent | Kind::Project | Kind::Material => "select a body",
+      Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
       Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
       Kind::AsBuiltJoint => {
         "select the moving component, then the one it's jointed to, then a face, edge or point for the joint"
@@ -6471,21 +6471,6 @@ mod tests {
     d.edges = vec![edge(&s, 0, |e| e.length > 18.0 && e.length < 20.5 && e.mid.z > 5.0)];
     d.distance = "0.5 mm".into();
     apply(&mut s, &mut d);
-  }
-
-  /// Physical Material on a body outside any component gives the body its own material.
-  #[test]
-  fn physical_material_on_a_root_body() {
-    let mut s = Session::default();
-    run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
-    let b = s.model.bodies[0].id;
-    let mut d = Dialog::blank(Kind::Material);
-    d.bodies = vec![b.0];
-    d.comps = vec![None];
-    d.name = "Aluminum".into();
-    assert_eq!(Dialog::blank(Kind::Material).missing_input(), "select a body");
-    apply(&mut s, &mut d);
-    assert_eq!(s.design.body_settings(b).and_then(|x| x.material.as_deref()), Some("Aluminum"));
   }
 
   #[test]
