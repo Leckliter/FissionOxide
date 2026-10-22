@@ -2712,15 +2712,20 @@ pub(crate) fn dialog_dock(canvas: Rect, sketching: bool) -> egui::Pos2 {
   if sketching { home - vec2(270.0 + 8.0, 0.0) } else { home }
 }
 
-/// Where the selection readout's bottom-right corner goes: the canvas's bottom-right corner, or
-/// left of the SKETCH PALETTE (`palette`, its rect while a sketch is open), never under it.
+/// Where the selection readout's bottom-right corner goes: the canvas's bottom-right corner, below
+/// the SKETCH PALETTE (`palette`, its rect while a sketch is open) as in Fusion, or left of the
+/// palette when it reaches down over that corner, never under it.
 pub(crate) fn readout_anchor(canvas: Rect, palette: Option<Rect>) -> egui::Pos2 {
   let at = canvas.right_bottom() - vec2(14.0, 12.0);
   match palette {
-    Some(p) if p.left() < at.x => egui::pos2(p.left() - 14.0, at.y),
+    // only a palette reaching down to the readout's line (pushed down by a dialog) moves it
+    Some(p) if p.left() < at.x && p.bottom() > at.y - READOUT_H => egui::pos2(p.left() - 14.0, at.y),
     _ => at,
   }
 }
+
+/// The selection readout's line height.
+const READOUT_H: f32 = 16.0;
 
 /// The SKETCH PALETTE shown on the right of the canvas while a sketch is open.
 pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
@@ -4680,6 +4685,8 @@ pub(crate) mod timeline_bar;
 mod timeline_groups;
 mod timeline_tip;
 
+pub(crate) use browser_edit::set_opacity;
+pub(crate) use browser_rows::{body_menu_items, construction_plane_menu, run_body_cmd, run_construction_plane_cmd};
 pub(crate) use browser_rows::{doc_name, root_label, unsaved as is_unsaved, window_title};
 pub(crate) use mesh_rows::{MeshCmd, OPACITY_LEVELS, mesh_body_menu, run_mesh_cmd};
 #[cfg(test)]

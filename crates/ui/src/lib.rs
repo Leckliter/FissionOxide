@@ -3064,8 +3064,9 @@ mod tests {
     assert_eq!(panels::palette_pos(canvas, Some(dialog)), panels::palette_pos(canvas, None));
   }
 
-  /// `ui:sketch:status-readout-under-palette`: the selection readout sits at the canvas's lower
-  /// right, left of the Sketch Palette when there is one, never under it.
+  /// `ui:sketch:status-readout-under-palette`, `ui:canvas:readout-beside-palette`: the selection
+  /// readout stays at the canvas's lower right, below the Sketch Palette, and moves left of the
+  /// palette only when the palette reaches down over it.
   #[test]
   fn the_selection_readout_keeps_left_of_the_palette() {
     let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
@@ -3073,9 +3074,9 @@ mod tests {
     // the palette pushed down by a dialog reaches the canvas's bottom: the readout moves left of it
     let palette = egui::Rect::from_min_max(egui::pos2(896.0, 338.0), egui::pos2(1166.0, 820.0));
     assert_eq!(panels::readout_anchor(canvas, Some(palette)), egui::pos2(882.0, 788.0));
-    // so does a palette at its usual place
+    // a palette at its usual place ends above the readout: it stays in the corner, below it
     let home = egui::Rect::from_min_max(egui::pos2(896.0, 190.0), egui::pos2(1166.0, 700.0));
-    assert_eq!(panels::readout_anchor(canvas, Some(home)), egui::pos2(882.0, 788.0));
+    assert_eq!(panels::readout_anchor(canvas, Some(home)), egui::pos2(1186.0, 788.0));
   }
 
   /// `ui:sketch:horizontal-conflict`: the palette's Horizontal/Vertical on a line trimmed onto a

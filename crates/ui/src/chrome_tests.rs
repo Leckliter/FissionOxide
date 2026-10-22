@@ -93,15 +93,15 @@ fn a_right_drag_runs_the_marking_menu_slot_it_points_at() {
   // the canvas right of the box, clear of the browser and the ViewCube
   let at = h.app.canvas.center() + vec2(380.0, 120.0);
   let cam = h.app.cam;
-  // east is Press Pull with nothing selected, as on Fusion's ring
-  h.right_drag(at, at + vec2(120.0, 0.0));
+  // north-east is Press Pull with nothing selected, as on Fusion's ring
+  h.right_drag(at, at + vec2(90.0, -90.0));
   assert_eq!(h.app.cam, cam, "Fusion's preset doesn't orbit with the right button");
   assert!(h.app.marking.is_none(), "the gesture runs the item without the menu");
   let kind = h.app.dialog.as_ref().map(|d| d.kind);
   assert!(matches!(kind, Some(crate::dialogs::Kind::PressPull)), "{kind:?}");
   h.app.cancel_dialog();
-  // north-west is Undo: the box goes
-  h.right_drag(at, at + vec2(-90.0, -90.0));
+  // west is Undo: the box goes
+  h.right_drag(at, at + vec2(-120.0, 0.0));
   assert!(h.app.s.model.bodies.is_empty(), "Undo ran");
   // a right-click without dragging still opens the menu
   h.press(egui::PointerButton::Secondary, at, true);
@@ -114,8 +114,8 @@ fn a_right_drag_runs_the_marking_menu_slot_it_points_at() {
 fn a_flick_toward_a_list_opens_it() {
   let mut h = Harness::new(boxed());
   let at = h.app.canvas.center() + vec2(380.0, 120.0);
-  // south-west is the Sketch item with its list of sketch tools
-  h.right_drag(at, at + vec2(-90.0, 90.0));
+  // south is the Sketch item with its list of sketch tools
+  h.right_drag(at, at + vec2(0.0, 120.0));
   assert!(h.app.marking.is_some(), "the menu opens on the item's list");
   assert!(h.app.dialog.is_none());
 }

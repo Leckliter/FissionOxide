@@ -163,7 +163,7 @@ pub(super) fn opacity_menu(app: &mut App, ui: &mut egui::Ui, bodies: &[BodyId]) 
 }
 
 /// Sets bodies' opacity (255 = opaque, the default).
-pub(super) fn set_opacity(app: &mut App, bodies: &[BodyId], alpha: u8) {
+pub(crate) fn set_opacity(app: &mut App, bodies: &[BodyId], alpha: u8) {
   let o = &mut app.ctx_menu.opacity;
   o.retain(|(b, _)| !bodies.contains(b));
   if alpha < 255 {

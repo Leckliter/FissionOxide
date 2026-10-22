@@ -1696,7 +1696,7 @@ impl Harness {
 /// `ui:sketch:offset-default-follow`, `ui:sketch:offset-dialog-rows`,
 /// `ui:sketch:status-readout-under-palette`: O on a pre-selected line opens OFFSET beside the
 /// Sketch Palette on its left, the offset at 0 mm on the line (the pointer doesn't move it), the
-/// value box by the pointer with the keyboard, and the readout left of the palette; typing ".1"
+/// value box by the pointer with the keyboard, and the readout below the palette; typing ".1"
 /// and Enter makes the offset line and ends the tool.
 #[test]
 fn offset_on_a_preselected_line_starts_at_zero_and_takes_a_typed_distance() {
@@ -1718,9 +1718,10 @@ fn offset_on_a_preselected_line_starts_at_zero_and_takes_a_typed_distance() {
   let palette = h.ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette"))).expect("the palette");
   assert!(dialog.right() <= palette.left(), "side by side: {dialog:?} {palette:?}");
   assert!((dialog.top() - palette.top()).abs() < 1.0, "{dialog:?} {palette:?}");
-  // the readout sits left of the palette
+  // the readout stays at the canvas's lower right, below the palette and never under it
+  // (ui:canvas:readout-beside-palette)
   let readout = texts.iter().find(|(_, t)| t.starts_with("1 Sketch")).expect("the readout");
-  assert!(readout.0.right() <= palette.left(), "{readout:?} {palette:?}");
+  assert!(readout.0.top() >= palette.bottom() && readout.0.right() > palette.left(), "{readout:?} {palette:?}");
   // the value box has the keyboard, says 0 mm and sits by the pointer
   let focused = h.ctx.memory(|m| m.focused()).expect("the value box has the keyboard");
   assert_eq!(h.ctx.read_response(focused).map(|r| r.layer_id), Some(crate::value_box::layer()));
