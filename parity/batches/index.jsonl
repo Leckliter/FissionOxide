@@ -97,6 +97,6 @@
 {"name": "ui-sheet-flat-pattern-env", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_e4b2a7dc (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-sheet-menus-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_59980ba5 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-sheet-rules-library", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_eb0b3ece (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-manage-bom-palette", "items": 2, "status": "ready", "pr": null}
-{"name": "ui-utilities-addins-make", "items": 4, "status": "ready", "pr": null}
-{"name": "ui-utilities-tips-status", "items": 4, "status": "ready", "pr": null}
+{"name": "ui-manage-bom-palette", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_4cc1c457 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-utilities-addins-make", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_b240d544 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-utilities-tips-status", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_899ce0b8 (requested 2026-10-22 by the coordinator)"}
