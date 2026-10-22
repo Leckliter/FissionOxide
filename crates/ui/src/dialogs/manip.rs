@@ -189,6 +189,13 @@ impl Dialog {
         self.manip.pivot = centre(s, &self.bodies).map(|c| (self.bodies.clone(), c));
       }
       Kind::Move => self.refresh_move(s),
+      // an edge flange's arrow, found on the sheet before the preview bends it
+      Kind::Flange if self.choice == "edge" && !self.applied => {
+        let key = self.anchor_key();
+        if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
+          self.manip.anchor = super::flange::flange_anchor(s, &key).map(|(o, d)| (key, o, d));
+        }
+      }
       // the arrow's reach is measured afresh each frame (the preview scales the very curves)
       Kind::SkScale => self.manip.anchor = self.scale_anchor(s).map(|(o, d)| (Value::Null, o, d)),
       _ => {}
@@ -279,6 +286,19 @@ impl Dialog {
       let r = reach.length();
       return Some(Manipulator { origin: *origin, dir: *reach / r, value: self.scale_factor(s)? * r });
     }
+    // Edge Flange: the Height arrow on the edge, the way the flange bends (Flip turns it over)
+    if self.kind == Kind::Flange {
+      let (key, origin, dir) = self.manip.anchor.as_ref().filter(|_| self.choice == "edge")?;
+      if *key != self.anchor_key() {
+        return None;
+      }
+      let sign = if self.flip { -1.0 } else { 1.0 };
+      return Some(Manipulator {
+        origin: *origin,
+        dir: *dir * sign,
+        value: self.len(s, &self.distance).unwrap_or(0.0),
+      });
+    }
     if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::OffsetFace | Kind::SkOffset)
       || (self.editing.is_some() && !matches!(self.kind, Kind::Fillet | Kind::Chamfer))
     {
@@ -327,6 +347,14 @@ impl Dialog {
     let dir = (DVec3::from(e.n1) + DVec3::from(e.n2)).try_normalize().unwrap_or(DVec3::Z);
     // the edited dialog's edges are placeholders, so its anchor key is null
     self.manip.anchor = Some((self.anchor_key(), DVec3::from(e.point), dir));
+  }
+
+  /// Edit Feature: an edited edge flange's arrow hangs on the edge it was built on (see
+  /// [`super::flange::flange_edit_anchor`]).
+  pub(super) fn load_flange_edit_anchor(&mut self, s: &Session, kind: &FeatureKind) {
+    if let Some((o, d)) = super::flange::flange_edit_anchor(s, kind) {
+      self.manip.anchor = Some((self.anchor_key(), o, d));
+    }
   }
 
   /// The feature handles this dialog shows (see [`crate::handles`]): Extrude's taper handle,
@@ -599,6 +627,8 @@ impl Dialog {
       // a radius or distance can't reach zero: the smallest step is as far as it goes
       Kind::Fillet | Kind::Chamfer => self.radius = mm(self.unit, v.max(step.max(1e-3))),
       Kind::PressPull | Kind::OffsetFace => self.distance = mm(self.unit, v),
+      // a flange's height stops at the edge
+      Kind::Flange if self.choice == "edge" => self.distance = mm(self.unit, v.max(0.0)),
       // an offset is never zero: it keeps to the side it is on
       Kind::SkOffset => {
         self.distance = mm(self.unit, nonzero(v, step));

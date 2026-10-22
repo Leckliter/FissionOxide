@@ -286,7 +286,7 @@ cmds! {
   "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?, corner_relief?: none|round|square|tear, corner_relief_size?}";
   "sheet.rules" => "List the sheet metal rules", "{}";
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
-  "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join, targets?: [body] (bodies join/cut may change)}";
+  "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, center? (the sheet straddles the sketch), operation?: new_body|join, targets?: [body] (bodies join/cut may change)}";
   "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
   "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open|closed|overlap|butt}";
   "sheet.hem" => "Fold sheet edges back 180° (flat hem)", "{edges: [{body, edge} | {point}], length, gap?, flip?}";
@@ -1546,7 +1546,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       let rule = rule_name(s, p)?;
       let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-      add_op_feature(s, FeatureKind::Flange { sketch: sk, profiles, rule, flip, operation }, p)
+      let center = p.get("center").and_then(Value::as_bool).unwrap_or(false);
+      add_op_feature(s, FeatureKind::Flange { sketch: sk, profiles, rule, flip, operation, center }, p)
     }
     "sheet.contour_flange" => {
       let sk = sketch_for_feature(s, p)?;

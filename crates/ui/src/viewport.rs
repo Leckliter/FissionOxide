@@ -840,6 +840,8 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     preview_curves: app.dialog.as_ref().map(|d| d.preview_curves().to_vec()).unwrap_or_default(),
     sketch_show: app.palette.show(),
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies()).unwrap_or_default(),
+    // a base flange's previewed sheet is Fusion's solid preview blue
+    preview: app.dialog.as_ref().map(|d| d.sheet_preview_bodies(&app.s)).unwrap_or_default(),
     // the palette's Slice reaches the scene as the `slice` render parameter (see `slice_params`)
     ..analysis
   }

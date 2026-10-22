@@ -266,6 +266,8 @@ impl State {
         Input::Choice { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         // (Pattern on Path is the pattern dialog's last Type)
         Input::Icons { key: "pattern_type", .. } => json!("path"),
+        // (Lofted Flange is the Flange dialog's last Type)
+        Input::Icons { key: "flange_type", .. } => json!("lofted"),
         Input::Icons { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         Input::Vec3 { default, .. } => json!(default),
         Input::Faces { .. }
@@ -2426,6 +2428,8 @@ pub static LOFTED_FLANGE: Form = Form {
   cmd: "sheet.lofted_flange",
   fixed: &[],
   inputs: &[
+    // Fusion: the Flange dialog with Type Lofted flange (see `crate::dialogs::FLANGE_TYPES`)
+    Input::Icons { key: "flange_type", label: "Type", options: crate::dialogs::FLANGE_TYPES },
     Input::Sketch { key: "from", label: "First profile" },
     Input::Sketch { key: "to", label: "Second profile" },
     Input::Choice {

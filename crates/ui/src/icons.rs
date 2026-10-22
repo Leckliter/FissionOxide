@@ -433,6 +433,9 @@ pub enum Icon {
   HemRolled,
   HemTeardrop,
   HemRope,
+  // the timeline's sheet metal flanges: a flat sheet, and a sheet with a flange bent up
+  BaseFlange,
+  EdgeFlange,
 }
 
 #[derive(Clone, Copy)]
@@ -2914,6 +2917,18 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
         pts.push((0.44, 0.48 + r - 0.04));
       }
       k.band(k.pts(&pts), 3.4);
+    }
+    Icon::BaseFlange => {
+      // a flat sheet seen from above, its thickness along the front
+      k.solid(&[(0.06, 0.52), (0.44, 0.3), (0.94, 0.48), (0.56, 0.72)], BlueLight);
+      k.solid(&[(0.06, 0.52), (0.56, 0.72), (0.56, 0.82), (0.06, 0.62)], Blue);
+      k.solid(&[(0.56, 0.72), (0.94, 0.48), (0.94, 0.58), (0.56, 0.82)], BlueDark);
+    }
+    Icon::EdgeFlange => {
+      // the sheet with a wall bent up along its back edge
+      k.solid(&[(0.06, 0.62), (0.44, 0.44), (0.94, 0.6), (0.56, 0.8)], BlueLight);
+      k.solid(&[(0.06, 0.62), (0.56, 0.8), (0.56, 0.88), (0.06, 0.7)], Blue);
+      k.solid(&[(0.44, 0.44), (0.44, 0.08), (0.94, 0.24), (0.94, 0.6)], Blue);
     }
   }
 }

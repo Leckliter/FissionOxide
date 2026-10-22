@@ -34,6 +34,8 @@ pub const EDGE_HOVER_COLOR: [u8; 4] = [10, 10, 10, 255];
 /// A Mirror's or pattern's previewed copy: Fusion's see-through grey ghost with dark edges.
 pub const GHOST_COLOR: [u8; 4] = [150, 150, 150, 90];
 pub const GHOST_EDGE_COLOR: [u8; 4] = [60, 60, 60, 255];
+/// A previewed new sheet metal body (Base Flange): Fusion's solid preview blue.
+pub const PREVIEW_COLOR: [u8; 4] = [104, 154, 222, 255];
 /// A visible sketch's closed profiles, seen from outside the sketch and in it alike: Fusion's
 /// pale blue, drawn unlit so it reads the same from every angle.
 pub const PROFILE_COLOR: [u8; 4] = [230, 245, 250, 255];
@@ -274,6 +276,8 @@ pub struct ViewOptions {
   pub section_color: Option<[u8; 4]>,
   /// The analysis's bodies, opacity, vertex colours, combs and isocurves (see [`crate::analysis`]).
   pub analysis_view: crate::analysis::AnalysisView,
+  /// Bodies drawn in [`PREVIEW_COLOR`]: a Base Flange's previewed sheet.
+  pub preview: Vec<BodyId>,
 }
 
 /// What the Sketch Palette shows of the sketch being edited (every option on by default, as
@@ -366,6 +370,7 @@ impl SceneBuilder {
       let ghost = opts.ghosts.contains(&body.id);
       let base = tint(s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR));
       let base = if ghost { GHOST_COLOR } else { base };
+      let base = if opts.preview.contains(&body.id) { PREVIEW_COLOR } else { base };
       let tri_ids: Vec<u32> = m.tri_face.iter().map(|f| picks.id(Pick::Face { body: body.id, face: *f })).collect();
       // per-face highlight: hover one face; selected faces get their own meshes' colour via split
       let hover = match opts.hover {

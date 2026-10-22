@@ -36,6 +36,8 @@ mod auto_cut;
 mod body_picks;
 mod copies;
 mod edit_more;
+mod flange;
+pub(crate) use flange::TYPE_ICONS as FLANGE_TYPES;
 #[cfg(test)]
 mod edit_tests;
 mod export_dxf;
@@ -681,6 +683,8 @@ pub struct Dialog {
   pub(crate) mesh: insert_mesh::Options,
   /// An INSPECT analysis's settings (see [`analysis`]).
   an: analysis::AnalysisForm,
+  /// The Flange dialog's Orientation and open groups (see [`flange`]).
+  flange: flange::State,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -820,6 +824,7 @@ impl Dialog {
         Kind::Analysis(k) => k,
         _ => "",
       }),
+      flange: flange::State::default(),
     }
   }
 
@@ -868,7 +873,7 @@ impl Dialog {
       // the newest sketch's profiles are the ones to pick; Extrude takes only a picked one (as
       // in Fusion, E opens with Profiles: Select and no preview)
       d.sketch = s.edit_sketch.or(app.last_sketch).or_else(|| last_unconsumed_sketch(s));
-      if !matches!(kind, Kind::Extrude | Kind::Sweep)
+      if !matches!(kind, Kind::Extrude | Kind::Sweep | Kind::Flange)
         && let Some(sk) = d.sketch
         && let Some(r) = s.model.sketches.get(&sk)
         && r.profiles.len() == 1
@@ -1048,21 +1053,7 @@ impl Dialog {
         d.name = "NOTE".into();
         d.at = ["20".into(), "20".into()];
       }
-      Kind::Flange => {
-        // edges picked → edge flange; a sketch of open curves only → contour flange
-        let open_only = d.sketch.and_then(|sk| s.model.sketches.get(&sk)).is_some_and(|r| r.profiles.is_empty());
-        d.choice = if !d.edges.is_empty() {
-          "edge"
-        } else if open_only {
-          "contour"
-        } else {
-          "base"
-        };
-        d.distance = "10 mm".into();
-        d.angle = "90 deg".into();
-        d.position = "adjacent";
-        d.op = "new_body";
-      }
+      Kind::Flange => d.flange_defaults(s),
       // Fusion's flat hem, four thicknesses long, its bend at the edge
       Kind::Hem => {
         d.choice = "flat";
@@ -1396,11 +1387,16 @@ impl Dialog {
       | FeatureKind::Mirror { .. }
       | FeatureKind::Combine { .. }
       | FeatureKind::OffsetFaces { .. }) => edit_more::load(&app.s, kind)?,
+      kind @ (FeatureKind::Flange { .. }
+      | FeatureKind::ContourFlange { .. }
+      | FeatureKind::EdgeFlange { .. }
+      | FeatureKind::Hem { .. }) => flange::edit_dialog(app, kind)?,
       _ => return None,
     };
     d.editing = Some(id);
     d.unit = app.s.design.units;
     d.load_edit_anchor(&f.kind);
+    d.load_flange_edit_anchor(&app.s, &f.kind);
     // a stored bare length is mm, and an edit box always shows the unit, as Fusion's do ("2 mm")
     let lengths = match d.kind {
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => 3,
@@ -1589,26 +1585,7 @@ impl Dialog {
         }
         ("split", json!({"plane": self.plane, "bodies": [self.bodies.first()?]}))
       }
-      Kind::Flange => match self.choice {
-        "edge" => (
-          "sheet.edge_flange",
-          json!({
-            "edges": self.edges, "height": self.distance, "angle": self.angle, "flip": self.flip,
-            "position": self.position, "corners": self.corners,
-          }),
-        ),
-        "contour" => {
-          let mut p =
-            json!({"sketch": self.sketch?.0, "distance": self.distance, "symmetric": self.flag, "flip": self.flip});
-          self.put_rule(&mut p);
-          ("sheet.contour_flange", p)
-        }
-        _ => {
-          let mut p = json!({"sketch": self.sketch?.0, "profiles": self.profiles, "flip": self.flip, "operation": op});
-          self.put_rule(&mut p);
-          ("sheet.flange", p)
-        }
-      },
+      Kind::Flange => return self.flange_command(),
       Kind::Hem => {
         let gap = if self.choice == "open" { self.distance2.as_str() } else { sheet::FLAT_HEM_GAP };
         ("sheet.hem", json!({"edges": self.edges, "length": self.distance, "gap": gap, "flip": self.flip}))
@@ -1950,6 +1927,7 @@ impl Dialog {
       Kind::Draft => self.draft_edit_set(),
       Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
       Kind::Hole | Kind::Mirror | Kind::Combine | Kind::PressPull => self.more_edit_set()?,
+      Kind::Flange | Kind::Hem => return self.flange_edit_set(),
       _ => return None,
     })
   }
@@ -2071,13 +2049,7 @@ impl Dialog {
       Kind::PressPull | Kind::OffsetFace => !self.faces.is_empty(),
       Kind::Draft => !self.plane.is_null() && !self.faces.is_empty(),
       Kind::Scale => !self.bodies.is_empty() && self.point.is_some(),
-      Kind::Flange => {
-        if self.choice == "edge" {
-          !self.edges.is_empty()
-        } else {
-          self.sketch.is_some()
-        }
-      }
+      Kind::Flange => self.flange_ready(),
       Kind::Hem => !self.edges.is_empty() && sheet::hem_folds(self.choice),
       Kind::Rip => !self.edges.is_empty(),
       Kind::NewComponent => self.choice == "empty" || !self.bodies.is_empty(),
@@ -2293,9 +2265,8 @@ impl Dialog {
           self.dirty = !self.picks();
         }
       }
-      Kind::Extrude | Kind::Revolve | Kind::Sweep | Kind::Flange
-        if !(self.kind == Kind::Flange && self.choice == "edge") =>
-      {
+      Kind::Flange => self.flange_sync(s),
+      Kind::Extrude | Kind::Revolve | Kind::Sweep => {
         let mut pts = Vec::new();
         for sel in &s.selection {
           if let Sel::Profile { sketch, index } = sel
@@ -2344,7 +2315,7 @@ impl Dialog {
         }
         self.sync_loft_guides(s);
       }
-      Kind::Hem | Kind::Rip | Kind::Flange if !self.applied => {
+      Kind::Hem | Kind::Rip if !self.applied => {
         let e = sel_edges(s);
         if e != self.edges {
           self.edges = e;
@@ -2691,7 +2662,11 @@ impl Dialog {
   /// timeline, as in Fusion.
   pub(crate) fn heading(&self) -> String {
     if self.editing.is_some() {
-      return "EDIT FEATURE".into();
+      // sheet metal features name their command, as Fusion's EDIT EDGE FLANGE does
+      return self.flange_title().map_or("EDIT FEATURE".into(), |t| format!("EDIT {t}"));
+    }
+    if let Some(t) = self.flange_title() {
+      return t.into();
     }
     match self.kind {
       Kind::Move => self.move_title().unwrap_or(self.kind.title()),
@@ -2759,6 +2734,7 @@ impl Dialog {
         Kind::OffsetFace => "Select face(s) to offset".into(),
         Kind::Scale if self.bodies.is_empty() => "Select bodies or sketches to scale".into(),
         Kind::Scale => "Select point".into(),
+        Kind::Flange => flange::PICK_PROMPT.into(),
         // one prompt for the whole pick, as Fusion words it
         Kind::SkScale => {
           "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
@@ -2776,6 +2752,10 @@ impl Dialog {
     // Offset's prompt names its values whatever the pointer is over, as Fusion's does
     if self.kind == Kind::SkOffset {
       return Some("Modify offset distance or side settings".into());
+    }
+    // the flange's, whatever the pointer is over, as Fusion words it
+    if let Some(p) = self.flange_prompt() {
+      return Some(p.into());
     }
     // Mirror's prompt once both picks are in, whatever the pointer is over, as Fusion words it
     if self.kind == Kind::Mirror && self.editing.is_none() {
@@ -2871,6 +2851,7 @@ impl Dialog {
       Kind::Draft => !self.draft_angle_set(),
       Kind::Fillet if self.editing.is_none() && self.solid.fillet_type != "full_round" => !length_set(&self.radius),
       Kind::Shell if self.editing.is_none() => !length_set(&self.radius),
+      Kind::Flange => self.flange_waits(),
       _ => false,
     }
   }
@@ -3082,6 +3063,7 @@ impl Dialog {
         self.form_fields(f, app, ui, &mut dirty);
         self.path_type_switch(f);
         self.form_cut_rows(ui, &op);
+        self.flange_type_switch(f);
         if dirty && (!self.picks() || self.applied) {
           self.dirty = true;
         }
@@ -3516,9 +3498,6 @@ impl Dialog {
       let text = if n == 0 { "Select".to_string() } else { format!("{n} {what}") };
       sel_chip(ui, accent, &text, n > 0);
     };
-    const FLANGES: [(&str, &str); 3] =
-      [("base", "Base (profile)"), ("edge", "Edge"), ("contour", "Contour (open path)")];
-    const POSITIONS: [(&str, &str); 3] = [("adjacent", "Adjacent"), ("inside", "Inside"), ("outside", "Outside")];
     const RELIEFS: [(&str, &str); 3] = [("rectangular", "Rectangular"), ("round", "Round"), ("none", "None")];
     const JOINTS: [(&str, &str); 8] = [
       ("rigid", "Rigid"),
@@ -3545,41 +3524,11 @@ impl Dialog {
       Kind::Scale => self.scale_rows(ui, dirty),
       Kind::OffsetFace => self.offset_face_rows(ui, dirty),
       Kind::SplitBody => self.split_body_fields(ui),
-      Kind::Flange => {
-        let before = self.choice;
-        Self::choose(ui, "Type", "flange", &mut self.choice, &FLANGES, dirty);
-        if before != self.choice {
-          self.withdraw(&mut app.s);
-        }
-        match self.choice {
-          "edge" => {
-            ui.label("Edges");
-            chip(ui, self.edges.len(), "selected");
-            ui.end_row();
-            Self::field(ui, "Height", &mut self.distance, dirty);
-            Self::field(ui, "Bend angle", &mut self.angle, dirty);
-            Self::choose(ui, "Position", "pos", &mut self.position, &POSITIONS, dirty);
-            Self::choose(ui, "Corners", "corners", &mut self.corners, &CORNERS, dirty);
-          }
-          "contour" => {
-            ui.label("Sketch");
-            ui.label(self.sketch.and_then(|s| app.s.design.feature(s)).map(|f| f.name.clone()).unwrap_or_default());
-            ui.end_row();
-            Self::field(ui, "Distance", &mut self.distance, dirty);
-            Self::check(ui, "Symmetric", &mut self.flag, dirty);
-            self.rule_combo(ui);
-          }
-          _ => {
-            ui.label("Profiles");
-            chip(ui, self.profiles.len(), "selected");
-            ui.end_row();
-            self.rule_combo(ui);
-            Self::choose(ui, "Operation", "op", &mut self.op, &OPS[..2], dirty);
-          }
-        }
-        Self::check(ui, "Flip", &mut self.flip, dirty);
+      Kind::Flange => self.flange_rows(app, ui, dirty),
+      Kind::Hem => {
+        self.flange_type_row(ui);
+        self.hem_rows(app, ui, dirty);
       }
-      Kind::Hem => self.hem_rows(app, ui, dirty),
       Kind::Fold => self.fold_rows(app, ui, dirty),
       Kind::ConvertSheet => self.convert_rows(ui),
       Kind::Rip => self.rip_rows(ui, dirty),
@@ -5629,6 +5578,8 @@ impl Dialog {
       Kind::Fillet | Kind::Chamfer => Some(&mut self.radius),
       Kind::SkScale => Some(&mut self.a),
       Kind::Scale if self.choice != "non_uniform" => Some(&mut self.a),
+      // an edge flange's Height, in the box on its arrow
+      Kind::Flange if self.choice == "edge" => Some(&mut self.distance),
       _ => None,
     }
   }
@@ -6390,6 +6341,8 @@ mod tests {
     d.sketch = s.edit_sketch;
     d.rule = "Alu".into();
     run(&mut s, "sketch.finish", json!({}));
+    // the profile picked (Fusion's Flange picks nothing itself)
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     apply(&mut s, &mut d);
     d.applied = false;
     let mut d = Dialog::blank(Kind::Flange);

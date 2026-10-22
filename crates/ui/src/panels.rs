@@ -4096,11 +4096,12 @@ pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Import { breps, meshes, .. } if breps.is_empty() && !meshes.is_empty() => Icon::MeshFeature,
     FeatureKind::Import { .. } => Icon::Import,
     FeatureKind::RemoveBodies { .. } => Icon::Remove,
-    FeatureKind::Flange { .. }
-    | FeatureKind::ContourFlange { .. }
-    | FeatureKind::EdgeFlange { .. }
-    | FeatureKind::Hem { .. }
-    | FeatureKind::Bend { .. } => Icon::Extrude,
+    // Fusion's flat sheet (BaseFlange) and bent flange (EdgeFlange) icons
+    FeatureKind::Flange { .. } => Icon::BaseFlange,
+    FeatureKind::EdgeFlange { .. } => Icon::EdgeFlange,
+    FeatureKind::ContourFlange { .. } => Icon::Flange,
+    FeatureKind::Hem { .. } => Icon::Hem,
+    FeatureKind::Bend { .. } => Icon::Extrude,
     FeatureKind::ConvertToSheetMetal { .. }
     | FeatureKind::Unfold { .. }
     | FeatureKind::Refold { .. }

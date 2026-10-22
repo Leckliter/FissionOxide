@@ -471,6 +471,7 @@ fn plate_flange(d: &mut Design) {
     rule: String::new(),
     flip: false,
     operation: Operation::NewBody,
+    center: false,
   })
   .unwrap();
 }

@@ -1160,6 +1160,9 @@ pub enum FeatureKind {
     flip: bool,
     #[serde(default)]
     operation: Operation,
+    /// Fusion's Orientation Center: the sheet straddles the sketch plane (`flip` is ignored).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    center: bool,
   },
   /// Sheet metal contour flange: an open sketch path (lines and arcs) becomes one face of a bent
   /// sheet; sharp corners get the rule's bend radius. The section is extruded `distance` along
@@ -2390,7 +2393,7 @@ impl Design {
       return Err(DesignError::TooMany);
     }
     let id = FeatureId(self.alloc());
-    let name = self.unique_name(kind.base_name());
+    let name = self.unique_name(&kind);
     let at = self.active_len();
     self.features.insert(
       at,
@@ -2411,8 +2414,15 @@ impl Design {
     Ok(id)
   }
 
-  fn unique_name(&self, base: &str) -> String {
-    let n = self.features.iter().filter(|f| f.kind.base_name() == base).count() + 1;
+  fn unique_name(&self, kind: &FeatureKind) -> String {
+    let base = kind.name_stem();
+    // Fusion numbers base, edge and contour flanges with one counter (BaseFlange1, EdgeFlange2)
+    let n = self
+      .features
+      .iter()
+      .filter(|f| if kind.is_flange() { f.kind.is_flange() } else { f.kind.base_name() == kind.base_name() })
+      .count()
+      + 1;
     let mut k = n;
     loop {
       let name = format!("{base}{k}");
@@ -3185,6 +3195,22 @@ fn rename_ident(expr: &str, old: &str, new: &str) -> String {
     }
   }
   out
+}
+
+impl FeatureKind {
+  /// The stem of a new feature's name: the base name, but Fusion's "BaseFlange" for a flange
+  /// from profiles.
+  pub fn name_stem(&self) -> &'static str {
+    match self {
+      FeatureKind::Flange { .. } => "BaseFlange",
+      _ => self.base_name(),
+    }
+  }
+
+  /// A base, edge or contour flange (the features Fusion's one Flange command makes).
+  pub fn is_flange(&self) -> bool {
+    matches!(self, FeatureKind::Flange { .. } | FeatureKind::EdgeFlange { .. } | FeatureKind::ContourFlange { .. })
+  }
 }
 
 #[cfg(test)]

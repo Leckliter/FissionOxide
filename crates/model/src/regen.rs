@@ -1469,7 +1469,7 @@ impl Ctx<'_> {
         }
         Ok(missing.then(|| "some faces could not be found".to_string()))
       }
-      FeatureKind::Flange { sketch, profiles, rule, flip, operation } => {
+      FeatureKind::Flange { sketch, profiles, rule, flip, operation, center } => {
         let info = self.sheet_info(rule)?;
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
         let (chosen, missing) = pick_profiles(&sk, profiles);
@@ -1480,10 +1480,13 @@ impl Ctx<'_> {
             "the selected profiles no longer exist".into()
           });
         }
-        let n = sk.plane.normal() * if *flip { -info.thickness } else { info.thickness };
+        let n = sk.plane.normal() * if *flip && !*center { -info.thickness } else { info.thickness };
         let mut tools = Vec::new();
         for p in &chosen {
-          tools.push(Shape::face(&sk.plane, p).map_err(ke)?.extrude(n).map_err(ke)?);
+          let face = Shape::face(&sk.plane, p).map_err(ke)?;
+          // Orientation Center: half the thickness either side of the sketch
+          let face = if *center { face.translated(-n / 2.0).map_err(ke)? } else { face };
+          tools.push(face.extrude(n).map_err(ke)?);
         }
         self.operate(id, union_all(tools)?, *operation)?;
         self.tag_sheet(id, &info);
