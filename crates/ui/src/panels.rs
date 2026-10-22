@@ -441,6 +441,8 @@ pub(crate) enum Cmd {
   /// MESH > Direct Edit, Create Base Mesh Feature and Finish Direct Editing (see
   /// [`crate::mesh_ui`]).
   MeshEdit(crate::mesh_ui::Act),
+  /// The flat pattern environment's Finish and Export, and the REFOLD panel's Refold.
+  Flat(crate::flat_ui::FlatAct),
 }
 
 impl Cmd {
@@ -668,6 +670,7 @@ impl Cmd {
       Cmd::BaseFeature(false) => {
         (Icon::Finish, "Finish Base Feature", "Finish editing the base feature and go back to the parametric tabs")
       }
+      Cmd::Flat(a) => crate::flat_ui::info(a),
     }
   }
 
@@ -808,6 +811,7 @@ impl Cmd {
       Cmd::BaseFeature(start) => crate::config_ui::base_mode(app, start),
       Cmd::Insert(target) => crate::insert_window::open(app, target),
       Cmd::InsertDxf => crate::insert_window::open_dxf(app),
+      Cmd::Flat(a) => crate::flat_ui::run(app, a),
     }
   }
 }
@@ -866,6 +870,7 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
   if !app.mesh_edit.active && app.tab == Tab::MeshEdit {
     app.tab = Tab::Mesh;
   }
+  crate::flat_ui::check(app);
   egui::Panel::top("toolbar")
     .exact_size(96.0)
     .frame(egui::Frame::NONE.fill(theme::TOOLBAR).inner_margin(egui::Margin { left: 6, right: 6, top: 0, bottom: 0 }))
@@ -1184,8 +1189,8 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     if app.form.active {
       tabs.push(Tab::Form);
     }
-    if app.base_mode {
-      // Fusion: BASE FEATURE SOLID and BASE FEATURE SURFACE replace the modelling tabs
+    if app.base_mode || app.flat_mode {
+      // Fusion: BASE FEATURE (or FLAT PATTERN) SOLID and SURFACE replace the modelling tabs
       tabs.retain(|t| matches!(t, Tab::Solid | Tab::Surface | Tab::Sketch));
       if !matches!(app.tab, Tab::Solid | Tab::Surface | Tab::Sketch) {
         app.tab = Tab::Solid;
@@ -1203,6 +1208,7 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       let label = match t {
         Tab::Plugin(i) => crate::plugins_ui::tab_label(app, i),
         Tab::Solid | Tab::Surface if app.base_mode => format!("BASE FEATURE {}", t.label()),
+        Tab::Solid | Tab::Surface if app.flat_mode => crate::flat_ui::tab_label(t),
         _ => t.label().to_string(),
       };
       let tw = ui.painter().layout_no_wrap(label.clone(), font.clone(), color).size().x;
@@ -1436,6 +1442,10 @@ pub(crate) fn browser_max_height(app: &App) -> f32 {
 }
 
 fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
+  if app.flat_mode {
+    browser_flat::env_tree(app, ui);
+    return;
+  }
   let root = egui::Id::new("tree-root");
   // Find in Browser: open the folders down to the node (its row scrolls to itself)
   if let Some(sel) = app.ctx_menu.reveal {
@@ -1515,6 +1525,8 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       });
     }
   }
+  // the sheet metal flat pattern, under the Rule row
+  browser_flat::row(app, ui);
   // Named Views
   let nv = egui::Id::new("tree-views");
   let ev = tree_row(ui, nv, 1, Some(false), None, Icon::Folder, "Named Views", false, theme::TEXT);
@@ -2166,6 +2178,9 @@ pub(crate) enum RowCmd {
   Copy,
   Remove,
   Isolate,
+  // the Flat Pattern row (see browser_flat)
+  Activate,
+  ExportFlatPattern,
 }
 
 /// One row of a browser context menu.
@@ -3451,6 +3466,11 @@ pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
           });
           ui.add_space(6.0);
           ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            // the flat pattern environment's timeline holds only the flat pattern
+            if app.flat_mode {
+              crate::flat_ui::timeline_item(ui);
+              return;
+            }
             let hidden = hidden_items(app, active);
             timeline_items(app, ui, hidden.shown(n), hidden.shown(active), &hidden);
           });
@@ -4180,6 +4200,7 @@ mod browser_assembly;
 mod browser_canvas;
 mod browser_config;
 mod browser_edit;
+pub(crate) mod browser_flat;
 mod browser_rows;
 mod mesh_rows;
 pub(crate) use browser_rows::lock_glyph;

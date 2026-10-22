@@ -848,6 +848,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies()).unwrap_or_default(),
     // a base flange's previewed sheet is Fusion's solid preview blue
     preview: app.dialog.as_ref().map(|d| d.sheet_preview_bodies(&app.s)).unwrap_or_default(),
+    tint_faces: app.dialog.as_ref().map(|d| d.tint_faces(&app.s)).unwrap_or_default(),
     // the palette's Slice reaches the scene as the `slice` render parameter (see `slice_params`)
     ..analysis
   }
@@ -894,6 +895,11 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies().iter().map(|b| b.0).collect()).unwrap_or_default(),
     grid_plane: app.grid_preview,
     quads: [crate::origin::plane_quads(app), crate::construction::quads(app)].concat(),
+    tints: app
+      .dialog
+      .as_ref()
+      .map(|d| d.tint_faces(&app.s).into_iter().map(|(b, f, _)| (b.0, f)).collect())
+      .unwrap_or_default(),
   };
   if crate::gpu::active(app) {
     crate::gpu::set_quads(app, &key.quads);
@@ -990,6 +996,7 @@ fn view_params(app: &App) -> serde_json::Value {
   if let Some(g) = app.dialog.as_ref().map(|d| d.cut_ghost_key()).filter(|g| *g > 0) {
     v["cut_ghost"] = json!(g);
   }
+  crate::flat_ui::view_params(app, &mut v);
   if app.manufacture {
     v["toolpaths"] = json!(app.s.toolpaths_of.map(|t| t.1));
   }

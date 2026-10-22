@@ -260,6 +260,15 @@ pub(crate) fn flat_dxf(
   .map_err(CmdError::new)
 }
 
+/// [`flat_dxf`] with Export Flat Pattern's options.
+pub(crate) fn flat_dxf_with(
+  body: &fox_model::regen::Body,
+  flat: &fox_model::sheet::FlatPattern,
+  opts: &fox_model::sheet::FlatDxfOptions,
+) -> Result<String, CmdError> {
+  fox_model::sheet::flat_dxf_with(flat, body.sheet.as_ref(), opts).map_err(CmdError::new)
+}
+
 /// Checks a flat pattern DXF file (`path`), or a sheet metal body's flat pattern, against shop
 /// rules. The rules default to the body's sheet (or the file's `SHEET` note); `min_feature` and
 /// `hole_to_bend` override them.

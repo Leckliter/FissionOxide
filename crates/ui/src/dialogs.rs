@@ -57,6 +57,9 @@ mod rsl;
 mod section;
 mod sheet;
 pub(crate) use plane_cut::overlay as plane_cut_overlay;
+mod sheet_flat;
+#[cfg(test)]
+mod sheet_flat_tests;
 #[cfg(test)]
 mod sketch_row_tests;
 mod solid;
@@ -133,7 +136,6 @@ pub enum Kind {
   /// Sketch Scale: curves scaled about a picked sketch point.
   SkScale,
   Project,
-  Refold,
   // assembly motion and component copies
   DriveJoint,
   MotionStudy,
@@ -164,6 +166,8 @@ pub enum Kind {
   InsertMesh,
   /// Plane Cut on the MESH tab (see [`plane_cut`]).
   PlaneCut,
+  /// Export Flat Pattern (the flat pattern environment's EXPORT panel, the Flat Pattern row).
+  ExportFlat,
 }
 
 impl Kind {
@@ -191,6 +195,7 @@ impl Kind {
       Kind::ExportDxf => "EXPORT DXF",
       Kind::InsertMesh => "INSERT MESH",
       Kind::PlaneCut => "PLANE CUT",
+      Kind::ExportFlat => "EXPORT FLAT PATTERN",
       Kind::Loft => "LOFT",
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
@@ -206,7 +211,7 @@ impl Kind {
       Kind::Rip => "RIP",
       Kind::Unfold => "UNFOLD",
       Kind::SheetRules => "SHEET METAL RULES",
-      Kind::FlatPattern => "FLAT PATTERN",
+      Kind::FlatPattern => "CREATE FLAT PATTERN",
       Kind::NewComponent => "NEW COMPONENT",
       Kind::Joint => "JOINT",
       Kind::AsBuiltJoint => "AS-BUILT JOINT",
@@ -224,7 +229,6 @@ impl Kind {
       Kind::SkRectPattern => "RECTANGULAR PATTERN",
       Kind::SkScale => "SKETCH SCALE",
       Kind::Project => "PROJECT",
-      Kind::Refold => "REFOLD FACES",
       Kind::DriveJoint => "DRIVE JOINTS",
       Kind::MotionStudy => "MOTION STUDY",
       Kind::CopyComponent => "DUPLICATE COMPONENT",
@@ -274,6 +278,7 @@ impl Kind {
       Kind::ExportDxf => Icon::ExportDxf,
       Kind::InsertMesh => Icon::InsertMesh,
       Kind::PlaneCut => Icon::PlaneCut,
+      Kind::ExportFlat => Icon::Export,
       Kind::Loft => Icon::Loft,
       Kind::Sweep => Icon::Sweep,
       Kind::Hole => Icon::Hole,
@@ -316,7 +321,6 @@ impl Kind {
       Kind::SkRectPattern => Icon::SkRectPattern,
       Kind::SkScale => Icon::SkScale,
       Kind::Project => Icon::Project,
-      Kind::Refold => Icon::Refold,
       Kind::DriveJoint => Icon::DriveJoint,
       Kind::MotionStudy => Icon::MotionStudy,
       Kind::CopyComponent => Icon::Component,
@@ -348,7 +352,7 @@ impl Kind {
       Kind::Rip => ("Rip", "Slit a solid along edges so it can unfold"),
       Kind::Unfold => ("Unfold", "Flatten a sheet metal body onto a face"),
       Kind::SheetRules => ("Sheet Metal Rules", "Thickness, bend radius and reliefs of sheet metal"),
-      Kind::FlatPattern => ("Create Flat Pattern", "Flat pattern size and bends, and DXF export"),
+      Kind::FlatPattern => ("Create Flat Pattern", "Lay a sheet metal body flat on a stationary face"),
       Kind::NewComponent => ("New Component", "Make an empty component, or one from the selected bodies"),
       Kind::Joint => ("Joint", "Join two components at a face or edge of each"),
       Kind::AsBuiltJoint => ("As-built Joint", "Joint two components where they already sit"),
@@ -382,7 +386,6 @@ impl Kind {
       Kind::SkRectPattern => ("Rectangular Pattern", "Copy sketch curves in rows and columns"),
       Kind::SkScale => ("Sketch Scale", "Scale sketch curves about a point; dimensions inside them scale too"),
       Kind::Project => ("Project", "Project a body's or face's edges into the sketch"),
-      Kind::Refold => ("Refold Faces", "Fold an unfolded sheet back up, keeping cuts made while flat"),
       Kind::DriveJoint => ("Drive Joints", "Set a joint's rotation and slide"),
       Kind::MotionStudy => ("Motion Study", "Step a joint through a range and check for interference"),
       Kind::CopyComponent => ("Duplicate Component", "Another instance of a component that follows the original"),
@@ -398,6 +401,7 @@ impl Kind {
       Kind::ExportDxf => ("Export DXF", "Save the sketch as a DXF file"),
       Kind::InsertMesh => ("Insert Mesh", "Place a mesh file in the design: its unit, up direction and position"),
       Kind::PlaneCut => ("Plane Cut", "Cut a mesh body with a plane: trim it, split it in two or split its faces"),
+      Kind::ExportFlat => ("Export Flat Pattern", "Save the flat pattern as a DXF or STEP file"),
       _ => (self.title(), ""),
     };
     (self.icon(), name, hint)
@@ -422,10 +426,8 @@ impl Kind {
         | Kind::Rip
         | Kind::ConvertSheet
         | Kind::Fold
-        | Kind::Unfold
         | Kind::Joint
         | Kind::AsBuiltJoint
-        | Kind::Refold
         | Kind::PlaneCut
     )
   }
@@ -438,10 +440,7 @@ impl Kind {
 
   /// Dialogs that only show information (no OK, nothing applied).
   pub(crate) fn reports(self) -> bool {
-    matches!(
-      self,
-      Kind::Inspect | Kind::Appearance | Kind::Material | Kind::FlatPattern | Kind::Bom | Kind::MotionStudy
-    )
+    matches!(self, Kind::Inspect | Kind::Appearance | Kind::Material | Kind::Bom | Kind::MotionStudy)
   }
 
   /// Dialogs of the Drawing workspace.
@@ -678,6 +677,8 @@ pub struct Dialog {
   redefine: redefine::State,
   /// Export DXF's unit and Visible Geometry check boxes (see [`export_dxf`]).
   dxf: export_dxf::Options,
+  /// Unfold's and Export Flat Pattern's choices (see [`sheet_flat`]).
+  flat: sheet_flat::State,
   /// The patterns' Type row picked another pattern: the dialog becomes that one next frame
   /// (see [`copies`]).
   switch: Option<Kind>,
@@ -828,6 +829,7 @@ impl Dialog {
       place: primitive::Step::Done,
       redefine: redefine::State::default(),
       dxf: export_dxf::Options::default(),
+      flat: sheet_flat::State::default(),
       switch: None,
       ghosts: Vec::new(),
       last_pick: Value::Null,
@@ -1562,7 +1564,6 @@ impl Dialog {
       | Kind::Inspect
       | Kind::Appearance
       | Kind::Material
-      | Kind::FlatPattern
       | Kind::Interference
       | Kind::Bom
       | Kind::CenterOfMass
@@ -1570,6 +1571,7 @@ impl Dialog {
       | Kind::Analysis(_) => {
         return None;
       }
+      Kind::FlatPattern => ("sheet.create_flat_pattern", json!({"face": self.faces.first()?})),
       Kind::Loft => (
         "loft",
         self.with_guides(json!({
@@ -1623,16 +1625,7 @@ impl Dialog {
         ("sheet.convert", p)
       }
       Kind::Rip => ("sheet.rip", json!({"edges": self.edges, "gap": self.distance})),
-      Kind::Unfold => {
-        let mut p = json!({});
-        if let Some(b) = self.bodies.first() {
-          p["body"] = json!(b);
-        }
-        if let Some(f) = self.faces.first() {
-          p["face"] = f.clone();
-        }
-        ("sheet.unfold", p)
-      }
+      Kind::Unfold => ("sheet.unfold", json!({"body": self.bodies.first()?, "face": self.faces.first()?})),
       Kind::SheetRules => (
         "sheet.rule",
         json!({
@@ -1758,13 +1751,6 @@ impl Dialog {
           p["symmetric2"] = json!(self.symmetric[1]);
         }
         ("sketch.pattern_rect", p)
-      }
-      Kind::Refold => {
-        let mut p = json!({});
-        if let Some(b) = self.bodies.first() {
-          p["body"] = json!(b);
-        }
-        ("sheet.refold", p)
       }
       Kind::DriveJoint => (
         "joint.drive",
@@ -1894,7 +1880,7 @@ impl Dialog {
       ),
       Kind::Move => self.move_command()?,
       Kind::RedefinePlane => self.redefine_command()?,
-      Kind::ExportDxf => return None,
+      Kind::ExportDxf | Kind::ExportFlat => return None,
       Kind::InsertMesh => self.insert_mesh_command()?,
       Kind::PlaneCut => self.plane_cut_command()?,
     })
@@ -2101,6 +2087,8 @@ impl Dialog {
       Kind::Analysis(k) => self.analysis_ready(k),
       Kind::CenterOfMass => !self.bodies.is_empty(),
       Kind::PlaneCut => self.plane_cut_ready(),
+      Kind::FlatPattern => !self.faces.is_empty(),
+      Kind::Unfold => !self.faces.is_empty() && self.flat.all_bends,
       _ => true,
     }
   }
@@ -2366,12 +2354,6 @@ impl Dialog {
           self.faces = f;
         }
       }
-      Kind::Refold if !self.applied => {
-        let b = sel_bodies(s);
-        if b != self.bodies {
-          self.bodies = b;
-        }
-      }
       Kind::DrawingView => {
         let b = sel_bodies(s);
         if !b.is_empty() && b != self.bodies {
@@ -2379,7 +2361,8 @@ impl Dialog {
           self.dirty = self.choice == "flat";
         }
       }
-      Kind::ConvertSheet | Kind::Unfold | Kind::Project if !self.applied || !self.picks() => {
+      Kind::FlatPattern | Kind::Unfold if !self.applied => self.flat_sync(s),
+      Kind::ConvertSheet | Kind::Project if !self.applied || !self.picks() => {
         let f: Vec<Value> = sel_faces(s).into_iter().take(1).collect();
         let b = sel_bodies(s);
         if (f != self.faces || b != self.bodies) && (!b.is_empty() || self.kind != Kind::Project) {
@@ -2413,14 +2396,6 @@ impl Dialog {
         let c = if self.kind == Kind::SkOffset { self.offset_picks(s) } else { sel_curves(s) };
         if !c.is_empty() && c != self.curves {
           self.curves = c;
-          self.dirty = true;
-        }
-      }
-      Kind::FlatPattern => {
-        let b = sel_bodies(s);
-        if b != self.bodies {
-          self.bodies = b;
-          self.faces = sel_faces(s).into_iter().take(1).collect();
           self.dirty = true;
         }
       }
@@ -2623,6 +2598,10 @@ impl Dialog {
       keep = false;
       self.dxf_ok(app);
     }
+    if ok && self.kind == Kind::ExportFlat {
+      ok = false;
+      keep = !self.export_flat_ok(app);
+    }
     if ok && self.kind == Kind::RedefinePlane {
       ok = false;
       keep = !self.redefine_ok(app);
@@ -2668,6 +2647,10 @@ impl Dialog {
         }
         if self.kind == Kind::NewDrawing {
           app.drawing = app.s.design.drawings.last().map(|d| d.id);
+        }
+        // OK on CREATE FLAT PATTERN enters the flat pattern environment
+        if self.kind == Kind::FlatPattern {
+          crate::flat_ui::enter(app);
         }
         // the new component is the newest (ids only grow)
         if self.kind == Kind::NewComponent
@@ -2778,6 +2761,9 @@ impl Dialog {
         Kind::Scale => "Select point".into(),
         Kind::Flange => flange::PICK_PROMPT.into(),
         Kind::PlaneCut => plane_cut::HINT.into(),
+        Kind::FlatPattern => sheet_flat::FLAT_HINT.into(),
+        Kind::Unfold if self.faces.is_empty() => sheet_flat::UNFOLD_HINT.into(),
+        Kind::Unfold => sheet_flat::UNFOLD_BENDS_HINT.into(),
         // one prompt for the whole pick, as Fusion words it
         Kind::SkScale => {
           "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
@@ -2974,6 +2960,9 @@ impl Dialog {
       Kind::Analysis(k) => self.analysis_missing(k),
       Kind::CenterOfMass => "select bodies and/or components",
       Kind::PlaneCut => "select a mesh body and a cut plane",
+      Kind::FlatPattern => "select a stationary face",
+      Kind::Unfold if self.faces.is_empty() => "select a stationary face",
+      Kind::Unfold => "tick Unfold all bends",
       _ => "missing input",
     }
   }
@@ -3111,6 +3100,7 @@ impl Dialog {
       Kind::RedefinePlane => self.redefine_rows(app, ui),
       Kind::ExportDxf => self.dxf_rows(app, ui),
       Kind::InsertMesh => self.insert_mesh_rows(app, ui),
+      Kind::ExportFlat => self.export_flat_rows(app, ui),
       Kind::Section => self.section_fields(app, ui),
       Kind::PlaneCut => self.plane_cut_rows(app, ui),
       Kind::Analysis(kind) => self.inspect_analysis_rows(app, ui, kind),
@@ -3628,18 +3618,7 @@ impl Dialog {
       Kind::Fold => self.fold_rows(app, ui, dirty),
       Kind::ConvertSheet => self.convert_rows(ui),
       Kind::Rip => self.rip_rows(ui, dirty),
-      Kind::Unfold => {
-        ui.label("Body");
-        if self.bodies.is_empty() {
-          ui.label(RichText::new("the sheet metal body").color(theme::MUTED));
-        } else {
-          chip(ui, 1, "body");
-        }
-        ui.end_row();
-        ui.label("Stationary face");
-        chip(ui, self.faces.len(), "face");
-        ui.end_row();
-      }
+      Kind::Unfold => self.unfold_rows(app, ui),
       Kind::SheetRules => {
         ui.label("Rule");
         let cur = self.name.clone();
@@ -3666,61 +3645,7 @@ impl Dialog {
         ui.label(RichText::new("empty = from the thickness").small().color(theme::MUTED));
         ui.end_row();
       }
-      Kind::FlatPattern => {
-        ui.label("Body");
-        if self.bodies.is_empty() {
-          ui.label(RichText::new("the sheet metal body").color(theme::MUTED));
-        } else {
-          chip(ui, 1, "body");
-        }
-        ui.end_row();
-        if let Some(r) = self.report.clone() {
-          if let Some([w, h]) = r.get("size").and_then(|v| serde_json::from_value::<[f64; 2]>(v.clone()).ok()) {
-            ui.label("Flat size");
-            ui.label(format!("{:.2} × {:.2} {}", self.unit.from_mm(w), self.unit.from_mm(h), self.unit.symbol()));
-            ui.end_row();
-          }
-          let bends = r.get("bends").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
-          ui.label("Bends");
-          ui.label(bends.to_string());
-          ui.end_row();
-          if let Some(check) = r.get("check") {
-            ui.label("Ready to cut");
-            let findings = check["findings"].as_array().cloned().unwrap_or_default();
-            if findings.is_empty() {
-              ui.label(RichText::new("✓ passes the shop checks").color(theme::ACCENT));
-            } else {
-              ui.vertical(|ui| {
-                for f in &findings {
-                  let at = &f["at"];
-                  let text = format!(
-                    "⚠ {} (at {:.1}, {:.1})",
-                    f["message"].as_str().unwrap_or(""),
-                    at[0].as_f64().unwrap_or(0.0),
-                    at[1].as_f64().unwrap_or(0.0)
-                  );
-                  ui.label(RichText::new(text).color(theme::WARNING));
-                }
-              });
-            }
-            ui.end_row();
-          }
-          ui.label("Export");
-          if panels::secondary_button(ui, "DXF…").clicked()
-            && let Some(path) =
-              rfd::FileDialog::new().add_filter("DXF", &["dxf"]).set_file_name("flat pattern.dxf").save_file()
-          {
-            let mut p = json!({"path": path});
-            if let Some(b) = self.bodies.first() {
-              p["body"] = json!(b);
-            }
-            if app.run("sheet.flat_pattern", p).is_some() {
-              app.status = Some((format!("Exported {}", path.display()), false));
-            }
-          }
-          ui.end_row();
-        }
-      }
+      Kind::FlatPattern => self.create_flat_rows(app, ui),
       Kind::NewComponent | Kind::ComponentProps => {
         let new = self.kind == Kind::NewComponent;
         Self::choose(ui, "Type", "comp-type", &mut self.position, &COMPONENT_TYPES, dirty);
@@ -3980,15 +3905,6 @@ impl Dialog {
           // a second quantity of 1 patterns one way
           self.use_dir2 = self.count2.trim().parse::<u64>().ok().is_none_or(|n| n > 1);
         }
-      }
-      Kind::Refold => {
-        ui.label("Body");
-        if self.bodies.is_empty() {
-          ui.label(RichText::new("the unfolded sheet").color(theme::MUTED));
-        } else {
-          chip(ui, 1, "body");
-        }
-        ui.end_row();
       }
       Kind::DriveJoint | Kind::MotionStudy => {
         ui.label("Joint");
@@ -4405,22 +4321,6 @@ impl Dialog {
   /// Re-runs a report dialog's query.
   fn refresh_report(&mut self, s: &mut Session) {
     let r = match self.kind {
-      Kind::FlatPattern => {
-        let mut p = json!({});
-        if let Some(b) = self.bodies.first() {
-          p["body"] = json!(b);
-        }
-        if let Some(f) = self.faces.first() {
-          p["face"] = f.clone();
-        }
-        // with the shop checks of the flat (hole sizes, webs, holes near bends)
-        s.execute("sheet.flat_pattern", &p).map(|mut v| {
-          if let Ok(c) = s.execute("sheet.check", &p) {
-            v["check"] = c;
-          }
-          v
-        })
-      }
       Kind::Interference => {
         // the selected bodies (two or more), else every pair of components
         let picked = sel_only_bodies(s);
@@ -6469,10 +6369,17 @@ mod tests {
     d.distance2 = "0.5 mm".into();
     apply(&mut s, &mut d);
     d.applied = false;
+    let bottom = face(&s, 0, |f| f.normal.z < -0.9 && f.kind == fox_engine::kernel::SurfaceKind::Plane);
     let mut d = Dialog::blank(Kind::FlatPattern);
-    d.refresh_report(&mut s);
-    assert!(d.report.as_ref().is_some_and(|r| r["bends"].as_array().unwrap().len() == 2), "{:?}", d.error);
+    assert!(!d.ready());
+    d.faces = vec![bottom.clone()];
+    apply(&mut s, &mut d);
+    assert!(s.design.flat_pattern.is_some());
     let mut d = Dialog::blank(Kind::Unfold);
+    d.bodies = vec![s.model.bodies[0].id.0];
+    d.faces = vec![bottom];
+    assert!(!d.ready(), "Unfold all bends unticked");
+    d.flat.all_bends = true;
     apply(&mut s, &mut d);
 
     // fold a flat sheet along a sketch line
@@ -6666,7 +6573,7 @@ mod tests {
 
   #[test]
   fn remaining_engine_commands() {
-    // split by body, refold
+    // split by body
     let mut s = Session::default();
     run(&mut s, "box", json!({"width": 40, "depth": 40, "height": 10}));
     run(&mut s, "cylinder", json!({"radius": 5, "height": 30, "at": [20, 20]}));
@@ -6674,15 +6581,6 @@ mod tests {
     let mut d = Dialog::blank(Kind::SplitBody);
     d.bodies = vec![plate];
     d.target = Some(pin);
-    apply(&mut s, &mut d);
-
-    let mut s = Session::default();
-    run(&mut s, "sketch.create", json!({"plane": "xy"}));
-    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [80, 40]}));
-    run(&mut s, "sheet.flange", json!({}));
-    run(&mut s, "sheet.edge_flange", json!({"edges": [{"point": [40, 40, 1]}], "height": 15}));
-    run(&mut s, "sheet.unfold", json!({}));
-    let mut d = Dialog::blank(Kind::Refold);
     apply(&mut s, &mut d);
 
     // components: duplicate, joint, drive, motion study

@@ -26,6 +26,7 @@ pub mod explode;
 mod features;
 pub mod files;
 mod fillet;
+pub mod flat;
 mod form;
 pub mod generative;
 mod groups;
@@ -649,6 +650,8 @@ mod tests_explode;
 mod tests_files;
 #[cfg(test)]
 mod tests_fillet;
+#[cfg(test)]
+mod tests_flat;
 #[cfg(test)]
 mod tests_form;
 #[cfg(test)]

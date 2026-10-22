@@ -297,7 +297,7 @@ cmds! {
   "sheet.rip" => "Slit a solid along edges (e.g. a shelled box's corners) so it can unfold", "{edges: [{body, edge} | {point}], gap?}";
   "sheet.refold" => "Fold an unfolded sheet back up, carrying cuts made while flat", "{body?}";
   "sheet.unfold" => "Flatten a sheet metal body onto its stationary face (timeline feature)", "{body?, face?, keep_folded?}";
-  "sheet.flat_pattern" => "Flat pattern of a sheet metal body: size and bends; writes .dxf/.step/.stl when given a path", "{body?, face?, path?}";
+  "sheet.flat_pattern" => "Flat pattern of a sheet metal body (default the design's flat pattern): size and bends; writes .dxf/.step/.stl when given a path, a DXF in units (a DXF unit, default mm) with splines as polylines, bend center lines (default on) and extent lines (default off) as asked", "{body?, face?, path?, units?, polylines?: bool, center_lines?: bool, extent_lines?: bool}";
   "sheet.check" => "Check a sheet metal body's flat pattern against the rules shops cut by: hole sizes, material between holes and edges, holes near bends, and the sheet size; defaults follow the body's thickness and bend radius", "{body?, face?, min_hole?, min_web?, bend_clearance?, sheet?: [width, height]}";
   "emboss" => "Raise (or with deboss, sink) sketch profiles or text on a face, projected or wrapped around a cylinder", "{sketch?, profiles?, face, depth, deboss?, wrap?, horizontal?, vertical? (move the profiles along the sketch x / the face's up), rotation?: deg (about the profiles' centre)}";
   "deboss" => "Sink sketch profiles or text into a face (emboss with deboss: true)", "{sketch?, profiles?, face, depth, wrap?, horizontal?, vertical?, rotation?: deg}";
@@ -530,6 +530,8 @@ cmds! {
   "mesh.section_sketch" => "Create Mesh Section Sketch: a sketch on the plane (moved by offset along its normal) with the lines where it cuts the mesh body", "{body, plane, offset?}";
   "mesh.edit.start" => "Direct Edit / Create Base Mesh Feature: a base feature for direct mesh edits", "{}";
   "mesh.edit.finish" => "Finish Direct Editing: the edited mesh body is kept as \"<name>_Edited\" in the base feature, and the marker goes back to the end", "{body?, feature?}";
+  "sheet.create_flat_pattern" => "Create Flat Pattern: the design's flat pattern, a sheet metal body laid flat on its stationary face (kept with the design, not in the timeline); sheet.flat_pattern then defaults to it", "{face: {body, face}}";
+  "sheet.delete_flat_pattern" => "Delete the design's flat pattern", "{}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -571,6 +573,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::sheet2::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::flat::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::config::run(s, name, p) {
@@ -2119,6 +2124,24 @@ fn flat_of<'a>(
   Ok((id, body, flat))
 }
 
+/// Export Flat Pattern's DXF options in `p`: `units` (a DXF unit key), `polylines`,
+/// `center_lines` (default on) and `extent_lines` (default off).
+fn flat_dxf_options(p: &Value) -> Result<fox_model::sheet::FlatDxfOptions, CmdError> {
+  let mut o = fox_model::sheet::FlatDxfOptions::default();
+  if let Some(u) = opt_str(p, "units") {
+    let &(_, _, mm, code) = fox_exchange::dxf::DXF_UNITS
+      .iter()
+      .find(|x| x.0 == u)
+      .ok_or_else(|| CmdError::new(format!("unknown DXF unit '{u}' (mm, cm, m, in, ft, ...)")))?;
+    (o.mm_per_unit, o.insunits) = (mm, code);
+  }
+  let flag = |k: &str, d: bool| p.get(k).and_then(Value::as_bool).unwrap_or(d);
+  o.polylines = flag("polylines", false);
+  o.center_lines = flag("center_lines", true);
+  o.extent_lines = flag("extent_lines", false);
+  Ok(o)
+}
+
 /// Checks a sheet metal body's flat pattern against the rules shops cut by.
 fn sheet_check(s: &Session, p: &Value) -> CmdResult {
   let (id, body, flat) = flat_of(s, p)?;
@@ -2162,6 +2185,8 @@ fn sheet_check(s: &Session, p: &Value) -> CmdResult {
 }
 
 fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
+  let own = crate::flat::default_params(s, p);
+  let p = own.as_ref().unwrap_or(p);
   let (id, body, flat) = flat_of(s, p)?;
   let m = flat.shape.mass()?;
   // size in the stationary plane
@@ -2179,7 +2204,7 @@ fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
     let path = PathBuf::from(path);
     let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
-      "dxf" => std::fs::write(&path, crate::sheet2::flat_dxf(body, &flat)?)?,
+      "dxf" => std::fs::write(&path, crate::sheet2::flat_dxf_with(body, &flat, &flat_dxf_options(p)?)?)?,
       "step" | "stp" => fox_kernel::write_step([&flat.shape], &path)?,
       "stl" => fox_kernel::write_stl(&[flat.shape.tessellate(0.02)?], &path)?,
       o => return Err(CmdError::new(format!("unknown flat pattern format '.{o}' (dxf, step, stl)"))),

@@ -169,6 +169,9 @@ pub struct Design {
   /// workspace shows and what Document Settings names it.
   #[serde(default, skip_serializing_if = "DesignType::is_part")]
   pub design_type: DesignType,
+  /// The sheet metal flat pattern (Create Flat Pattern; the browser's Flat Pattern row).
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub flat_pattern: Option<FlatPatternDef>,
   #[serde(default)]
   next_id: u32,
 }
@@ -214,6 +217,15 @@ impl DesignType {
       DesignType::Hybrid => "Hybrid Design",
     }
   }
+}
+
+/// A flat pattern: the sheet metal body laid flat on its stationary face. Fusion keeps one per
+/// component; it is not a timeline feature and changes nothing the timeline builds.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FlatPatternDef {
+  pub body: BodyId,
+  /// The stationary face, found again after edits.
+  pub face: FaceRef,
 }
 
 /// A saved camera: one of Fusion's user Named Views.
@@ -2379,6 +2391,7 @@ impl Design {
       render: render::RenderDoc::default(),
       sim: Vec::new(),
       design_type: DesignType::Part,
+      flat_pattern: None,
       next_id: 1,
     }
   }

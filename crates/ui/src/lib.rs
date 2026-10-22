@@ -37,6 +37,7 @@ mod file_dialogs;
 #[cfg(test)]
 mod file_dialogs_tests;
 mod file_menu;
+mod flat_ui;
 mod form_ui;
 mod forms;
 mod gen_ui;
@@ -372,6 +373,11 @@ pub struct App {
   pub(crate) asm_component: Option<asm_component::AsmComponent>,
   /// The DIRECT MESH EDITING tab, while open.
   pub mesh_edit: mesh_ui::MeshEdit,
+  /// The flat pattern environment (Create Flat Pattern or the Flat Pattern row's Activate):
+  /// FLAT PATTERN SOLID / SURFACE tabs and a green FINISH FLAT PATTERN (see [`flat_ui`]).
+  pub flat_mode: bool,
+  /// Its browser's Bend Lines: Center Lines and Extent Lines shown.
+  pub(crate) flat_lines: [bool; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -416,6 +422,8 @@ struct RenderKey {
   ghosts: Vec<u32>,
   /// Mesh bodies drawn flat-shaded.
   flat: Vec<u32>,
+  /// Faces a dialog previews in a colour of their own (Unfold's bends).
+  tints: Vec<(u32, u32)>,
   /// Faces and sketches highlighted from the timeline.
   peek_faces: Vec<(u32, u32)>,
   peek_sketches: Vec<u32>,
@@ -637,6 +645,8 @@ impl App {
       inserts: insert_window::Inserts::default(),
       asm_component: None,
       mesh_edit: mesh_ui::MeshEdit::default(),
+      flat_mode: false,
+      flat_lines: [true, true],
     }
   }
 

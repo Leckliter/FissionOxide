@@ -648,7 +648,7 @@ pub fn flat_contours(flat: &FlatPattern) -> Result<(Vec<crate::cutcheck::Contour
 /// Flat pattern outline and bend lines as a DXF (R12, millimetres) in the stationary face's
 /// plane, its lower-left corner at the origin. See [`flat_dxf_for`] for the layers.
 pub fn flat_dxf(flat: &FlatPattern) -> Result<String, String> {
-  write_flat_dxf(flat, None)
+  write_flat_dxf(flat, None, &FlatDxfOptions::default())
 }
 
 /// The flat pattern DXF of a body with sheet settings `sheet`, layered by role: the outline and
@@ -656,7 +656,52 @@ pub fn flat_dxf(flat: &FlatPattern) -> Result<String, String> {
 /// for marking, and on `NOTES` a note at each bend (direction, angle, inside radius) and a
 /// `SHEET T=… R=… K=…` note below the part (which the flat pattern checks read).
 pub fn flat_dxf_for(flat: &FlatPattern, sheet: &SheetInfo) -> Result<String, String> {
-  write_flat_dxf(flat, Some(sheet))
+  write_flat_dxf(flat, Some(sheet), &FlatDxfOptions::default())
+}
+
+/// [`flat_dxf_for`] (or [`flat_dxf`] without a sheet) with Export Flat Pattern's options.
+pub fn flat_dxf_with(flat: &FlatPattern, sheet: Option<&SheetInfo>, opts: &FlatDxfOptions) -> Result<String, String> {
+  write_flat_dxf(flat, sheet, opts)
+}
+
+/// Export Flat Pattern's choices for a DXF: the unit, splines as polylines, and which bend
+/// lines go in (Fusion's Visible Geometry: Center Lines and Extent Lines).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlatDxfOptions {
+  /// Millimetres per drawing unit.
+  pub mm_per_unit: f64,
+  /// The DXF `$INSUNITS` code of the unit (4 = millimetres).
+  pub insunits: u32,
+  /// Splines and ellipses written as chains of lines rather than SPLINE entities.
+  pub polylines: bool,
+  /// Bend centre lines on `BEND_UP` / `BEND_DOWN`.
+  pub center_lines: bool,
+  /// Bend extent lines (where each bend zone meets the flat faces) on `BEND_EXTENT`; they need
+  /// the sheet's bend radius and K factor.
+  pub extent_lines: bool,
+}
+
+impl Default for FlatDxfOptions {
+  /// What the flat pattern DXF has always held: millimetres, splines, centre lines only.
+  fn default() -> FlatDxfOptions {
+    FlatDxfOptions { mm_per_unit: 1.0, insunits: 4, polylines: false, center_lines: true, extent_lines: false }
+  }
+}
+
+/// The bend extent lines of a flat pattern: where each bend zone meets the flat faces, either
+/// side of its centre line by half the bend allowance (angle x (bend radius + K x thickness)),
+/// end to end in model coordinates.
+pub fn flat_extent_lines(flat: &FlatPattern, sheet: &SheetInfo) -> Vec<(DVec3, DVec3)> {
+  let n = flat.plane.normal();
+  let mut out = Vec::new();
+  for b in &flat.bends {
+    let half = b.angle.abs() * (sheet.bend_radius + sheet.k_factor * sheet.thickness) / 2.0;
+    let Some(across) = n.cross(b.end - b.start).try_normalize() else { continue };
+    for side in [-half, half] {
+      out.push((b.start + across * side, b.end + across * side));
+    }
+  }
+  out
 }
 
 /// The layers of a flat pattern DXF: name, colour, line type.
@@ -668,7 +713,7 @@ const FLAT_LAYERS: [(&str, u8, &str); 5] = [
   ("NOTES", 2, "CONTINUOUS"),
 ];
 
-fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>) -> Result<String, String> {
+fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>, opts: &FlatDxfOptions) -> Result<String, String> {
   use std::fmt::Write as _;
   let pl = &flat.plane;
   let n = pl.normal();
@@ -705,6 +750,12 @@ fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>) -> Result<Strin
         };
         ents.push(Ent::Arc(c, e.radius, ang(a), ang(b)));
       }
+      _ if opts.polylines => {
+        // Splines to Polylines: the edge's tessellation as lines
+        let pts: Vec<P2> = lines.iter().filter(|l| l.id == e.id).flat_map(|l| l.points.iter().map(|q| p(*q))).collect();
+        let pts = if pts.len() < 2 { vec![p(e.start), p(e.end)] } else { pts };
+        ents.extend(pts.windows(2).map(|w| Ent::Line(w[0], w[1], "CUT")));
+      }
       _ => {
         // splines and ellipses as their exact NURBS (SPLINE entities)
         let pts: Vec<P2> = lines.iter().filter(|l| l.id == e.id).flat_map(|l| l.points.iter().map(|q| p(*q))).collect();
@@ -726,8 +777,15 @@ fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>) -> Result<Strin
   if ents.is_empty() {
     return Err("the flat pattern has no outline".into());
   }
-  for b in &flat.bends {
-    ents.push(Ent::Line(pl.to_local(b.start), pl.to_local(b.end), if b.inner { "BEND_UP" } else { "BEND_DOWN" }));
+  if opts.center_lines {
+    for b in &flat.bends {
+      ents.push(Ent::Line(pl.to_local(b.start), pl.to_local(b.end), if b.inner { "BEND_UP" } else { "BEND_DOWN" }));
+    }
+  }
+  if let Some(sheet) = sheet.filter(|_| opts.extent_lines) {
+    for (a, b) in flat_extent_lines(flat, sheet) {
+      ents.push(Ent::Line(pl.to_local(a), pl.to_local(b), "BEND_EXTENT"));
+    }
   }
   // shift to the first quadrant
   let (mut x0, mut y0) = (f64::INFINITY, f64::INFINITY);
@@ -741,7 +799,7 @@ fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>) -> Result<Strin
   // notes: one along each bend, and the sheet below the part
   let h = 2.5;
   let mut notes: Vec<(P2, f64, String)> = Vec::new();
-  for b in &flat.bends {
+  for b in flat.bends.iter().filter(|_| opts.center_lines) {
     let (mut a, mut c) = (pl.to_local(b.start), pl.to_local(b.end));
     // text reads left to right
     if c[0] < a[0] - 1e-9 || ((c[0] - a[0]).abs() <= 1e-9 && c[1] < a[1]) {
@@ -761,17 +819,28 @@ fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>) -> Result<Strin
     let text = format!("SHEET T={} R={} K={}", round3(sh.thickness), round3(sh.bend_radius), round3(sh.k_factor));
     notes.push(([x0, y0 - 2.0 * h], 0.0, text));
   }
+  // in the chosen unit: everything scales about the corner the file starts at
+  let (ents, notes, o, h) = if opts.mm_per_unit == 1.0 {
+    (ents, notes, o, h)
+  } else {
+    let k = 1.0 / opts.mm_per_unit;
+    let ents = ents.into_iter().map(|e| e.scaled(k)).collect();
+    let notes = notes.into_iter().map(|(at, ang, t)| (mul(at, k), ang, t)).collect();
+    (ents, notes, mul(o, k), h * k)
+  };
+  let layers = flat_layers(opts);
   if ents.iter().any(|e| matches!(e, Ent::Spline(..))) {
-    return Ok(flat_dxf2000(&ents, &notes, o, h));
+    return Ok(flat_dxf2000(&layers, &ents, &notes, o, h));
   }
-  let mut s = String::from("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n");
+  let mut s =
+    format!("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n{}\n0\nENDSEC\n", opts.insunits);
   s.push_str("0\nSECTION\n2\nTABLES\n");
   s.push_str("0\nTABLE\n2\nLTYPE\n70\n2\n");
   s.push_str("0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0\n");
   s.push_str("0\nLTYPE\n2\nDASHED\n70\n0\n3\nDashed __ __\n72\n65\n73\n2\n40\n6\n49\n4\n49\n-2\n");
   s.push_str("0\nENDTAB\n");
-  let _ = write!(s, "0\nTABLE\n2\nLAYER\n70\n{}\n", FLAT_LAYERS.len());
-  for (name, color, ltype) in FLAT_LAYERS {
+  let _ = write!(s, "0\nTABLE\n2\nLAYER\n70\n{}\n", layers.len());
+  for &(name, color, ltype) in &layers {
     let _ = write!(s, "0\nLAYER\n2\n{name}\n70\n0\n62\n{color}\n6\n{ltype}\n");
   }
   s.push_str("0\nENDTAB\n0\nENDSEC\n");
@@ -811,10 +880,16 @@ fn round3(v: f64) -> String {
 
 /// The flat pattern DXF as R2000 (AC1015), which SPLINE entities need: the same layers, line
 /// types and notes as the R12 file, moved by `-o`.
-fn flat_dxf2000(ents: &[Ent], notes: &[(P2, f64, String)], o: P2, h: f64) -> String {
+fn flat_dxf2000(
+  layers: &[(&'static str, u8, &'static str)],
+  ents: &[Ent],
+  notes: &[(P2, f64, String)],
+  o: P2,
+  h: f64,
+) -> String {
   use fox_exchange::dxf::{Entity, Layer, Text};
   let layers: Vec<Layer> =
-    FLAT_LAYERS.iter().map(|(name, color, lt)| Layer { name, color: *color, dashed: *lt == "DASHED" }).collect();
+    layers.iter().map(|(name, color, lt)| Layer { name, color: *color, dashed: *lt == "DASHED" }).collect();
   let out: Vec<(Entity, &str)> = ents
     .iter()
     .map(|e| match e {
@@ -845,7 +920,30 @@ enum Ent {
   Spline(fox_exchange::dxf::Spline, Vec<P2>),
 }
 
+/// The layers a flat pattern DXF declares: [`FLAT_LAYERS`], and `BEND_EXTENT` when it has
+/// extent lines.
+fn flat_layers(opts: &FlatDxfOptions) -> Vec<(&'static str, u8, &'static str)> {
+  let mut out = FLAT_LAYERS.to_vec();
+  if opts.extent_lines {
+    out.push(("BEND_EXTENT", 8, "CONTINUOUS"));
+  }
+  out
+}
+
 impl Ent {
+  /// The entity scaled by `k` about the origin.
+  fn scaled(self, k: f64) -> Ent {
+    match self {
+      Ent::Line(a, b, layer) => Ent::Line(mul(a, k), mul(b, k), layer),
+      Ent::Circle(c, r) => Ent::Circle(mul(c, k), r * k),
+      Ent::Arc(c, r, a0, a1) => Ent::Arc(mul(c, k), r * k, a0, a1),
+      Ent::Spline(mut sp, pts) => {
+        sp.control.iter_mut().for_each(|q| *q = mul(*q, k));
+        Ent::Spline(sp, pts.into_iter().map(|q| mul(q, k)).collect())
+      }
+    }
+  }
+
   fn extent(&self) -> Vec<P2> {
     match self {
       Ent::Line(a, b, _) => vec![*a, *b],

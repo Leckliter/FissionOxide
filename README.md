@@ -88,10 +88,11 @@ change a parameter and watch the whole history rebuild.
   profiles (die-formed or press-brake with a bend count, sharp or rounded bends), Miter Flange (a sketch profile swept
   along a chain of edges), Hem, Bend along a sketch line, Rip, Convert to Sheet Metal (sharp
   corners become bends, with corner reliefs), Unfold and Refold in the timeline (cuts made while
-  flat are carried back onto the bends), corner closures where flanges meet (miter, open,
+  flat are carried back onto the bends; Refold from the REFOLD panel an Unfold leaves), corner closures where flanges meet (miter, open,
   closed, overlap, butt) with round, square or tear corner reliefs, rectangular or round bend
-  reliefs, and a flat pattern with bend lines exported as a layered DXF with bend notes (also
-  STEP/STL), checked against shop rules, or made into an editable sketch. The unfolder works on the B-rep, so holes and cuts anywhere — even across bends, and
+  reliefs, and a flat pattern (Create Flat Pattern's own environment, a Flat Pattern row in the
+  browser) with bend centre and extent lines exported as a layered DXF in any unit with bend notes
+  (also STEP/STL), checked against shop rules, or made into an editable sketch. The unfolder works on the B-rep, so holes and cuts anywhere — even across bends, and
   bends running straight into other bends — come out in the flat pattern. The flat pattern is
   also checked the way a shop checks a cut file: holes smaller than the material is thick, too little
   material between holes and edges, holes too close to a bend, a part too big for the sheet.

@@ -296,6 +296,7 @@ mod tests {
       ghosts: Vec::new(),
       grid_plane: None,
       quads: Vec::new(),
+      tints: Vec::new(),
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

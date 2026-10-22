@@ -1842,8 +1842,16 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     ),
     (_, "Create Flat Pattern") => (
       "Unfolds a sheet metal body into its flat blank.",
-      "Pick the face that stays fixed. The flat pattern shows bend lines and its size, and can be \
-       exported as a DXF for cutting.",
+      "Pick the face that stays fixed. The flat pattern opens in its own environment with its bend \
+       lines; export it as a DXF or STEP for cutting, then Finish Flat Pattern.",
+    ),
+    (_, "Export Flat Pattern") => (
+      "Exports the flat pattern as a DXF or STEP file.",
+      "Choose the file type and units, and whether bend center lines and extent lines go in the file.",
+    ),
+    (_, "Finish Flat Pattern") => (
+      "Finishes the flat pattern and returns to the folded model.",
+      "The flat pattern stays in the browser; Activate it there to come back.",
     ),
     (_, "Flat Pattern Sketch") => (
       "Makes an editable sketch of the flat pattern.",
@@ -1853,12 +1861,12 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     // SHEET METAL MODIFY
     (_, "Unfold") => (
       "Flattens bends of a sheet metal body onto a face.",
-      "Pick the fixed face and the bends to unfold. Add cuts while flat, then use Refold Faces to bend \
-       it back.",
+      "Pick the fixed face and the bends to unfold. Add cuts while flat, then use Refold in the REFOLD \
+       panel to bend it back.",
     ),
-    (_, "Refold Faces") => (
-      "Folds an unfolded sheet back up, keeping cuts made while flat.",
-      "Pick the unfolded bends to refold. Cuts made across them follow the bends.",
+    (_, "Refold") => (
+      "Folds the unfolded bends back up, keeping cuts made while flat.",
+      "Runs at once on the bends the last Unfold flattened. Cuts made across them follow the bends.",
     ),
     (_, "Sheet Metal Rules") => (
       "Sets the thickness, bend radius and reliefs of sheet metal.",

@@ -278,6 +278,10 @@ pub struct ViewOptions {
   pub analysis_view: crate::analysis::AnalysisView,
   /// Bodies drawn in [`PREVIEW_COLOR`]: a Base Flange's previewed sheet.
   pub preview: Vec<BodyId>,
+  /// The flat pattern environment: the design's flat pattern drawn in place of its body.
+  pub flat: Option<crate::flat::FlatShow>,
+  /// Faces drawn in a colour of their own (Unfold's bends previewed green).
+  pub tint_faces: Vec<(BodyId, u32, [u8; 4])>,
 }
 
 /// What the Sketch Palette shows of the sketch being edited (every option on by default, as
@@ -314,9 +318,49 @@ pub struct SceneBuilder {
   smooth: HashMap<BodyId, TriMesh>,
   /// The design's exploded view and its offsets, for the revision they were worked out at.
   explode: Option<(u64, fox_model::explode::ExplodedView, HashMap<BodyId, DVec3>)>,
+  /// The flat pattern environment's drawing, for the revision it was worked out at.
+  flat: Option<(u64, Option<crate::flat::FlatDraw>)>,
 }
 
 impl SceneBuilder {
+  /// Draws the design's flat pattern for its environment; returns the body it stands for.
+  fn draw_flat(
+    &mut self,
+    s: &Session,
+    show: crate::flat::FlatShow,
+    scene: &mut Scene,
+    hide_edges: bool,
+  ) -> Option<BodyId> {
+    if self.flat.as_ref().is_none_or(|(r, _)| *r != s.revision) {
+      self.flat = Some((s.revision, crate::flat::FlatDraw::of(s)));
+    }
+    let d = self.flat.as_ref()?.1.as_ref()?;
+    let color = s.design.body_color(d.body).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR);
+    let mut mesh = mesh_of(&d.mesh, Vec::new(), color, None);
+    mesh.analyze = true;
+    scene.meshes.push(mesh);
+    let line = |points: Vec<[f32; 3]>, color: [u8; 4], dash_dot: bool| Polyline {
+      points,
+      color,
+      width: 1.0,
+      id: 0,
+      on_top: false,
+      dashed: false,
+      dash_dot,
+      behind: false,
+    };
+    if !hide_edges {
+      scene.lines.extend(d.edges.iter().map(|e| line(e.clone(), EDGE_COLOR, false)));
+    }
+    if show.center_lines {
+      scene.lines.extend(d.center.iter().map(|l| line(l.to_vec(), crate::flat::CENTER_LINE_COLOR, true)));
+    }
+    if show.extent_lines {
+      scene.lines.extend(d.extent.iter().map(|l| line(l.to_vec(), crate::flat::EXTENT_LINE_COLOR, false)));
+    }
+    Some(d.body)
+  }
+
   pub fn build(&mut self, s: &Session, opts: &ViewOptions) -> (Scene, PickTable) {
     if self.revision != s.revision {
       self.edges.clear();
@@ -345,10 +389,14 @@ impl SceneBuilder {
       crate::diff::draw(d, &mut scene);
     }
 
-    // bodies (a simulation view draws its own)
+    // bodies (a simulation view draws its own, the flat pattern environment the flat)
     let sim_bodies = opts.sim.as_ref().map(|v| crate::sim::view_bodies(s, v)).unwrap_or_default();
+    let flat_body = match opts.flat {
+      Some(show) => self.draw_flat(s, show, &mut scene, opts.hide_edges),
+      None => None,
+    };
     for body in &s.model.bodies {
-      if s.diff.is_some() || sim_bodies.contains(&body.id) {
+      if s.diff.is_some() || sim_bodies.contains(&body.id) || flat_body == Some(body.id) {
         continue;
       }
       let shown = match &opts.only_bodies {
@@ -384,7 +432,12 @@ impl SceneBuilder {
         })
         .collect();
       let first = scene.meshes.len();
-      let face_cols = crate::views::body_face_colors(s, body.id);
+      let mut face_cols = crate::views::body_face_colors(s, body.id);
+      for (b, f, c) in &opts.tint_faces {
+        if *b == body.id {
+          face_cols.insert(*f, [c[0], c[1], c[2]]);
+        }
+      }
       let peek_faces: Vec<u32> = opts.peek_faces.iter().filter(|(b, _)| *b == body.id).map(|(_, f)| *f).collect();
       if !ghost && (!face_cols.is_empty() || !peek_faces.is_empty()) {
         // faces with an appearance of their own (and selected or peeked faces) draw as meshes of
@@ -1765,6 +1818,11 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
   o.cut = p.get("cut").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   if let Some(v) = p.get("sim").filter(|v| !v.is_null()) {
     o.sim = Some(crate::sim::view_of(s, v)?);
+  }
+  // the flat pattern environment: `{center_lines?, extent_lines?}`
+  if let Some(v) = p.get("flat").filter(|v| v.is_object()) {
+    let on = |k: &str| v.get(k).and_then(serde_json::Value::as_bool).unwrap_or(true);
+    o.flat = Some(crate::flat::FlatShow { center_lines: on("center_lines"), extent_lines: on("extent_lines") });
   }
   let pull = match p.get("pull") {
     Some(serde_json::Value::String(a)) => match a.as_str() {

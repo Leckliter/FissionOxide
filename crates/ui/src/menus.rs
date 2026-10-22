@@ -10,6 +10,7 @@ use egui::{Color32, Rect, RichText, Stroke, Vec2, pos2, vec2};
 
 use crate::customize::{self, Action, Binding, Prefs};
 use crate::dialogs::Kind;
+use crate::flat_ui::FlatAct;
 use crate::icons::{self, Icon, Tint};
 use crate::panels::{self, Cmd, Tab};
 use crate::render_ui::RenderCmd;
@@ -164,6 +165,7 @@ impl E {
 /// Fusion's SKETCH > CONSTRAINTS panel shows all twelve constraints, the widest default.
 const MAX_QUICK: usize = 12;
 
+#[derive(Clone, Copy)]
 pub(crate) struct Group {
   label: &'static str,
   /// Labels of the entries shown as toolbar icons.
@@ -534,7 +536,8 @@ const SHEET_MORE: &[E] = &[
   c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
   c("All Flat Patterns on One Sheet", Icon::FlatPattern, D(Kind::Form(&forms::COLLECT_FLAT))),
   c("Cut Service Check", Icon::Interference, Cmd::CutCheck),
-  c("Refold Faces", Icon::Refold, D(Kind::Refold)),
+  // the REFOLD panel's command, which shows only after an Unfold
+  c("Refold", Icon::Refold, Cmd::Flat(FlatAct::Refold)),
 ];
 
 const SHEET_MODIFY: &[E] = &[
@@ -1292,6 +1295,36 @@ const PLASTIC: [Group; 2] = [
   },
 ];
 
+// the flat pattern environment (see `flat_ui`): the modelling panels, EXPORT and a green FINISH
+// FLAT PATTERN
+const FLAT_EXPORT: &[E] = &[c("Export Flat Pattern", Icon::Export, Cmd::Flat(FlatAct::Export))];
+const FLAT_FINISH: &[E] = &[c("Finish Flat Pattern", Icon::Finish, Cmd::Flat(FlatAct::Finish))];
+
+macro_rules! flat_groups {
+  ($create:expr, $modify:expr) => {
+    [
+      $create,
+      $modify,
+      Group { label: "CONSTRUCT", quick: &["Offset Plane"], menu: CONSTRUCT },
+      Group { label: "INSPECT", quick: &["Measure", "Section Analysis"], menu: INSPECT },
+      Group { label: "INSERT", quick: &["Insert Derive", "Canvas", "Insert Mesh"], menu: INSERT },
+      Group { label: "SELECT", quick: &["Select"], menu: SELECT },
+      Group { label: "EXPORT", quick: &["Export Flat Pattern"], menu: FLAT_EXPORT },
+      Group { label: "FINISH FLAT PATTERN", quick: &["Finish Flat Pattern"], menu: FLAT_FINISH },
+    ]
+  };
+}
+
+const FLAT_SOLID: [Group; 8] = flat_groups!(SOLID[0], SOLID[1]);
+const FLAT_SURFACE: [Group; 8] = flat_groups!(SURFACE[0], SURFACE[1]);
+
+// the REFOLD panel an Unfold leaves at the right of SHEET METAL: greyed while UNFOLD is open,
+// lit once a body is unfolded
+const REFOLD: &[E] = &[c("Refold", Icon::Refold, Cmd::Flat(FlatAct::Refold))];
+const REFOLD_OFF: &[E] = &[c("Refold", Icon::Refold, Cmd::Flat(FlatAct::Refold)).off()];
+const REFOLD_GROUP: Group = Group { label: "REFOLD", quick: &["Refold"], menu: REFOLD };
+const REFOLD_GROUP_OFF: Group = Group { label: "REFOLD", quick: &["Refold"], menu: REFOLD_OFF };
+
 const MESH: [Group; 3] = [
   Group { label: "CREATE", quick: &["Insert Mesh", "Tessellate", "Create Mesh Section Sketch"], menu: MESH_CREATE },
   Group { label: "PREPARE", quick: &["Repair", "Generate Face Groups", "Combine Face Groups"], menu: MESH_PREPARE },
@@ -1522,13 +1555,9 @@ pub(crate) fn offers(tab: Tab, cmd: Cmd) -> bool {
 /// (widest panel first, down to one icon each) until every panel is on screen; the panel menus
 /// still list everything.
 pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bool {
-  let (own, shared) = groups(tab);
   let mut pick: Option<Item> = None;
   let mut act: Option<Action> = None;
-  let mut all: Vec<&Group> = own.iter().chain(shared.iter()).collect();
-  if app.base_mode && matches!(tab, Tab::Solid | Tab::Surface) {
-    all.push(&BASE_FEATURE_FINISH);
-  }
+  let all = shown_groups(app, tab);
   let items: Vec<Vec<Item>> = all.iter().map(|g| quick_items(&app.prefs, tab, g)).collect();
   let font = egui::FontId::proportional(12.0);
   let panels: Vec<PanelSize> = all
@@ -1545,7 +1574,7 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bo
   for ((g, its), n) in all.iter().zip(items).zip(counts) {
     show_group(app, ui, tab, g, &its[..n], &mut pick, &mut act);
   }
-  if let Some(it) = pick {
+  if let Some(it) = pick.filter(|it| !it.disabled) {
     match it.cmd {
       Some(c) => c.run(app),
       None => app.status = Some((format!("{} isn't in FissionOxide yet", it.label), false)),
@@ -1560,6 +1589,55 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bo
 /// Where [`tab_toolbar`] keeps how many icons each panel of `tab` showed in the last frame.
 pub(crate) fn fit_id(tab: Tab) -> egui::Id {
   egui::Id::new(("toolbar-fit", tab))
+}
+
+/// The panels the toolbar shows on `tab`: its own and the shared ones, with the environments'
+/// (base feature, flat pattern) and the REFOLD panel an Unfold leaves.
+fn shown_groups(app: &App, tab: Tab) -> Vec<&'static Group> {
+  let (own, shared) = groups(tab);
+  if app.flat_mode && matches!(tab, Tab::Solid | Tab::Surface) {
+    let flat: &'static [Group] = if tab == Tab::Solid { &FLAT_SOLID } else { &FLAT_SURFACE };
+    return flat.iter().collect();
+  }
+  let mut all: Vec<&'static Group> = own.iter().chain(shared.iter()).collect();
+  if app.base_mode && matches!(tab, Tab::Solid | Tab::Surface) {
+    all.push(&BASE_FEATURE_FINISH);
+  }
+  if tab == Tab::SheetMetal
+    && let Some(on) = crate::flat_ui::refold_panel(app)
+  {
+    all.push(if on { &REFOLD_GROUP } else { &REFOLD_GROUP_OFF });
+  }
+  all
+}
+
+/// The names of the panels the toolbar shows on `tab`, and whether each one's first command is
+/// greyed (for tests and the REFOLD panel).
+#[cfg(test)]
+pub(crate) fn panel_labels(app: &App, tab: Tab) -> Vec<(&'static str, bool)> {
+  shown_groups(app, tab)
+    .into_iter()
+    .map(|g| (g.label, g.menu.iter().any(|e| matches!(e, E::I(i) if i.disabled))))
+    .collect()
+}
+
+/// The commands a panel's menu lists, by label (for tests).
+#[cfg(test)]
+pub(crate) fn panel_commands(app: &App, tab: Tab, panel: &str) -> Vec<&'static str> {
+  fn walk(menu: &[E], out: &mut Vec<&'static str>) {
+    for e in menu {
+      match e {
+        E::I(i) => out.push(i.label),
+        E::Sub(_, sub) => walk(sub, out),
+        E::Sep => {}
+      }
+    }
+  }
+  let mut out = Vec::new();
+  for g in shown_groups(app, tab).into_iter().filter(|g| g.label == panel) {
+    walk(g.menu, &mut out);
+  }
+  out
 }
 
 /// Where a menu is: what its rows' options and tooltips need.
@@ -1687,7 +1765,7 @@ fn show_group(
   let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
   // FINISH SKETCH sits on light blue, like the contextual SKETCH tab
   let bg = ui.painter().add(egui::Shape::Noop);
-  let finish = matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING" | "FINISH BASE FEATURE");
+  let finish = matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING" | "FINISH BASE FEATURE" | "FINISH FLAT PATTERN");
   let inner = ui.vertical(|ui| {
     ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
     ui.add_space(2.0);
@@ -1700,6 +1778,12 @@ fn show_group(
         let resp = if finish {
           let w = ui.painter().layout_no_wrap(g.label.to_string(), egui::FontId::proportional(12.0), Color32::BLACK);
           icons::tool_button_wide(ui, it.icon, it.tint, active, w.size().x + 22.0)
+        } else if it.disabled {
+          // greyed, as Fusion shows a panel's commands unavailable for now
+          let (rect, resp) = ui.allocate_exact_size(vec2(icons::TOOL_BUTTON_W, 40.0), egui::Sense::hover());
+          let ic = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(32.0));
+          icons::draw(ui.painter(), ic, it.icon, Color32::from_gray(185));
+          resp
         } else {
           icons::tool_button_bare(ui, it.icon, it.tint, active)
         };
@@ -1725,8 +1809,9 @@ fn show_group(
     toggles(menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
   egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, &at, menu, pick, act, &on));
   if finish {
-    // FINISH BASE FEATURE is Fusion's green
-    let fill = if g.label == "FINISH BASE FEATURE" { theme::BASE_FEATURE } else { theme::CONTEXT_TAB };
+    // FINISH BASE FEATURE and FINISH FLAT PATTERN are Fusion's green
+    let green = matches!(g.label, "FINISH BASE FEATURE" | "FINISH FLAT PATTERN");
+    let fill = if green { theme::BASE_FEATURE } else { theme::CONTEXT_TAB };
     ui.painter().set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, fill));
   }
   panels::separator(ui);
@@ -2640,9 +2725,7 @@ mod tests {
       SHEET_MODIFY.iter().filter_map(|e| if let E::I(i) = e { i.paid.then_some(i.label) } else { None }).collect();
     assert_eq!(paid, ["Join by bend", "Sheet Metal Fillet", "Sheet Metal Chamfer"]);
     let offered: Vec<&str> = commands(&[Tab::SheetMetal]).iter().map(|e| e.label).collect();
-    for l in
-      ["Miter Flange", "Flat Pattern Sketch", "All Flat Patterns on One Sheet", "Cut Service Check", "Refold Faces"]
-    {
+    for l in ["Miter Flange", "Flat Pattern Sketch", "All Flat Patterns on One Sheet", "Cut Service Check", "Refold"] {
       assert!(offered.contains(&l), "{l} stays reachable");
     }
     assert!(tips::tip(Scope::Design, "Bill of Materials").is_none(), "the tooltip is the bare name");
