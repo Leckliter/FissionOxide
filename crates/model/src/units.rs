@@ -136,6 +136,12 @@ impl LengthUnit {
     LengthUnit::Mm.typed_from(expr, self)
   }
 
+  /// A stored length expression as an edit box shows it: always with a unit, as Fusion's boxes
+  /// are. Stored bare numbers are millimetres, so `"2"` → `"2 mm"` in every design.
+  pub fn pinned(expr: &str) -> String {
+    LengthUnit::Mm.typed_from(expr, LengthUnit::In)
+  }
+
   /// Pins a bare `expr` to `self` when the design unit is `design` (see [`LengthUnit::shown`]).
   fn typed_from(self, expr: &str, design: LengthUnit) -> String {
     if design == self || !bare(expr) {
@@ -367,6 +373,12 @@ mod tests {
     assert_eq!(u.shown("10"), "10 mm");
     assert_eq!(u.shown("1 in"), "1 in");
     assert_eq!(LengthUnit::Mm.shown("10"), "10");
+    // an edit box always shows the unit, in a mm design too
+    assert_eq!(LengthUnit::pinned("2"), "2 mm");
+    assert_eq!(LengthUnit::pinned("2 * 3"), "(2 * 3) mm");
+    assert_eq!(LengthUnit::pinned("0.1 in"), "0.1 in");
+    assert_eq!(LengthUnit::pinned("w / 2"), "w / 2");
+    assert_eq!(LengthUnit::pinned(""), "");
     assert_eq!(u.localize("10 mm"), "0.393701 in");
     assert_eq!(u.localize("30 deg"), "30 deg");
     assert_eq!(LengthUnit::parse("IN"), Some(LengthUnit::In));

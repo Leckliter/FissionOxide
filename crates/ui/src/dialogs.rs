@@ -27,9 +27,10 @@ pub(crate) use move_copy::Paste;
 mod auto_cut;
 mod body_picks;
 mod copies;
-mod export_dxf;
+mod edit_more;
 #[cfg(test)]
 mod edit_tests;
+mod export_dxf;
 mod newcomp;
 mod primitive;
 mod redefine;
@@ -1288,22 +1289,35 @@ impl Dialog {
       }
       kind @ FeatureKind::Move { .. } => {
         let mut d = Dialog::blank(Kind::Move);
-        d.load_move(kind);
+        d.unit = app.s.design.units;
+        d.load_move(&app.s, kind);
         d
       }
       kind @ (FeatureKind::Emboss { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. }) => {
         solid::edit_form(kind)?
       }
+      kind @ (FeatureKind::Hole { .. }
+      | FeatureKind::Mirror { .. }
+      | FeatureKind::Combine { .. }
+      | FeatureKind::OffsetFaces { .. }) => edit_more::load(&app.s, kind)?,
       _ => return None,
     };
     d.editing = Some(id);
     d.unit = app.s.design.units;
     d.load_edit_anchor(&f.kind);
-    // a stored bare length is mm: in a design in another unit its box says so ("10 mm")
-    let u = d.unit;
+    // a stored bare length is mm, and an edit box always shows the unit, as Fusion's do ("2 mm")
+    let lengths = match d.kind {
+      Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => 3,
+      Kind::Hole => 4,
+      _ => 0,
+    };
+    let s = &mut d.solid;
     let fields = [&mut d.distance, &mut d.distance2, &mut d.radius, &mut d.spacing, &mut d.spacing2];
-    for f in fields.into_iter().chain(d.translate.iter_mut()) {
-      *f = u.shown(f);
+    let more = [&mut s.distance2, &mut s.radius2, &mut s.thickness_out];
+    let abc = [&mut d.a, &mut d.b, &mut d.c, &mut d.d].into_iter().take(lengths);
+    let rows = s.rows.iter_mut().map(|r| &mut r.radius);
+    for f in fields.into_iter().chain(more).chain(abc).chain(rows).chain(d.translate.iter_mut()) {
+      *f = fox_engine::model::LengthUnit::pinned(f);
     }
     Some(d)
   }
@@ -1833,8 +1847,9 @@ impl Dialog {
       Kind::CircPattern => {
         json!({"count": self.count, "angle": self.angle, "symmetric": self.symmetric[0], "join": self.join})
       }
-      Kind::Move => self.move_edit_set(),
+      Kind::Move => self.move_edit_set()?,
       Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
+      Kind::Hole | Kind::Mirror | Kind::Combine | Kind::PressPull => self.more_edit_set()?,
       _ => return None,
     })
   }
@@ -1868,6 +1883,9 @@ impl Dialog {
     self.dirty = false;
     let selection = s.selection.clone();
     self.withdraw(s);
+    if self.kind == Kind::Move {
+      self.prepare_move_edit(s);
+    }
     if self.kind.reports() {
       self.refresh_report(s);
       return;
@@ -2136,6 +2154,10 @@ impl Dialog {
   /// Picks up selection changes made in the viewport while the dialog is open.
   fn sync_selection(&mut self, s: &Session) {
     if self.picks_fixed() {
+      // Edit Move's Selection stays live, as in Fusion
+      if self.kind == Kind::Move && self.mv.adds {
+        self.sync_move(s);
+      }
       return;
     }
     match self.kind {
@@ -2743,6 +2765,8 @@ impl Dialog {
         ui.label("Plane");
         if creating {
           self.plane_choice(ui);
+        } else if self.kind == Kind::Mirror {
+          sel_chip(ui, self.accent(), "1 selected", true);
         } else {
           ui.label("(unchanged)");
         }

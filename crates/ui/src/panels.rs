@@ -4092,6 +4092,10 @@ pub fn edit_feature(app: &mut App, id: FeatureId) {
       if app.dialog.is_none() {
         app.status = Some(("This feature has no editable properties yet".into(), false));
       }
+      // the bodies the edit acts on are drawn selected, as in Fusion
+      if let Some(sel) = app.dialog.as_ref().and_then(|d| d.edit_selection(&app.s)) {
+        app.s.selection = sel;
+      }
     }
   }
 }

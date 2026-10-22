@@ -149,7 +149,8 @@ impl Dialog {
 
   /// Brings the cached manipulator geometry up to date; the viewport calls it every frame.
   pub fn refresh_manip(&mut self, s: &Session) {
-    if self.picks_fixed() {
+    // Edit Move keeps its triad, on the moved bodies
+    if self.picks_fixed() && !(self.kind == Kind::Move && self.mv.adds) {
       return;
     }
     match self.kind {
@@ -601,7 +602,7 @@ impl Dialog {
   /// The move/rotate triad this dialog shows: Move's on the moved bodies' centre, Joint's (an
   /// offset arrow and an angle ring about the joint's Z) on the fixed side's joint origin.
   pub fn triad(&self, s: &Session) -> Option<Triad> {
-    if self.editing.is_some() {
+    if self.editing.is_some() && !(self.kind == Kind::Move && self.mv.adds) {
       return None;
     }
     match self.kind {
