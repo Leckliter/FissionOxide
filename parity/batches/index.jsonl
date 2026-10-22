@@ -69,9 +69,9 @@
 {"name": "ui-sweep-loft-revolve", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_28b804e8 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-rib-emboss-thread", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_cd7b2130 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-pattern-mirror-misc", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_94c1c044 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-modify-menu-tooltips", "items": 5, "status": "ready", "pr": null}
-{"name": "ui-draft-scale-dialogs", "items": 4, "status": "ready", "pr": null}
-{"name": "ui-combine-split-dialogs", "items": 5, "status": "ready", "pr": null}
-{"name": "ui-align-remove-simplify", "items": 4, "status": "ready", "pr": null}
-{"name": "ui-material-appearance", "items": 3, "status": "ready", "pr": null}
-{"name": "ui-dialog-selection-state", "items": 3, "status": "ready", "pr": null}
+{"name": "ui-modify-menu-tooltips", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_09b73edb (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-draft-scale-dialogs", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_fbb41230 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-combine-split-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_9635415e (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-align-remove-simplify", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_10b85414 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-material-appearance", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_4e643365 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-dialog-selection-state", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_7ce0d07b (requested 2026-10-22 by the coordinator)"}
