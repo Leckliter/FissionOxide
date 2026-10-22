@@ -14,6 +14,7 @@ use crate::theme;
 use crate::{App, panels};
 
 mod choice;
+mod construct;
 mod extrude;
 mod hole_pattern;
 mod icon_row;
@@ -131,7 +132,7 @@ impl Kind {
       Kind::Mirror => "MIRROR",
       Kind::Combine => "COMBINE",
       Kind::Move => "MOVE/COPY",
-      Kind::OffsetPlane => "OFFSET PLANE",
+      Kind::OffsetPlane => construct::TITLE,
       Kind::Inspect => "MEASURE",
       Kind::Appearance => "APPEARANCE",
       Kind::Loft => "LOFT",
@@ -170,6 +171,8 @@ impl Kind {
       Kind::MotionStudy => "MOTION STUDY",
       Kind::CopyComponent => "DUPLICATE COMPONENT",
       Kind::NewDrawing => "CREATE DRAWING",
+      // every plane, axis and point command opens Fusion's one construction dialog
+      Kind::Form(_) if construct::method_of(self).is_some() => construct::TITLE,
       Kind::Form(f) => f.title,
       Kind::Section => "SECTION ANALYSIS",
       Kind::Analysis("zebra") => "ZEBRA ANALYSIS",
@@ -560,6 +563,9 @@ pub struct Dialog {
   /// Text: the frame was just placed, so the Text box takes the keyboard on the next frame (its
   /// sample text selected, so typing replaces it), as in Fusion.
   focus_text: bool,
+  /// Another command this dialog switches to (a construction dialog's Type or Method): the app
+  /// cancels this one and starts that.
+  pub(crate) switch_to: Option<Kind>,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -683,6 +689,7 @@ impl Dialog {
       center: None,
       dir_lines: Vec::new(),
       focus_text: false,
+      switch_to: None,
     }
   }
 
@@ -1649,8 +1656,13 @@ impl Dialog {
   /// Puts the dialog on an origin plane ("xy", "xz" or "yz"), as its plane chooser would, and
   /// re-previews (the browser's Offset Plane on an origin plane).
   pub(crate) fn use_origin_plane(&mut self, s: &mut Session, plane: &str) {
-    self.plane = json!(plane);
-    self.plane_label = format!("{} plane", plane.to_uppercase());
+    self.use_plane(s, json!(plane), format!("{} plane", plane.to_uppercase()));
+  }
+
+  /// Offset Plane from `plane` (a `sketch.create` plane: an origin plane, `{feature}`, a face).
+  pub(crate) fn use_plane(&mut self, s: &mut Session, plane: Value, label: String) {
+    self.plane = plane;
+    self.plane_label = label;
     self.refresh_manip(s);
     self.preview(s);
   }
@@ -1722,6 +1734,7 @@ impl Dialog {
       Kind::Hole => self.hole_ready(),
       Kind::Fold => self.sketch.is_some(),
       Kind::RectPattern => self.pattern_ready(),
+      Kind::OffsetPlane => !self.plane.is_null(),
       Kind::PressPull | Kind::Draft => !self.faces.is_empty(),
       Kind::Flange => {
         if self.choice == "edge" {
@@ -2367,6 +2380,7 @@ impl Dialog {
       Kind::Hole => "sketch points to drill (Point tool) are needed",
       Kind::RectPattern => self.pattern_missing(),
       Kind::Fold => "pick a sketch with a bend line",
+      Kind::OffsetPlane => "select a plane",
       Kind::PressPull | Kind::Draft => "select faces",
       Kind::Flange if self.choice == "edge" => "select sheet edges",
       Kind::Flange => "select a profile",
@@ -2401,6 +2415,7 @@ impl Dialog {
 
   fn fields(&mut self, app: &mut App, ui: &mut egui::Ui) {
     let creating = self.editing.is_none();
+    self.construct_rows(ui);
     match self.kind {
       // Create Sketch has no dialog (`show` returns before drawing one): the planes to pick are
       // drawn in the viewport (`viewport::plane_picker`) with the cursor hint
@@ -2513,16 +2528,16 @@ impl Dialog {
       }
       Kind::OffsetPlane | Kind::Mirror => {
         ui.label("Plane");
-        if creating {
+        if self.kind == Kind::OffsetPlane && creating {
+          self.offset_plane_chip(ui, &mut app.s);
+        } else if creating {
           self.plane_choice(ui);
         } else {
           ui.label("(unchanged)");
         }
         ui.end_row();
         if self.kind == Kind::OffsetPlane {
-          ui.label("Offset");
-          self.text(ui, true);
-          ui.end_row();
+          self.offset_plane_rows(ui);
         } else {
           ui.label("Type");
           let types = [("bodies", "Bodies"), ("features", "Features")];

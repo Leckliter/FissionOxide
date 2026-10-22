@@ -1049,7 +1049,7 @@ These exist so code driving the engine can inspect and tag what it builds (see
   perimeter and bounding curves, and the curves outside every profile; `samples` and `loops`
   add points along curves and profile boundaries.
 - `sketch.transform` (move, rotate, scale) and `sketch.insert` (copy curves from a sketch, a
-  DXF, an SVG or a `.fox`); `sketch.trace` (an image); `sketch.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
+  DXF, an SVG or a `.fox`); `sketch.trace` (an image); `sketch.visible`; `construction.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
 - `view.render` writes a PNG with a chosen camera, only some bodies, no sketches or grid.
 - `view.render` also takes a named view's camera (`camera`) and an exploded view (`explode`):
   `{"view": "top", "ortho": true}` for a top view, `{"yaw": 45, "pitch": 30, "ortho": true,

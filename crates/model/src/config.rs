@@ -299,7 +299,9 @@ impl Design {
         let Some(p) = self.parameter(name) else { return Ok(None) };
         Override::Parameter { name: name.clone(), expr: text(eval(p.kind)?, p.kind) }
       }
-      Column::Suppress { feature } => Override::Suppress { feature: *feature, suppressed: eval(Kind::Unitless)? != 0.0 },
+      Column::Suppress { feature } => {
+        Override::Suppress { feature: *feature, suppressed: eval(Kind::Unitless)? != 0.0 }
+      }
       Column::Appearance { body } => {
         let color = if eval(Kind::Unitless)? != 0.0 { r.color } else { r.otherwise };
         Override::Appearance { body: *body, color }

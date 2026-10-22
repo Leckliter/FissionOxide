@@ -513,6 +513,7 @@ cmds! {
   "select.by_size" => "Select the visible bodies (bounding box diagonal) or faces (square root of the area) between min and max", "{max, min?, kind?: bodies|faces}";
   "select.by_boundary" => "Select the faces enclosed by a closed chain of edges of one body (the smaller side); default the selected edges", "{edges?: [{body, edge}]}";
   "select.seed_boundary" => "Select the faces connected to a seed face without crossing the boundary edges; defaults: the selected face and edges", "{seed?: {body, face}, edges?: [{body, edge}]}";
+  "construction.visible" => "Show or hide a construction plane, axis or point (the browser row's eye, V)", "{feature, visible: bool}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1604,6 +1605,25 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           let cur = sketch.curve(CurveId(c)).map(|c| c.centerline).unwrap_or(false);
           sketch.set_centerline(CurveId(c), on.unwrap_or(!cur))?;
         }
+        Ok(())
+      })?;
+      Ok(json!({}))
+    }
+    "construction.visible" => {
+      let id = FeatureId(req_u32(p, "feature")?);
+      let v = p.get("visible").and_then(Value::as_bool).unwrap_or(true);
+      s.edit(|d| {
+        let f = d.feature_mut(id).ok_or(CmdError::new("no such feature"))?;
+        if !matches!(
+          f.kind,
+          FeatureKind::ConstructionPlane { .. }
+            | FeatureKind::ConstructionAxis { .. }
+            | FeatureKind::ConstructionPoint { .. }
+        ) {
+          return Err(CmdError::new("not a construction plane, axis or point"));
+        }
+        // shown is the default: no flag to save
+        f.visible = (!v).then_some(false);
         Ok(())
       })?;
       Ok(json!({}))

@@ -216,6 +216,9 @@ pub struct ViewOptions {
   /// Construction planes left out (the one an Offset Plane dialog previews, which the UI fills
   /// itself).
   pub hide_planes: Vec<FeatureId>,
+  /// Draw no construction planes: the caller draws them itself (the app fills them over the
+  /// image at a fixed size on screen, as Fusion does).
+  pub planes_drawn_by_caller: bool,
   /// Bodies' exploded-view offsets; `None` = the design's exploded view (`view.explode`).
   pub explode: Option<HashMap<BodyId, DVec3>>,
   /// Sketch curves and points also drawn in the hover colour: what a hovered constraint glyph
@@ -529,9 +532,10 @@ impl SceneBuilder {
     }
 
     // construction planes
+    // hidden ones (the browser row's eye, V) are left out
+    let hidden = |id: &FeatureId| s.design.feature(*id).is_some_and(|f| f.suppressed || f.visible == Some(false));
     for (id, pl) in &s.model.planes {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) || opts.hide_planes.contains(id)
-      {
+      if opts.hide_construction || opts.planes_drawn_by_caller || hidden(id) || opts.hide_planes.contains(id) {
         continue;
       }
       let size = scene_size(s) * 0.35;
@@ -556,7 +560,7 @@ impl SceneBuilder {
     // construction axes (dashed, through the model), points and cosmetic threads
     let reach = scene_size(s) * 0.4;
     for (id, (o, d)) in &s.model.axes {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || hidden(id) {
         continue;
       }
       scene.lines.push(Polyline {
@@ -571,7 +575,7 @@ impl SceneBuilder {
       });
     }
     for (id, p) in &s.model.points {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || hidden(id) {
         continue;
       }
       scene.markers.push(Marker {
