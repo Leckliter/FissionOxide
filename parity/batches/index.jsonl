@@ -116,3 +116,8 @@
 {"name": "ui-documents-window-tabs", "items": 5, "status": "ready", "pr": null}
 {"name": "ui-marking-menu-targets", "items": 8, "status": "ready", "pr": null}
 {"name": "ui-preferences-pages", "items": 9, "status": "ready", "pr": null}
+{"name": "ui-leftovers-sketch", "items": 8, "status": "ready", "pr": null}
+{"name": "ui-leftovers-dialogs", "items": 9, "status": "ready", "pr": null}
+{"name": "ui-leftovers-chrome", "items": 8, "status": "ready", "pr": null}
+{"name": "ui-leftovers-display-handles", "items": 8, "status": "ready", "pr": null}
+{"name": "ui-leftovers-render", "items": 7, "status": "ready", "pr": null}
