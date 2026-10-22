@@ -2883,3 +2883,57 @@ fn render_needs_a_saved_design() {
   RenderCmd::Render.run(&mut h.app);
   assert!(h.app.render.render_open && !h.app.render.needs_save);
 }
+
+/// `ui:dialogs:manage-materials`: UTILITIES > UTILITY > Manage Materials opens the Material
+/// Browser with Fusion's vertical library tree (Home, Favorites, then each library on its own
+/// row, the open library's folders indented under it) and the bottom toolbar inside the window,
+/// in a 908 x 785 window as the prober's.
+#[test]
+fn the_material_browser_tree_has_one_library_per_row() {
+  use crate::material_ui::{APPEARANCE_LIBRARY, MATERIAL_LIBRARY, NONLINEAR_LIBRARY};
+  let mut h = Harness::with_width(908.0);
+  crate::panels::Cmd::ManageMaterials.run(&mut h.app);
+  let size = vec2(908.0, 785.0);
+  for _ in 0..3 {
+    h.frame_in(size, vec![]);
+  }
+  h.time += 1.0 / 60.0;
+  let input =
+    RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), time: Some(h.time), ..Default::default() };
+  let app = &mut h.app;
+  let out = h.ctx.run_ui(input, |ui| app.draw(ui));
+  let all = texts(&out);
+  out.drop_without_applying_deltas();
+  let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("material-browser"))).expect("the browser is open");
+  // the tree's row of each (the breadcrumb above also names the open library)
+  let row = |t: &str| {
+    all
+      .iter()
+      .filter(|(r, s)| s == t && window.contains_rect(*r))
+      .map(|(r, _)| *r)
+      .max_by(|a, b| a.top().total_cmp(&b.top()))
+      .unwrap_or_else(|| panic!("{t} is drawn in the browser: {all:?}"))
+  };
+  // Home, Favorites and the open library, then its folders indented under it, one per row
+  let lib = row(MATERIAL_LIBRARY);
+  let rows: Vec<Rect> = ["Home", "Favorites", MATERIAL_LIBRARY, "Ceramic", "Electronics", "Fabric"]
+    .into_iter()
+    .map(|t| if t == MATERIAL_LIBRARY { lib } else { row(t) })
+    .collect();
+  for w in rows.windows(2) {
+    assert!(w[1].top() >= w[0].bottom(), "one row each, top to bottom: {rows:?}");
+    assert!((w[1].left() - w[0].left()).abs() < 24.0, "the rows line up on the left: {rows:?}");
+  }
+  assert!(rows[3].left() > lib.left(), "the folders are indented: {rows:?}");
+  // the other libraries, where drawn (the tree scrolls), sit on rows of their own under it
+  for t in [APPEARANCE_LIBRARY, NONLINEAR_LIBRARY] {
+    for (r, _) in all.iter().filter(|(r, s)| s == t && window.contains_rect(*r)) {
+      assert!(r.top() >= rows[5].bottom() && (r.left() - lib.left()).abs() < 4.0, "{t} at {r:?}: {rows:?}");
+    }
+  }
+  // the bottom toolbar is in the window, at its bottom, below the tree
+  let bar = row("📚 ▾");
+  assert!(bar.top() > rows[5].bottom() && bar.bottom() <= window.bottom(), "{bar:?} in {window:?}");
+  assert!(window.bottom() - bar.bottom() < 24.0, "{bar:?} in {window:?}");
+  assert!(window.bottom() <= 785.0, "the browser fits the window: {window:?}");
+}

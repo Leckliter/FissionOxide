@@ -2521,6 +2521,37 @@ mod tests {
     assert!(app.s.body_visible(body));
   }
 
+  /// `ui:chrome:status-dev-messages`: as Fusion, Ctrl+B and UTILITIES > Compute All recompute and
+  /// write nothing at the lower left.
+  #[test]
+  fn compute_all_from_its_key_and_the_ribbon_leaves_no_message() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    app.status = None;
+    let input = egui::RawInput {
+      events: vec![egui::Event::Key {
+        key: egui::Key::B,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::COMMAND,
+      }],
+      ..Default::default()
+    };
+    ctx.run_ui(input, |ui| app.shortcuts(ui.ctx())).drop_without_applying_deltas();
+    assert!(app.rebuild.is_some(), "Ctrl+B starts a recompute");
+    while app.poll_rebuild() {
+      std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(app.status, None);
+    panels::Cmd::ComputeAll.run(&mut app);
+    assert!(app.rebuild.is_some(), "Compute All starts a recompute");
+    while app.poll_rebuild() {
+      std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(app.status, None);
+  }
+
   #[test]
   fn s_opens_the_toolbox_over_the_canvas_only() {
     let ctx = egui::Context::default();

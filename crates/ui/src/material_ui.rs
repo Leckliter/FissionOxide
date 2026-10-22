@@ -570,6 +570,17 @@ pub(crate) fn browser_window(app: &mut App, ctx: &egui::Context) {
 }
 
 fn browser_contents(app: &mut App, ui: &mut egui::Ui, b: &mut Browser) {
+  // the bottom toolbar, pinned to the window's bottom edge: library and asset actions (the
+  // library files themselves are Fusion's)
+  egui::Panel::bottom("mb-toolbar").frame(egui::Frame::NONE).show(ui, |ui| {
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+      let later = "isn't in FissionOxide yet";
+      ui.add_enabled(false, egui::Button::new("📚 ▾")).on_disabled_hover_text(format!("Creating libraries {later}"));
+      ui.add_enabled(false, egui::Button::new("＋ ▾")).on_disabled_hover_text(format!("Creating materials {later}"));
+      ui.add_enabled(false, egui::Button::new("▤")).on_disabled_hover_text(format!("The asset editor {later}"));
+    });
+  });
   ui.horizontal(|ui| {
     for (t, label) in [(BrowserTab::Physical, "Physical"), (BrowserTab::Appearance, "Appearance")] {
       if ui.selectable_label(b.tab == t, label).clicked() && b.tab != t {
@@ -596,11 +607,15 @@ fn browser_contents(app: &mut App, ui: &mut egui::Ui, b: &mut Browser) {
   });
   ui.separator();
   let listed = b.listed(app);
-  let bottom = 30.0;
-  let height = (ui.available_height() - bottom).max(120.0);
+  // the panes fill the window down to the bottom toolbar
+  let height = ui.available_height().max(120.0);
+  let down = egui::Layout::top_down(egui::Align::Min);
   ui.horizontal_top(|ui| {
-    ui.allocate_ui(vec2(220.0, height), |ui| {
-      egui::ScrollArea::vertical().id_salt("mb-tree").show(ui, |ui| {
+    // the library tree, one row per library as Fusion's (a child of a horizontal row would lay
+    // them side by side)
+    ui.allocate_ui_with_layout(vec2(220.0, height), down, |ui| {
+      ui.set_min_height(height);
+      egui::ScrollArea::vertical().id_salt("mb-tree").max_height(height).auto_shrink([false, false]).show(ui, |ui| {
         ui.set_width(210.0);
         if ui.selectable_label(b.at == Place::Home, "Home").clicked() {
           b.go(Place::Home);
@@ -633,8 +648,9 @@ fn browser_contents(app: &mut App, ui: &mut egui::Ui, b: &mut Browser) {
       });
     });
     ui.separator();
-    ui.allocate_ui(vec2(ui.available_width(), height), |ui| {
-      egui::ScrollArea::vertical().id_salt("mb-list").show(ui, |ui| {
+    ui.allocate_ui_with_layout(vec2(ui.available_width(), height), down, |ui| {
+      ui.set_min_height(height);
+      egui::ScrollArea::vertical().id_salt("mb-list").max_height(height).auto_shrink([false, false]).show(ui, |ui| {
         ui.set_width(ui.available_width());
         if b.at == Place::Home && b.search.trim().is_empty() {
           ui.label(RichText::new("Libraries").strong());
@@ -660,14 +676,6 @@ fn browser_contents(app: &mut App, ui: &mut egui::Ui, b: &mut Browser) {
         }
       });
     });
-  });
-  ui.separator();
-  // the bottom toolbar: library and asset actions (the library files themselves are Fusion's)
-  ui.horizontal(|ui| {
-    let later = "isn't in FissionOxide yet";
-    ui.add_enabled(false, egui::Button::new("📚 ▾")).on_disabled_hover_text(format!("Creating libraries {later}"));
-    ui.add_enabled(false, egui::Button::new("＋ ▾")).on_disabled_hover_text(format!("Creating materials {later}"));
-    ui.add_enabled(false, egui::Button::new("▤")).on_disabled_hover_text(format!("The asset editor {later}"));
   });
 }
 

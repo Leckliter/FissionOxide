@@ -941,9 +941,10 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        Constrain sketches with dimensions and constraints. Select Finish Sketch to exit Sketch mode.",
     ),
     (_, "Create Form") => (
-      "Starts a freeform modelling space for sculpted T-spline shapes.",
-      "Begin from a primitive such as a box or sphere and push, pull and crease it into organic shapes. \
-       Finish the form to turn it back into a body.",
+      "Enters Form mode and inserts a form feature into the timeline. Use form tools to create and edit \
+       history-free bodies by pushing and pulling on vertices, edges, and faces. This is commonly referred \
+       to as T-Spline modeling.",
+      "Select Finish Form to exit out of the mode.",
     ),
     (_, "Derive") => (
       "Brings bodies, sketches or parameters from another design into this one.",
@@ -971,14 +972,14 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        control the sides between them.",
     ),
     (_, "Rib") => (
-      "Adds a thin stiffening wall from an open sketch line to the body.",
-      "Pick an open sketch curve and set the thickness; the rib grows until it meets the body. Use it \
-       to strengthen walls in moulded and printed parts.",
+      "Creates a thin feature from an open sketch profile, extruded to the nearest faces on a solid body. \
+       The rib feature is extruded in a direction parallel to the sketch plane.",
+      "Select an open sketch profile, then specify the thickness.",
     ),
     (_, "Web") => (
-      "Adds a network of thin walls from sketch lines.",
-      "Pick open sketch lines; walls grow along the sketch normal until they meet the body. Use it for \
-       crossing stiffeners inside a shell.",
+      "Creates a thin feature from an open sketch profile, extruded to the nearest faces on a solid body. \
+       The web feature is extruded in a direction perpendicular to the sketch plane.",
+      "Select an open sketch profile, then specify the thickness.",
     ),
     (_, "Emboss") => (
       "Raises or sinks sketch profiles or text on a face, flat or curved.",
@@ -1122,9 +1123,8 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        and pulled separately.",
     ),
     (_, "Split Body") => (
-      "Cuts bodies into separate bodies along a plane or face.",
-      "Pick the bodies and the splitting tool. Use it to divide a part for printing or to make the \
-       halves of an enclosure.",
+      "Creates new bodies by dividing selected bodies using a profile, face, or plane.",
+      "Select the bodies to modify then select the profile, face, or plane that divides the bodies.",
     ),
     (_, "Silhouette Split") => (
       "Splits faces along their outline as seen from a direction.",
@@ -1132,9 +1132,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        find a mould's parting line.",
     ),
     (_, "Move/Copy") => (
-      "Moves, rotates or copies bodies.",
-      "Pick bodies, then drag the handles or type distances and angles. Turn on copy to leave the \
-       originals in place.",
+      "Moves the selected face, body, sketch, or construction geometry a specified distance or angle.",
+      "Select the objects to modify then specify the distance or angle. Use Set Pivot to reposition the \
+       manipulator.",
     ),
     (_, "Align") => (
       "Moves a body so that one of its faces or edges lines up with another.",
@@ -1162,9 +1162,11 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        look, not the material or the mass.",
     ),
     (_, "Manage Materials") => (
-      "Edits the libraries of physical materials and appearances.",
-      "Create and edit materials, change their properties and organise them into libraries you can \
-       share. Materials you add then appear in Physical Material and Appearance.",
+      "Opens the Material Browser, where you can manage physical materials and appearances in user-defined \
+       material libraries.",
+      "Navigate between libraries, create new libraries, and add physical materials or appearances to your \
+       Favorites. In custom libraries, edit the properties of physical materials and appearances, or create \
+       new ones.",
     ),
     (_, "Change Parameters") => (
       "Displays the Parameters dialog, where you can create and manage equations and relationships to \
@@ -1178,7 +1180,7 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        in the Timeline, to ensure all assembly relationships are calculated properly.\n\nPress Ctrl+/ \
        for more help.",
     ),
-    // (Fusion's Bill of Materials tooltip is its bare name: no text here)
+    // Bill of Materials: Fusion's tooltip is the bare title, see [`title_only`]
 
     // DIRECT EDIT
     (_, "Move Face") => (
@@ -1387,9 +1389,8 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        them.",
     ),
     (_, "Interference") => (
-      "Finds where bodies of different components overlap.",
-      "Pick the components to check, or check them all. The overlaps are shown with their volumes so \
-       you can fix clashes before making parts.",
+      "Reports the interference between selected solid bodies or components.",
+      "Select the components then click compute. Choose to create components from the interferences.",
     ),
     (_, "Section Analysis") => (
       "Creates a view that cuts through all visible objects in a design to reveal interior details and obscured \
@@ -1409,8 +1410,10 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        on smooth surfaces.",
     ),
     (_, "Draft Analysis") => (
-      "Colours faces by whether they have enough draft for moulding.",
-      "Pick the pull direction and the angle range. Faces that would stick in the mould stand out.",
+      "Displays a color gradient on the faces of selected bodies to help evaluate the manufacturability of \
+       your design.",
+      "Select the bodies to evaluate and the axis to define the direction. Use the options to refine the \
+       gradient display.",
     ),
     (_, "Environment Map Analysis") => (
       "Reflects a surrounding image on the faces to judge smoothness.",
@@ -1428,9 +1431,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        stripes that kink mean tangent; smooth stripes mean curvature continuous.",
     ),
     (_, "Accessibility Analysis") => (
-      "Colours faces by whether a tool can reach them from a direction.",
-      "Pick the direction the tool approaches from. Hidden faces stand out, which helps with machining \
-       and moulding.",
+      "Used to colorize an object based on whether or not certain parts of the object are accessible from a \
+       particular plane.",
+      "Inaccessible areas are highlighted in red. Useful for checking undercut areas through a plane.",
     ),
     (_, "Center of Mass") => (
       "Shows the centre of mass of the selected bodies, or of all of them.",
@@ -1447,9 +1450,10 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        assemblies with many components.",
     ),
     (_, "Display Component Colors") => (
-      "Colours each component differently in the viewport.",
-      "Toggle it to tell components apart in a busy assembly. Their real appearances return when you \
-       turn it off.",
+      "Displays each component in an assembly as a different color to make them easier to differentiate. \
+       Hides physical materials and appearances.",
+      "Press Shift+N to show or hide component colors in the canvas. Right-click a component and select \
+       Cycle Component Color to change its color.",
     ),
     (_, "Display Mesh Face Groups") => (
       "Colours a mesh body's face groups.",
@@ -1462,9 +1466,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        makes a new version you can return to.",
     ),
     (_, "Sustainability Insights") => (
-      "Estimates the environmental impact of the design's materials.",
-      "Shows estimates of the carbon footprint of the materials in the design, so you can compare \
-       alternatives. The figures are estimates for comparing options, not certified values.",
+      "Displays an estimated carbon footprint of the current design.",
+      "Select a body to analyze, then specify manufacturing details to improve your footprint estimate. You \
+       can also activate a persistent dock to monitor selected bodies as you work.",
     ),
 
     // INSERT
@@ -2019,9 +2023,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // ADD-INS
     (_, "Scripts and Add-Ins...") => (
-      "Installs and manages plugins that extend the app.",
-      "Install a .foxplugin file (or drop it on the window) or one shared in your data hub, update it, \
-       turn it off, change what it may do and read its log. Its commands get their own toolbar tab.",
+      "Manage Scripts and Add-Ins",
+      "Displays the Scripts and Add-Ins dialog box. Create, edit, run, stop, debug and manage Scripts and \
+       Add-Ins.",
     ),
     (_, "Design and Make Marketplace") => (
       "Browses an online store of add-ins and content.",
@@ -2192,15 +2196,30 @@ impl Tip {
 
 /// Whether the ribbon tooltip of `label` grows, after resting on it, with Fusion's illustration
 /// (a rendered picture of the command's result; FissionOxide paints the command's icon large
-/// until pictures exist). Fusion has none for Display Configuration Table, Offset Plane and Add
-/// To Assembly, which show "Press Ctrl+/ for more help." at once and never grow, nor for the
-/// commands whose usage text already ends with that line.
+/// until pictures exist). Fusion has none for Display Configuration Table, Offset Plane, Add To
+/// Assembly, Scripts and Add-Ins, Manage Materials, Interference and Draft Analysis, which show
+/// "Press Ctrl+/ for more help." at once and never grow, nor for the commands whose usage text
+/// already ends with that line.
 pub(crate) fn illustrated(scope: Scope, label: &str) -> bool {
   match tip(scope, label) {
     None => false,
     Some(t) => {
-      !matches!(label, "Display Configuration Table" | "Offset Plane" | "Add To Assembly")
-        && !t.more.ends_with(MORE_HELP)
+      !matches!(
+        label,
+        "Display Configuration Table"
+          | "Offset Plane"
+          | "Add To Assembly"
+          | "Scripts and Add-Ins..."
+          | "Manage Materials"
+          | "Interference"
+          | "Draft Analysis"
+      ) && !t.more.ends_with(MORE_HELP)
     }
   }
+}
+
+/// Whether Fusion's ribbon tooltip of `label` is only its title in a small dark pill, with no
+/// description and never expanding (Bill of Materials).
+pub(crate) fn title_only(label: &str) -> bool {
+  label == "Bill of Materials"
 }
