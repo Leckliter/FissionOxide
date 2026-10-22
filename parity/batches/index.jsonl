@@ -61,7 +61,7 @@
 {"name": "ui-document-settings-views", "items": 6, "status": "done", "pr": "6d43b74", "fixer": "cloud task_6ece50ff (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-status-readouts", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_7bb6ebf6 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-camera-navbar", "items": 5, "status": "done", "pr": "6951023", "fixer": "cloud task_17e44523 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-display-settings-3", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_1a57e52e (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-display-settings-3", "items": 5, "status": "done", "pr": "e315cfc", "fixer": "cloud session_011WRufzngKGK1csRsEmb2Lu (requested 2026-10-21)"}
 {"name": "ui-grid-snaps-2", "items": 3, "status": "done", "pr": "26b9c61", "fixer": "cloud task_90348c0f (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-origin-display", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_99c1f3b0 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-construction-display", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_84272e49 (requested 2026-10-22 by the coordinator)"}
