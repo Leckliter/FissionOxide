@@ -217,8 +217,7 @@ pub fn simulate(setup: &Setup, model: &Model, paths: &[Toolpath]) -> Result<Voxe
     h = h.min((dmin / 5.0).max(0.05));
   }
   h = h.max((ext.x * ext.y * ext.z / MAX_VOXELS).cbrt());
-  let n =
-    [(ext.x / h).ceil().max(1.0) as usize, (ext.y / h).ceil().max(1.0) as usize, (ext.z / h).ceil().max(1.0) as usize];
+  let n = [(ext.x / h).ceil().max(1.0) as usize, (ext.y / h).ceil().max(1.0) as usize, (ext.z / h).ceil().max(1.0) as usize];
   let mut sim = VoxelSim {
     lo,
     h,
@@ -276,8 +275,7 @@ pub fn simulate(setup: &Setup, model: &Model, paths: &[Toolpath]) -> Result<Voxe
           None => notes.note(WarningKind::AxisLimit, m.to, to_axis.angle_between(DVec3::Z).to_degrees()),
         }
       }
-      let steps =
-        (((m.to - at).length() / h).max(axis.angle_between(to_axis) / 2f64.to_radians()).ceil() as usize).max(1);
+      let steps = (((m.to - at).length() / h).max(axis.angle_between(to_axis) / 2f64.to_radians()).ceil() as usize).max(1);
       for s in 0..=steps {
         let f = s as f64 / steps as f64;
         let c = Cutter {
@@ -320,8 +318,7 @@ fn sweep(sim: &mut VoxelSim, c: &Cutter, notes: &mut Notes, removed: &mut f64) {
     let b = ((h - sim.lo[axis]) / sim.h - 0.5).floor();
     (b >= a && b >= 0.0).then(|| (a as usize, (b as usize).min(sim.n[axis] - 1)))
   };
-  let (Some((i0, i1)), Some((j0, j1)), Some((k0, k1))) =
-    (range(lo.x, hi.x, 0), range(lo.y, hi.y, 1), range(lo.z, hi.z, 2))
+  let (Some((i0, i1)), Some((j0, j1)), Some((k0, k1))) = (range(lo.x, hi.x, 0), range(lo.y, hi.y, 1), range(lo.z, hi.z, 2))
   else {
     return;
   };
