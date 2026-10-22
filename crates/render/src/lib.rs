@@ -10,6 +10,12 @@
 
 use glam::{DMat4, DVec3, DVec4, Vec3};
 
+mod post;
+pub use post::{
+  AA_EDGE, AO_RADII, AO_STRENGTH, Dome, Post, SHADOW_BIAS, SHADOW_DARKEN, SHADOW_LEAN, SHADOW_MIN_COS, SHADOW_SIZE,
+  ShadowMap, ao_at, casts_shadow, shadow_light, shadow_texel, to_light,
+};
+
 /// Hostile-size guard for frames.
 pub const MAX_DIM: u32 = 8192;
 
@@ -434,7 +440,9 @@ pub struct Marker {
 /// are drawn, plus two line-drawing styles (`view.render` only; Fusion's menu has six rows).
 ///
 /// Fusion's default, Shaded, draws the bodies' edges in light grey and lets them be picked, so
-/// [`VisualStyle::Shaded`] draws them too; Shaded with Visible Edges Only looks the same here.
+/// [`VisualStyle::Shaded`] draws them too. Shaded with Visible Edges Only draws them dark instead
+/// (see [`Scene::restyle_edges`]) and outlines curved faces with their silhouettes, the crisp
+/// line look of Fusion's older default.
 ///
 /// Body surfaces are the meshes marked [`Mesh::analyze`]; their edges are the depth-tested lines
 /// with a pick id (sketch profiles, the grid and construction geometry draw as they always do).
@@ -516,9 +524,15 @@ impl VisualStyle {
     true
   }
 
-  /// Body silhouettes are drawn as edges: in every style that doesn't shade the surfaces.
+  /// Body silhouettes are drawn as edges: in every style that doesn't shade the surfaces, and in
+  /// Shaded with Visible Edges Only, whose dark outlines set it apart from Shaded.
   pub fn silhouettes(self) -> bool {
-    !self.shaded()
+    !self.shaded() || self == VisualStyle::ShadedVisibleEdges
+  }
+
+  /// Body edges are drawn dark ([`SILHOUETTE_COLOR`]) rather than in the scene's light grey.
+  pub fn dark_edges(self) -> bool {
+    self == VisualStyle::ShadedVisibleEdges
   }
 
   /// Edges behind the surfaces show, dashed.
@@ -698,6 +712,22 @@ pub struct Scene {
   /// How far the analysis colours fade back to the plain shading (1 − Fusion's Opacity / 100).
   pub analysis_fade: f32,
   pub style: VisualStyle,
+  /// The effects drawn into the picture (Environment Dome, Object Shadow, Ambient Occlusion,
+  /// Anti-Aliasing; see [`Post`]).
+  pub post: Post,
+}
+
+impl Scene {
+  /// Draws the body edges in `plain` (the scene builder's light grey; hovered and selected edges
+  /// keep their colours) as the style wants them: dark in Shaded with Visible Edges Only.
+  pub fn restyle_edges(&mut self, plain: [u8; 4]) {
+    if !self.style.dark_edges() {
+      return;
+    }
+    for l in self.lines.iter_mut().filter(|l| is_edge(l) && l.color == plain) {
+      l.color = SILHOUETTE_COLOR;
+    }
+  }
 }
 
 pub struct Frame {
@@ -772,23 +802,41 @@ pub struct Effects {
   pub reflections: bool,
   /// A see-through ground plane.
   pub ground_plane: bool,
-  /// The environment's image behind the model. Kept, not drawn yet.
+  /// The environment's dome behind the model (see [`Post`]).
   #[serde(default)]
   pub environment_dome: bool,
-  /// Bodies casting shadows onto each other. Kept, not drawn yet.
+  /// Bodies casting shadows onto each other (see [`Post`]).
   #[serde(default)]
   pub object_shadow: bool,
-  /// Ambient occlusion. Kept, not drawn yet.
+  /// Ambient occlusion (see [`Post`]).
   #[serde(default)]
   pub ambient_occlusion: bool,
-  /// Anti-aliasing. Kept, not drawn yet.
+  /// Anti-aliasing (see [`Post`]).
   #[serde(default)]
   pub anti_aliasing: bool,
 }
 
 impl Effects {
-  /// Adds the ground, shadow and reflections to a built scene. They have no pick id.
+  /// Adds the ground, shadow and reflections to a built scene, the ground at the bodies' lowest
+  /// point. They have no pick id.
   pub fn apply(self, scene: &mut Scene) {
+    self.apply_at(scene, None);
+  }
+
+  /// [`Effects::apply`] with Ground Plane Offset: the ground `offset` below the bodies' lowest
+  /// point (`None`: Adaptive, at it). The effects drawn into the picture go to
+  /// [`Scene::post`], with `dome` for Environment Dome.
+  pub fn apply_with(self, scene: &mut Scene, offset: Option<f32>, dome: Dome) {
+    scene.post = Post {
+      dome: self.environment_dome.then_some(dome),
+      object_shadow: self.object_shadow,
+      ambient_occlusion: self.ambient_occlusion,
+      anti_aliasing: self.anti_aliasing,
+    };
+    self.apply_at(scene, offset);
+  }
+
+  fn apply_at(self, scene: &mut Scene, offset: Option<f32>) {
     if !(self.ground_shadow || self.reflections || self.ground_plane) {
       return;
     }
@@ -801,7 +849,7 @@ impl Effects {
       hi = hi.max(Vec3::from(*p));
     }
     let size = (hi - lo).max_element().max(1.0);
-    let z0 = lo.z;
+    let z0 = lo.z - offset.filter(|o| o.is_finite()).unwrap_or(0.0).max(0.0);
     let lift = size * 1e-3;
     let flat = |positions: Vec<[f32; 3]>, indices: Vec<u32>, color: [u8; 4]| Mesh {
       normals: vec![[0.0, 0.0, 1.0]; positions.len()],
@@ -838,7 +886,7 @@ impl Effects {
     }
     if self.ground_shadow {
       // the light leans a little, so a body's sides cast some shadow beside its footprint
-      let (sx, sy) = (0.35, 0.25);
+      let [sx, sy] = SHADOW_LEAN;
       let hull = convex_hull(pts().map(|p| [p[0] + (p[2] - z0) * sx, p[1] + (p[2] - z0) * sy]).collect());
       if hull.len() >= 3 {
         let z = z0 - lift * 0.5;
@@ -879,12 +927,16 @@ fn convex_hull(mut p: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
 pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   let mut f = Frame::new(width, height);
   let (w, h) = (f.width, f.height);
-  // background gradient
+  // background gradient, or the environment's dome
   for y in 0..h {
     let t = y as f32 / (h.max(2) - 1) as f32;
     let c = lerp_color(scene.background_top, scene.background_bottom, t);
     for x in 0..w {
       let i = ((y * w + x) * 4) as usize;
+      let c = match scene.post.dome {
+        Some(d) => d.color(Dome::ray(cam, w, h, x as f32 + 0.5, y as f32 + 0.5)),
+        None => c,
+      };
       if let Some(px) = f.rgba.get_mut(i..i + 4) {
         px.copy_from_slice(&c);
       }
@@ -900,12 +952,15 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   let fill = (right * 0.7 - up * 0.2 + back * 0.3).normalize().as_vec3();
   let style = scene.style;
   let lights = [key, head, fill];
+  // Object Shadow: on shaded body surfaces
+  let shadows = (scene.post.object_shadow && style.shaded()).then(|| ShadowMap::build(&scene.meshes)).flatten();
   let shade_of = |m: &Mesh| Shade {
     vertex_colors: false,
     analysis: scene.analysis.filter(|_| m.analyze && !m.unanalyzed),
     fade: scene.analysis_fade,
     paper: m.analyze && style.line_drawing(),
     unlit: m.unlit,
+    shadow: shadows.as_ref().filter(|_| casts_shadow(m)),
   };
   for m in scene.meshes.iter().filter(|m| !m.transparent()) {
     if m.analyze && !style.shaded() && !style.line_drawing() {
@@ -915,6 +970,9 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
       continue;
     }
     draw_mesh(&mut f, m, &vp, cam, eye, lights, shade_of(m));
+  }
+  if scene.post.ambient_occlusion && (style.shaded() || style.line_drawing()) {
+    post::ambient_occlusion(&mut f, cam);
   }
   let silhouettes = if style.silhouettes() { silhouette_lines(scene, cam, h) } else { Vec::new() };
   let edges = || scene.lines.iter().filter(|l| is_edge(l)).chain(&silhouettes);
@@ -940,6 +998,9 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   }
   for mk in scene.markers.iter().filter(|m| m.on_top) {
     draw_marker(&mut f, mk, &vp);
+  }
+  if scene.post.anti_aliasing {
+    post::anti_alias(&mut f);
   }
   f
 }
@@ -1083,7 +1144,7 @@ struct CV {
   col: Vec3,
 }
 
-fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, lights: [Vec3; 3], shade: Shade) {
+fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, lights: [Vec3; 3], shade: Shade<'_>) {
   let tris = m.indices.len() / 3;
   let rgb = |c: [u8; 4]| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32) / 255.0;
   let per_vertex = !m.colors.is_empty();
@@ -1151,7 +1212,7 @@ fn clip_near(v: &[CV; 3]) -> Vec<CV> {
 
 /// How a triangle's pixels are coloured beyond plain lighting.
 #[derive(Clone, Copy)]
-struct Shade {
+struct Shade<'a> {
   vertex_colors: bool,
   analysis: Option<Analysis>,
   /// The analysis colours' fade to plain shading ([`Scene::analysis_fade`]).
@@ -1160,6 +1221,8 @@ struct Shade {
   paper: bool,
   /// Unlit in its own colour ([`Mesh::unlit`]).
   unlit: bool,
+  /// Object Shadow's map, for a body surface.
+  shadow: Option<&'a ShadowMap>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1171,7 +1234,7 @@ fn raster_tri(
   cam: &Camera,
   eye: DVec3,
   lights: [Vec3; 3],
-  shade: Shade,
+  shade: Shade<'_>,
 ) {
   let [key, head, fill] = lights;
   let (w, h) = (f.width as f64, f.height as f64);
@@ -1257,6 +1320,10 @@ fn raster_tri(
           let tone = analysis_tone(a, n, view, diff);
           tone + (base * (0.5 + diff) + Vec3::splat(spec) - tone) * shade.fade
         }
+      };
+      let c = match shade.shadow {
+        Some(sm) if !(shade.paper || shade.unlit) => sm.shade(c, wpos, n),
+        _ => c,
       };
       if let Some(p) = f.rgba.get_mut(i * 4..i * 4 + 4) {
         let a = color[3] as f32 / 255.0;
@@ -1698,9 +1765,15 @@ mod tests {
       let (l, r) = outline(&f);
       assert!(l > 60 && r > 60, "{style:?}: the outline is drawn ({l}, {r})");
     }
-    // shaded styles leave the outline to the shading
+    // Shaded leaves the outline to the shading; Shaded with Visible Edges Only draws it dark
+    let f = draw(VisualStyle::Shaded);
+    assert!(f.rgba[((100 * 200 + 100) * 4) as usize] > 120, "red, not ink, in the middle");
+    let (l, r) = outline(&f);
+    assert!(l < 60 && r < 60, "Shaded: no outline ({l}, {r})");
     let f = draw(VisualStyle::ShadedVisibleEdges);
     assert!(f.rgba[((100 * 200 + 100) * 4) as usize] > 120, "red, not ink, in the middle");
+    let (l, r) = outline(&f);
+    assert!(l > 60 && r > 60, "Shaded with Visible Edges Only: the outline is drawn ({l}, {r})");
     // line drawings: plain white surfaces that pick as the face under them
     for style in [VisualStyle::HiddenLine, VisualStyle::VisibleLine] {
       let f = draw(style);
@@ -1748,7 +1821,7 @@ mod tests {
     assert_eq!(VisualStyle::default(), VisualStyle::Shaded);
     for s in VisualStyle::ALL {
       assert_eq!(VisualStyle::parse(s.name()), Some(s));
-      assert_eq!(s.silhouettes(), !s.shaded());
+      assert_eq!(s.silhouettes(), !s.shaded() || s == VisualStyle::ShadedVisibleEdges);
       assert!(!(s.shaded() && s.line_drawing()));
     }
     assert_eq!(VisualStyle::parse("Hidden_Line"), Some(VisualStyle::HiddenLine));
@@ -1873,5 +1946,146 @@ mod tests {
     let home = Camera::default();
     cam.set_view(StandardView::Home);
     assert!((cam.eye_dir() - home.eye_dir()).length() < 1e-3);
+  }
+
+  /// Shaded with Visible Edges Only draws the plain (light grey) body edges dark; hovered and
+  /// selected edges, and every other style, keep their colours.
+  #[test]
+  fn shaded_with_visible_edges_only_darkens_the_edges() {
+    let plain = [179, 178, 173, 255];
+    let edge = |color: [u8; 4]| Polyline {
+      points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+      color,
+      width: 1.0,
+      id: 5,
+      on_top: false,
+      dashed: false,
+      dash_dot: false,
+      behind: false,
+    };
+    let lines = vec![edge(plain), edge([10, 131, 252, 255]), Polyline { id: NO_ID, ..edge(plain) }];
+    let mut s = Scene { lines: lines.clone(), style: VisualStyle::ShadedVisibleEdges, ..Default::default() };
+    s.restyle_edges(plain);
+    assert_eq!(s.lines[0].color, SILHOUETTE_COLOR, "a plain edge turns dark");
+    assert_eq!(s.lines[1].color, [10, 131, 252, 255], "a selected edge keeps its blue");
+    assert_eq!(s.lines[2].color, plain, "the grid and other unpickable lines stay");
+    let mut s = Scene { lines, style: VisualStyle::Shaded, ..Default::default() };
+    s.restyle_edges(plain);
+    assert_eq!(s.lines[0].color, plain, "Shaded keeps them light grey");
+  }
+
+  /// Two boxes, one standing on a wide slab, from the side and above.
+  fn slab_and_block() -> (Scene, Camera) {
+    let cuboid = |lo: [f32; 3], hi: [f32; 3], id: u32| {
+      let mut m = Mesh { color: [200, 200, 200, 255], analyze: true, id, ..Default::default() };
+      let faces: [([usize; 3], f32, [f32; 3]); 6] = [
+        ([0, 1, 2], lo[2], [0.0, 0.0, -1.0]),
+        ([0, 1, 2], hi[2], [0.0, 0.0, 1.0]),
+        ([0, 2, 1], lo[1], [0.0, -1.0, 0.0]),
+        ([0, 2, 1], hi[1], [0.0, 1.0, 0.0]),
+        ([1, 2, 0], lo[0], [-1.0, 0.0, 0.0]),
+        ([1, 2, 0], hi[0], [1.0, 0.0, 0.0]),
+      ];
+      for (axes, at, n) in faces {
+        let [a, b, c] = axes;
+        let base = m.positions.len() as u32;
+        for (u, v) in [(lo[a], lo[b]), (hi[a], lo[b]), (hi[a], hi[b]), (lo[a], hi[b])] {
+          let mut p = [0.0; 3];
+          p[a] = u;
+          p[b] = v;
+          p[c] = at;
+          m.positions.push(p);
+          m.normals.push(n);
+        }
+        m.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+      }
+      m
+    };
+    let scene = Scene {
+      meshes: vec![cuboid([-40.0, -40.0, 0.0], [40.0, 40.0, 5.0], 1), cuboid([-8.0, -8.0, 5.0], [8.0, 8.0, 30.0], 2)],
+      background_top: [255; 4],
+      background_bottom: [255; 4],
+      ..Default::default()
+    };
+    let cam = Camera { distance: 160.0, target: [0.0, 0.0, 10.0], ..Camera::default() };
+    (scene, cam)
+  }
+
+  fn brightness(f: &Frame) -> u64 {
+    f.rgba.chunks_exact(4).map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum()
+  }
+
+  /// Object Shadow darkens the slab where the block stands in the light's way; Ambient
+  /// Occlusion darkens the crease where the block meets the slab and leaves flat faces alone;
+  /// Anti-Aliasing softens the edges; none of them changes what picks.
+  #[test]
+  fn object_shadow_ambient_occlusion_and_anti_aliasing_change_the_picture() {
+    let (plain, cam) = slab_and_block();
+    let base = render(&plain, &cam, 240, 180);
+    let with = |post: Post| render(&Scene { post, ..plain.clone() }, &cam, 240, 180);
+    let shadow = with(Post { object_shadow: true, ..Default::default() });
+    assert!(brightness(&shadow) < brightness(&base), "a shadow on the slab");
+    assert_eq!(shadow.ids, base.ids);
+    let map = ShadowMap::build(&plain.meshes).expect("bodies");
+    // the slab's top just beside the block, away from the light, is shadowed; far off it isn't
+    let lean = Vec3::new(SHADOW_LEAN[0], SHADOW_LEAN[1], 0.0).normalize();
+    assert!(map.occlusion(Vec3::new(0.0, 0.0, 5.0) + lean * 12.0 + Vec3::Z * 0.05) > 0.5);
+    assert_eq!(map.occlusion(Vec3::new(-35.0, 35.0, 5.05)), 0.0);
+    let ao = with(Post { ambient_occlusion: true, ..Default::default() });
+    assert!(brightness(&ao) < brightness(&base), "the crease darkens");
+    assert_eq!(ao.ids, base.ids);
+    // a flat face alone takes none
+    let flat = Scene { meshes: vec![plain.meshes[0].clone()], ..plain.clone() };
+    let a = render(&flat, &cam, 240, 180);
+    let b =
+      render(&Scene { post: Post { ambient_occlusion: true, ..Default::default() }, ..flat.clone() }, &cam, 240, 180);
+    let changed = a.rgba.iter().zip(&b.rgba).filter(|(x, y)| x.abs_diff(**y) > 2).count();
+    assert!(changed < a.rgba.len() / 200, "{changed} channels changed on a flat face");
+    let aa = with(Post { anti_aliasing: true, ..Default::default() });
+    assert_ne!(aa.rgba, base.rgba, "edges are smoothed");
+    assert_eq!(aa.ids, base.ids);
+  }
+
+  /// Environment Dome replaces the background with the environment's sky over its ground,
+  /// turning with the camera: looking up shows sky, looking down at the horizon ground.
+  #[test]
+  fn the_environment_dome_turns_with_the_camera() {
+    let dome = Dome { zenith: [40, 90, 200, 255], horizon: [220, 225, 230, 255], ground: [90, 80, 70, 255] };
+    assert_eq!(dome.color(Vec3::Z), dome.zenith);
+    assert_eq!(dome.color(Vec3::X), dome.horizon);
+    assert_eq!(dome.color(-Vec3::Z), dome.ground);
+    let scene = Scene { post: Post { dome: Some(dome), ..Default::default() }, ..Default::default() };
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Front);
+    let f = render(&scene, &cam, 100, 100);
+    let px = |f: &Frame, x: u32, y: u32| {
+      let i = ((y * f.width + x) * 4) as usize;
+      [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2]]
+    };
+    // seen from the front: sky in the top row, ground in the bottom one
+    assert!(px(&f, 50, 0)[2] > px(&f, 50, 0)[0], "sky above: {:?}", px(&f, 50, 0));
+    assert!(px(&f, 50, 99)[0] > px(&f, 50, 99)[2], "ground below: {:?}", px(&f, 50, 99));
+    cam.set_view(StandardView::Top);
+    let f = render(&scene, &cam, 100, 100);
+    assert!(px(&f, 50, 50)[0] > px(&f, 50, 50)[2], "looking straight down: ground");
+  }
+
+  /// Ground Plane Offset: with Adaptive off, the ground and its shadow sit the offset below the
+  /// bodies' lowest point.
+  #[test]
+  fn the_ground_follows_the_offset() {
+    let (plain, _) = slab_and_block();
+    let effects = Effects { ground_plane: true, ground_shadow: true, ..Default::default() };
+    let dome = Dome { zenith: [0; 4], horizon: [0; 4], ground: [0; 4] };
+    let ground_z = |offset: Option<f32>| {
+      let mut s = plain.clone();
+      effects.apply_with(&mut s, offset, dome);
+      s.meshes[2..].iter().flat_map(|m| m.positions.iter().map(|p| p[2])).fold(f32::NEG_INFINITY, f32::max)
+    };
+    assert!(ground_z(None).abs() < 0.5, "adaptive: at the lowest point");
+    assert!((ground_z(Some(20.0)) + 20.0).abs() < 0.5, "20 below it");
+    let mut s = plain.clone();
+    Effects { object_shadow: true, environment_dome: true, ..effects }.apply_with(&mut s, None, dome);
+    assert_eq!(s.post, Post { dome: Some(dome), object_shadow: true, ..Default::default() });
   }
 }

@@ -60,6 +60,7 @@ flat in uint v_id;
 layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_id;
 ID_COLOR
+OBJ_SHADOW
 vec3 safe_norm(vec3 v) {
   float l = length(v);
   return l > 0.0 ? v / l : vec3(0.0);
@@ -126,6 +127,7 @@ void main() {
     }
     c = t + (base * (0.5 + diff) + vec3(spec) - t) * u_fade;
   }
+  if (u_mode != 4 && u_mode != 5) c = obj_shadow(c, v_wpos, n);
   o_color = vec4(clamp(c, 0.0, 1.0), flat_c.a);
   o_id = id_color(v_id);
 }
@@ -322,16 +324,34 @@ void main() {
 }
 "#;
 
+/// The background gradient, or Environment Dome's sky over its ground (`fox_render::Dome`).
 const BACKGROUND_FS: &str = r#"
 uniform vec2 u_size;
 uniform vec4 u_top;
 uniform vec4 u_bottom;
+uniform int u_dome;
+uniform vec4 u_zenith;
+uniform vec4 u_horizon;
+uniform vec4 u_ground;
+uniform vec3 u_right;
+uniform vec3 u_up;
+uniform vec3 u_back;
+uniform float u_tan;
 in vec2 v_uv;
 layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_id;
 void main() {
-  float t = (u_size.y - gl_FragCoord.y - 0.5) / max(u_size.y - 1.0, 1.0);
+  float y = u_size.y - gl_FragCoord.y;
+  float t = (y - 0.5) / max(u_size.y - 1.0, 1.0);
   o_color = mix(u_top, u_bottom, clamp(t, 0.0, 1.0));
+  if (u_dome == 1) {
+    float sx = gl_FragCoord.x / u_size.x * 2.0 - 1.0;
+    float sy = 1.0 - y / u_size.y * 2.0;
+    vec3 d = normalize(-u_back + u_right * (sx * u_tan * u_size.x / u_size.y) + u_up * (sy * u_tan));
+    float e = clamp(d.z, -1.0, 1.0);
+    vec4 c = e >= 0.0 ? mix(u_horizon, u_zenith, sqrt(e)) : mix(u_horizon, u_ground, min(-e * 6.0, 1.0));
+    o_color = floor(c * 255.0 + 0.5) / 255.0;
+  }
   o_id = vec4(0.0);
 }
 "#;
@@ -553,6 +573,13 @@ pub struct Renderer {
   /// Physically based shading of the meshes that have a material (the Render workspace).
   pbr: Option<crate::pbr::Pbr>,
   pbr_on: bool,
+  /// The effects drawn into the picture ([`Scene::post`]), and their GPU objects once needed.
+  post: fox_render::Post,
+  fx: Option<crate::effects::Fx>,
+  /// Object Shadow's light (see [`fox_render::shadow_light`]), and whether its map needs
+  /// drawing again.
+  light_vp: Option<glam::Mat4>,
+  shadow_dirty: bool,
 }
 
 fn unit(c: [u8; 4]) -> [f32; 4] {
@@ -576,11 +603,13 @@ impl Renderer {
       "#version 330 core\n"
     };
     let mvp = ["u_vp", "u_size"];
+    let mesh_header = format!("{header}{}", crate::effects::defines());
+    let mesh_fs = MESH_FS.replace("OBJ_SHADOW", crate::effects::SHADOW_GLSL);
     let mesh = program(
       gl,
-      header,
+      &mesh_header,
       MESH_VS,
-      MESH_FS,
+      &mesh_fs,
       &[
         "u_vp",
         "u_key",
@@ -597,6 +626,11 @@ impl Renderer {
         "u_param",
         "u_param2",
         "u_fade",
+        "u_obj_shadow",
+        "u_shadow_map",
+        "u_light_vp",
+        "u_to_light",
+        "u_shadow_texel",
       ],
     )?;
     let line = program(gl, header, LINE_VS, LINE_FS, &["u_vp", "u_size", "u_hidden", "u_hidden_alpha"])?;
@@ -619,7 +653,25 @@ impl Renderer {
       ],
     )?;
     let marker = program(gl, header, MARKER_VS, MARKER_FS, &mvp)?;
-    let background = program(gl, header, FULLSCREEN_VS, BACKGROUND_FS, &["u_size", "u_top", "u_bottom"])?;
+    let background = program(
+      gl,
+      header,
+      FULLSCREEN_VS,
+      BACKGROUND_FS,
+      &[
+        "u_size",
+        "u_top",
+        "u_bottom",
+        "u_dome",
+        "u_zenith",
+        "u_horizon",
+        "u_ground",
+        "u_right",
+        "u_up",
+        "u_back",
+        "u_tan",
+      ],
+    )?;
     let composite = program(gl, header, FULLSCREEN_VS, COMPOSITE_FS, &["u_tex", "u_tint"])?;
     unsafe {
       let quad = gl.create_buffer()?;
@@ -653,6 +705,10 @@ impl Renderer {
         header,
         pbr: None,
         pbr_on: false,
+        post: fox_render::Post::default(),
+        fx: None,
+        light_vp: None,
+        shadow_dirty: true,
       };
       Ok(r)
     }
@@ -706,7 +762,24 @@ impl Renderer {
     self.analysis = scene.analysis;
     self.analysis_fade = scene.analysis_fade;
     self.style = scene.style;
+    self.post = scene.post;
+    self.light_vp =
+      scene.post.object_shadow.then(|| fox_render::shadow_light(&scene.meshes)).flatten().map(|m| m.as_mat4());
+    self.shadow_dirty = true;
     Ok(())
+  }
+
+  /// The effects' GPU objects, made on first use.
+  fn fx(&mut self, gl: &Gl) -> Result<&mut crate::effects::Fx, String> {
+    if self.fx.is_none() {
+      self.fx = Some(crate::effects::Fx::new(gl, self.header)?);
+    }
+    self.fx.as_mut().ok_or_else(|| "no effects".to_string())
+  }
+
+  /// Object Shadow is drawn this frame (shaded surfaces, a shadow map light).
+  fn object_shadow(&self) -> bool {
+    self.post.object_shadow && self.style.shaded() && self.light_vp.is_some()
   }
 
   /// Replaces the see-through quads drawn over the scene ([`fox_render::Quad`]: depth-tested,
@@ -827,6 +900,20 @@ impl Renderer {
         p.shadow_pass(gl, &casters)?;
       }
     }
+    if self.object_shadow() && self.shadow_dirty {
+      let casters: Vec<_> = self
+        .meshes
+        .iter()
+        .map(|m| (m.vao, merged(m.chunks.iter().map(|c| c.full.range.clone())), m.analyze && m.color[3] == 255))
+        .collect();
+      let light = self.light_vp.unwrap_or(glam::Mat4::IDENTITY);
+      self.fx(gl)?.shadow_pass(gl, &light, &casters)?;
+      self.shadow_dirty = false;
+    }
+    // the passes over the picture are made before the target is bound
+    if self.post.ambient_occlusion || self.post.anti_aliasing {
+      self.fx(gl)?;
+    }
     let Some(t) = &self.target else { return Err("no render target".into()) };
     unsafe {
       gl.bind_framebuffer(glow::FRAMEBUFFER, Some(t.fbo));
@@ -849,6 +936,16 @@ impl Renderer {
       let [top, bottom] = self.background_colors.map(unit);
       gl.uniform_4_f32_slice(p.loc("u_top"), &top);
       gl.uniform_4_f32_slice(p.loc("u_bottom"), &bottom);
+      gl.uniform_1_i32(p.loc("u_dome"), self.post.dome.is_some() as i32);
+      if let Some(d) = self.post.dome {
+        gl.uniform_4_f32_slice(p.loc("u_zenith"), &unit(d.zenith));
+        gl.uniform_4_f32_slice(p.loc("u_horizon"), &unit(d.horizon));
+        gl.uniform_4_f32_slice(p.loc("u_ground"), &unit(d.ground));
+        gl.uniform_3_f32_slice(p.loc("u_right"), &right.as_vec3().to_array());
+        gl.uniform_3_f32_slice(p.loc("u_up"), &up.as_vec3().to_array());
+        gl.uniform_3_f32_slice(p.loc("u_back"), &back.as_vec3().to_array());
+        gl.uniform_1_f32(p.loc("u_tan"), (cam.fov / 2.0).tan() as f32);
+      }
       gl.bind_vertex_array(Some(self.empty_vao));
       gl.draw_arrays(glow::TRIANGLES, 0, 3);
       if let Some(pbr) = self.pbr() {
@@ -880,6 +977,14 @@ impl Renderer {
         gl.color_mask(false, false, false, false);
         self.draw_meshes(gl, &runs, false, Some(true));
         gl.color_mask(true, true, true, true);
+      }
+      if self.post.ambient_occlusion && surfaces {
+        let (fbo, vao) = (t.fbo, self.empty_vao);
+        if let Some(fx) = self.fx.as_mut() {
+          fx.ambient_occlusion(gl, fbo, (w, h), vao, cam)?;
+        }
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+        gl.depth_func(glow::LESS);
       }
 
       // lines and markers blend over what's there; the id attachment keeps its alpha of 1
@@ -915,6 +1020,13 @@ impl Renderer {
       // sketch geometry in sketch mode and other on-top overlays
       gl.disable(glow::DEPTH_TEST);
       stats.segments += self.draw_instances(gl, &view, true, size, &vp);
+      if self.post.anti_aliasing {
+        let (fbo, vao) = (t.fbo, self.empty_vao);
+        if let Some(fx) = self.fx.as_mut() {
+          fx.anti_alias(gl, fbo, (w, h), vao)?;
+        }
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+      }
 
       gl.depth_mask(true);
       gl.disable(glow::BLEND);
@@ -932,6 +1044,17 @@ impl Renderer {
     let p = &self.mesh;
     let paper = self.style.line_drawing();
     unsafe {
+      // Object Shadow's map, on texture unit 2
+      let shadow_map = self.fx.as_ref().and_then(|f| f.shadow_map()).filter(|_| self.object_shadow());
+      if let (Some(tex), Some(light)) = (shadow_map, self.light_vp) {
+        gl.active_texture(glow::TEXTURE2);
+        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+        gl.active_texture(glow::TEXTURE0);
+        gl.uniform_1_i32(p.loc("u_shadow_map"), 2);
+        gl.uniform_matrix_4_f32_slice(p.loc("u_light_vp"), false, &light.to_cols_array());
+        gl.uniform_3_f32_slice(p.loc("u_to_light"), &fox_render::to_light().to_array());
+        gl.uniform_1_f32(p.loc("u_shadow_texel"), fox_render::shadow_texel(&light.as_dmat4()));
+      }
       let pbr = self.pbr();
       let wanted = |i: usize, m: &GpuMesh| {
         (m.color[3] < 255) == transparent && bodies.is_none_or(|b| m.analyze == b) && !pbr.is_some_and(|p| p.has(i))
@@ -973,6 +1096,8 @@ impl Renderer {
         gl.uniform_4_f32_slice(p.loc("u_param"), &param);
         gl.uniform_4_f32_slice(p.loc("u_param2"), &param2);
         gl.uniform_1_f32(p.loc("u_fade"), self.analysis_fade);
+        let shadowed = shadow_map.is_some() && m.analyze && m.color[3] == 255;
+        gl.uniform_1_i32(p.loc("u_obj_shadow"), shadowed as i32);
         gl.bind_vertex_array(Some(m.vao));
         for r in runs {
           gl.draw_elements(glow::TRIANGLES, r.len() as i32, glow::UNSIGNED_INT, (r.start * 4) as i32);
@@ -1283,6 +1408,9 @@ impl Renderer {
     }
     if let Some(p) = self.pbr.take() {
       p.destroy(gl);
+    }
+    if let Some(f) = self.fx.take() {
+      f.destroy(gl);
     }
     unsafe {
       for p in [&self.mesh, &self.line, &self.silhouette, &self.marker, &self.background, &self.composite] {

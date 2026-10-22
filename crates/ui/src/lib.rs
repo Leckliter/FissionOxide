@@ -493,6 +493,8 @@ struct RenderKey {
   /// The see-through squares drawn over the scene (the origin planes): on the GPU they are
   /// handed over apart from the scene, so the GPU's scene key leaves them out.
   quads: Vec<fox_engine::render::Quad>,
+  /// Ground Plane Offset (`None`: Adaptive) and the Environment, whose dome Environment Dome draws.
+  display: (Option<f32>, navbar::Environment),
 }
 
 impl App {

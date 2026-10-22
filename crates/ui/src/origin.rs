@@ -444,6 +444,24 @@ pub(crate) fn overlay(app: &App, painter: &egui::Painter, project: &dyn Fn(DVec3
   }
 }
 
+/// Object Visibility ▸ Origin Plane Names: each origin plane drawn this frame (see
+/// [`plane_quads`]) with its name ("XY", "XZ", "YZ") and where it goes, inside the square's
+/// outer corner.
+pub(crate) fn plane_names(app: &App) -> Vec<(DVec3, &'static str)> {
+  if !app.objects.origin_plane_names || picking_plane(app) {
+    return Vec::new();
+  }
+  let size = crate::viewport::origin_plane_size(app);
+  OriginItem::PLANES
+    .into_iter()
+    .filter(|i| visible(app, *i))
+    .filter_map(|i| {
+      let (a, b) = plane_axes(i.plane()?);
+      Some((a * size * 0.9 + b * size * 0.9, i.label()))
+    })
+    .collect()
+}
+
 /// How close (points) the pointer must come to the origin point or an axis.
 const PICK_PX: f32 = 6.0;
 
@@ -710,5 +728,30 @@ mod tests {
     assert!(under(&app, at(DVec3::ZERO), &project, &ray).is_some());
     app.create_sketch(json!("xz"));
     assert_eq!(under(&app, at(DVec3::ZERO), &project, &ray), None);
+  }
+
+  /// Origin Plane Names labels each shown origin plane inside its square's outer corner, and a
+  /// construction plane carries its name; the Object Visibility rows turn them off.
+  #[test]
+  fn plane_names_label_the_shown_planes() {
+    let mut app = app();
+    assert!(plane_names(&app).is_empty(), "the origin starts hidden");
+    app.origin_shown = true;
+    let names: Vec<&str> = plane_names(&app).iter().map(|(_, n)| *n).collect();
+    assert_eq!(names, ["XY", "XZ", "YZ"]);
+    let size = crate::viewport::origin_plane_size(&app);
+    let (at, _) = plane_names(&app)[0];
+    assert!(in_square(OriginPlane::Xy, at, size), "inside the XY square");
+    app.objects.origin_plane_names = false;
+    assert!(plane_names(&app).is_empty());
+    let v = app.run("plane.offset", json!({"plane": "xy", "offset": 10})).expect("plane.offset");
+    let id = fox_engine::model::FeatureId(v["feature"].as_u64().unwrap() as u32);
+    let name = app.s.design.feature(id).unwrap().name.clone();
+    let labels = crate::construction::plane_names(&app);
+    assert_eq!(labels.len(), 1);
+    assert_eq!(labels[0].1, name);
+    assert!((labels[0].0.z - 10.0).abs() < 1e-9, "on the plane");
+    app.objects.construction_plane_names = false;
+    assert!(crate::construction::plane_names(&app).is_empty());
   }
 }

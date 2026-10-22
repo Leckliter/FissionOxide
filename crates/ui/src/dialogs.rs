@@ -58,12 +58,14 @@ mod rsl;
 mod section;
 mod sheet;
 pub(crate) use plane_cut::overlay as plane_cut_overlay;
+mod edge_handles;
 mod sheet_flat;
 #[cfg(test)]
 mod sheet_flat_tests;
 #[cfg(test)]
 mod sketch_row_tests;
 mod solid;
+mod solid_bodies;
 pub(crate) mod surface;
 mod thread;
 
@@ -1271,6 +1273,7 @@ impl Dialog {
     if kind == Kind::OffsetFace {
       d.distance = d.unit.fixed(0.0, 2);
     }
+    d.drop_mesh_bodies(&app.s);
     d.dirty = !d.picks();
     d
   }
@@ -2380,6 +2383,11 @@ impl Dialog {
 
   /// Picks up selection changes made in the viewport while the dialog is open.
   fn sync_selection(&mut self, s: &Session) {
+    self.sync_selection_of_kind(s);
+    self.drop_mesh_bodies(s);
+  }
+
+  fn sync_selection_of_kind(&mut self, s: &Session) {
     if self.picks_fixed() {
       // Edit Move's Selection stays live, as in Fusion
       if self.kind == Kind::Move && self.mv.adds {
@@ -5779,6 +5787,8 @@ impl Dialog {
       Kind::Scale if self.choice != "non_uniform" => Some(&mut self.a),
       // an edge flange's Height, in the box on its arrow
       Kind::Flange if self.choice == "edge" => Some(&mut self.distance),
+      // a hem's length, in the box on its arrow ("Thickness * 4")
+      Kind::Hem => Some(&mut self.distance),
       _ => None,
     }
   }

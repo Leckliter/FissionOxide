@@ -93,9 +93,9 @@ pub(crate) fn settings(ctx: &egui::Context) -> Settings {
 }
 
 /// The gear's menu, as Fusion's: Change to Direct Modeling (the browser root's), then the two
-/// checkboxes. FissionOxide's features don't record the component they belong to, so every
-/// item is the top level's: Hide all inactive features has nothing to hide, and the swatch marks
-/// the items that made a component.
+/// checkboxes. Each feature belongs to the component it was made in (`Feature::owner`): Hide all
+/// inactive features leaves out the other components' features while one is active (see
+/// [`inactive`]), and the swatch colours each item by its component.
 pub(crate) fn settings_menu(app: &mut App, ui: &mut egui::Ui) {
   let direct = app.s.design.history_off;
   let (icon, label) =
@@ -122,7 +122,8 @@ pub(crate) fn swatch(app: &App, ui: &egui::Ui, rect: Rect, id: FeatureId) {
   if !settings(ui.ctx()).swatch {
     return;
   }
-  let Some(c) = app.s.design.feature(id).and_then(|f| f.component) else { return };
+  // the item's component; an item of the top level that made a component takes that one's
+  let Some(c) = app.s.design.feature(id).and_then(|f| owner(app, f).or(f.component)) else { return };
   let bar = Rect::from_min_max(rect.left_bottom() + egui::vec2(3.0, -3.0), rect.right_bottom() - egui::vec2(3.0, 1.0));
   ui.painter().rect_filled(bar, 0.0, swatch_color(c.0));
 }
@@ -149,4 +150,69 @@ pub(crate) fn failed(ctx: &egui::Context, id: FeatureId, computed: Option<bool>)
       None => set.contains(&id),
     }
   })
+}
+
+/// The component feature `f` belongs to, while it still exists (`None`: the top level).
+fn owner(app: &App, f: &fox_engine::model::Feature) -> Option<fox_engine::model::ComponentId> {
+  f.owner.filter(|c| app.s.design.component(*c).is_some())
+}
+
+/// The name of the component feature `id` belongs to, as its tooltip shows it (the top level's
+/// "(Unsaved)" until saved).
+pub(crate) fn owner_label(app: &App, id: FeatureId) -> String {
+  match app.s.design.feature(id).and_then(|f| owner(app, f)).and_then(|c| app.s.design.component(c)) {
+    Some(c) => c.name.clone(),
+    None => super::browser_rows::root_label(app),
+  }
+}
+
+/// The design indices of the features Hide all inactive features leaves out (`hide`): while a
+/// component is active, those that belong to neither it nor a component inside it.
+pub(crate) fn inactive(app: &App, hide: bool) -> Vec<usize> {
+  let Some(active) = app.s.active_component.filter(|c| app.s.design.component(*c).is_some()).filter(|_| hide) else {
+    return Vec::new();
+  };
+  let inside = fox_engine::model::explode::subtree(&app.s.design, active);
+  let d = &app.s.design;
+  d.features
+    .iter()
+    .enumerate()
+    .filter(|(_, f)| !owner(app, f).is_some_and(|c| inside.contains(&c)))
+    .map(|(i, _)| i)
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+  use fox_engine::Session;
+  use serde_json::json;
+
+  use crate::App;
+
+  /// A feature belongs to the component active when it was made: its tooltip names that
+  /// component, Hide all inactive features leaves out the other components' features while one
+  /// is active, and nothing is hidden at the top level.
+  #[test]
+  fn features_belong_to_the_component_they_were_made_in() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    let r = app.run("component.create", json!({"name": "Bracket", "activate": true})).unwrap();
+    let c = fox_engine::model::ComponentId(r["component"].as_u64().unwrap() as u32);
+    app.run("box", json!({"width": 5, "depth": 5, "height": 5, "at": [30, 0]})).unwrap();
+    let (first, second) = (app.s.design.features[0].id, app.s.design.features[1].id);
+    assert_eq!(app.s.design.features[0].owner, None, "made at the top level");
+    assert_eq!(app.s.design.features[1].owner, Some(c), "made in Bracket");
+    assert_eq!(super::owner_label(&app, first), "(Unsaved)");
+    assert_eq!(super::owner_label(&app, second), "Bracket");
+    assert_eq!(super::inactive(&app, true), vec![0], "the top level's box is inactive");
+    assert!(super::inactive(&app, false).is_empty(), "the setting off hides nothing");
+    let hidden = crate::panels::hidden_items(&app, app.s.design.active_len()).with_owned(super::inactive(&app, true));
+    assert_eq!(hidden.shown(2), 1, "one item shows");
+    app.run("component.activate", json!({"component": null})).unwrap();
+    assert!(super::inactive(&app, true).is_empty(), "the top level active: every item shows");
+    // the owner is saved with the design
+    let text = serde_json::to_string(&app.s.design.features[1]).unwrap();
+    let back: fox_engine::model::Feature = serde_json::from_str(&text).unwrap();
+    assert_eq!(back.owner, Some(c));
+  }
 }

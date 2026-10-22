@@ -444,6 +444,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     crate::library_ui::place_clicks(app, &resp, &painter, &|p| view.to_screen(&cam, p), &|p| view.ray(&cam, p));
   // the Origin folder's axes and point, under the sketch's own drawing
   crate::origin::overlay(app, &painter, &|p| view.to_screen(&cam, p));
+  plane_names_overlay(app, &painter, &|p| view.to_screen(&cam, p));
   if (app.s.edit_sketch.is_some() || app.grid_preview.is_some()) && grid_shown(app) && app.grid.reference_numbers {
     grid_labels(app, &painter, &view);
   }
@@ -756,8 +757,12 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
     let (filter, priority) = (app.sel_filter, app.sel_priority);
     let locked = &app.ctx_menu.unselectable;
     let s = &app.s;
-    let ok =
-      |p: &Pick| filter.allows_on(s, p, priority) && !crate::select::pick_body(p).is_some_and(|b| locked.contains(&b));
+    let skip_mesh = app.dialog.as_ref().is_some_and(|d| d.skips_mesh_bodies());
+    let ok = |p: &Pick| {
+      filter.allows_on(s, p, priority)
+        && !crate::select::pick_body(p)
+          .is_some_and(|b| locked.contains(&b) || skip_mesh && crate::select::is_mesh(s, b))
+    };
     if !app.hover.as_ref().is_some_and(ok) {
       // the front-most pick is filtered out: the nearest allowed one around the cursor wins
       app.hover = picks.get(frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| ok(&p)))).filter(ok);
@@ -919,6 +924,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
       .as_ref()
       .map(|d| d.tint_faces(&app.s).into_iter().map(|(b, f, _)| (b.0, f)).collect())
       .unwrap_or_default(),
+    display: (app.display.ground(), app.display.environment),
   };
   if crate::gpu::active(app) {
     crate::gpu::set_quads(app, &key.quads);
@@ -934,9 +940,10 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
   if let Some(d) = &app.dialog {
     d.add_cut_ghost(&mut scene);
   }
-  scene.style = app.visual_style;
-  app.effects.apply(&mut scene);
+  crate::navbar::dress(app, &mut scene);
   if let Some(c) = crate::render_ui::canvas_background(app) {
+    // the Render workspace's own background, not the dome
+    scene.post.dome = None;
     scene.background_top = [c[0], c[1], c[2], 255];
     scene.background_bottom = scene.background_top;
   }
@@ -5401,6 +5408,20 @@ fn section_plane_overlay(app: &App, painter: &egui::Painter, view: &View) {
 /// Section Analysis's plane: fill and edge.
 const SECTION_PLANE: (Color32, Color32) =
   (Color32::from_rgba_premultiplied(64, 46, 34, 64), Color32::from_rgba_premultiplied(200, 130, 90, 200));
+
+/// Object Visibility's Origin Plane Names and Construction Plane Names: each plane's name in
+/// small grey text inside a corner of its square, as Fusion labels them.
+fn plane_names_overlay(app: &App, painter: &egui::Painter, project: &dyn Fn(DVec3) -> Option<Pos2>) {
+  let origin = crate::origin::plane_names(app).into_iter().map(|(p, n)| (p, n.to_string()));
+  for (at, name) in origin.chain(crate::construction::plane_names(app)) {
+    if let Some(p) = project(at) {
+      painter.text(p, egui::Align2::CENTER_CENTER, name, egui::FontId::proportional(11.0), PLANE_NAME_INK);
+    }
+  }
+}
+
+/// The plane names' grey.
+const PLANE_NAME_INK: egui::Color32 = egui::Color32::from_gray(95);
 
 #[cfg(test)]
 mod tests {

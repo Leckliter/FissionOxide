@@ -22,7 +22,7 @@ use crate::manipulators::{Triad, TriadEdit, snap};
 #[derive(Default)]
 pub(super) struct Cache {
   /// The pick the anchor was found for, and the anchor: a point and a unit direction.
-  anchor: Option<(Value, DVec3, DVec3)>,
+  pub(super) anchor: Option<(Value, DVec3, DVec3)>,
   /// Rectangular Pattern: the bodies and their centre before the preview.
   pivot: Option<(Vec<u32>, DVec3)>,
   /// Offset Plane: the base last taken from the selection (a planar face or construction
@@ -38,6 +38,9 @@ pub(super) struct Cache {
   /// Extrude of a face: the face it was found for, and the middle of the face's edge the taper
   /// handle sits on with the unit direction into the face.
   face_taper: Option<(Value, DVec3, DVec3)>,
+  /// Fillet: the edge its setback handle was found for, the edge's end and the unit direction
+  /// along the edge from there (see [`super::edge_handles`]).
+  pub(super) setback: Option<(Value, DVec3, DVec3)>,
 }
 
 /// Draft's angle handle turns in 5° steps, as Fusion's does.
@@ -164,6 +167,9 @@ impl Dialog {
         if !self.applied =>
       {
         let key = self.anchor_key();
+        if self.kind == Kind::Fillet && self.manip.setback.as_ref().is_none_or(|a| a.0 != key) {
+          self.manip.setback = super::edge_handles::setback_anchor(s, &key).map(|(o, d)| (key.clone(), o, d));
+        }
         if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
           self.manip.anchor = anchor(s, &key).map(|(o, d)| (key, o, d));
         }
@@ -202,6 +208,13 @@ impl Dialog {
       Kind::Move => self.refresh_move(s),
       // an edge flange's arrow, found on the sheet before the preview bends it
       Kind::Flange if self.choice == "edge" && !self.applied => {
+        let key = self.anchor_key();
+        if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
+          self.manip.anchor = super::flange::flange_anchor(s, &key).map(|(o, d)| (key, o, d));
+        }
+      }
+      // a hem's arrow, as an edge flange's, found on the sheet before the preview folds it
+      Kind::Hem if !self.applied => {
         let key = self.anchor_key();
         if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
           self.manip.anchor = super::flange::flange_anchor(s, &key).map(|(o, d)| (key, o, d));
@@ -317,6 +330,10 @@ impl Dialog {
         value: self.len(s, &self.distance).unwrap_or(0.0),
       });
     }
+    // Hem: the length arrow on its edge (see [`super::edge_handles`])
+    if self.kind == Kind::Hem {
+      return self.hem_manipulator(s);
+    }
     // Extend: the distance along the arrow out of the first edge
     if let Kind::Form(f) = self.kind
       && f.cmd == crate::forms::EXTEND_CMD
@@ -406,6 +423,7 @@ impl Dialog {
       k if super::primitive::base_of(k).is_some() => self.primitive_handles(s),
       Kind::Section if !self.plane.is_null() => self.section_handles(s),
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::PLANE_ANGLE) => self.angle_plane_handles(s),
+      Kind::Fillet => self.fillet_handles(s),
       _ => None,
     }
     .unwrap_or_default()
@@ -569,6 +587,7 @@ impl Dialog {
         }
       }
       Kind::PlaneCut => self.set_plane_cut_handle(i, v, step),
+      Kind::Fillet => self.set_setback_handle(v_snapped),
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::PLANE_ANGLE) => {
         let Some(i) = f.inputs.iter().position(|x| x.key() == "angle") else { return };
         self.form.values[i] = json!(deg(v_snapped));
@@ -695,6 +714,8 @@ impl Dialog {
       Kind::PressPull | Kind::OffsetFace => self.distance = mm(self.unit, v),
       // a flange's height stops at the edge
       Kind::Flange if self.choice == "edge" => self.distance = mm(self.unit, v.max(0.0)),
+      // a hem has some length
+      Kind::Hem => self.distance = mm(self.unit, v.max(step.max(1e-3))),
       // Extend doesn't go backwards
       Kind::Form(f) if f.cmd == crate::forms::EXTEND_CMD => {
         let Some(i) = f.inputs.iter().position(|x| x.key() == "distance") else { return false };
@@ -739,6 +760,8 @@ impl Dialog {
       (Kind::SkRectPattern, 3) => Some(&mut self.count2),
       (Kind::Revolve, 0) => Some(&mut self.angle),
       (k, _) if super::primitive::base_of(k).is_some() => self.primitive_field(i),
+      // Fillet's setback handle has no box of its own (the radius arrow's box stays)
+      (Kind::Fillet, _) => None,
       (_, 0) => self.surface_handle_field(),
       _ => None,
     }

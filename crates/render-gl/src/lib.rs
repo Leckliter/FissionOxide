@@ -15,6 +15,7 @@
 //! All OpenGL calls take the caller's `glow::Context`, which must be current.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod effects;
 mod gl;
 #[cfg(feature = "headless")]
 pub mod headless;

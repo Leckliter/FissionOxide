@@ -2,7 +2,9 @@
 //! same pick ids, up to rasterization differences along edges. Skipped (with a note) where no
 //! OpenGL context can be created.
 
-use fox_render::{Analysis, Camera, Frame, Marker, Mesh, NO_ID, Polyline, Scene, StandardView, VisualStyle};
+use fox_render::{
+  Analysis, Camera, Dome, Frame, Marker, Mesh, NO_ID, Polyline, Post, Scene, StandardView, VisualStyle,
+};
 use fox_render_gl::Renderer;
 
 /// A UV sphere with one pick id per latitude band, so faces meet along seams like a B-rep body.
@@ -73,6 +75,7 @@ fn scene() -> Scene {
     analysis: None,
     analysis_fade: 0.0,
     style: VisualStyle::default(),
+    post: Default::default(),
   }
 }
 
@@ -327,5 +330,37 @@ fn hidden_curves_are_dashed_along_their_whole_length() {
   // Fusion's pattern: 9 px dashes with 3 px gaps (fox_render::dash_gap)
   assert!((0.55..0.9).contains(&ratio), "dashed / solid = {ratio:.2}");
   assert!((dashed as f64 - cpu_dashed as f64).abs() < solid as f64 * 0.15);
+  r.destroy(&h.gl);
+}
+
+/// The effects drawn into the picture (Environment Dome, Object Shadow, Ambient Occlusion,
+/// Anti-Aliasing) look the same on the GPU as on the CPU, each alone and all together, and pick
+/// as without them.
+#[test]
+fn effects_match_cpu() {
+  let Ok(h) = fox_render_gl::headless::context() else { return };
+  let Ok(mut r) = Renderer::new(&h.gl) else { return };
+  let dome = Dome { zenith: [120, 150, 190, 255], horizon: [225, 228, 232, 255], ground: [150, 145, 140, 255] };
+  let posts = [
+    ("dome", Post { dome: Some(dome), ..Default::default() }),
+    ("object shadow", Post { object_shadow: true, ..Default::default() }),
+    ("ambient occlusion", Post { ambient_occlusion: true, ..Default::default() }),
+    ("anti-aliasing", Post { anti_aliasing: true, ..Default::default() }),
+    ("all", Post { dome: Some(dome), object_shadow: true, ambient_occlusion: true, anti_aliasing: true }),
+  ];
+  for (what, post) in posts {
+    let s = Scene { post, ..scene() };
+    let plain = fox_render::render(&scene(), &cams()[0].1, 320, 240);
+    for (name, cam) in cams() {
+      let cpu = fox_render::render(&s, &cam, 320, 240);
+      let gpu = r.render(&h.gl, &s, &cam, 320, 240).expect("gpu render");
+      let d = compare(&cpu, &gpu);
+      eprintln!("{name} {what}: {:.2}% colour, {:.2}% ids differ", d.color * 100.0, d.ids * 100.0);
+      assert!(d.color < 0.04, "{name} {what}: {:.2}% of pixels differ in colour", d.color * 100.0);
+      assert!(d.ids < 0.02, "{name} {what}: {:.2}% of pixels differ in pick id", d.ids * 100.0);
+    }
+    let cpu = fox_render::render(&s, &cams()[0].1, 320, 240);
+    assert_ne!(cpu.rgba, plain.rgba, "{what} changes the picture");
+  }
   r.destroy(&h.gl);
 }

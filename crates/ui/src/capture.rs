@@ -236,8 +236,7 @@ pub fn render_image(app: &mut App, form: &ImageForm) -> Frame {
   let [w, h] = form.size();
   let opts = crate::viewport::scene_options(app);
   let (mut scene, _) = app.scene.build(&app.s, &opts);
-  scene.style = app.visual_style;
-  app.effects.apply(&mut scene);
+  crate::navbar::dress(app, &mut scene);
   let mut frame = if form.antialias {
     downsample(&render::render(&scene, &app.cam, w * 2, h * 2))
   } else {

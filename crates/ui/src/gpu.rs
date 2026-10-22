@@ -298,6 +298,7 @@ mod tests {
       component_colors: false,
       quads: Vec::new(),
       tints: Vec::new(),
+      display: (None, Default::default()),
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

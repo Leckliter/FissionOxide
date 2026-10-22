@@ -3714,7 +3714,8 @@ pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
               crate::flat_ui::timeline_item(ui);
               return;
             }
-            let hidden = hidden_items(app, active);
+            let hide = timeline_bar::settings(ui.ctx()).hide_inactive;
+            let hidden = hidden_items(app, active).with_owned(timeline_bar::inactive(app, hide));
             timeline_items(app, ui, hidden.shown(n), hidden.shown(active), &hidden);
           });
         });
@@ -3900,7 +3901,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
           let selected = app.s.selection.contains(&Sel::Feature { feature: id });
           let editing = app.s.edit_sketch == Some(id);
           let note = st.error.as_ref().map(|e| format!("⚠ {e}")).or_else(|| st.warning.clone());
-          let tip = timeline_tip::Tip { icon, name: name.clone(), component: root_label(app), note };
+          let tip = timeline_tip::Tip { icon, name: name.clone(), component: timeline_bar::owner_label(app, id), note };
           // a suppressed feature isn't computed: whether it failed is what it last did
           let computed = (!suppressed && !st.rolled_back).then_some(st.error.is_some());
           let failed = timeline_bar::failed(ui.ctx(), id, computed);
@@ -4062,7 +4063,7 @@ fn timeline_drag(app: &mut App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Re
         Some(timeline_tip::Tip {
           icon: feature_icon(&f.kind),
           name: f.name.clone(),
-          component: root_label(app),
+          component: timeline_bar::owner_label(app, id),
           note: Some(note),
         })
       };
@@ -4077,7 +4078,12 @@ fn timeline_drag(app: &mut App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Re
 /// The tooltip of the feature just left of timeline slot `gap` (none before the first).
 fn slot_tip(app: &App, gap: usize, hidden: &Hidden, note: Option<String>) -> Option<timeline_tip::Tip> {
   let f = app.s.design.features.get(hidden.item(gap.checked_sub(1)?))?;
-  Some(timeline_tip::Tip { icon: feature_icon(&f.kind), name: f.name.clone(), component: root_label(app), note })
+  Some(timeline_tip::Tip {
+    icon: feature_icon(&f.kind),
+    name: f.name.clone(),
+    component: timeline_bar::owner_label(app, f.id),
+    note,
+  })
 }
 
 /// Finishes a timeline drag: the marker's rolls are kept as one undo step (none when it ends

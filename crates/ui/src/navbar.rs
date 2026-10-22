@@ -3,7 +3,7 @@
 //! screen) and Grid and Snaps, as in Fusion. The bar itself is [`crate::panels::nav_bar`].
 
 use egui::RichText;
-use fox_engine::render::{Effects, VisualStyle};
+use fox_engine::render::{Dome, Effects, Scene, VisualStyle};
 
 use crate::icons::Icon;
 use crate::viewcube::Projection;
@@ -14,18 +14,18 @@ use crate::{App, NavMode, theme};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectVisibility {
   pub origin_planes: bool,
-  /// Kept: the canvas draws no origin plane names.
+  /// Each origin plane's name in its square (see `origin::plane_names`).
   pub origin_plane_names: bool,
   pub origin_axes: bool,
   /// The origin point.
   pub origin_points: bool,
   pub construction_planes: bool,
-  /// Kept: the canvas draws no construction plane names.
+  /// Each construction plane's name in its square (see `construction::plane_names`).
   pub construction_plane_names: bool,
   pub construction_axes: bool,
   pub construction_points: bool,
   pub sketches: bool,
-  /// Kept: FissionOxide has no user coordinate systems.
+  /// Kept, greyed: FissionOxide has no user coordinate systems.
   pub user_coordinate_systems: bool,
   /// The saved joint origins' glyphs.
   pub joint_origins: bool,
@@ -61,11 +61,11 @@ impl ObjectVisibility {
   pub fn rows(&mut self) -> [(&'static str, &mut bool, bool); 13] {
     [
       ("Origin Planes", &mut self.origin_planes, true),
-      ("Origin Plane Names", &mut self.origin_plane_names, false),
+      ("Origin Plane Names", &mut self.origin_plane_names, true),
       ("Origin Axes", &mut self.origin_axes, true),
       ("Origin Points", &mut self.origin_points, true),
       ("Construction Planes", &mut self.construction_planes, true),
-      ("Construction Plane Names", &mut self.construction_plane_names, false),
+      ("Construction Plane Names", &mut self.construction_plane_names, true),
       ("Construction Axes", &mut self.construction_axes, true),
       ("Construction Points", &mut self.construction_points, true),
       ("Sketches", &mut self.sketches, true),
@@ -223,7 +223,8 @@ pub fn zoom_menu(app: &mut App, ui: &mut egui::Ui) {
 
 /// Display Settings ▸ Environment, as Fusion's Design workspace lists it: the theme's own
 /// environment (the default), three theme environments and three legacy ones. The choice is kept
-/// for the Render workspace; the modelling view's lighting is fixed.
+/// for the Render workspace and gives Environment Dome its colours ([`Environment::dome`]); the
+/// modelling view's lighting is fixed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Environment {
   #[default]
@@ -237,6 +238,22 @@ pub enum Environment {
 }
 
 impl Environment {
+  /// The environment's dome as Environment Dome draws it: its sky at the zenith and horizon and
+  /// its ground, after the environment's image (a studio's grey walls, a river valley's sky over
+  /// green banks, a night sky, a pool's blue).
+  pub fn dome(self) -> Dome {
+    let c = |r: u8, g: u8, b: u8| [r, g, b, 255];
+    let (zenith, horizon, ground) = match self {
+      Environment::Theme | Environment::GreyRoom => (c(196, 199, 204), c(232, 233, 235), c(160, 160, 162)),
+      Environment::PhotoBooth => (c(214, 216, 220), c(246, 246, 247), c(188, 188, 190)),
+      Environment::RiverRubicon => (c(118, 160, 214), c(214, 226, 236), c(104, 118, 92)),
+      Environment::DarkSky => (c(22, 26, 40), c(70, 78, 98), c(30, 30, 34)),
+      Environment::InfinityPool => (c(92, 150, 220), c(206, 226, 240), c(70, 140, 170)),
+      Environment::TranquilityBlue => (c(128, 164, 206), c(220, 230, 240), c(150, 160, 172)),
+    };
+    Dome { zenith, horizon, ground }
+  }
+
   /// The rows under the "Theme Environments" header.
   pub const THEME: [Environment; 3] = [Environment::PhotoBooth, Environment::RiverRubicon, Environment::DarkSky];
   /// The rows under the "Legacy Environments" header.
@@ -309,6 +326,15 @@ pub fn default_effects() -> Effects {
   }
 }
 
+/// Dresses a built scene as Display Settings ask: the visual style (Shaded with Visible Edges
+/// Only darkens the plain edges), and the effects with the ground at Ground Plane Offset and the
+/// environment's dome.
+pub fn dress(app: &App, scene: &mut Scene) {
+  scene.style = app.visual_style;
+  scene.restyle_edges(fox_engine::scene::EDGE_COLOR);
+  app.effects.apply_with(scene, app.display.ground(), app.display.environment.dome());
+}
+
 /// Display Settings ▸ Visual Style: Fusion's six rows in its order, with their shortcuts
 /// (Ctrl+4 to Ctrl+9, which work from the canvas too).
 pub const VISUAL_STYLES: [(VisualStyle, egui::Key, &str); 6] = [
@@ -379,6 +405,12 @@ impl DisplaySettings {
     GraphicsPreset::ALL.into_iter().find(|p| p.effects() == Some(effects)).unwrap_or(GraphicsPreset::Custom)
   }
 
+  /// How far below the model's lowest point the effects' ground sits: `None` with Adaptive (at
+  /// it).
+  pub fn ground(&self) -> Option<f32> {
+    (!self.ground_adaptive).then_some(self.ground_offset as f32)
+  }
+
   /// Opens the GROUND PLANE OFFSET dialog on the current values.
   pub fn open_ground_offset(&mut self) {
     self.ground_offset_form = Some(GroundOffsetForm { adaptive: self.ground_adaptive, offset: self.ground_offset });
@@ -438,17 +470,16 @@ pub fn display_menu(app: &mut App, ui: &mut egui::Ui) {
     ui.add_enabled(false, egui::Checkbox::new(&mut true, format!("Graphics Preset: {}", preset.label())));
     ui.separator();
     let e: &mut Effects = &mut app.effects;
-    // (label, flag, drawn here): the effects the viewport can't draw yet are greyed
-    for (label, flag, drawn) in [
-      ("Environment Dome", &mut e.environment_dome, false),
-      ("Ground Plane", &mut e.ground_plane, true),
-      ("Ground Shadow", &mut e.ground_shadow, true),
-      ("Ground Reflection", &mut e.reflections, true),
-      ("Object Shadow", &mut e.object_shadow, false),
-      ("Ambient Occlusion", &mut e.ambient_occlusion, false),
-      ("Anti-Aliasing", &mut e.anti_aliasing, false),
+    for (label, flag) in [
+      ("Environment Dome", &mut e.environment_dome),
+      ("Ground Plane", &mut e.ground_plane),
+      ("Ground Shadow", &mut e.ground_shadow),
+      ("Ground Reflection", &mut e.reflections),
+      ("Object Shadow", &mut e.object_shadow),
+      ("Ambient Occlusion", &mut e.ambient_occlusion),
+      ("Anti-Aliasing", &mut e.anti_aliasing),
     ] {
-      ui.add_enabled(drawn, egui::Checkbox::new(flag, label));
+      ui.checkbox(flag, label);
     }
   });
   ui.menu_button("Object Visibility", |ui| {
@@ -460,7 +491,8 @@ pub fn display_menu(app: &mut App, ui: &mut egui::Ui) {
     }
     ui.separator();
     for (label, flag, drawn) in v.rows() {
-      ui.add_enabled(drawn, egui::Checkbox::new(flag, label));
+      ui.add_enabled(drawn, egui::Checkbox::new(flag, label))
+        .on_disabled_hover_text("FissionOxide has no user coordinate systems yet");
     }
   });
   ui.menu_button("Camera", |ui| {
@@ -831,5 +863,54 @@ mod tests {
     set_layout_grid(&mut app, false, 7.0);
     assert!(!app.layout_grid);
     assert_eq!(app.grid.locked, None);
+  }
+
+  /// Display Settings reach the scene: Shaded with Visible Edges Only darkens the plain edges,
+  /// the Effects go to the picture (Environment Dome in the environment's colours), and with
+  /// Adaptive off the ground sits Ground Plane Offset below the model.
+  #[test]
+  fn display_settings_dress_the_scene() {
+    let mut app = App::with_session(fox_engine::Session::default());
+    app.run("box", serde_json::json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+    let opts = crate::viewport::scene_options(&mut app);
+    let (built, _) = app.scene.build(&app.s, &opts);
+    let edge = fox_engine::scene::EDGE_COLOR;
+    let plain_edges = |s: &Scene| s.lines.iter().filter(|l| fox_engine::render::is_edge(l) && l.color == edge).count();
+    assert!(plain_edges(&built) > 0);
+    let mut s = built.clone();
+    app.visual_style = VisualStyle::ShadedVisibleEdges;
+    dress(&app, &mut s);
+    assert_eq!(plain_edges(&s), 0, "dark edges");
+    // Fusion's default effects: ambient occlusion and anti-aliasing are drawn
+    assert!(s.post.ambient_occlusion && s.post.anti_aliasing && s.post.dome.is_none());
+    app.effects.environment_dome = true;
+    app.display.environment = Environment::DarkSky;
+    let mut s = built.clone();
+    dress(&app, &mut s);
+    assert_eq!(s.post.dome, Some(Environment::DarkSky.dome()));
+    let ground_top = |s: &Scene| {
+      s.meshes
+        .iter()
+        .filter(|m| !m.analyze && m.id == 0)
+        .flat_map(|m| m.positions.iter().map(|p| p[2]))
+        .fold(f32::NEG_INFINITY, f32::max)
+    };
+    assert!(ground_top(&s).abs() < 0.5, "adaptive: at the model's foot ({})", ground_top(&s));
+    app.display.ground_adaptive = false;
+    app.display.ground_offset = 15.0;
+    let mut s = built;
+    dress(&app, &mut s);
+    assert!((ground_top(&s) + 15.0).abs() < 0.5, "15 mm below ({})", ground_top(&s));
+  }
+
+  /// Every Effects row can be ticked now that the viewport draws them all.
+  #[test]
+  fn every_effect_is_drawn() {
+    let mut e = default_effects();
+    assert!(e.ambient_occlusion && e.anti_aliasing && !e.object_shadow && !e.environment_dome);
+    let mut s = Scene::default();
+    e.object_shadow = true;
+    e.apply_with(&mut s, None, Environment::Theme.dome());
+    assert!(s.post.object_shadow);
   }
 }

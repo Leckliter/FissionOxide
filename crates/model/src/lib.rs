@@ -584,6 +584,10 @@ pub struct Feature {
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub component: Option<ComponentId>,
   pub kind: FeatureKind,
+  /// The component the feature was made in (the active one then; `None` = the top level), as
+  /// Fusion's timeline items belong to a component.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub owner: Option<ComponentId>,
 }
 
 /// A frozen copy of a deleted sketch that a feature kept using: its solved curves, without
@@ -2726,6 +2730,7 @@ impl Design {
         cached: Vec::new(),
         component: None,
         kind,
+        owner: None,
       },
     );
     if let Some(m) = self.marker.as_mut() {

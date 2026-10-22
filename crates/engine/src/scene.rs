@@ -1721,6 +1721,7 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
   };
   let (mut scene, _) = SceneBuilder::default().build(s, &opts);
   scene.style = style;
+  scene.restyle_edges(EDGE_COLOR);
   if let Some(bg) = p.get("background") {
     let c = crate::commands::parse_color(bg)?;
     scene.background_top = [c[0], c[1], c[2], 255];

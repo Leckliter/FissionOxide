@@ -136,6 +136,22 @@ pub(crate) fn quads(app: &App) -> Vec<Quad> {
   out
 }
 
+/// Object Visibility ▸ Construction Plane Names: each construction plane drawn this frame with
+/// its name ("Plane1") and where it goes, inside its square's corner.
+pub(crate) fn plane_names(app: &App) -> Vec<(DVec3, String)> {
+  if !app.objects.construction_plane_names {
+    return Vec::new();
+  }
+  let half = crate::viewport::plane_half_size(app);
+  drawn(app)
+    .into_iter()
+    .filter_map(|(id, pl)| {
+      let name = app.s.design.feature(id)?.name.clone();
+      Some((crate::viewport::plane_square(&pl, pl.origin, half * 0.9)[3], name))
+    })
+    .collect()
+}
+
 /// The visible construction plane under the pointer, the nearest along its ray, and none when a
 /// body face is nearer.
 pub(crate) fn under(app: &App, pos: Pos2, ray: &dyn Fn(Pos2) -> (DVec3, DVec3)) -> Option<FeatureId> {

@@ -16,7 +16,7 @@ use crate::theme;
 /// Values the solid feature extensions add to a dialog.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Extra {
-  setback: String,
+  pub(super) setback: String,
   /// Fillet radius given as the chord length (the round's width).
   chord: bool,
   pub(super) rail: Option<FeatureId>,
@@ -51,7 +51,7 @@ pub(super) struct Extra {
   /// Fillet: tangent chain off (on by default, as in Fusion).
   pub(super) no_chain: bool,
   /// Fillet corner type: setback (else rolling ball).
-  setback_corner: bool,
+  pub(super) setback_corner: bool,
   /// An edited fillet's stored sets after the first.
   edit_sets: Value,
   /// Extrude rows (see [`super::extrude`]).

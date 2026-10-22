@@ -239,8 +239,17 @@ pub(crate) fn hover_bodies(app: &App) -> Vec<BodyId> {
   }
 }
 
+/// Is `p` on a mesh body while the open command skips mesh bodies (see
+/// `Kind::skips_mesh_bodies`)? Such a pick neither lights up nor selects.
+pub(crate) fn mesh_skipped(app: &App, p: &Pick) -> bool {
+  app.dialog.as_ref().is_some_and(|d| d.skips_mesh_bodies()) && pick_body(p).is_some_and(|b| is_mesh(&app.s, b))
+}
+
 /// Selects (or with `add`, toggles) what a click on `p` picks.
 pub fn pick(app: &mut App, p: Pick, add: bool) {
+  if mesh_skipped(app, &p) {
+    return;
+  }
   let items = crate::mesh_ui::face_pick(app, p).unwrap_or_else(|| targets(&app.s, p, app.sel_priority));
   if items.len() == 1 {
     crate::panels::toggle_sel(&mut app.s, items[0], add);
@@ -652,6 +661,7 @@ pub(crate) fn select_ids(app: &mut App, inside: &HashMap<u32, usize>, window: bo
     } else {
       filter.allows_on(&app.s, &p, priority)
         && !pick_body(&p).is_some_and(|b| app.ctx_menu.unselectable.contains(&b))
+        && !mesh_skipped(app, &p)
         && !matches!(
           (priority, p),
           (Priority::Face, Pick::Edge { .. } | Pick::Vertex { .. })

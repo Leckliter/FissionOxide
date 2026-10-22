@@ -325,6 +325,7 @@ impl Session {
     let before = self.design.clone();
     match f(&mut self.design) {
       Ok(v) => {
+        self.own_new_features(&before);
         self.undo.push(Step::new(before, self.cmd_label.clone()));
         self.design.tidy_groups();
         self.trim_undo();
@@ -339,6 +340,18 @@ impl Session {
         self.design = before;
         Err(e)
       }
+    }
+  }
+
+  /// The features an edit added (those not in `before`) belong to the active component, as
+  /// Fusion's timeline items belong to the component they were made in.
+  fn own_new_features(&mut self, before: &Design) {
+    let Some(active) = self.active_component.filter(|c| self.design.component(*c).is_some()) else {
+      return;
+    };
+    let had: std::collections::HashSet<FeatureId> = before.features.iter().map(|f| f.id).collect();
+    for f in self.design.features.iter_mut().filter(|f| !had.contains(&f.id) && f.owner.is_none()) {
+      f.owner = Some(active);
     }
   }
 
@@ -542,6 +555,7 @@ impl Session {
     let before = self.design.clone();
     match f(&mut self.design) {
       Ok(v) => {
+        self.own_new_features(&before);
         self.undo.push(Step::new(before, self.cmd_label.clone()));
         self.design.tidy_groups();
         self.trim_undo();
