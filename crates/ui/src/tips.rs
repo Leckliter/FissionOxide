@@ -1007,9 +1007,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        thickness.",
     ),
     (_, "Draft") => (
-      "Tapers faces about a pull direction.",
-      "Pick the pull direction and the faces, then set the angle. Moulded and cast parts need draft to \
-       release from the mould.",
+      "Applies a fixed or parting line draft angle to planar faces.",
+      "Select a pull direction, parting tool, and faces to draft, then specify the draft angle.\n\nPress \
+       Ctrl+/ for more help.",
     ),
     (_, "Scale") => (
       "Scales bodies about a point.",
@@ -1087,9 +1087,10 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        that other values can reference.\n\nPress Ctrl+/ for more help.",
     ),
     (_, "Compute All") => (
-      "Recomputes the whole timeline.",
-      "Every feature is rebuilt in order. Use it after changing linked data or when something looks out \
-       of date.",
+      "Computes all of the parameters, features, and assembly relationships in a design.",
+      "Use at major milestones in the design process and after making significant changes to features \
+       in the Timeline, to ensure all assembly relationships are calculated properly.\n\nPress Ctrl+/ \
+       for more help.",
     ),
     (_, "Bill of Materials") => (
       "Lists the components with their quantities, materials and masses.",

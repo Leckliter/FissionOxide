@@ -594,14 +594,13 @@ impl App {
   /// Takes a finished background regeneration back. Returns whether one is still running.
   fn poll_rebuild(&mut self) -> bool {
     if self.rebuild.as_ref().is_some_and(|(job, _)| job.is_finished())
-      && let Some((job, start)) = self.rebuild.take()
+      && let Some((job, _)) = self.rebuild.take()
     {
       self.s.finish_rebuild(job);
-      let errors = self.s.model.errors();
-      self.status = Some(match errors.first() {
-        Some(e) => (e.clone(), true),
-        None => (format!("Computed in {:.1} s", now() - start), false),
-      });
+      // as Fusion, a clean recompute says nothing; only a failure leaves a message
+      if let Some(e) = self.s.model.errors().first() {
+        self.status = Some((e.clone(), true));
+      }
     }
     self.rebuild.is_some()
   }
@@ -2343,6 +2342,13 @@ mod tests {
     }
     let v = app.s.model.bodies[0].shape.mass().unwrap().volume;
     assert!((v - 3000.0).abs() < 1e-6, "{v}");
+    // `ui:dialogs:compute-all-message`: like Fusion, Compute All leaves no message when it succeeds
+    app.status = None;
+    app.run_background("compute_all", json!({}));
+    while app.poll_rebuild() {
+      std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(app.status, None);
     app.run_background("param.set", json!({"name": "h", "expr": "1 +"}));
     assert!(app.rebuild.is_none() && app.status.as_ref().is_some_and(|s| s.1));
   }

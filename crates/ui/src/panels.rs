@@ -4160,7 +4160,7 @@ mod browser_rows;
 mod sketch_rows;
 mod timeline_groups;
 
-pub(crate) use browser_rows::{doc_name, unsaved as is_unsaved, window_title};
+pub(crate) use browser_rows::{doc_name, root_label, unsaved as is_unsaved, window_title};
 #[cfg(test)]
 pub(crate) use sketch_rows::run_sketch_cmd;
 pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};

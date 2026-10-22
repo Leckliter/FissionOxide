@@ -116,9 +116,9 @@ const PATTERN: &[E] = &[
 ];
 
 const SIMPLIFY: &[E] = &[
-  c("Remove Faces", Icon::RemoveBody, D(Kind::Form(&forms::REMOVE_FACES))),
-  c("Remove Features", Icon::RemoveBody, D(Kind::Form(&forms::REMOVE_FACES))),
-  x("Replace with Primitives", Icon::Box),
+  c("Remove Features", Icon::RemoveFeatures, D(Kind::Form(&forms::REMOVE_FACES))),
+  c("Remove Faces", Icon::RemoveFaces, D(Kind::Form(&forms::REMOVE_FACES))),
+  x("Replace with Primitives", Icon::ReplacePrimitives),
 ];
 
 const CREATE_PCB: &[E] = &[x("Associative PCB", Icon::InsertComponent), x("Create 3D PCB", Icon::InsertComponent)];
@@ -157,40 +157,48 @@ const SOLID_CREATE: &[E] = &[
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
 
-const SOLID_MODIFY: &[E] = &[
-  c("Press Pull", Icon::PressPull, D(Kind::PressPull)).k("Q"),
-  E::Sep,
-  c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
-  c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
-  E::Sep,
-  c("Shell", Icon::Shell, D(Kind::Shell)),
-  c("Draft", Icon::Draft, D(Kind::Draft)),
-  c("Scale", Icon::Scale, D(Kind::Form(&forms::SCALE))),
-  c("Combine", Icon::Combine, D(Kind::Combine)),
-  c("Offset Face", Icon::OffsetFace, D(Kind::Form(&forms::OFFSET_FACE))),
-  c("Replace Face", Icon::ReplaceFace, D(Kind::Form(&forms::REPLACE_FACE))),
-  c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
-  c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
-  x("Silhouette Split", Icon::SilhouetteSplit),
-  E::Sep,
-  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
-  c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
-  c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
-  c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
-  E::Sep,
-  E::Sub("Simplify", SIMPLIFY),
-  E::Sep,
-  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
-  c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
-  c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
-  E::Sep,
-  c("Change Parameters", Icon::Params, Cmd::Params),
-  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
-  E::Sep,
-  c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
-  E::Sep,
-  E::Sub("Direct Edit", DIRECT_EDIT),
-];
+/// SOLID > MODIFY, as Fusion lists it with design history on; `$extra` ends the menu.
+macro_rules! solid_modify {
+  ($($extra:expr),*) => {
+    &[
+      c("Press Pull", Icon::PressPull, D(Kind::PressPull)).k("Q"),
+      c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
+      c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
+      E::Sep,
+      c("Shell", Icon::Shell, D(Kind::Shell)),
+      c("Draft", Icon::Draft, D(Kind::Draft)),
+      c("Scale", Icon::Scale, D(Kind::Form(&forms::SCALE))),
+      c("Combine", Icon::Combine, D(Kind::Combine)),
+      c("Offset Face", Icon::OffsetFace, D(Kind::Form(&forms::OFFSET_FACE))),
+      c("Replace Face", Icon::ReplaceFace, D(Kind::Form(&forms::REPLACE_FACE))),
+      c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
+      c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
+      x("Silhouette Split", Icon::SilhouetteSplit),
+      E::Sep,
+      c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
+      c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
+      c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
+      c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
+      E::Sub("Simplify", SIMPLIFY),
+      E::Sep,
+      c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
+      c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
+      c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
+      E::Sep,
+      c("Change Parameters", Icon::Params, Cmd::Params),
+      c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
+      E::Sep,
+      c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
+      $($extra),*
+    ]
+  };
+}
+
+const SOLID_MODIFY: &[E] = solid_modify!();
+
+/// With design history off Fusion edits faces directly; FissionOxide's direct edits then join the
+/// menu (Fusion has no such entry while history is on).
+const SOLID_MODIFY_DIRECT: &[E] = solid_modify!(E::Sep, E::Sub("Direct Edit", DIRECT_EDIT));
 
 const DIRECT_EDIT: &[E] = &[
   c("Move Face", Icon::Move, D(Kind::Form(&config_ui::DIRECT_MOVE_FACE))),
@@ -541,17 +549,14 @@ const SHARED: [Group; 6] = shared_groups!();
 // as in Fusion, only MESH has an EXPORT panel (elsewhere 3D Print is under UTILITIES > MAKE)
 const MESH_SHARED: [Group; 7] = shared_groups!(Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT });
 
+// Fusion's SOLID ribbon: CREATE 5 icons, MODIFY 4; the rest stay in the panel menus
 const SOLID: [Group; 2] = [
   Group {
     label: "CREATE",
-    quick: &["Create Sketch", "Extrude", "Revolve", "Hole", "Rectangular Pattern", "Create Form"],
+    quick: &["Create Sketch", "Extrude", "Revolve", "Hole", "Rectangular Pattern"],
     menu: SOLID_CREATE,
   },
-  Group {
-    label: "MODIFY",
-    quick: &["Press Pull", "Fillet", "Shell", "Combine", "Split Body", "Move/Copy", "Bill of Materials"],
-    menu: SOLID_MODIFY,
-  },
+  Group { label: "MODIFY", quick: &["Press Pull", "Fillet", "Shell", "Combine"], menu: SOLID_MODIFY },
 ];
 
 const SURFACE: [Group; 2] = [
@@ -1315,6 +1320,8 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bo
     })
     .collect();
   let counts = fit_counts(&panels, width);
+  let shown: Vec<(&'static str, usize)> = all.iter().zip(&counts).map(|(g, n)| (g.label, *n)).collect();
+  ui.ctx().data_mut(|d| d.insert_temp(fit_id(tab), shown));
   for ((g, its), n) in all.iter().zip(items).zip(counts) {
     show_group(app, ui, tab, g, &its[..n], &mut pick, &mut act);
   }
@@ -1328,6 +1335,11 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bo
     customize::apply(app, a);
   }
   true
+}
+
+/// Where [`tab_toolbar`] keeps how many icons each panel of `tab` showed in the last frame.
+pub(crate) fn fit_id(tab: Tab) -> egui::Id {
+  egui::Id::new(("toolbar-fit", tab))
 }
 
 /// Where a menu is: what its rows' options and tooltips need.
@@ -1472,15 +1484,26 @@ fn show_group(
     panels::group_label(ui, g.label, w, open)
   });
   // toggles (selection priority and filters) show a check mark while on
+  let menu = menu_of(app, tab, g);
   let on: Vec<&'static str> =
-    toggles(g.menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
-  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, &at, g.menu, pick, act, &on));
+    toggles(menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
+  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, &at, menu, pick, act, &on));
   if finish {
     // FINISH BASE FEATURE is Fusion's green
     let fill = if g.label == "FINISH BASE FEATURE" { theme::BASE_FEATURE } else { theme::CONTEXT_TAB };
     ui.painter().set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, fill));
   }
   panels::separator(ui);
+}
+
+/// The menu a group's name opens: SOLID's MODIFY (on SOLID and PLASTIC) gains the direct edits
+/// while design history is off.
+fn menu_of(app: &App, tab: Tab, g: &Group) -> &'static [E] {
+  if app.s.design.history_off && g.label == "MODIFY" && matches!(tab, Tab::Solid | Tab::Plastic) {
+    SOLID_MODIFY_DIRECT
+  } else {
+    g.menu
+  }
 }
 
 /// The toggle commands in a menu (and its submenus): the selection filters get a check mark
@@ -2005,6 +2028,57 @@ mod tests {
     let named = [PanelSize { label: 200.0, icons: 3 }, PanelSize { label: 40.0, icons: 4 }];
     let two_icons = ICON_W * 2.0 - 1.0 + SEPARATOR_W;
     assert_eq!(fit_counts(&named, 200.0 + SEPARATOR_W + two_icons), vec![3, 2]);
+  }
+
+  /// `ui:toolbar:solid-modify-menu-list`: Fusion's SOLID > MODIFY, separators included, with no
+  /// Direct Edit entry while design history is on; Simplify in Fusion's order with an icon each.
+  #[test]
+  fn the_solid_modify_list_is_fusions() {
+    let rows: Vec<&str> = SOLID_MODIFY
+      .iter()
+      .map(|e| match e {
+        E::I(i) => i.label,
+        E::Sep => "|",
+        E::Sub(l, _) => l,
+      })
+      .collect();
+    assert_eq!(
+      rows.join(", "),
+      "Press Pull, Fillet, Chamfer, |, Shell, Draft, Scale, Combine, Offset Face, Replace Face, Split Face, \
+       Split Body, Silhouette Split, |, Move/Copy, Align, Delete, Remove, Simplify, |, Physical Material, \
+       Appearance, Manage Materials, |, Change Parameters, Compute All, |, Bill of Materials"
+    );
+    let mut simplify = Vec::new();
+    labels(SIMPLIFY, &mut simplify);
+    assert_eq!(simplify, ["Remove Features", "Remove Faces", "Replace with Primitives"]);
+    let icons: Vec<Icon> = SIMPLIFY.iter().filter_map(|e| if let E::I(i) = e { Some(i.icon) } else { None }).collect();
+    assert!(icons[0] != icons[1] && icons[1] != icons[2] && icons[0] != icons[2], "{icons:?}");
+    // the direct edits come back with design history off
+    let mut app = App::with_session(fox_engine::Session::default());
+    let g = &SOLID[1];
+    assert_eq!(menu_of(&app, Tab::Solid, g).len(), SOLID_MODIFY.len());
+    app.s.design.history_off = true;
+    assert!(matches!(menu_of(&app, Tab::Solid, g).last(), Some(E::Sub("Direct Edit", _))));
+    assert_eq!(menu_of(&app, Tab::Surface, &SURFACE[1]).len(), SURFACE_MODIFY.len());
+  }
+
+  /// `ui:toolbar:solid-modify-menu-tooltips`: Draft and Compute All carry Fusion's paragraphs.
+  #[test]
+  fn draft_and_compute_all_tooltips_are_fusions() {
+    let draft = tips::tip(Scope::Design, "Draft").unwrap();
+    assert_eq!(draft.line, "Applies a fixed or parting line draft angle to planar faces.");
+    assert_eq!(
+      draft.more,
+      "Select a pull direction, parting tool, and faces to draft, then specify the draft angle.\n\nPress Ctrl+/ \
+       for more help."
+    );
+    let all = tips::tip(Scope::Design, "Compute All").unwrap();
+    assert_eq!(all.line, "Computes all of the parameters, features, and assembly relationships in a design.");
+    assert_eq!(
+      all.more,
+      "Use at major milestones in the design process and after making significant changes to features in the \
+       Timeline, to ensure all assembly relationships are calculated properly.\n\nPress Ctrl+/ for more help."
+    );
   }
 
   /// The sketch MODIFY tooltips carry Fusion's wording: a first line, then the instruction and,

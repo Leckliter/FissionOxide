@@ -1028,6 +1028,20 @@ fn a_narrow_window_keeps_every_panel_through_select_on_screen() {
   assert!(h.find(vec![], "Create Form").is_some(), "Create Form stays in the CREATE menu");
 }
 
+/// `ui:toolbar:responsive-collapse`: once the row fits, SOLID shows Fusion's counts, CREATE 5
+/// icons and MODIFY 4 (Press Pull, Fillet, Shell, Combine), and every panel through SELECT.
+#[test]
+fn a_window_that_fits_the_row_shows_fusions_icon_counts() {
+  let mut h = Harness::with_width(1100.0);
+  h.frame(vec![]);
+  let counts: Vec<(&str, usize)> =
+    h.ctx.data(|d| d.get_temp(crate::menus::fit_id(crate::panels::Tab::Solid))).expect("the SOLID toolbar drew");
+  let of = |name: &str| counts.iter().find(|(l, _)| *l == name).map(|(_, n)| *n);
+  assert_eq!(of("CREATE"), Some(5), "{counts:?}");
+  assert_eq!(of("MODIFY"), Some(4), "{counts:?}");
+  assert!(counts.iter().all(|(_, n)| *n >= 1), "{counts:?}");
+}
+
 /// The big FINISH SKETCH button is clickable across the whole panel, not only on its icon,
 /// and the contextual SKETCH tab is drawn like the others (bold black, no blue box).
 #[test]

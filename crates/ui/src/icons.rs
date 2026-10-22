@@ -99,6 +99,12 @@ pub enum Icon {
   SilhouetteSplit,
   Align,
   RemoveBody,
+  /// Simplify > Remove Features: a block losing its small features.
+  RemoveFeatures,
+  /// Simplify > Remove Faces: a block losing a face.
+  RemoveFaces,
+  /// Simplify > Replace with Primitives: a body turned into a box.
+  ReplacePrimitives,
   PhysMaterial,
   Appearance,
   ManageMaterials,
@@ -1172,6 +1178,23 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.76, 0.5), 0.17, Some(Blue), None);
       k.thick((0.6, 0.5), (0.2, 0.5), Blue, 2.4);
       k.arrow_head((0.04, 0.5), (-1.0, 0.0), 0.2, Blue);
+    }
+    Icon::RemoveFeatures => {
+      k.block(0.06, 0.42, 0.62, 0.94, 0.24, Light, Fill, Dark);
+      k.circle((0.34, 0.28), 0.1, Some(Blue), Some(Ink));
+      k.thick((0.62, 0.06), (0.94, 0.38), Red, 1.6);
+      k.thick((0.94, 0.06), (0.62, 0.38), Red, 1.6);
+    }
+    Icon::RemoveFaces => {
+      k.block(0.06, 0.42, 0.62, 0.94, 0.24, BlueLight, Light, Dark);
+      k.thick((0.62, 0.06), (0.94, 0.38), Red, 1.6);
+      k.thick((0.94, 0.06), (0.62, 0.38), Red, 1.6);
+    }
+    Icon::ReplacePrimitives => {
+      k.circle((0.26, 0.5), 0.2, Some(Fill), Some(Ink));
+      k.thick((0.48, 0.5), (0.58, 0.5), Ink, 1.2);
+      k.arrow_head((0.64, 0.5), (1.0, 0.0), 0.12, Ink);
+      k.block(0.66, 0.42, 0.9, 0.74, 0.1, BlueLight, Blue, BlueDark);
     }
     Icon::PhysMaterial => {
       k.circle((0.5, 0.5), 0.42, Some(White), Some(Ink));
