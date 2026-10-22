@@ -129,8 +129,8 @@ pub(crate) fn toggle_eye(app: &mut App, item: OriginItem) {
 }
 
 /// Shown in the canvas: its Object Visibility row on (Origin Planes, Origin Axes or Origin
-/// Points), the folder's eye on and the item's own (Fusion's folder-and-child rule), and no sketch
-/// being edited.
+/// Points), the folder's eye on and the item's own (Fusion's folder-and-child rule), or a dialog
+/// that shows them for its picks; and no sketch being edited.
 pub(crate) fn visible(app: &App, item: OriginItem) -> bool {
   let o = &app.objects;
   let row = match item {
@@ -138,7 +138,13 @@ pub(crate) fn visible(app: &App, item: OriginItem) -> bool {
     OriginItem::X | OriginItem::Y | OriginItem::Z => o.origin_axes,
     OriginItem::Xy | OriginItem::Xz | OriginItem::Yz => o.origin_planes,
   };
-  row && app.origin_shown && eye(app, item) && app.s.edit_sketch.is_none()
+  (row && app.origin_shown && eye(app, item) || dialog_shows(app)) && app.s.edit_sketch.is_none()
+}
+
+/// The open dialog shows the origin planes and axes for its picks (Revolve, Loft), as Fusion
+/// does whatever the Origin folder's eyes say.
+fn dialog_shows(app: &App) -> bool {
+  app.dialog.as_ref().is_some_and(|d| d.shows_origin())
 }
 
 /// All three plane eyes are on (the folder's Show/Hide Planes).
@@ -260,7 +266,8 @@ pub(crate) enum Look {
 }
 
 pub(crate) fn look(app: &App, item: OriginItem) -> Look {
-  if picked(app) == Some(item) {
+  let dialog_axis = app.dialog.as_ref().and_then(|d| d.origin_axis());
+  if picked(app) == Some(item) || dialog_axis == Some(item) {
     Look::Selected
   } else if app.hover_origin == Some(item) {
     Look::Hovered

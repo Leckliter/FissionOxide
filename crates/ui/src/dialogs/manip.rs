@@ -285,6 +285,7 @@ impl Dialog {
       Kind::SkCircPattern => self.sk_circ_handles(s),
       Kind::SkRectPattern => self.sk_rect_handles(s),
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => self.text_handles(s),
+      Kind::Revolve => self.revolve_handles(s),
       // Box, Cylinder, Sphere, Torus and Coil (see [`super::primitive`])
       k if super::primitive::base_of(k).is_some() => self.primitive_handles(s),
       _ => None,
@@ -415,6 +416,14 @@ impl Dialog {
       }
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => {
         self.set_text_angle(snap(v, step).to_degrees());
+      }
+      // a revolve turns by something, up to a whole turn either way
+      Kind::Revolve => {
+        let a = v_snapped.clamp(-std::f64::consts::TAU, std::f64::consts::TAU);
+        if a.abs() < 1e-9 {
+          return;
+        }
+        self.angle = deg(a);
       }
       k if super::primitive::base_of(k).is_some() => {
         if !self.set_primitive_handle(s, i, v, step) {
@@ -550,6 +559,7 @@ impl Dialog {
       (Kind::SkRectPattern, 1) => Some(&mut self.count),
       (Kind::SkRectPattern, 2) => Some(&mut self.spacing2),
       (Kind::SkRectPattern, 3) => Some(&mut self.count2),
+      (Kind::Revolve, 0) => Some(&mut self.angle),
       (k, _) if super::primitive::base_of(k).is_some() => self.primitive_field(i),
       _ => None,
     }

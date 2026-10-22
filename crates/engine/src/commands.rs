@@ -146,7 +146,7 @@ cmds! {
   "point" => "Construction point by method: vertex {point}, two_edges {a, b} (where two edges, axes x|y|z|{axis: id} or sketch lines {sketch, curve} meet, extended if need be), three_planes {a, b, c}, center {face}, edge_plane {edge (an edge, {sketch, curve} line or axis), plane}, along_path {edge: body edge | {sketch, curve}, t | distance}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
   "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); an ISO metric designation (M10x1.5) resizes the face to its class-mean diameter; without one, pitch defaults to ISO coarse; length and offset run from the face's low end (high_end or flip: the other end)", "{faces, designation?, class?: 6g|6H|.., pitch?, length?, offset?, modeled?, left? | right_handed?, flip? | location?: low_end|high_end}";
   "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
-  "pipe" => "Tube along a path sketch or intersection curve: round, square or triangular, solid or hollow with a wall, along all or the first fraction of the path (round and whole along an intersection curve)", "{path: sketch | intersection curve, path_curves?, diameter | size, section?: circular|square|triangular, wall?, distance?: 0..1, operation?}";
+  "pipe" => "Tube along a path sketch or intersection curve: round, square or triangular, solid or hollow with a wall, along all or the first fraction of the path (round and whole along an intersection curve)", "{path: sketch | intersection curve, path_curves?, diameter | size, section?: circular|square|triangular, wall?, distance?: 0..1, operation?, targets?: [body] (bodies join/cut may change)}";
   "rib" => "Rib from sketch lines: thick across the sketch plane, grown to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?, one_side?: all the thickness on one side of the lines}";
   "web" => "Web from sketch lines: thick in the sketch plane, grown along its normal to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?, one_side?}";
   "scale" => "Scale bodies about a point, uniformly or per axis", "{bodies?|component?, center?: [x,y,z], factor | factors: [x,y,z]}";
@@ -1791,7 +1791,7 @@ pub(crate) fn add_feature(s: &mut Session, kind: FeatureKind) -> CmdResult {
 }
 
 /// Adds a join/cut/intersect feature, limited to the bodies in `targets` when given.
-fn add_op_feature(s: &mut Session, kind: FeatureKind, p: &Value) -> CmdResult {
+pub(crate) fn add_op_feature(s: &mut Session, kind: FeatureKind, p: &Value) -> CmdResult {
   let targets: Vec<BodyId> = ids(p, "targets").into_iter().map(BodyId).collect();
   if let Some(b) = targets.iter().find(|b| s.model.body(**b).is_none()) {
     return Err(CmdError::new(format!("no body {}", b.0)));

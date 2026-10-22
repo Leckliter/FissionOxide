@@ -24,6 +24,7 @@ mod pieces;
 mod press_owner;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
+mod auto_cut;
 mod body_picks;
 mod copies;
 mod export_dxf;
@@ -32,6 +33,7 @@ mod edit_tests;
 mod newcomp;
 mod primitive;
 mod redefine;
+mod rsl;
 #[cfg(test)]
 mod sketch_row_tests;
 mod solid;
@@ -474,8 +476,6 @@ const OPS: [(&str, &str); 5] = [
   ("intersect", "Intersect"),
   ("new_component", "New Component"),
 ];
-const REVOLVE_DIRECTIONS: [(&str, &str); 3] =
-  [("one_side", "One side"), ("two_sides", "Two sides"), ("symmetric", "Symmetric")];
 
 pub struct Dialog {
   pub kind: Kind,
@@ -812,7 +812,7 @@ impl Dialog {
       // the newest sketch's profiles are the ones to pick; Extrude takes only a picked one (as
       // in Fusion, E opens with Profiles: Select and no preview)
       d.sketch = s.edit_sketch.or(app.last_sketch).or_else(|| last_unconsumed_sketch(s));
-      if kind != Kind::Extrude
+      if !matches!(kind, Kind::Extrude | Kind::Sweep)
         && let Some(sk) = d.sketch
         && let Some(r) = s.model.sketches.get(&sk)
         && r.profiles.len() == 1
@@ -857,7 +857,8 @@ impl Dialog {
         d.b = "5.08 mm".into();
         d.position = "center";
       }
-      Kind::Revolve => d.axis = "z".into(),
+      // Fusion's Axis starts empty: no preview until one is picked
+      Kind::Revolve => d.axis = String::new(),
       Kind::Mirror => {
         d.join = false;
         d.choice = "bodies";
@@ -881,16 +882,8 @@ impl Dialog {
       Kind::Loft => {
         d.sections = sel_sections(s);
       }
-      Kind::Sweep => {
-        d.path = s
-          .design
-          .features
-          .iter()
-          .take(s.design.active_len())
-          .rev()
-          .find(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && Some(f.id) != d.sketch)
-          .map(|f| f.id);
-      }
+      // Fusion's Profile and Path start empty: both are picked in the canvas
+      Kind::Sweep => {}
       Kind::Hole => {
         d.choice = "simple";
         d.a = "5 mm".into();
@@ -1418,7 +1411,7 @@ impl Dialog {
 
   /// The command (name, params) this dialog applies.
   fn command(&self) -> Option<(&'static str, Value)> {
-    self.with_comp_name(self.command_base())
+    self.with_comp_name(self.command_base()).map(|(c, p)| (c, self.with_cut_targets(p)))
   }
 
   fn command_base(&self) -> Option<(&'static str, Value)> {
@@ -1891,6 +1884,7 @@ impl Dialog {
       self.error = None;
       return;
     }
+    self.cut_ghost(s, cmd, &params);
     self.live_applying(s, cmd, &params);
     let before: Vec<BodyId> = s.model.bodies.iter().map(|b| b.id).collect();
     let result = s.execute(cmd, &params);
@@ -1916,8 +1910,12 @@ impl Dialog {
         self.summary = None;
       }
     }
+    let switched = self.auto_cut_check(s);
     if !self.picks() {
       s.selection = selection;
+    }
+    if switched {
+      self.preview(s);
     }
   }
 
@@ -1933,7 +1931,7 @@ impl Dialog {
     match self.kind {
       Kind::Form(f) => self.form.missing(f).is_none(),
       Kind::Extrude => self.sketch.is_some() && !self.profiles.is_empty(),
-      Kind::Revolve => self.sketch.is_some(),
+      Kind::Revolve => self.sketch.is_some() && !self.axis.is_empty(),
       Kind::Fillet => self.fillet_ready(),
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty() || !self.bodies.is_empty(),
@@ -1943,7 +1941,7 @@ impl Dialog {
       Kind::CircPattern => !self.bodies.is_empty() && self.circ_axis().is_some(),
       Kind::Move => self.move_ready(),
       Kind::Loft => self.sections.len() >= 2,
-      Kind::Sweep => self.sketch.is_some() && self.path.is_some(),
+      Kind::Sweep => self.sketch.is_some() && self.path.is_some() && !self.profiles.is_empty(),
       Kind::Hole => self.hole_ready(),
       Kind::Fold => self.sketch.is_some(),
       Kind::RectPattern => self.pattern_ready(),
@@ -2172,7 +2170,7 @@ impl Dialog {
           self.sync_object(s);
         }
         if self.kind == Kind::Sweep {
-          self.sync_guide_surface(s);
+          self.sync_sweep_picks(s);
         }
         if self.kind == Kind::Revolve {
           self.sync_revolve_axis(s);
@@ -2199,6 +2197,7 @@ impl Dialog {
           self.sections = secs;
           self.dirty = true;
         }
+        self.sync_loft_guides(s);
       }
       Kind::Hem | Kind::Rip | Kind::Flange if !self.applied => {
         let e = sel_edges(s);
@@ -2361,7 +2360,7 @@ impl Dialog {
     let mut cancel = false;
     let title = self.heading();
     // FILLET's selection table needs the extra width, as in Fusion
-    let width = if self.kind == Kind::Fillet { 360.0 } else { 300.0 };
+    let width = if matches!(self.kind, Kind::Fillet | Kind::Loft) { 360.0 } else { 300.0 };
     // docked at the canvas's top-right corner when it opens and again after the window is
     // resized; in between it stays where it was dragged
     let dock = panels::dialog_dock(app.canvas, app.s.edit_sketch.is_some());
@@ -2391,6 +2390,7 @@ impl Dialog {
               }
             });
           } else {
+            self.tab_strip(ui);
             egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
               self.fields(app, ui);
             });
@@ -2543,12 +2543,13 @@ impl Dialog {
     if !self.ready() {
       return Some(match self.kind {
         Kind::Extrude => "Select sketch profiles or planar faces to extrude".into(),
+        Kind::Revolve if self.sketch.is_some() => "Select the axis to revolve the profile around".into(),
         Kind::Revolve => "Select sketch profiles or planar faces to revolve".into(),
         Kind::Fillet => "Select edges, faces, or features to fillet".into(),
         Kind::Chamfer => "Select edges or faces to chamfer".into(),
         Kind::Shell => "Select faces to remove or bodies to shell".into(),
         Kind::Loft => "Select profiles or planar faces".into(),
-        Kind::Sweep if self.sketch.is_none() => "Select sketch profiles or planar faces to sweep".into(),
+        Kind::Sweep if self.profiles.is_empty() => "Specify a sweep type or select an object to sweep".into(),
         Kind::Sweep => "Select path".into(),
         Kind::Combine if self.bodies.is_empty() => "Select target body".into(),
         Kind::Mirror if self.choice == "features" && self.mirror_features.is_empty() => {
@@ -2672,6 +2673,7 @@ impl Dialog {
   fn missing_input(&self) -> &'static str {
     match self.kind {
       Kind::Form(f) => self.form.missing(f).unwrap_or("missing input"),
+      Kind::Revolve if self.sketch.is_some() => "select the axis to revolve the profile around",
       Kind::Extrude | Kind::Revolve => "select a profile",
       Kind::Fillet => "select edges or faces",
       Kind::Chamfer => "select edges",
@@ -2724,69 +2726,7 @@ impl Dialog {
       // drawn in the viewport (`viewport::plane_picker`) with the cursor hint
       Kind::PickPlane => {}
       Kind::Extrude => self.extrude_rows(ui),
-      Kind::Revolve => {
-        ui.label("Profiles");
-        let n = self.profiles.len();
-        if self.editing.is_some() {
-          ui.label("(unchanged)");
-        } else if n == 0 {
-          sel_chip(ui, self.accent(), "Select (all regions)", false);
-        } else {
-          sel_chip(ui, self.accent(), &format!("{n} selected"), true);
-        }
-        ui.end_row();
-        ui.label("Axis");
-        let lines = self.sketch_lines(app);
-        let current = self.axis.clone();
-        egui::ComboBox::from_id_salt("axis")
-          .selected_text(axis_label(&current))
-          .show_ui(ui, |ui| {
-            for a in ["x", "y", "z"] {
-              if ui.selectable_label(current == a, axis_label(a)).clicked() {
-                self.axis = a.into();
-                self.dirty = true;
-              }
-            }
-            for (id, label) in lines {
-              let key = format!("line:{id}");
-              if ui.selectable_label(current == key, label).clicked() {
-                self.axis = key;
-                self.dirty = true;
-              }
-            }
-            // construction axes, and an edge picked in the viewport
-            for id in app.s.model.axes.keys() {
-              let key = format!("axis:{}", id.0);
-              let name = app.s.design.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| axis_label(&key));
-              if ui.selectable_label(current == key, name).clicked() {
-                self.axis = key;
-                self.dirty = true;
-              }
-            }
-            if !self.solid.axis_edge.is_null() && ui.selectable_label(current == "edge", axis_label("edge")).clicked() {
-              self.axis = "edge".into();
-              self.dirty = true;
-            }
-          })
-          .response
-          .on_hover_text("Or pick a straight edge, sketch line or construction axis in the canvas");
-        ui.end_row();
-        ui.label("Direction");
-        self.combo(ui, "rev_dir", &REVOLVE_DIRECTIONS, true);
-        ui.end_row();
-        self.revolve_type_rows(ui);
-        if self.extent == "two_sides" {
-          ui.label("Angle 2");
-          if value_edit(ui, &mut self.angle2).changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-        }
-        ui.label("Operation");
-        self.combo(ui, "op", &OPS, false);
-        ui.end_row();
-        self.comp_name_row(ui);
-      }
+      Kind::Revolve => self.revolve_fields(ui),
       Kind::Fillet => {
         self.fillet_rows(app, ui, creating);
         self.setback_row(ui, creating);
@@ -2928,8 +2868,10 @@ impl Dialog {
       Kind::Analysis(kind) => analysis_fields(app, ui, kind),
       Kind::Form(f) => {
         let mut dirty = false;
+        let op = self.operation().to_string();
         self.form_fields(f, app, ui, &mut dirty);
         self.path_type_switch(f);
+        self.form_cut_rows(ui, &op);
         if dirty && (!self.picks() || self.applied) {
           self.dirty = true;
         }
@@ -3372,44 +3314,8 @@ impl Dialog {
       ("screw", "Screw"),
     ];
     match self.kind {
-      Kind::Loft => {
-        ui.label("Profiles");
-        chip(ui, self.sections.len(), "profiles");
-        ui.end_row();
-        for (i, (sk, _)) in self.sections.iter().enumerate() {
-          ui.label(RichText::new(format!("  Section {}", i + 1)).color(theme::MUTED));
-          ui.label(app.s.design.feature(FeatureId(*sk)).map(|f| f.name.clone()).unwrap_or_default());
-          ui.end_row();
-        }
-        Self::check(ui, "Ruled (straight between sections)", &mut self.flag, dirty);
-        Self::check(ui, "Closed (back to the first)", &mut self.flag2, dirty);
-        self.loft_rows(app, ui, dirty);
-        Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
-        newcomp::comp_name_field(ui, self.editing.is_none(), self.op, &mut self.comp_name, dirty);
-      }
-      Kind::Sweep => {
-        ui.label("Profile");
-        chip(ui, self.profiles.len(), "selected");
-        ui.end_row();
-        ui.label("Path");
-        let list = Self::sketches(app, self.sketch);
-        let cur = self.path.and_then(|p| list.iter().find(|(id, _)| *id == p)).map(|(_, n)| n.clone());
-        egui::ComboBox::from_id_salt("path").selected_text(cur.unwrap_or("Pick a sketch".into())).width(140.0).show_ui(
-          ui,
-          |ui| {
-            for (id, n) in &list {
-              if ui.selectable_label(self.path == Some(*id), n).clicked() {
-                self.path = Some(*id);
-                *dirty = true;
-              }
-            }
-          },
-        );
-        ui.end_row();
-        self.sweep_rows(app, ui, dirty);
-        Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
-        newcomp::comp_name_field(ui, self.editing.is_none(), self.op, &mut self.comp_name, dirty);
-      }
+      Kind::Loft => self.loft_fields(app, ui, dirty),
+      Kind::Sweep => self.sweep_fields(app, ui, dirty),
       Kind::Hole => self.hole_fields(app, ui, dirty),
       Kind::PressPull => {
         ui.label("Faces");
@@ -6341,6 +6247,7 @@ mod tests {
     run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 3}));
     let mut d = Dialog::blank(Kind::Sweep);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     d.path = Some(path);
     apply(&mut s, &mut d);
     assert_eq!(s.model.bodies.len(), 1);

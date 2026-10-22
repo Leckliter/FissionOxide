@@ -467,10 +467,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
   }
   // a click on a visible origin plane, axis or point selects it (again: clears it), as in Fusion;
-  // with Mirror or Circular Pattern open it is the plane or axis they ask for
+  // with Mirror or Circular Pattern open it is the plane or axis they ask for, and an axis
+  // clicked for Revolve's Axis is Revolve's
   if !consumed && let Some(item) = app.hover_origin {
     consumed = true;
-    if resp.clicked() && !app.dialog.as_mut().is_some_and(|d| d.take_origin(item)) {
+    if resp.clicked() && !app.dialog.as_mut().is_some_and(|d| d.take_origin(item) || d.pick_origin_axis(item)) {
       crate::origin::pick(app, item);
     }
   }
@@ -854,6 +855,9 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
   }
   let opts = scene_options(app);
   let (mut scene, picks) = app.scene.build(&app.s, &opts);
+  if let Some(d) = &app.dialog {
+    d.add_cut_ghost(&mut scene);
+  }
   scene.style = app.visual_style;
   app.effects.apply(&mut scene);
   if crate::gpu::active(app) {
@@ -924,6 +928,16 @@ fn sketch_3d_manipulator(app: &App, painter: &egui::Painter, view: &View) {
 /// The section and analysis settings as render parameters.
 fn view_params(app: &App) -> serde_json::Value {
   let mut v = app.analysis.clone().unwrap_or(json!({}));
+  // a Sweep's or Loft's Analysis tab shows its analysis while the dialog is open
+  if let Some(a) = app.dialog.as_ref().and_then(|d| d.tab_analysis())
+    && v.get("analysis").is_none()
+  {
+    v = json!({"analysis": a, "pull": "z", "angle": 1.0});
+  }
+  // the red preview of a cut's tool (its revision re-renders the canvas when it changes)
+  if let Some(g) = app.dialog.as_ref().map(|d| d.cut_ghost_key()).filter(|g| *g > 0) {
+    v["cut_ghost"] = json!(g);
+  }
   if app.manufacture {
     v["toolpaths"] = json!(app.s.toolpaths_of.map(|t| t.1));
   }
@@ -4731,14 +4745,18 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
     .is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane() || d.wants_plane());
   app.hover_origin = None;
   if !picking {
-    if app.dialog.as_ref().is_none_or(|d| d.wants_origin())
+    // with Revolve open only the axes it takes light up: the planes stay shown without getting
+    // in the way of the profiles on them
+    let takes_axis = app.dialog.as_ref().map(|d| d.takes_origin_axis());
+    if app.dialog.as_ref().is_none_or(|d| d.wants_origin() || d.takes_origin_axis())
       && app.drag.is_none()
       && let Some(pos) = resp.hover_pos()
     {
       let cam = app.cam;
       let project = |p| view.to_screen(&cam, p);
       let ray = |p| view.ray(&cam, p);
-      app.hover_origin = crate::origin::under(app, pos, &project, &ray);
+      app.hover_origin = crate::origin::under(app, pos, &project, &ray)
+        .filter(|i| takes_axis != Some(true) || crate::origin::OriginItem::AXES.contains(i));
       if app.hover_origin.is_some() {
         app.hover = None;
       }
