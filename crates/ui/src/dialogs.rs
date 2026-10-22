@@ -44,6 +44,7 @@ mod primitive;
 mod redefine;
 mod rsl;
 mod section;
+mod sheet;
 #[cfg(test)]
 mod sketch_row_tests;
 mod solid;
@@ -390,6 +391,7 @@ impl Kind {
         | Kind::Hem
         | Kind::Rip
         | Kind::ConvertSheet
+        | Kind::Fold
         | Kind::Unfold
         | Kind::Joint
         | Kind::AsBuiltJoint
@@ -1030,9 +1032,12 @@ impl Dialog {
         d.position = "adjacent";
         d.op = "new_body";
       }
+      // Fusion's flat hem, four thicknesses long, its bend at the edge
       Kind::Hem => {
-        d.distance = "5 mm".into();
-        d.distance2 = "0.5 mm".into();
+        d.choice = "flat";
+        d.position = "adjacent";
+        d.distance = sheet::HEM_LENGTH.into();
+        d.distance2 = sheet::HEM_GAP.into();
       }
       Kind::Fold => {
         d.angle = "90 deg".into();
@@ -1580,7 +1585,8 @@ impl Dialog {
         }
       },
       Kind::Hem => {
-        ("sheet.hem", json!({"edges": self.edges, "length": self.distance, "gap": self.distance2, "flip": self.flip}))
+        let gap = if self.choice == "open" { self.distance2.as_str() } else { sheet::FLAT_HEM_GAP };
+        ("sheet.hem", json!({"edges": self.edges, "length": self.distance, "gap": gap, "flip": self.flip}))
       }
       Kind::Fold => (
         "sheet.bend",
@@ -2033,7 +2039,7 @@ impl Dialog {
       Kind::Loft => self.sections.len() >= 2,
       Kind::Sweep => self.sketch.is_some() && self.path.is_some() && !self.profiles.is_empty(),
       Kind::Hole => self.hole_ready(),
-      Kind::Fold => self.sketch.is_some(),
+      Kind::Fold => !self.faces.is_empty() && self.sketch.is_some() && self.line.is_some(),
       Kind::RectPattern => self.pattern_ready(),
       Kind::OffsetPlane => !self.plane.is_null(),
       Kind::PressPull | Kind::OffsetFace => !self.faces.is_empty(),
@@ -2046,7 +2052,8 @@ impl Dialog {
           self.sketch.is_some()
         }
       }
-      Kind::Hem | Kind::Rip => !self.edges.is_empty(),
+      Kind::Hem => !self.edges.is_empty() && sheet::hem_folds(self.choice),
+      Kind::Rip => !self.edges.is_empty(),
       Kind::NewComponent => self.choice == "empty" || !self.bodies.is_empty(),
       Kind::ComponentProps => self.target.is_some(),
       Kind::AsBuiltJoint => self.as_built_picks().is_some(),
@@ -2232,7 +2239,7 @@ impl Dialog {
   pub fn profile_sketches(&self) -> Vec<FeatureId> {
     match self.kind {
       Kind::Hole if self.solid.hp.single => Vec::new(),
-      Kind::Extrude | Kind::Revolve | Kind::Flange | Kind::Hole | Kind::Fold => self.sketch.into_iter().collect(),
+      Kind::Extrude | Kind::Revolve | Kind::Flange | Kind::Hole => self.sketch.into_iter().collect(),
       Kind::Sweep => self.sketch.into_iter().chain(self.path).collect(),
       Kind::Loft => self.sections.iter().map(|(sk, _)| FeatureId(*sk)).collect(),
       _ => Vec::new(),
@@ -2326,6 +2333,13 @@ impl Dialog {
       }
       Kind::Draft if !self.applied => self.sync_draft(s),
       Kind::Scale => self.sync_scale(s),
+      // Fold's Reference: the picked face of the sheet
+      Kind::Fold if !self.applied => {
+        let f: Vec<Value> = sel_faces(s).into_iter().take(1).collect();
+        if f != self.faces {
+          self.faces = f;
+        }
+      }
       Kind::Refold if !self.applied => {
         let b = sel_bodies(s);
         if b != self.bodies {
@@ -2700,6 +2714,7 @@ impl Dialog {
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
         Kind::Draft if self.pick_row == 0 || self.plane.is_null() => "Select pull direction".into(),
         Kind::Draft => "Select faces to draft".into(),
+        Kind::Fold if self.faces.is_empty() => "Click on the stationary side of a face on a sheet metal body.".into(),
         Kind::RedefinePlane => redefine::HINT.into(),
         Kind::OffsetFace => "Select face(s) to offset".into(),
         Kind::Scale if self.bodies.is_empty() => "Select bodies or sketches to scale".into(),
@@ -2713,6 +2728,10 @@ impl Dialog {
         }
         _ => sentence(self.missing_input()),
       });
+    }
+    // Hem's prompt once its edges are picked, whatever the pointer is over, as Fusion words it
+    if self.kind == Kind::Hem {
+      return Some("Adjust settings or hold Ctrl to modify selection".into());
     }
     // Offset's prompt names its values whatever the pointer is over, as Fusion's does
     if self.kind == Kind::SkOffset {
@@ -2836,6 +2855,7 @@ impl Dialog {
       Kind::Hole if self.solid.hp.single => "click a planar face where the hole goes",
       Kind::Hole => "sketch points to drill (Point tool) are needed",
       Kind::RectPattern => self.pattern_missing(),
+      Kind::Fold if self.faces.is_empty() => "click the stationary side of a face on the sheet",
       Kind::Fold => "pick a sketch with a bend line",
       Kind::OffsetPlane => "select a plane",
       Kind::PressPull | Kind::OffsetFace => "select faces",
@@ -2845,7 +2865,9 @@ impl Dialog {
       Kind::Scale => "select the point to scale about",
       Kind::Flange if self.choice == "edge" => "select sheet edges",
       Kind::Flange => "select a profile",
-      Kind::Hem | Kind::Rip => "select edges",
+      Kind::Hem if self.edges.is_empty() => "select an edge to hem",
+      Kind::Hem => "FissionOxide folds flat and open hems only so far",
+      Kind::Rip => "select edges",
       Kind::Project if self.choice != "bodies" => "select geometry to project",
       Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
       Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
@@ -3108,7 +3130,10 @@ impl Dialog {
         | Input::Curves { label, .. } => {
           ui.label(*label);
           let n = v.as_array().map(Vec::len).unwrap_or(0);
-          sel_chip(ui, accent, &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
+          let text = if n == 0 { "Select".to_string() } else { format!("{n} selected") };
+          // Corner Closure's one row is lit from the start, as Fusion's active selection
+          let lit = n > 0 || f.cmd == "sheet.corner_closure";
+          sel_chip_lit(ui, accent, &text, lit, n > 0);
           ui.end_row();
         }
         Input::Bodies { label, .. } => {
@@ -3553,59 +3578,10 @@ impl Dialog {
         }
         Self::check(ui, "Flip", &mut self.flip, dirty);
       }
-      Kind::Hem => {
-        ui.label("Edges");
-        chip(ui, self.edges.len(), "selected");
-        ui.end_row();
-        Self::field(ui, "Length", &mut self.distance, dirty);
-        Self::field(ui, "Gap", &mut self.distance2, dirty);
-        Self::check(ui, "Flip", &mut self.flip, dirty);
-      }
-      Kind::Fold => {
-        ui.label("Sketch");
-        let list = Self::sketches(app, None);
-        let cur = self.sketch.and_then(|p| list.iter().find(|(id, _)| *id == p)).map(|(_, n)| n.clone());
-        egui::ComboBox::from_id_salt("fsk").selected_text(cur.unwrap_or_default()).width(140.0).show_ui(ui, |ui| {
-          for (id, n) in &list {
-            if ui.selectable_label(self.sketch == Some(*id), n).clicked() {
-              self.sketch = Some(*id);
-              self.line = None;
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-        ui.label("Bend line");
-        let lines = self.sketch_lines(app);
-        let cur = self.line.map(|l| format!("Sketch line {l}")).unwrap_or("Pick a line".into());
-        egui::ComboBox::from_id_salt("fline").selected_text(cur).width(140.0).show_ui(ui, |ui| {
-          for (id, label) in lines {
-            if ui.selectable_label(self.line == Some(id), label).clicked() {
-              self.line = Some(id);
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-        Self::field(ui, "Angle", &mut self.angle, dirty);
-        Self::check(ui, "Flip direction", &mut self.flip, dirty);
-        Self::check(ui, "Fold the other side", &mut self.flag, dirty);
-      }
-      Kind::ConvertSheet => {
-        ui.label("Body");
-        chip(ui, self.bodies.len().min(1), "body");
-        ui.end_row();
-        ui.label("Stationary face");
-        chip(ui, self.faces.len(), "face");
-        ui.end_row();
-        self.rule_combo(ui);
-      }
-      Kind::Rip => {
-        ui.label("Edges");
-        chip(ui, self.edges.len(), "selected");
-        ui.end_row();
-        Self::field(ui, "Gap", &mut self.distance, dirty);
-      }
+      Kind::Hem => self.hem_rows(app, ui, dirty),
+      Kind::Fold => self.fold_rows(app, ui, dirty),
+      Kind::ConvertSheet => self.convert_rows(ui),
+      Kind::Rip => self.rip_rows(ui, dirty),
       Kind::Unfold => {
         ui.label("Body");
         if self.bodies.is_empty() {
@@ -5886,7 +5862,7 @@ mod tests {
 
     assert_eq!(Dialog::blank(Kind::PickPlane).prompt(false).as_deref(), Some(PICK_PLANE_HINT));
     // a command without its own wording asks for its missing input as a sentence
-    assert_eq!(Dialog::blank(Kind::Hem).prompt(false).as_deref(), Some("Select edges"));
+    assert_eq!(Dialog::blank(Kind::Hem).prompt(false).as_deref(), Some("Select an edge to hem"));
     // one with nothing to select or specify has no prompt
     assert_eq!(Dialog::blank(Kind::CenterOfMass).prompt(false), None);
     assert_eq!(Dialog::blank(Kind::Inspect).prompt(false).as_deref(), Some("Select objects to measure."));
@@ -6486,6 +6462,7 @@ mod tests {
     d.applied = false;
     let mut d = Dialog::blank(Kind::Hem);
     d.edges = vec![edge(&s, 0, |e| e.length > 79.0 && e.mid.y < 1.0 && e.mid.z > 1.0)];
+    d.choice = "open";
     d.distance = "5 mm".into();
     d.distance2 = "0.5 mm".into();
     apply(&mut s, &mut d);
@@ -6505,6 +6482,7 @@ mod tests {
     run(&mut s, "sketch.create", json!({"plane": top}));
     let line = run(&mut s, "sketch.line", json!({"points": [[40, -5], [40, 45]]}));
     let mut d = Dialog::blank(Kind::Fold);
+    d.faces = vec![top];
     d.sketch = s.edit_sketch;
     d.line = line["curves"].as_array().and_then(|a| a.first()).and_then(Value::as_u64).map(|v| v as u32);
     d.angle = "90 deg".into();

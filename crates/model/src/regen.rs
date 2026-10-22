@@ -1516,11 +1516,18 @@ impl Ctx<'_> {
         })
       }
       FeatureKind::Hem { edges, length, gap, flip } => {
-        let (l, g) = (self.len(length)?, self.len(gap)?);
-        if !(g >= 0.01) {
-          return Err("the hem gap must be at least 0.01 mm (a closed hem would fuse to the sheet)".into());
-        }
+        // the values may name the sheet's thickness, as Fusion's default length "Thickness * 4"
+        // does (a parameter of that name wins)
+        let (length, gap) = (length.clone(), gap.clone());
+        let base = self.params.clone();
         self.edge_flanges(id, edges, *flip, (0.0, 0.0), CornerMode::Miter, |info| {
+          let mut params = base.clone();
+          params.entry("Thickness".into()).or_insert(info.thickness);
+          let len = |e: &str| fox_expr::eval(e, fox_expr::Kind::Length, &params).map_err(|err| format!("'{e}': {err}"));
+          let (l, g) = (len(&length)?, len(&gap)?);
+          if !(g >= 0.01) {
+            return Err("the hem gap must be at least 0.01 mm (a closed hem would fuse to the sheet)".into());
+          }
           let (t, r) = (info.thickness, g / 2.0);
           let straight = l - (r + t);
           if straight < -1e-9 {

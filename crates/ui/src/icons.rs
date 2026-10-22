@@ -425,6 +425,12 @@ pub enum Icon {
   // Draft's Type row
   DraftFixedPlane,
   DraftPartingLine,
+  // Hem's Type drop-down: the sheet's end folded back, seen edge-on
+  HemFlat,
+  HemOpen,
+  HemRolled,
+  HemTeardrop,
+  HemRope,
 }
 
 #[derive(Clone, Copy)]
@@ -2869,7 +2875,36 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.08, 0.5), (0.92, 0.5), (0.78, 0.9), (0.22, 0.9)], Fill);
       k.thick((0.04, 0.5), (0.96, 0.5), Blue, 1.4);
     }
+    Icon::HemFlat | Icon::HemOpen => {
+      // folded flat onto the sheet, or back with a gap
+      let g = if icon == Icon::HemFlat { 0.08 } else { 0.18 };
+      let mut pts = vec![(0.06, 0.5 + g)];
+      pts.extend(unit_arc((0.74, 0.5), g, -std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2));
+      pts.push((0.3, 0.5 - g));
+      k.band(k.pts(&pts), 3.4);
+    }
+    Icon::HemRolled | Icon::HemTeardrop | Icon::HemRope => {
+      use std::f32::consts::{FRAC_PI_2, PI};
+      // a roll round the sheet's end: three quarters, a teardrop closing on the sheet, a full rope
+      let (c, r) = ((0.62, 0.48), 0.24);
+      let mut pts = vec![(0.06, 0.48 + r)];
+      let sweep = match icon {
+        Icon::HemRolled => 1.5 * PI,
+        Icon::HemTeardrop => 1.75 * PI,
+        _ => 2.1 * PI,
+      };
+      pts.extend(unit_arc(c, r, -FRAC_PI_2, -FRAC_PI_2 + sweep));
+      if icon == Icon::HemTeardrop {
+        pts.push((0.44, 0.48 + r - 0.04));
+      }
+      k.band(k.pts(&pts), 3.4);
+    }
   }
+}
+
+/// Points along an arc in unit-square coordinates, angles counter-clockwise from +x (screen y up).
+fn unit_arc(c: (f32, f32), r: f32, a0: f32, a1: f32) -> Vec<(f32, f32)> {
+  (0..=16).map(|i| a0 + (a1 - a0) * i as f32 / 16.0).map(|t| (c.0 + t.cos() * r, c.1 - t.sin() * r)).collect()
 }
 
 /// A five-pointed star's outline (unit-square coordinates), its first point straight up.

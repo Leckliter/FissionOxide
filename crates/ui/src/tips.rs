@@ -1092,11 +1092,7 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        in the Timeline, to ensure all assembly relationships are calculated properly.\n\nPress Ctrl+/ \
        for more help.",
     ),
-    (_, "Bill of Materials") => (
-      "Lists the components with their quantities, materials and masses.",
-      "The list updates with the design. Set each component's material first for the masses to be \
-       right.",
-    ),
+    // (Fusion's Bill of Materials tooltip is its bare name: no text here)
 
     // DIRECT EDIT
     (_, "Move Face") => (

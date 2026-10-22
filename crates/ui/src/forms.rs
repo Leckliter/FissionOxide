@@ -560,6 +560,8 @@ impl State {
         matches!(key, "pattern_type" | "object_type" | "bodies" | "path_curves" | "path")
           || picked("bodies") && picked("path_curves")
       }
+      // Corner Closure: Edges until they are picked, as in Fusion
+      "sheet.corner_closure" => key == "edges" || self.picked(form, &["edges"]),
       // Joint Origin: Origin Mode and Snap until the snap is picked, as in Fusion
       "joint_origin" => matches!(key, "mode" | "face") || get("face").is_some_and(|v| !v.is_null()),
       "drawing.feature_control" if key.starts_with("lower_") => {
@@ -1667,7 +1669,7 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       }
       (form.cmd, q)
     }
-    "rib" | "web" | "emboss" | "thicken" => {
+    "rib" | "web" | "emboss" | "thicken" | "sheet.corner_closure" => {
       let mut q = p.clone();
       if let Some(m) = q.as_object_mut() {
         engine_keys(form.cmd, m);
@@ -2566,6 +2568,8 @@ pub static CORNER_CLOSURE: Form = Form {
   cmd: "sheet.corner_closure",
   fixed: &[],
   inputs: &[
+    // Fusion opens with Edges alone (lit) and OK greyed; the corner's rows come with the pick
+    Input::Edges { key: "edges", label: "Edges" },
     Input::Choice { key: "corners", label: "Corners", options: CORNERS },
     Input::Choice {
       key: "relief",
@@ -2574,7 +2578,7 @@ pub static CORNER_CLOSURE: Form = Form {
     },
     Input::Expr { key: "relief_size", label: "Relief size (empty = default)", default: "" },
   ],
-  picks_model: false,
+  picks_model: true,
 };
 
 pub static JOIN_BY_BEND: Form = Form {
@@ -3014,6 +3018,10 @@ pub fn engine_keys(cmd: &str, m: &mut Map<String, Value>) {
       }
       m.remove("extend");
     }
+    // the picked edges open the dialog's rows; the closure goes on the last edge or miter flange
+    "sheet.corner_closure" => {
+      m.remove("edges");
+    }
     "emboss" => {
       if let Some(e) = m.remove("effect") {
         m.insert("deboss".into(), json!(e == "deboss"));
@@ -3049,6 +3057,7 @@ pub fn pick_prompt(form: &Form) -> Option<&'static str> {
     "web" => "Select open sketch profile to create web",
     "thicken" => "Select Surfaces to Thicken",
     "boundary_fill" => "Select bodies & planes",
+    "sheet.corner_closure" => "Select edges",
     _ => return None,
   })
 }

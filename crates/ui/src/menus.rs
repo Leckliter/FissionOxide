@@ -32,6 +32,8 @@ pub(crate) struct Item {
   /// The SURFACE tab's own command of a SOLID label (Fusion's surface Extrude and Sweep): its
   /// own tooltip, and no shortcut shown.
   surface: bool,
+  /// Carries Fusion's blue round subscription badge (a command of the paid Fusion subscription).
+  paid: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -60,12 +62,23 @@ const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
     disabled: false,
     needs_saved: false,
     surface: false,
+    paid: false,
   })
 }
 
 /// A Fusion command FissionOxide doesn't have yet.
 const fn x(label: &'static str, icon: Icon) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false, needs_saved: false, surface: false })
+  E::I(Item {
+    label,
+    icon,
+    tint: Tint::Blue,
+    key: "",
+    cmd: None,
+    disabled: false,
+    needs_saved: false,
+    surface: false,
+    paid: false,
+  })
 }
 
 impl E {
@@ -129,6 +142,17 @@ impl E {
     match self {
       E::I(mut i) => {
         i.disabled = true;
+        E::I(i)
+      }
+      other => other,
+    }
+  }
+
+  /// With Fusion's subscription badge.
+  const fn p(self) -> E {
+    match self {
+      E::I(mut i) => {
+        i.paid = true;
         E::I(i)
       }
       other => other,
@@ -487,7 +511,6 @@ const SHEET_CREATE: &[E] = &[
   c("Flange (Base/Edge/Contour)", Icon::Flange, D(Kind::Flange)),
   c("Hem", Icon::Hem, D(Kind::Hem)),
   c("Lofted Flange", Icon::LoftedFlange, D(Kind::Form(&forms::LOFTED_FLANGE))),
-  c("Miter Flange", Icon::Flange, D(Kind::Form(&forms::MITER_FLANGE))),
   c("Fold", Icon::Fold, D(Kind::Fold)),
   c("Convert to Sheet Metal", Icon::ConvertSheet, D(Kind::ConvertSheet)).k("Ctrl+Alt+S"),
   x("Derive", Icon::Derive),
@@ -496,27 +519,32 @@ const SHEET_CREATE: &[E] = &[
   E::Sep,
   c("Hole", Icon::Hole, D(Kind::Hole)).k("H"),
   c("Thread", Icon::Thread, D(Kind::Form(&forms::THREAD))),
-  E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
   c("Create Flat Pattern", Icon::FlatPattern, D(Kind::FlatPattern)),
-  c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
+];
+
+/// Sheet metal commands FissionOxide has that Fusion's CREATE and MODIFY dropdowns don't list:
+/// not in the dropdowns, still found by the S toolbox and the keyboard shortcuts.
+const SHEET_MORE: &[E] = &[
+  c("Miter Flange", Icon::Flange, D(Kind::Form(&forms::MITER_FLANGE))),
+  c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
   c("All Flat Patterns on One Sheet", Icon::FlatPattern, D(Kind::Form(&forms::COLLECT_FLAT))),
   c("Cut Service Check", Icon::Interference, Cmd::CutCheck),
+  c("Refold Faces", Icon::Refold, D(Kind::Refold)),
 ];
 
 const SHEET_MODIFY: &[E] = &[
   c("Unfold", Icon::Unfold, D(Kind::Unfold)),
-  c("Refold Faces", Icon::Refold, D(Kind::Refold)),
   c("Sheet Metal Rules", Icon::SmRules, D(Kind::SheetRules)),
   c("Corner Closure", Icon::CornerClosure, D(Kind::Form(&forms::CORNER_CLOSURE))),
-  c("Join by bend", Icon::Fold, D(Kind::Form(&forms::JOIN_BY_BEND))),
+  c("Join by bend", Icon::Fold, D(Kind::Form(&forms::JOIN_BY_BEND))).p(),
   c("Rip", Icon::Rip, D(Kind::Rip)),
   E::Sep,
-  c("Sheet Metal Fillet", Icon::Fillet, D(Kind::Form(&forms::SHEET_FILLET))),
-  c("Sheet Metal Chamfer", Icon::Chamfer, D(Kind::Form(&forms::SHEET_CHAMFER))),
+  c("Sheet Metal Fillet", Icon::Fillet, D(Kind::Form(&forms::SHEET_FILLET))).p(),
+  c("Sheet Metal Chamfer", Icon::Chamfer, D(Kind::Form(&forms::SHEET_CHAMFER))).p(),
   c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
@@ -800,7 +828,8 @@ const SKETCH_MODIFY_MORE: &[E] = &[
 fn extra_commands(tab: Tab) -> &'static [&'static [E]] {
   match tab {
     Tab::Sketch => &[SKETCH_MODIFY_MORE, ASSEMBLE_MORE],
-    Tab::Solid | Tab::Surface | Tab::Mesh | Tab::SheetMetal | Tab::Plastic => &[ASSEMBLE_MORE],
+    Tab::SheetMetal => &[ASSEMBLE_MORE, SHEET_MORE],
+    Tab::Solid | Tab::Surface | Tab::Mesh | Tab::Plastic => &[ASSEMBLE_MORE],
     _ => &[],
   }
 }
@@ -1236,7 +1265,14 @@ const SHEET_METAL: [Group; 2] = [
   Group { label: "CREATE", quick: &["Flange (Base/Edge/Contour)", "Create Flat Pattern"], menu: SHEET_CREATE },
   Group {
     label: "MODIFY",
-    quick: &["Sheet Metal Rules", "Join by bend", "Sheet Metal Fillet", "Fillet", "Chamfer", "Bill of Materials"],
+    quick: &[
+      "Sheet Metal Rules",
+      "Sheet Metal Fillet",
+      "Sheet Metal Chamfer",
+      "Fillet",
+      "Chamfer",
+      "Bill of Materials",
+    ],
     menu: SHEET_MODIFY,
   },
 ];
@@ -1390,6 +1426,7 @@ pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -
     disabled: false,
     needs_saved: false,
     surface: false,
+    paid: false,
   };
   let key = key_of(prefs, Scope::Sketch, label);
   rich_tip(resp, Scope::Sketch, &it, key)
@@ -1615,6 +1652,9 @@ fn show_group(
         } else {
           icons::tool_button_bare(ui, it.icon, it.tint, active)
         };
+        if it.paid {
+          paid_badge(ui.painter(), resp.rect.shrink(4.0));
+        }
         let resp = rich_tip(resp, at.scope(), it, at.key(it));
         if it.cmd.is_some() {
           resp.context_menu(|ui| at.options(ui, it, act));
@@ -1753,6 +1793,9 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
     } else {
       icons::draw_tinted(p, ir, i.icon, i.tint);
     }
+    if i.paid {
+      paid_badge(p, ir);
+    }
     if !key.is_empty() {
       p.text(
         pos2(rect.right() - 90.0, rect.center().y),
@@ -1780,6 +1823,18 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
     ));
   }
   resp
+}
+
+/// Fusion's subscription badge on a command's icon: a small blue disc with a white rim and a
+/// white four-pointed sparkle, at the icon's top right.
+fn paid_badge(p: &egui::Painter, icon: Rect) {
+  let c = icon.right_top() + vec2(-1.0, 2.0);
+  p.circle(c, 4.5, theme::ACCENT, Stroke::new(1.0, Color32::WHITE));
+  // the sparkle: a tall and a wide diamond across each other
+  for (w, h) in [(0.9, 3.0), (3.0, 0.9)] {
+    let pts = vec![c + vec2(0.0, -h), c + vec2(w, 0.0), c + vec2(0.0, h), c + vec2(-w, 0.0)];
+    p.add(egui::Shape::convex_polygon(pts, Color32::WHITE, Stroke::NONE));
+  }
 }
 
 /// The icon the toolbar menus draw for the command labelled `label` on any tab (the Undo list
@@ -1857,6 +1912,11 @@ mod tests {
         labels(g.menu, &mut all);
       }
       for l in all {
+        // Fusion's Bill of Materials tooltip is its bare name
+        if l == "Bill of Materials" {
+          assert!(tips::tip(Scope::of(tab), l).is_none());
+          continue;
+        }
         match tips::tip(Scope::of(tab), l) {
           // Fusion's Press Pull and Display Configuration Table have a description only
           Some(t)
@@ -2486,5 +2546,54 @@ mod tests {
       assert_eq!(cmd_of(tab, group, "Insert Derive"), Some(Cmd::Insert(Target::Derive)));
     }
     assert_eq!(cmd_of(Tab::Mesh, "CREATE", "Insert Mesh"), Some(Cmd::Insert(Target::Mesh)));
+  }
+
+  /// A dropdown as Fusion's reads: each row with its shortcut in brackets, submenus with ">",
+  /// separators as "|".
+  fn listing(menu: &[E]) -> String {
+    let rows: Vec<String> = menu
+      .iter()
+      .map(|e| match e {
+        E::I(i) if i.key.is_empty() => i.label.to_string(),
+        E::I(i) => format!("{} ({})", i.label, i.key),
+        E::Sub(l, _) => format!("{l} >"),
+        E::Sep => "|".into(),
+      })
+      .collect();
+    rows.join(", ").replace(", |, ", " | ")
+  }
+
+  /// The SHEET METAL tab's ribbon and dropdowns are Fusion's, its subscription commands carry the
+  /// badge, and the commands Fusion doesn't list stay reachable (S toolbox, shortcuts).
+  #[test]
+  fn sheet_metal_lists_are_fusions() {
+    assert_eq!(
+      listing(SHEET_CREATE),
+      "Create Sketch, Flange (Base/Edge/Contour), Hem, Lofted Flange, Fold, Convert to Sheet Metal (Ctrl+Alt+S), \
+       Derive | Extrude (E) | Hole (H), Thread, Pattern >, Mirror | Create Flat Pattern, Joint Origin"
+    );
+    assert_eq!(
+      listing(SHEET_MODIFY),
+      "Unfold, Sheet Metal Rules, Corner Closure, Join by bend, Rip | Sheet Metal Fillet, Sheet Metal Chamfer, \
+       Fillet (F), Chamfer | Move/Copy (M), Align, Delete (Del), Remove | Physical Material, Appearance (A), \
+       Manage Materials | Change Parameters, Compute All (Ctrl+B) | Bill of Materials"
+    );
+    let quick =
+      |g: &Group| quick_items(&Prefs::default(), Tab::SheetMetal, g).iter().map(|i| i.label).collect::<Vec<_>>();
+    assert_eq!(quick(&SHEET_METAL[0]), ["Flange (Base/Edge/Contour)", "Create Flat Pattern"]);
+    assert_eq!(
+      quick(&SHEET_METAL[1]),
+      ["Sheet Metal Rules", "Sheet Metal Fillet", "Sheet Metal Chamfer", "Fillet", "Chamfer", "Bill of Materials"]
+    );
+    let paid: Vec<&str> =
+      SHEET_MODIFY.iter().filter_map(|e| if let E::I(i) = e { i.paid.then_some(i.label) } else { None }).collect();
+    assert_eq!(paid, ["Join by bend", "Sheet Metal Fillet", "Sheet Metal Chamfer"]);
+    let offered: Vec<&str> = commands(&[Tab::SheetMetal]).iter().map(|e| e.label).collect();
+    for l in
+      ["Miter Flange", "Flat Pattern Sketch", "All Flat Patterns on One Sheet", "Cut Service Check", "Refold Faces"]
+    {
+      assert!(offered.contains(&l), "{l} stays reachable");
+    }
+    assert!(tips::tip(Scope::Design, "Bill of Materials").is_none(), "the tooltip is the bare name");
   }
 }

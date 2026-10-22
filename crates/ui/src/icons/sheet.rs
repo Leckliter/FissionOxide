@@ -331,6 +331,11 @@ const ALL: &[Icon] = &[
   Icon::OriginTwoEdge,
   Icon::DraftFixedPlane,
   Icon::DraftPartingLine,
+  Icon::HemFlat,
+  Icon::HemOpen,
+  Icon::HemRolled,
+  Icon::HemTeardrop,
+  Icon::HemRope,
 ];
 
 fn render(icons: &[Icon], tint: Option<Tint>, cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {
