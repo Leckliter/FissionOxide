@@ -40,6 +40,18 @@ impl Default for Live {
   }
 }
 
+impl Live {
+  /// Fusion's mesh dialogs open with Preview unticked.
+  pub(super) fn for_kind(kind: Kind) -> Live {
+    let off = match kind {
+      Kind::Form(f) => crate::forms::preview_off(f),
+      Kind::PlaneCut => true,
+      _ => false,
+    };
+    Live { on: !off, ..Live::default() }
+  }
+}
+
 /// A picked edge or face of the un-previewed model.
 #[derive(Debug, Clone, Copy)]
 enum Was {
@@ -175,7 +187,7 @@ impl Dialog {
   /// open with their one selection row).
   pub(super) fn live_checkbox(&mut self, ui: &mut egui::Ui, s: &mut Session) {
     if matches!(self.kind, Kind::Fillet | Kind::Draft | Kind::OffsetFace | Kind::Hem)
-      || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f))
+      || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f) || crate::forms::no_preview(f))
     {
       return;
     }

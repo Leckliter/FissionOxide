@@ -343,6 +343,7 @@ impl Dialog {
       Kind::SkRectPattern => self.sk_rect_handles(s),
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => self.text_handles(s),
       Kind::Revolve => self.revolve_handles(s),
+      Kind::PlaneCut => self.plane_cut_handles(s),
       // Box, Cylinder, Sphere, Torus and Coil (see [`super::primitive`])
       k if super::primitive::base_of(k).is_some() => self.primitive_handles(s),
       Kind::Section if !self.plane.is_null() => self.section_handles(s),
@@ -489,6 +490,7 @@ impl Dialog {
           return;
         }
       }
+      Kind::PlaneCut => self.set_plane_cut_handle(i, v, step),
       _ => return,
     }
     self.dirty = true;

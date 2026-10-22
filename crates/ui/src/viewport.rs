@@ -446,6 +446,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let hot_plane = sketch_planes_overlay(app, planes, &painter, &view);
   offset_plane_overlay(app, &painter, &view);
   section_plane_overlay(app, &painter, &view);
+  crate::dialogs::plane_cut_overlay(app, &painter, &|p| view.to_screen(&cam, p));
   // Preferences → General → Enable camera pivot: the orbit's centre while orbiting
   if app.preferences.values.camera_pivot
     && matches!(app.drag, Some(Drag::Orbit))
