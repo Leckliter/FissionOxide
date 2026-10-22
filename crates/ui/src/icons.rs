@@ -132,6 +132,43 @@ pub enum Icon {
   PlaneAlt,
   Axis,
   CPoint,
+  // CONSTRUCT's own icon for each command, as Fusion's
+  /// Plane at Angle: a plane tilted up from an edge, with the angle.
+  PlaneAngle,
+  /// Tangent Plane: a plane resting on a cylinder.
+  PlaneTangent,
+  /// Midplane: a plane halfway between two others.
+  Midplane,
+  /// Perpendicular Plane: a plane standing square on another.
+  PlanePerpendicular,
+  /// Plane Through Two Edges: a plane through two lines.
+  PlaneTwoEdges,
+  /// Plane Through Three Points: a plane through three points.
+  PlaneThreePoints,
+  /// Plane Along Path: a plane across a curved path.
+  PlaneAlongPath,
+  /// Axis Through Cylinder/Cone/Torus: a cylinder's axis.
+  AxisCylinder,
+  /// Axis Perpendicular To Face: an axis standing on a face.
+  AxisNormal,
+  /// Axis Through Two Planes: the line where two planes cross.
+  AxisTwoPlanes,
+  /// Axis Through Two Points: an axis through two points.
+  AxisTwoPoints,
+  /// Axis Through Edge: an axis along a block's edge.
+  AxisEdge,
+  /// Point At Vertex: a point on a block's corner.
+  PointVertex,
+  /// Point Through Two Edges: a point where two lines cross.
+  PointTwoEdges,
+  /// Point Through Three Planes: a point where three planes meet.
+  PointThreePlanes,
+  /// Point At Center Of Circle/Sphere/Torus: a point at a circle's centre.
+  PointCenter,
+  /// Point At Edge And Plane: a point where a line pierces a plane.
+  PointEdgePlane,
+  /// Point Along Path: a point on a curved path.
+  PointAlongPath,
   Interference,
   Section,
   CurvComb,
@@ -445,6 +482,9 @@ fn family(icon: Icon) -> Tint {
   use Icon::*;
   match icon {
     Plane | PlaneAlt | Axis | CPoint => Tint::Amber,
+    PlaneAngle | PlaneTangent | Midplane | PlanePerpendicular | PlaneTwoEdges | PlaneThreePoints | PlaneAlongPath
+    | AxisCylinder | AxisNormal | AxisTwoPlanes | AxisTwoPoints | AxisEdge | PointVertex | PointTwoEdges
+    | PointThreePlanes | PointCenter | PointEdgePlane | PointAlongPath => Tint::Amber,
     Measure | Interference | Section | CurvComb | CurvMap | DraftAnalysis | EnvMap | Isocurve | Zebra
     | Accessibility | CenterOfMass | MinRadius | Navigator | ComponentColors | FaceGroups | History
     | Sustainability | Select | WindowSel | FreeformSel | PaintSel => Tint::Green,
@@ -1344,6 +1384,99 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.sk(&[(0.5, 0.06), (0.5, 0.94)], Slate);
       k.sk(&[(0.06, 0.5), (0.94, 0.5)], Slate);
       k.circle((0.5, 0.5), 0.2, Some(Amber), Some(Amber));
+    }
+    Icon::PlaneAngle => {
+      k.skc(&[(0.04, 0.94), (0.24, 0.72), (0.96, 0.72), (0.76, 0.94)], Slate);
+      k.solid(&[(0.14, 0.83), (0.3, 0.12), (0.98, 0.12), (0.86, 0.83)], Amber);
+      k.thick((0.14, 0.83), (0.86, 0.83), Slate, 1.4);
+      k.ska((0.14, 0.83), 0.28, 0.0, 1.35, Slate);
+    }
+    Icon::PlaneTangent => {
+      k.circle((0.5, 0.66), 0.27, Some(Light), Some(Slate));
+      k.solid(&[(0.04, 0.39), (0.24, 0.17), (0.96, 0.17), (0.76, 0.39)], Amber);
+      k.dot((0.5, 0.39), Slate);
+    }
+    Icon::Midplane => {
+      k.skc(&[(0.04, 0.3), (0.24, 0.06), (0.96, 0.06), (0.76, 0.3)], Slate);
+      k.skc(&[(0.04, 0.94), (0.24, 0.7), (0.96, 0.7), (0.76, 0.94)], Slate);
+      k.solid(&[(0.04, 0.62), (0.24, 0.38), (0.96, 0.38), (0.76, 0.62)], Amber);
+    }
+    Icon::PlanePerpendicular => {
+      k.skc(&[(0.04, 0.94), (0.28, 0.68), (0.96, 0.68), (0.72, 0.94)], Slate);
+      k.solid(&[(0.22, 0.81), (0.22, 0.08), (0.78, 0.08), (0.78, 0.81)], Amber);
+      k.sk(&[(0.78, 0.69), (0.88, 0.69), (0.88, 0.8)], Slate);
+    }
+    Icon::PlaneTwoEdges => {
+      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Amber);
+      k.thick((0.0, 0.9), (0.36, 0.16), Slate, 1.4);
+      k.thick((0.62, 0.9), (0.98, 0.16), Slate, 1.4);
+    }
+    Icon::PlaneThreePoints => {
+      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Amber);
+      for c in [(0.26, 0.64), (0.5, 0.38), (0.74, 0.62)] {
+        k.dot(c, Slate);
+      }
+    }
+    Icon::PlaneAlongPath => {
+      k.sk(&[(0.04, 0.92), (0.26, 0.74), (0.48, 0.6), (0.7, 0.42), (0.86, 0.22), (0.96, 0.04)], Slate);
+      k.solid(&[(0.36, 0.22), (0.58, 0.06), (0.82, 0.78), (0.6, 0.94)], Amber);
+      k.dot((0.59, 0.5), Slate);
+    }
+    Icon::AxisCylinder => {
+      k.solid(&[(0.24, 0.26), (0.76, 0.26), (0.76, 0.78), (0.24, 0.78)], Light);
+      k.ellipse((0.5, 0.78), 0.26, 0.09, Some(Light), Slate);
+      k.ellipse((0.5, 0.26), 0.26, 0.09, Some(Light), Slate);
+      k.thick((0.5, 0.02), (0.5, 0.98), Amber, 2.0);
+    }
+    Icon::AxisNormal => {
+      k.solid(&[(0.04, 0.92), (0.28, 0.62), (0.96, 0.62), (0.72, 0.92)], Light);
+      k.thick((0.5, 0.77), (0.5, 0.04), Amber, 2.0);
+      k.sk(&[(0.5, 0.62), (0.62, 0.62), (0.62, 0.72)], Slate);
+    }
+    Icon::AxisTwoPlanes => {
+      k.solid(&[(0.17, 0.6), (0.17, 0.1), (0.83, 0.1), (0.83, 0.6)], Light);
+      k.solid(&[(0.04, 0.76), (0.3, 0.44), (0.96, 0.44), (0.7, 0.76)], Light);
+      k.thick((0.02, 0.6), (0.98, 0.6), Amber, 2.0);
+    }
+    Icon::AxisTwoPoints => {
+      k.thick((0.06, 0.94), (0.94, 0.06), Amber, 2.0);
+      k.circle((0.27, 0.73), 0.09, Some(White), Some(Slate));
+      k.circle((0.73, 0.27), 0.09, Some(White), Some(Slate));
+    }
+    Icon::AxisEdge => {
+      k.block(0.16, 0.42, 0.7, 0.92, 0.22, Light, Light, Dark);
+      k.thick((0.02, 0.42), (0.98, 0.42), Amber, 2.0);
+    }
+    Icon::PointVertex => {
+      k.block(0.1, 0.42, 0.66, 0.92, 0.24, Light, Light, Dark);
+      k.circle((0.66, 0.42), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointTwoEdges => {
+      k.thick((0.08, 0.88), (0.92, 0.18), Slate, 1.3);
+      k.thick((0.08, 0.22), (0.92, 0.8), Slate, 1.3);
+      k.circle((0.5, 0.53), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointThreePlanes => {
+      k.solid(&[(0.4, 0.08), (0.94, 0.08), (0.94, 0.6), (0.4, 0.6)], Light);
+      k.solid(&[(0.4, 0.08), (0.4, 0.6), (0.1, 0.86), (0.1, 0.34)], Dark);
+      k.solid(&[(0.4, 0.6), (0.94, 0.6), (0.64, 0.86), (0.1, 0.86)], Light);
+      k.circle((0.4, 0.6), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointCenter => {
+      k.circle((0.5, 0.5), 0.4, None, Some(Slate));
+      k.dashed((0.5, 0.16), (0.5, 0.84), Slate);
+      k.dashed((0.16, 0.5), (0.84, 0.5), Slate);
+      k.circle((0.5, 0.5), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointEdgePlane => {
+      k.thick((0.5, 0.6), (0.5, 0.98), Slate, 1.3);
+      k.solid(&[(0.04, 0.76), (0.3, 0.44), (0.96, 0.44), (0.7, 0.76)], Light);
+      k.thick((0.5, 0.02), (0.5, 0.6), Slate, 1.3);
+      k.circle((0.5, 0.6), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointAlongPath => {
+      k.sk(&[(0.04, 0.84), (0.2, 0.56), (0.38, 0.42), (0.56, 0.5), (0.74, 0.46), (0.96, 0.16)], Slate);
+      k.circle((0.56, 0.5), 0.11, Some(Amber), Some(Amber));
     }
     Icon::Interference => {
       k.solid(&[(0.06, 0.06), (0.62, 0.06), (0.62, 0.62), (0.06, 0.62)], White);

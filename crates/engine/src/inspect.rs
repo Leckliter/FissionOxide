@@ -101,9 +101,11 @@ fn entity(s: &Session, v: &Value) -> Result<Entity, CmdError> {
     let face = req_u32(v, "face")?;
     let f = b.faces().iter().find(|f| f.id == face).ok_or(CmdError::new(format!("body has no face {face}")))?;
     let planar = f.kind == SurfaceKind::Plane;
+    // Fusion's Loop Length: the length of the face's boundary, every loop's edges once
+    let loop_length: f64 = b.edges().iter().filter(|e| e.faces.contains(&face)).map(|e| e.length).sum();
     let mut props = json!({
       "kind": "face", "surface": format!("{:?}", f.kind).to_lowercase(), "area_mm2": f.area,
-      "center": f.center.to_array(),
+      "loop_length": loop_length, "center": f.center.to_array(),
     });
     if planar {
       props["normal"] = json!(f.normal.to_array());

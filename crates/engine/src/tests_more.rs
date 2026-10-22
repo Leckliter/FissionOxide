@@ -45,6 +45,10 @@ fn measure_between_faces_and_selection_tools() {
   assert!((r["angle_deg"].as_f64().unwrap() - 180.0).abs() < 1e-6, "{r}");
   let one = run(&mut s, "measure", json!({"a": {"body": b}}));
   assert!((one["volume_mm3"].as_f64().unwrap() - 8000.0).abs() < 1e-6);
+  // a face's Loop Length is its boundary: the 40 x 20 top face's four edges
+  let top = s.model.bodies[0].faces().iter().find(|f| (f.area - 800.0).abs() < 1e-6 && f.center.z > 5.0).unwrap().id;
+  let face = run(&mut s, "measure", json!({"a": {"body": b, "face": top}}));
+  assert!((face["loop_length"].as_f64().unwrap() - 120.0).abs() < 1e-6, "{face}");
   let side = run(
     &mut s,
     "measure",

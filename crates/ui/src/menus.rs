@@ -27,6 +27,8 @@ pub(crate) struct Item {
   cmd: Option<Cmd>,
   /// Greyed out, as Fusion shows commands unavailable in the current context.
   disabled: bool,
+  /// Greyed out while the design is unsaved.
+  needs_saved: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -39,12 +41,12 @@ pub(crate) enum E {
 
 /// A command FissionOxide runs.
 const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false })
+  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false, needs_saved: false })
 }
 
 /// A Fusion command FissionOxide doesn't have yet.
 const fn x(label: &'static str, icon: Icon) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false })
+  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false, needs_saved: false })
 }
 
 impl E {
@@ -75,6 +77,17 @@ impl E {
     match self {
       E::I(mut i) => {
         i.tint = Tint::Gold;
+        E::I(i)
+      }
+      other => other,
+    }
+  }
+
+  /// Greyed out while the design is unsaved.
+  const fn saved(self) -> E {
+    match self {
+      E::I(mut i) => {
+        i.needs_saved = true;
         E::I(i)
       }
       other => other,
@@ -220,26 +233,26 @@ const CONSTRUCT: &[E] = &[
   x("User Coordinate System (UCS)", Icon::Ucs),
   E::Sep,
   c("Offset Plane", Icon::Plane, D(Kind::OffsetPlane)),
-  c("Plane at Angle", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_ANGLE))),
-  c("Tangent Plane", Icon::PlaneAlt, D(Kind::Form(&forms::TANGENT_PLANE))),
-  c("Midplane", Icon::Plane, D(Kind::Form(&forms::MIDPLANE))),
-  c("Perpendicular Plane", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
-  c("Plane Through Two Edges", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_TWO_EDGES))),
-  c("Plane Through Three Points", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_THREE_POINTS))),
-  c("Plane Along Path", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
+  c("Plane at Angle", Icon::PlaneAngle, D(Kind::Form(&forms::PLANE_ANGLE))),
+  c("Tangent Plane", Icon::PlaneTangent, D(Kind::Form(&forms::TANGENT_PLANE))),
+  c("Midplane", Icon::Midplane, D(Kind::Form(&forms::MIDPLANE))),
+  c("Perpendicular Plane", Icon::PlanePerpendicular, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
+  c("Plane Through Two Edges", Icon::PlaneTwoEdges, D(Kind::Form(&forms::PLANE_TWO_EDGES))),
+  c("Plane Through Three Points", Icon::PlaneThreePoints, D(Kind::Form(&forms::PLANE_THREE_POINTS))),
+  c("Plane Along Path", Icon::PlaneAlongPath, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
   E::Sep,
-  c("Axis Through Cylinder/Cone/Torus", Icon::Axis, D(Kind::Form(&forms::AXIS_FACE))),
-  c("Axis Perpendicular To Face", Icon::Axis, D(Kind::Form(&forms::AXIS_NORMAL))),
-  c("Axis Through Two Planes", Icon::Axis, D(Kind::Form(&forms::AXIS_TWO_PLANES))),
-  c("Axis Through Two Points", Icon::Axis, D(Kind::Form(&forms::AXIS_TWO_POINTS))),
-  c("Axis Through Edge", Icon::Axis, D(Kind::Form(&forms::AXIS_EDGE))),
+  c("Axis Through Cylinder/Cone/Torus", Icon::AxisCylinder, D(Kind::Form(&forms::AXIS_FACE))),
+  c("Axis Perpendicular To Face", Icon::AxisNormal, D(Kind::Form(&forms::AXIS_NORMAL))),
+  c("Axis Through Two Planes", Icon::AxisTwoPlanes, D(Kind::Form(&forms::AXIS_TWO_PLANES))),
+  c("Axis Through Two Points", Icon::AxisTwoPoints, D(Kind::Form(&forms::AXIS_TWO_POINTS))),
+  c("Axis Through Edge", Icon::AxisEdge, D(Kind::Form(&forms::AXIS_EDGE))),
   E::Sep,
-  c("Point At Vertex", Icon::CPoint, D(Kind::Form(&forms::POINT_VERTEX))),
-  c("Point Through Two Edges", Icon::CPoint, D(Kind::Form(&forms::POINT_TWO_EDGES))),
-  c("Point Through Three Planes", Icon::CPoint, D(Kind::Form(&forms::POINT_THREE_PLANES))),
-  c("Point At Center Of Circle/Sphere/Torus", Icon::CPoint, D(Kind::Form(&forms::POINT_CENTER))),
-  c("Point At Edge And Plane", Icon::CPoint, D(Kind::Form(&forms::POINT_EDGE_PLANE))),
-  c("Point Along Path", Icon::CPoint, D(Kind::Form(&forms::POINT_ALONG_PATH))),
+  c("Point At Vertex", Icon::PointVertex, D(Kind::Form(&forms::POINT_VERTEX))),
+  c("Point Through Two Edges", Icon::PointTwoEdges, D(Kind::Form(&forms::POINT_TWO_EDGES))),
+  c("Point Through Three Planes", Icon::PointThreePlanes, D(Kind::Form(&forms::POINT_THREE_PLANES))),
+  c("Point At Center Of Circle/Sphere/Torus", Icon::PointCenter, D(Kind::Form(&forms::POINT_CENTER))),
+  c("Point At Edge And Plane", Icon::PointEdgePlane, D(Kind::Form(&forms::POINT_EDGE_PLANE))),
+  c("Point Along Path", Icon::PointAlongPath, D(Kind::Form(&forms::POINT_ALONG_PATH))),
 ];
 
 const INSPECT: &[E] = &[
@@ -265,8 +278,6 @@ const INSPECT: &[E] = &[
   E::Sep,
   x("History", Icon::History),
   x("Sustainability Insights", Icon::Sustainability),
-  E::Sep,
-  c("Properties", Icon::Properties, Cmd::Properties),
 ];
 
 const INSERT: &[E] = &[
@@ -275,34 +286,34 @@ const INSERT: &[E] = &[
   c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
-  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
+  // greyed until the design is saved, as Fusion's
+  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent).saved(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
   x("Insert Derive", Icon::Derive),
   x("Insert McMaster-Carr Component", Icon::McMaster).off(),
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
-  E::Sep,
-  // not in Fusion's menu: FissionOxide's STEP import
-  c("Insert STEP", Icon::Import, Cmd::InsertStep),
 ];
 
-const ASSEMBLE: &[E] = &[
-  x("Add To Assembly", Icon::AddToAssembly),
-  E::Sep,
-  // not in Fusion's menu: FissionOxide's component and joint commands
+// a Part Design document's ASSEMBLE holds only Add To Assembly, as Fusion's (FissionOxide makes
+// part designs only)
+const ASSEMBLE: &[E] = &[x("Add To Assembly", Icon::AddToAssembly)];
+
+/// FissionOxide's component and joint commands, which Fusion's ASSEMBLE lists only in an
+/// assembly design: not in a Part Design's dropdown, still found by the S toolbox and the
+/// keyboard shortcuts (J, Shift+J).
+const ASSEMBLE_MORE: &[E] = &[
   c("New Component", Icon::Component, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
   c("As-built Joint", Icon::JointOrigin, D(Kind::AsBuiltJoint)).k("Shift+J"),
   c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
   c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
   c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),
-  E::Sep,
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
   c("Rigid Group", Icon::Component, D(Kind::Form(&assembly_forms::RIGID_GROUP))),
   c("Motion Link", Icon::DriveJoint, D(Kind::Form(&assembly_forms::MOTION_LINK))),
   c("Contact Set", Icon::Interference, D(Kind::Form(&assembly_forms::CONTACT_SET))),
-  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
   c("Cam Follower", Icon::DriveJoint, D(Kind::Form(&assembly_forms::CAM_FOLLOWER))),
 ];
 
@@ -678,10 +689,12 @@ const SKETCH_MODIFY_MORE: &[E] = &[
   c("Clean Up", Icon::SkCleanup, D(Kind::Form(&forms::SK_CLEANUP))),
 ];
 
-/// A tab's commands that its dropdowns don't show (see [`SKETCH_MODIFY_MORE`]).
-fn extra_commands(tab: Tab) -> &'static [E] {
+/// A tab's commands that its dropdowns don't show (see [`SKETCH_MODIFY_MORE`] and
+/// [`ASSEMBLE_MORE`]).
+fn extra_commands(tab: Tab) -> &'static [&'static [E]] {
   match tab {
-    Tab::Sketch => SKETCH_MODIFY_MORE,
+    Tab::Sketch => &[SKETCH_MODIFY_MORE, ASSEMBLE_MORE],
+    Tab::Solid | Tab::Surface | Tab::Mesh | Tab::SheetMetal | Tab::Plastic => &[ASSEMBLE_MORE],
     _ => &[],
   }
 }
@@ -1260,7 +1273,15 @@ fn rich_tip(resp: egui::Response, scope: Scope, it: &Item, key: &str) -> egui::R
 /// Options): its name, description line and shortcut, expanding like a ribbon button's.
 pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -> egui::Response {
   let (icon, label, _) = Cmd::SketchTool(tool).info();
-  let it = Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(Cmd::SketchTool(tool)), disabled: false };
+  let it = Item {
+    label,
+    icon,
+    tint: Tint::Blue,
+    key: "",
+    cmd: Some(Cmd::SketchTool(tool)),
+    disabled: false,
+    needs_saved: false,
+  };
   let key = key_of(prefs, Scope::Sketch, label);
   rich_tip(resp, Scope::Sketch, &it, key)
 }
@@ -1270,7 +1291,7 @@ pub(crate) fn commands(tabs: &[Tab]) -> Vec<Entry> {
   fn walk(menu: &[E], tab: Tab, out: &mut Vec<Entry>) {
     for e in menu {
       match e {
-        E::I(Item { label, icon, tint, key, cmd: Some(cmd), disabled: false }) => {
+        E::I(Item { label, icon, tint, key, cmd: Some(cmd), disabled: false, .. }) => {
           if !out.iter().any(|o| o.label == *label && o.cmd == *cmd) {
             out.push(Entry { label, icon: *icon, tint: *tint, key, cmd: *cmd, tab });
           }
@@ -1286,7 +1307,9 @@ pub(crate) fn commands(tabs: &[Tab]) -> Vec<Entry> {
     for g in own.iter().chain(shared.iter()) {
       walk(g.menu, tab, &mut out);
     }
-    walk(extra_commands(tab), tab, &mut out);
+    for more in extra_commands(tab) {
+      walk(more, tab, &mut out);
+    }
   }
   out
 }
@@ -1349,11 +1372,18 @@ struct At<'a> {
   group: &'static str,
   /// The group's default toolbar icons.
   quick: &'static [&'static str],
+  /// The design has never been saved (commands that need a saved design grey out).
+  unsaved: bool,
 }
 
 impl At<'_> {
   fn scope(&self) -> Scope {
     Scope::of(self.tab)
+  }
+
+  /// `it` as the menu shows it here: greyed if it needs a saved design and this one isn't.
+  fn shown(&self, it: &Item) -> Item {
+    Item { disabled: it.disabled || it.needs_saved && self.unsaved, ..*it }
   }
 
   fn key(&self, it: &Item) -> &str {
@@ -1449,7 +1479,7 @@ fn show_group(
   pick: &mut Option<Item>,
   act: &mut Option<Action>,
 ) {
-  let at = At { prefs: &app.prefs, tab, group: g.label, quick: g.quick };
+  let at = At { prefs: &app.prefs, tab, group: g.label, quick: g.quick, unsaved: panels::is_unsaved(app) };
   let popup_id = egui::Id::new(("toolbar-menu", tab, g.label));
   let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
   // FINISH SKETCH sits on light blue, like the contextual SKETCH tab
@@ -1474,7 +1504,7 @@ fn show_group(
         if it.cmd.is_some() {
           resp.context_menu(|ui| at.options(ui, it, act));
         }
-        if resp.clicked() {
+        if resp.clicked() && !at.shown(it).disabled {
           *pick = Some(*it);
         }
       }
@@ -1547,6 +1577,7 @@ fn entries(
   for e in menu {
     match e {
       E::I(it) => {
+        let it = &at.shown(it);
         let r = row(ui, width, Some(it), at.key(it), it.label, false);
         if it.cmd.is_some() {
           // Fusion's ⋮ on the hovered row: its options open beside it
@@ -1641,7 +1672,8 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
 pub(crate) fn icon_of_label(label: &str) -> Option<Icon> {
   ALL_TABS.iter().find_map(|tab| {
     let (own, shared) = groups(*tab);
-    own.iter().chain(shared).find_map(|g| find(g.menu, label)).map(|i| i.icon)
+    let menus = own.iter().chain(shared).map(|g| g.menu).chain(extra_commands(*tab).iter().copied());
+    menus.into_iter().find_map(|m| find(m, label)).map(|i| i.icon)
   })
 }
 
@@ -2103,6 +2135,70 @@ mod tests {
       let more: Vec<&str> = t.more.split("\n\n").collect();
       assert_eq!(1 + more.len(), paragraphs, "{label}: {more:?}");
       assert_eq!(more.last() == Some(&help), has_help, "{label}: {more:?}");
+    }
+  }
+
+  /// A Part Design document's ASSEMBLE, INSPECT and INSERT list what Fusion's do; the joint and
+  /// component commands stay on the S toolbox and their keys.
+  #[test]
+  fn assemble_inspect_and_insert_are_fusions_part_design_lists() {
+    let shared = |tab: Tab, group: &str| {
+      let (own, shared) = groups(tab);
+      own.iter().chain(shared.iter()).find(|g| g.label == group).unwrap().menu
+    };
+    for tab in [Tab::Solid, Tab::Surface, Tab::Mesh, Tab::SheetMetal, Tab::Plastic, Tab::Sketch] {
+      assert_eq!(rows(shared(tab, "ASSEMBLE")), [("Add To Assembly", "")], "{tab:?}");
+      for cmd in [D(Kind::Joint), D(Kind::AsBuiltJoint), D(Kind::NewComponent), D(Kind::MotionStudy)] {
+        assert!(offers(tab, cmd), "{tab:?} still runs {cmd:?}");
+      }
+    }
+    let prefs = Prefs::default();
+    assert_eq!(key_of(&prefs, Scope::Design, "Joint"), "J");
+    assert_eq!(key_of(&prefs, Scope::Design, "As-built Joint"), "Shift+J");
+    assert_eq!(icon_of_label("Joint"), Some(Icon::JointOrigin), "the Undo list still finds its icon");
+
+    let inspect: Vec<&str> = rows(INSPECT).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(inspect[inspect.len() - 2..], ["History", "Sustainability Insights"]);
+    assert!(!matches!(INSPECT.last(), Some(E::Sep)));
+
+    let insert: Vec<&str> = rows(INSERT).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(
+      insert,
+      [
+        "Decal",
+        "Canvas",
+        "Insert SVG",
+        "Insert DXF",
+        "Insert Mesh",
+        "Insert Component",
+        "Insert Fastener",
+        "Duplicate With Joints",
+        "Insert Derive",
+        "Insert McMaster-Carr Component",
+        "Insert a manufacturer part",
+        "Insert TraceParts Supplier Components",
+      ]
+    );
+    assert!(!INSERT.iter().any(|e| matches!(e, E::Sep)));
+    // Insert Component greys out until the design is saved
+    let component = find(INSERT, "Insert Component").unwrap();
+    let at = |unsaved| At { prefs: &prefs, tab: Tab::Solid, group: "INSERT", quick: &[], unsaved };
+    assert!(at(true).shown(&component).disabled);
+    assert!(!at(false).shown(&component).disabled);
+    let mut app = App::with_session(fox_engine::Session::default());
+    assert!(panels::is_unsaved(&app));
+    app.s.path = Some("plate.fox".into());
+    assert!(!panels::is_unsaved(&app));
+    assert!(offers(Tab::Solid, Cmd::InsertComponent));
+  }
+
+  /// Every CONSTRUCT entry draws its own icon, as Fusion's do.
+  #[test]
+  fn construct_entries_each_have_their_own_icon() {
+    let icons: Vec<(&str, Icon)> =
+      CONSTRUCT.iter().filter_map(|e| if let E::I(i) = e { Some((i.label, i.icon)) } else { None }).collect();
+    for (i, (label, icon)) in icons.iter().enumerate() {
+      assert!(!icons[i + 1..].iter().any(|(_, o)| o == icon), "{label}'s {icon:?} is shared");
     }
   }
 }

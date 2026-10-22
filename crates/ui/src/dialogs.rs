@@ -2540,6 +2540,9 @@ impl Dialog {
     if let Some(p) = self.place_prompt() {
       return Some(p.into());
     }
+    if self.kind == Kind::Inspect {
+      return Some(MEASURE_PROMPT.into());
+    }
     if !self.ready() {
       return Some(match self.kind {
         Kind::Extrude => "Select sketch profiles or planar faces to extrude".into(),
@@ -4771,22 +4774,33 @@ impl Dialog {
   }
 }
 
+/// The pointer's prompt while Measure is open, as Fusion's.
+pub(crate) const MEASURE_PROMPT: &str = "Select objects to measure.";
+
 /// Measure's length units: name and millimetres per unit.
 pub(crate) const MEASURE_UNITS: [(&str, f64); 5] =
   [("mm", 1.0), ("cm", 10.0), ("m", 1000.0), ("in", 25.4), ("ft", 304.8)];
 
-/// How Measure shows its numbers: decimal places and length unit (kept between uses, as in Fusion).
+/// How Measure shows its numbers: decimal places, the length unit (the document's) and the
+/// Secondary Units every value is also given in (kept between uses, as in Fusion).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeasureFmt {
   pub precision: usize,
-  /// Index into [`MEASURE_UNITS`].
+  /// Index into [`MEASURE_UNITS`]: the document's unit.
   pub unit: usize,
+  /// Secondary Units, an index into [`MEASURE_UNITS`]; None (Fusion's default) shows one unit.
+  pub secondary: Option<usize>,
 }
 
 impl Default for MeasureFmt {
   fn default() -> Self {
-    MeasureFmt { precision: 3, unit: 0 }
+    MeasureFmt { precision: 3, unit: 0, secondary: None }
   }
+}
+
+/// A Precision choice as Fusion's drop-down shows it: "0", "0.1", "0.12", "0.123", ...
+pub(crate) fn precision_label(p: usize) -> String {
+  if p == 0 { "0".into() } else { format!("0.{}", &"12345678"[..p.min(8)]) }
 }
 
 impl MeasureFmt {
@@ -4801,19 +4815,36 @@ impl MeasureFmt {
     if s.trim_start_matches('-').chars().all(|c| c == '0' || c == '.') { s.trim_start_matches('-').into() } else { s }
   }
 
+  /// `v` (in mm to the `power`) in unit `i`, written as Fusion writes it: "0.663 in^2".
+  fn in_unit(&self, i: usize, v: f64, power: i32) -> String {
+    let (u, k) = MEASURE_UNITS[i.min(MEASURE_UNITS.len() - 1)];
+    let suffix = match power {
+      2 => "^2",
+      3 => "^3",
+      _ => "",
+    };
+    format!("{} {u}{suffix}", self.num(v / k.powi(power)))
+  }
+
+  /// In the document's unit, then in the Secondary Units when they're set (and differ).
+  fn both(&self, v: f64, power: i32) -> String {
+    let main = self.in_unit(self.unit, v, power);
+    match self.secondary {
+      Some(s) if s != self.unit => format!("{main} ({})", self.in_unit(s, v, power)),
+      _ => main,
+    }
+  }
+
   pub fn len(&self, mm: f64) -> String {
-    let (u, k) = self.unit();
-    format!("{} {u}", self.num(mm / k))
+    self.both(mm, 1)
   }
 
   pub fn area(&self, mm2: f64) -> String {
-    let (u, k) = self.unit();
-    format!("{} {u}²", self.num(mm2 / (k * k)))
+    self.both(mm2, 2)
   }
 
   pub fn volume(&self, mm3: f64) -> String {
-    let (u, k) = self.unit();
-    format!("{} {u}³", self.num(mm3 / (k * k * k)))
+    self.both(mm3, 3)
   }
 
   pub fn angle(&self, deg: f64) -> String {
@@ -4821,104 +4852,134 @@ impl MeasureFmt {
   }
 }
 
-/// One line of Measure's results; a heading names what was measured.
+/// One line of Measure's results.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Readout {
   pub label: String,
   pub value: String,
-  pub heading: bool,
 }
 
 fn row(label: &str, value: String) -> Readout {
-  Readout { label: label.into(), value, heading: false }
+  Readout { label: label.into(), value }
 }
 
-fn heading(label: &str, value: String) -> Readout {
-  Readout { label: label.into(), value, heading: true }
+/// One collapsible section of Measure's results, as Fusion's: "Selection 1" (and "Selection 2")
+/// with a grey line saying what was picked, and, between two picks, "Results".
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MeasureSection {
+  pub title: String,
+  /// The grey line under the title ("Face selected"); empty for Results.
+  pub note: String,
+  pub rows: Vec<Readout>,
 }
 
-/// Measure's readouts for a `measure` result: the distance, deltas and angle between two picks,
-/// or one pick's own numbers (a face's area, an edge's length, a vertex's position, a body's
-/// volume).
-pub(crate) fn measure_rows(r: &Value, f: &MeasureFmt) -> Vec<Readout> {
-  let num = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64);
-  let v3 = |v: &Value, k: &str| -> Option<[f64; 3]> {
-    let a = v.get(k)?.as_array()?;
-    Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+/// Measure's sections for a `measure` result: each pick's own numbers (a face's area and loop
+/// length, an edge's length, a vertex's position, a body's volume), then for two picks the
+/// distance, deltas and angle between them.
+pub(crate) fn measure_sections(r: &Value, f: &MeasureFmt) -> Vec<MeasureSection> {
+  let selection = |n: usize, e: &Value| {
+    let (note, rows) = entity_readouts(e, f);
+    MeasureSection { title: format!("Selection {n}"), note, rows }
   };
-  let xyz = |out: &mut Vec<Readout>, p: [f64; 3]| {
-    for (i, axis) in ["X", "Y", "Z"].iter().enumerate() {
-      out.push(row(axis, f.len(p[i])));
+  let Some(d) = r.get("distance").and_then(Value::as_f64) else { return vec![selection(1, r)] };
+  let mut out: Vec<MeasureSection> =
+    ["a", "b"].iter().filter_map(|k| r.get(*k)).enumerate().map(|(i, e)| selection(i + 1, e)).collect();
+  let mut rows = vec![row("Distance", f.len(d))];
+  if let Some(dl) = v3(r, "delta") {
+    for (i, axis) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
+      rows.push(row(axis, f.len(dl[i].abs())));
     }
-  };
-  let mut out = Vec::new();
-  if let Some(d) = num(r, "distance") {
-    out.push(heading("Distance", f.len(d)));
-    if let Some(dl) = v3(r, "delta") {
-      for (i, axis) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
-        out.push(row(axis, f.len(dl[i].abs())));
-      }
-    }
-    if let Some(a) = num(r, "angle_deg") {
-      out.push(row("Angle", f.angle(a)));
-    }
-    return out;
   }
-  let words = |s: &str| {
-    let mut c = s.chars();
-    c.next().map(|x| x.to_uppercase().chain(c).collect::<String>()).unwrap_or_default()
+  if let Some(a) = r.get("angle_deg").and_then(Value::as_f64) {
+    rows.push(row("Angle", f.angle(a)));
+  }
+  out.push(MeasureSection { title: "Results".into(), note: String::new(), rows });
+  out
+}
+
+fn v3(v: &Value, k: &str) -> Option<[f64; 3]> {
+  let a = v.get(k)?.as_array()?;
+  Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+}
+
+/// One picked entity's grey line ("Face selected") and numbers.
+fn entity_readouts(r: &Value, f: &MeasureFmt) -> (String, Vec<Readout>) {
+  let num = |k: &str| r.get(k).and_then(Value::as_f64);
+  let mut out = Vec::new();
+  let radius = |out: &mut Vec<Readout>| {
+    if let Some(x) = num("radius") {
+      out.push(row("Radius", f.len(x)));
+    }
+    if let Some(x) = num("diameter") {
+      out.push(row("Diameter", f.len(x)));
+    }
   };
-  match r.get("kind").and_then(Value::as_str) {
+  let what = match r.get("kind").and_then(Value::as_str) {
     Some("face") => {
-      out.push(heading("Face", words(r.get("surface").and_then(Value::as_str).unwrap_or(""))));
-      if let Some(a) = num(r, "area_mm2") {
+      if let Some(a) = num("area_mm2") {
         out.push(row("Area", f.area(a)));
       }
-      if let Some(x) = num(r, "radius") {
-        out.push(row("Radius", f.len(x)));
+      if let Some(l) = num("loop_length") {
+        out.push(row("Loop Length", f.len(l)));
       }
-      if let Some(x) = num(r, "diameter") {
-        out.push(row("Diameter", f.len(x)));
-      }
+      radius(&mut out);
+      "Face"
     }
     Some("edge") => {
-      out.push(heading("Edge", words(r.get("curve").and_then(Value::as_str).unwrap_or(""))));
-      if let Some(l) = num(r, "length") {
+      if let Some(l) = num("length") {
         out.push(row("Length", f.len(l)));
       }
-      if let Some(x) = num(r, "radius") {
-        out.push(row("Radius", f.len(x)));
-      }
-      if let Some(x) = num(r, "diameter") {
-        out.push(row("Diameter", f.len(x)));
-      }
+      radius(&mut out);
+      "Edge"
     }
     Some("point") => {
-      out.push(heading("Vertex", "Position".into()));
       if let Some(p) = v3(r, "at") {
-        xyz(&mut out, p);
+        for (i, axis) in ["X", "Y", "Z"].iter().enumerate() {
+          out.push(row(axis, f.len(p[i])));
+        }
       }
+      "Vertex"
     }
     Some("body") => {
-      out.push(heading("Body", r.get("name").and_then(Value::as_str).unwrap_or("").into()));
-      if let Some(v) = num(r, "volume_mm3") {
+      if let Some(v) = num("volume_mm3") {
         out.push(row("Volume", f.volume(v)));
       }
-      if let Some(a) = num(r, "area_mm2") {
+      if let Some(a) = num("area_mm2") {
         out.push(row("Area", f.area(a)));
       }
+      let (u, k) = f.unit();
       if let Some(d) = v3(r, "size") {
-        let (u, k) = f.unit();
         out.push(row("Size", format!("{} × {} × {} {u}", f.num(d[0] / k), f.num(d[1] / k), f.num(d[2] / k))));
       }
       if let Some(c) = v3(r, "center_of_mass") {
-        out.push(heading("Center of mass", String::new()));
-        xyz(&mut out, c);
+        out.push(row("Center of Mass", format!("{}, {}, {} {u}", f.num(c[0] / k), f.num(c[1] / k), f.num(c[2] / k))));
       }
+      "Body"
     }
-    _ => {}
+    _ => return (String::new(), out),
+  };
+  (format!("{what} selected"), out)
+}
+
+/// A collapsible section's title row in a dialog's grid, as Fusion's: a triangle and the title,
+/// open by default; a click folds it. Returns whether it is open.
+fn section_header(ui: &mut egui::Ui, id: egui::Id, title: &str) -> bool {
+  let open = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
+  let galley = ui.painter().layout_no_wrap(title.to_string(), egui::FontId::proportional(12.5), theme::TEXT);
+  let (rect, resp) = ui.allocate_exact_size(egui::vec2(galley.size().x + 16.0, 18.0), egui::Sense::click());
+  let c = egui::pos2(rect.left() + 5.0, rect.center().y);
+  let tri = if open {
+    vec![c + egui::vec2(-4.0, -2.0), c + egui::vec2(4.0, -2.0), c + egui::vec2(0.0, 3.0)]
+  } else {
+    vec![c + egui::vec2(-2.0, -4.0), c + egui::vec2(3.0, 0.0), c + egui::vec2(-2.0, 4.0)]
+  };
+  ui.painter().add(egui::Shape::convex_polygon(tri, theme::TEXT, egui::Stroke::NONE));
+  ui.painter().galley(egui::pos2(rect.left() + 14.0, rect.center().y - galley.size().y / 2.0), galley, theme::TEXT);
+  if resp.clicked() {
+    ui.ctx().data_mut(|d| d.insert_temp(id, !open));
   }
-  out
+  ui.end_row();
+  open
 }
 
 /// What Measure measures: the first two selected bodies, faces, edges and vertices, or (with
@@ -4941,8 +5002,12 @@ fn measure_picks(app: &App) -> (Vec<Value>, bool) {
 }
 
 impl Dialog {
-  /// Measure's panel: selection filter, precision and units, then the readouts with copy buttons.
+  /// Measure's panel, as Fusion's: Selection Filter (three icon toggles), Precision, Secondary
+  /// Units, Clear Selection and Show Snap Points, then a collapsible section per pick and, for
+  /// two, the Results between them (a value's right-click copies it).
   fn inspect(&mut self, app: &mut App, ui: &mut egui::Ui) {
+    use crate::select::Priority;
+    use icon_row::{choice, icon_row};
     app.measure = None;
     // Measure picks vertices too, while it's open
     if self.saved_filter.is_none() {
@@ -4950,41 +5015,58 @@ impl Dialog {
       app.sel_filter.vertices = true;
     }
     ui.label("Selection Filter");
-    ui.horizontal(|ui| {
-      use crate::select::Priority;
-      let whole = matches!(app.sel_priority, Priority::Body | Priority::Component);
-      if ui.selectable_label(whole, "Body").on_hover_text("Pick bodies").clicked() {
-        app.sel_priority = Priority::Body;
-      }
-      if ui.selectable_label(!whole, "Face/Edge/Vertex").on_hover_text("Pick faces, edges and vertices").clicked() {
-        app.sel_priority = Priority::Face;
-      }
-    });
+    const FILTERS: [icon_row::Choice; 3] = [
+      choice("face", Icon::FilterFaces, "Select Face/Edge/Vertex"),
+      choice("body", Icon::FilterBodies, "Select Body"),
+      choice("component", Icon::Component, "Select Component"),
+    ];
+    let mut cur: &'static str = match app.sel_priority {
+      Priority::Body => "body",
+      Priority::Component => "component",
+      Priority::Face | Priority::Edge => "face",
+    };
+    if icon_row(ui, &mut cur, &FILTERS, "") {
+      app.sel_priority = match cur {
+        "body" => Priority::Body,
+        "component" => Priority::Component,
+        _ => Priority::Face,
+      };
+    }
     ui.end_row();
+    // values read in the document's unit
+    let doc = app.s.design.units.symbol();
+    app.measure_fmt.unit = MEASURE_UNITS.iter().position(|(u, _)| *u == doc).unwrap_or(0);
     let fmt = &mut app.measure_fmt;
     ui.label("Precision");
-    egui::ComboBox::from_id_salt("measure-precision")
-      .selected_text(if fmt.precision == 0 { "0".to_string() } else { format!("0.{}", "0".repeat(fmt.precision)) })
-      .show_ui(ui, |ui| {
-        for p in 0..=6 {
-          let text = if p == 0 { "0".to_string() } else { format!("0.{}", "0".repeat(p)) };
-          ui.selectable_value(&mut fmt.precision, p, text);
-        }
-      });
-    ui.end_row();
-    ui.label("Units");
-    egui::ComboBox::from_id_salt("measure-units").selected_text(MEASURE_UNITS[fmt.unit].0).show_ui(ui, |ui| {
-      for (i, (u, _)) in MEASURE_UNITS.iter().enumerate() {
-        ui.selectable_value(&mut fmt.unit, i, *u);
+    egui::ComboBox::from_id_salt("measure-precision").selected_text(precision_label(fmt.precision)).show_ui(ui, |ui| {
+      for p in 0..=6 {
+        ui.selectable_value(&mut fmt.precision, p, precision_label(p));
       }
     });
+    ui.end_row();
+    ui.label("Secondary Units");
+    let shown = fmt.secondary.map_or("None", |i| MEASURE_UNITS[i.min(MEASURE_UNITS.len() - 1)].0);
+    egui::ComboBox::from_id_salt("measure-units").selected_text(shown).show_ui(ui, |ui| {
+      ui.selectable_value(&mut fmt.secondary, None, "None");
+      for (i, (u, _)) in MEASURE_UNITS.iter().enumerate() {
+        ui.selectable_value(&mut fmt.secondary, Some(i), *u);
+      }
+    });
+    ui.end_row();
+    ui.label("Clear Selection");
+    if crate::icons::icon_button(ui, Icon::Undo, 24.0, "Clear Selection", false, Some(theme::ACCENT)).clicked() {
+      app.s.selection.clear();
+    }
+    ui.end_row();
+    ui.label("Show Snap Points");
+    let mut off = false;
+    ui.add_enabled_ui(false, |ui| ui.checkbox(&mut off, ""))
+      .inner
+      .on_disabled_hover_text("FissionOxide doesn't show snap points yet");
     ui.end_row();
     let fmt = app.measure_fmt;
     let (picks, hovering) = measure_picks(app);
     if picks.is_empty() {
-      ui.label("");
-      ui.label(RichText::new("Select a body, face, edge or vertex — two to measure between them").color(theme::MUTED));
-      ui.end_row();
       return;
     }
     let p = if picks.len() == 2 { json!({"a": picks[0], "b": picks[1]}) } else { json!({"a": picks[0]}) };
@@ -5007,31 +5089,28 @@ impl Dialog {
         app.measure = Some((a, b, fmt.len(d)));
       }
     }
-    let rows = measure_rows(&r, &fmt);
-    ui.label(RichText::new(if hovering { "Results (hover)" } else { "Results" }).color(theme::GROUP_LABEL));
-    if ui.small_button("Copy all").on_hover_text("Copy every result to the clipboard").clicked() {
-      let text: Vec<String> = rows.iter().map(|r| format!("{}: {}", r.label, r.value)).collect();
-      ui.ctx().copy_text(text.join("\n"));
-      app.status = Some(("Copied the measurements".into(), false));
-    }
-    ui.end_row();
-    for (i, r) in rows.iter().enumerate() {
-      if r.heading {
-        ui.label(RichText::new(&r.label).strong());
-      } else {
-        ui.label(&r.label);
+    for (i, sec) in measure_sections(&r, &fmt).iter().enumerate() {
+      if !section_header(ui, ui.id().with(("measure-section", i)), &sec.title) {
+        continue;
       }
-      ui.horizontal(|ui| {
-        let v = if r.heading { RichText::new(&r.value).strong() } else { RichText::new(&r.value) };
-        ui.label(v);
-        if !r.value.is_empty()
-          && ui.push_id(i, |ui| ui.small_button("Copy")).inner.on_hover_text("Copy to clipboard").clicked()
-        {
-          ui.ctx().copy_text(r.value.clone());
-          app.status = Some((format!("Copied {}", r.value), false));
-        }
-      });
-      ui.end_row();
+      if !sec.note.is_empty() {
+        // what the pointer is over reads as a preview until it is picked
+        let note = if hovering { sec.note.replace("selected", "under the pointer") } else { sec.note.clone() };
+        ui.label(RichText::new(note).color(theme::MUTED));
+        ui.end_row();
+      }
+      for (j, r) in sec.rows.iter().enumerate() {
+        ui.label(&r.label);
+        let v = ui.push_id((i, j), |ui| ui.add(egui::Label::new(&r.value).sense(egui::Sense::click()))).inner;
+        v.context_menu(|ui| {
+          if ui.button("Copy").clicked() {
+            ui.ctx().copy_text(r.value.clone());
+            app.status = Some((format!("Copied {}", r.value), false));
+            ui.close();
+          }
+        });
+        ui.end_row();
+      }
     }
   }
 
@@ -5041,13 +5120,18 @@ impl Dialog {
     &mut self.palette
   }
 
-  /// Puts back what the dialog changed in the app while open (Measure's selection filter).
+  /// Puts back what the dialog changed in the app while open (Measure's selection filter and picks).
   pub(crate) fn leave(&mut self, app: &mut App) {
     // an edit closed some other way keeps what it shows and rolls forward
     self.end_edit(&mut app.s, true);
     if let Some((priority, vertices)) = self.saved_filter.take() {
       app.sel_priority = priority;
       app.sel_filter.vertices = vertices;
+    }
+    // Measure's picks are its own: closing it lets them go, as in Fusion
+    if self.kind == Kind::Inspect {
+      app.s.selection.clear();
+      app.measure = None;
     }
   }
 }
@@ -5723,7 +5807,8 @@ mod tests {
     // a command without its own wording asks for its missing input as a sentence
     assert_eq!(Dialog::blank(Kind::Hem).prompt(false).as_deref(), Some("Select edges"));
     // one with nothing to select or specify has no prompt
-    assert_eq!(Dialog::blank(Kind::Inspect).prompt(false), None);
+    assert_eq!(Dialog::blank(Kind::CenterOfMass).prompt(false), None);
+    assert_eq!(Dialog::blank(Kind::Inspect).prompt(false).as_deref(), Some("Select objects to measure."));
   }
 
   /// E opens Extrude with no profile picked, so nothing is previewed and no arrow shows, when
@@ -7305,34 +7390,47 @@ mod tests {
     let edge = body.edges().iter().find(|e| (e.length - 30.0).abs() < 1e-6).unwrap().id;
     let mm = MeasureFmt::default();
 
-    // a face: its area; an edge: its length; a vertex: its position
+    // a face: "Selection 1", "Face selected", its area and loop length, as Fusion's
     let r = s.execute("measure", &json!({"a": {"type": "face", "body": b.0, "face": face}})).unwrap();
-    let rows = measure_rows(&r, &mm);
-    assert_eq!(labels(&rows)[..2], [("Face", "Plane"), ("Area", "200.000 mm²")]);
-    assert!(rows[0].heading && !rows[1].heading);
+    let secs = measure_sections(&r, &mm);
+    assert_eq!(secs.len(), 1);
+    assert_eq!((secs[0].title.as_str(), secs[0].note.as_str()), ("Selection 1", "Face selected"));
+    assert_eq!(labels(&secs[0].rows), [("Area", "200.000 mm^2"), ("Loop Length", "60.000 mm")]);
+    // an edge: its length; a vertex: its position
     let r = s.execute("measure", &json!({"a": {"type": "edge", "body": b.0, "edge": edge}})).unwrap();
-    assert_eq!(labels(&measure_rows(&r, &mm))[1], ("Length", "30.000 mm"));
+    let secs = measure_sections(&r, &mm);
+    assert_eq!(secs[0].note, "Edge selected");
+    assert_eq!(labels(&secs[0].rows)[0], ("Length", "30.000 mm"));
     let r = s.execute("measure", &json!({"a": {"type": "vertex", "body": b.0, "edge": edge, "end": true}})).unwrap();
-    let rows = measure_rows(&r, &mm);
-    assert_eq!(rows[0].label, "Vertex");
-    assert_eq!(rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["Vertex", "X", "Y", "Z"]);
-    assert_eq!(labels(&rows)[3], ("Z", "30.000 mm"));
+    let secs = measure_sections(&r, &mm);
+    assert_eq!(secs[0].note, "Vertex selected");
+    assert_eq!(secs[0].rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["X", "Y", "Z"]);
+    assert_eq!(labels(&secs[0].rows)[2], ("Z", "30.000 mm"));
     // a body: its volume, in other units and precision
-    let cm1 = MeasureFmt { precision: 1, unit: 1 };
+    let cm1 = MeasureFmt { precision: 1, unit: 1, secondary: None };
     let r = s.execute("measure", &json!({"a": {"body": b.0}})).unwrap();
-    let rows = measure_rows(&r, &cm1);
-    assert!(labels(&rows).contains(&("Volume", "6.0 cm³")), "{rows:?}");
-    assert!(labels(&rows).contains(&("Area", "22.0 cm²")), "{rows:?}");
+    let rows = &measure_sections(&r, &cm1)[0].rows;
+    assert!(labels(rows).contains(&("Volume", "6.0 cm^3")), "{rows:?}");
+    assert!(labels(rows).contains(&("Area", "22.0 cm^2")), "{rows:?}");
+    // Secondary Units add the value in a second unit
+    let both = MeasureFmt { precision: 3, unit: 3, secondary: Some(0) };
+    assert_eq!(both.area(645.16), "1.000 in^2 (645.160 mm^2)");
+    assert_eq!(MeasureFmt { secondary: Some(3), ..both }.len(25.4), "1.000 in", "the same unit once");
 
-    // two picks: distance, deltas and angle
+    // two picks: a section each, then Results with the distance, deltas and angle
     let r = s
       .execute("measure", &json!({"a": {"body": b.0, "face": faces[0]}, "b": {"body": b.0, "face": faces[1]}}))
       .unwrap();
-    let inch = MeasureFmt { precision: 2, unit: 3 };
-    let rows = measure_rows(&r, &inch);
-    assert_eq!(labels(&rows)[0], ("Distance", "1.18 in"));
-    assert!(labels(&rows).contains(&("Angle", "180.00 deg")), "{rows:?}");
-    assert_eq!(MeasureFmt { precision: 0, unit: 0 }.len(-0.2), "0 mm");
+    let inch = MeasureFmt { precision: 2, unit: 3, secondary: None };
+    let secs = measure_sections(&r, &inch);
+    let titles: Vec<&str> = secs.iter().map(|x| x.title.as_str()).collect();
+    assert_eq!(titles, ["Selection 1", "Selection 2", "Results"]);
+    assert_eq!(secs[1].note, "Face selected");
+    assert_eq!(labels(&secs[2].rows)[0], ("Distance", "1.18 in"));
+    assert!(labels(&secs[2].rows).contains(&("Angle", "180.00 deg")), "{secs:?}");
+    assert_eq!(MeasureFmt { precision: 0, ..MeasureFmt::default() }.len(-0.2), "0 mm");
+    // Fusion's Precision list
+    assert_eq!((0..=4).map(precision_label).collect::<Vec<_>>(), ["0", "0.1", "0.12", "0.123", "0.1234"]);
   }
 
   #[test]
@@ -7350,8 +7448,13 @@ mod tests {
     app.s.selection = vec![Sel::Edge { body: b, edge }, Sel::Body { body: b }];
     assert!(show_once(&mut app, &mut d));
     assert!(app.measure.is_some(), "two picks draw the distance line");
+    // values read in the document's unit
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    assert!(show_once(&mut app, &mut d));
+    assert_eq!(MEASURE_UNITS[app.measure_fmt.unit].0, "in");
     d.leave(&mut app);
     assert!(!app.sel_filter.vertices);
+    assert!(app.s.selection.is_empty() && app.measure.is_none(), "closing Measure lets its picks go");
   }
 
   #[test]
