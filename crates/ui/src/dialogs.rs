@@ -5824,7 +5824,7 @@ mod tests {
     let circle =
       app.run("sketch.circle", json!({"center": [20, 0], "radius": 3})).unwrap()["curves"][0].as_u64().unwrap() as u32;
     let line =
-      app.run("sketch.line", json!({"start": [0, 10], "end": [40, 10]})).unwrap()["curves"][0].as_u64().unwrap() as u32;
+      app.run("sketch.line", json!({"points": [[0, 10], [40, 10]]})).unwrap()["curves"][0].as_u64().unwrap() as u32;
     let sk = app.s.edit_sketch.unwrap();
     let curve = |c: u32| Sel::SketchCurve { sketch: sk, curve: CurveId(c) };
     app.start(Kind::SkCircPattern);
@@ -7002,6 +7002,7 @@ mod tests {
     assert_eq!(d.form.values[at("halign")], json!("right"));
     d.form.values[at("italic")] = json!(true);
     d.form.values[at("bold")] = json!(false);
+    d.form.values[at("underline")] = json!(true);
     apply(&mut s, &mut d);
     let t = &s.design.sketch(FeatureId(sk)).unwrap().texts[0];
     assert!(t.style.italic && !t.style.bold && t.style.underline);

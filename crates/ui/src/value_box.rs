@@ -27,7 +27,7 @@ pub(crate) fn layer() -> egui::LayerId {
 
 /// Is `layer` one of the boxes' (see [`layer`])?
 pub(crate) fn is_box_layer(layer: egui::LayerId) -> bool {
-  (0..8).any(|n| layer == egui::LayerId::new(egui::Order::Foreground, id_nth(n)))
+  layer == self::layer() || (1..8).any(|n| layer == egui::LayerId::new(egui::Order::Foreground, id_nth(n)))
 }
 
 /// Whether the box has taken the keyboard since it appeared, and the text it showed last frame.

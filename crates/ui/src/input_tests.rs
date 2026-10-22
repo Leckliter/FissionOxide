@@ -164,16 +164,18 @@ fn text_frame_is_placed_by_two_clicks_and_typing_replaces_the_sample() {
   h.app.cam.set_view(fox_engine::render::StandardView::Top);
   h.app.start(crate::dialogs::Kind::Form(&crate::forms::SK_TEXT));
   h.frame(vec![]);
+  // (the second corner goes down and left: the dialog docks left of the Sketch Palette, over
+  // the canvas's upper right)
   let c = h.app.canvas.center();
   assert!(h.prompt_at(c, "Place first corner of text frame"));
   // a drag places nothing
-  h.drag(c, c + vec2(120.0, -60.0));
+  h.drag(c, c + vec2(-120.0, 60.0));
   let d = h.app.dialog.as_ref().expect("the dialog stays open");
   assert!(d.text_frame_start().is_none() && d.text_frame().is_none());
   h.move_then_click(c);
   assert!(h.app.dialog.as_ref().unwrap().text_frame_start().is_some(), "the first corner is placed");
-  assert!(h.prompt_at(c + vec2(60.0, -30.0), "Place second corner of text frame"));
-  h.move_then_click(c + vec2(120.0, -60.0));
+  assert!(h.prompt_at(c + vec2(-60.0, 30.0), "Place second corner of text frame"));
+  h.move_then_click(c + vec2(-120.0, 60.0));
   let d = h.app.dialog.as_ref().unwrap();
   assert!(d.text_frame().is_some(), "the second click places the frame");
   assert_eq!(d.form_value("text"), Some(&json!("Sample Text")));
