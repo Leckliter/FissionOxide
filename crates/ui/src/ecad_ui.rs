@@ -1,14 +1,16 @@
-//! The Electronics workspace: a schematic editor and a board editor over the design's
-//! electronics project, EAGLE-style. Every edit is an `ecad.*` command, so it undoes like any
-//! other and scripts can do the same. Wheel zooms, middle- or right-drag pans, F fits.
+//! The electronics documents' canvas: a schematic editor and a board editor over the design's
+//! electronics project, EAGLE-style (the ribbon, browser and panels around it are in
+//! `ecad_chrome`). Every edit is an `ecad.*` command, so it undoes like any other and scripts
+//! can do the same. Wheel zooms, middle- or right-drag pans, F fits, / opens the command line.
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
 use fox_engine::electronics::board::{Layer, Side};
 use fox_engine::electronics::geom::{P, Xf, add, rot};
 use fox_engine::electronics::library::{FpLayer, Gfx};
 use fox_engine::electronics::{Project, Severity, Violation};
-use serde_json::{Value, json};
+use serde_json::json;
 
+use crate::ecad_chrome::{self, Page, TextMode};
 use crate::{App, theme};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -32,29 +34,56 @@ pub enum Tool {
   Via,
 }
 
-/// The workspace's state while it is open.
+/// An electronics document's state: which page it shows and its editor.
 #[derive(Debug, Clone)]
 pub struct EcadView {
+  /// The electronics design's start page, or the schematic / board editor.
+  pub page: Page,
+  /// The ribbon tab shown (an index into the page's tabs).
+  pub ribbon: usize,
   pub sheet: Sheet,
   pub tool: Tool,
   /// Zoom (pixels per mm) and pan, per sheet.
   pub cam: [(f32, Vec2); 2],
-  fitted: [bool; 2],
+  pub(crate) fitted: [bool; 2],
   /// Points of the wire or track being drawn (with the layer each run is on).
-  pending: Vec<(P, Layer)>,
+  pub(crate) pending: Vec<(P, Layer)>,
   pub layer: Layer,
   pub selected: Option<String>,
-  drag: Option<(String, P)>,
+  pub(crate) drag: Option<(String, P)>,
   pub query: String,
   pub label: String,
   pub pour_net: String,
   /// The last ERC or DRC: title and findings.
   pub report: Option<(String, Vec<Violation>)>,
+  /// The command line under the ribbon, and a request to focus it.
+  pub cmdline: String,
+  pub(crate) focus_cmdline: bool,
+  /// TEXT COMMANDS: open, its language, the line being typed and what it printed.
+  pub text_open: bool,
+  pub text_mode: TextMode,
+  pub text_input: String,
+  pub text_log: Vec<String>,
+  /// SHEETS and COMMENTS along the bottom, open.
+  pub sheets_open: bool,
+  pub comments_open: bool,
+  /// The PLACE COMPONENTS panel: open, and its tab (libraries or recently placed).
+  pub place_open: bool,
+  pub place_tab: usize,
+  /// Devices placed, the latest first.
+  pub recent: Vec<String>,
+  /// The schematic grid shown.
+  pub grid: bool,
+  /// The start page's Description, and whether it is being edited.
+  pub description: String,
+  pub editing_description: bool,
 }
 
 impl Default for EcadView {
   fn default() -> Self {
     EcadView {
+      page: Page::Editor,
+      ribbon: 0,
       sheet: Sheet::Schematic,
       tool: Tool::Select,
       cam: [(4.0, Vec2::ZERO), (12.0, Vec2::ZERO)],
@@ -67,6 +96,20 @@ impl Default for EcadView {
       label: "NET1".into(),
       pour_net: "GND".into(),
       report: None,
+      cmdline: String::new(),
+      focus_cmdline: false,
+      text_open: false,
+      text_mode: TextMode::Txt,
+      text_input: String::new(),
+      text_log: Vec::new(),
+      sheets_open: false,
+      comments_open: false,
+      place_open: true,
+      place_tab: 0,
+      recent: Vec::new(),
+      grid: true,
+      description: String::new(),
+      editing_description: false,
     }
   }
 }
@@ -84,23 +127,10 @@ fn layer_color(l: Layer, active: bool) -> Color32 {
   if active { c } else { c.gamma_multiply(0.55) }
 }
 
-impl App {
-  /// Opens the Electronics workspace.
-  pub fn open_electronics(&mut self) {
-    self.cancel_dialog();
-    if self.s.edit_sketch.is_some() {
-      self.finish_sketch();
-    }
-    if self.electronics.is_none() {
-      self.electronics = Some(EcadView::default());
-    }
-  }
-}
-
-struct Cam {
-  rect: Rect,
-  zoom: f32,
-  pan: Vec2,
+pub(crate) struct Cam {
+  pub(crate) rect: Rect,
+  pub(crate) zoom: f32,
+  pub(crate) pan: Vec2,
 }
 
 impl Cam {
@@ -108,7 +138,7 @@ impl Cam {
     self.rect.center() + self.pan + vec2(p[0] as f32 * self.zoom, -(p[1] as f32) * self.zoom)
   }
 
-  fn from(&self, s: Pos2) -> P {
+  pub(crate) fn from(&self, s: Pos2) -> P {
     let d = s - self.rect.center() - self.pan;
     [(d.x / self.zoom) as f64, (-d.y / self.zoom) as f64]
   }
@@ -118,130 +148,9 @@ impl Cam {
   }
 }
 
-/// The toolbar row for the workspace (in place of the Design tabs).
-pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
-  let Some(mut v) = app.electronics.take() else { return };
-  ui.add_space(4.0);
-  ui.horizontal(|ui| {
-    for (s, name) in [(Sheet::Schematic, "SCHEMATIC"), (Sheet::Board, "BOARD")] {
-      if ui.add(egui::Button::selectable(v.sheet == s, egui::RichText::new(name).strong())).clicked() {
-        v.sheet = s;
-        v.tool = Tool::Select;
-        v.pending.clear();
-      }
-    }
-    ui.separator();
-    if app.s.design.electronics.is_none() {
-      if ui.button("New electronics design").clicked() {
-        app.run("ecad.new", json!({}));
-      }
-      if ui.button("Open the example board").clicked() {
-        app.run("ecad.new", json!({"example": true}));
-        v.fitted = [false; 2];
-      }
-    }
-  });
-  ui.horizontal(|ui| {
-    let tools: &[(Tool, &str, &str)] = match v.sheet {
-      Sheet::Schematic => &[
-        (Tool::Select, "Select", "Select, move (drag), rotate (R), mirror (M) and delete (Del) parts"),
-        (Tool::Wire, "Wire", "Click points; double-click, right-click or Esc ends the wire"),
-        (Tool::Label, "Net label", "Click a wire or pin to name its net"),
-        (Tool::NoConnect, "No-connect", "Mark a pin that stays unconnected"),
-        (Tool::Delete, "Delete", "Click a part, wire, label or marker to delete it"),
-      ],
-      Sheet::Board => &[
-        (Tool::Select, "Select", "Select and move footprints (drag), rotate (R), flip to the other side (F)"),
-        (Tool::Route, "Route", "Click from a pad; L changes layer through a via; double-click ends"),
-        (Tool::Via, "Via", "Click to place a via"),
-        (Tool::Delete, "Delete", "Click a track, via or hole to delete it"),
-      ],
-    };
-    for (t, name, tip) in tools {
-      if ui.add(egui::Button::selectable(v.tool == *t, *name)).on_hover_text(*tip).clicked() {
-        v.tool = t.clone();
-        v.pending.clear();
-      }
-    }
-    ui.separator();
-    match v.sheet {
-      Sheet::Schematic => {
-        if v.tool == Tool::Label {
-          ui.label("Name");
-          ui.add(egui::TextEdit::singleline(&mut v.label).desired_width(70.0));
-        }
-        if ui.button("ERC").on_hover_text("Electrical rules check").clicked()
-          && let Some(r) = app.run("ecad.erc", json!({}))
-        {
-          v.report = Some((
-            "Electrical rules check".into(),
-            serde_json::from_value(r["violations"].clone()).unwrap_or_default(),
-          ));
-        }
-      }
-      Sheet::Board => {
-        if matches!(v.tool, Tool::Route | Tool::Via) {
-          let mut layers = vec![Layer::Top, Layer::Bottom];
-          if app.s.design.electronics.as_ref().is_some_and(|p| p.board.layers >= 4) {
-            layers = vec![Layer::Top, Layer::Inner1, Layer::Inner2, Layer::Bottom];
-          }
-          egui::ComboBox::from_id_salt("ecad_layer").selected_text(v.layer.name()).width(70.0).show_ui(ui, |ui| {
-            for l in layers {
-              ui.selectable_value(&mut v.layer, l, l.name());
-            }
-          });
-        }
-        board_menu(app, ui, &mut v);
-        if ui.button("Autoroute").on_hover_text("Route what is left of the ratsnest").clicked() {
-          let r = app.run("ecad.autoroute", json!({}));
-          if let Some(r) = r {
-            app.status = Some((format!("Routed {} connections; {} left", r["routed"], r["unrouted"]), false));
-          }
-        }
-        if ui.button("DRC").on_hover_text("Design rules check").clicked()
-          && let Some(r) = app.run("ecad.drc", json!({}))
-        {
-          v.report =
-            Some(("Design rules check".into(), serde_json::from_value(r["violations"].clone()).unwrap_or_default()));
-        }
-        if ui
-          .button("Push to 3D")
-          .on_hover_text("The board and its parts as a component in the 3D design, kept up to date")
-          .clicked()
-          && let Some(r) = app.run("ecad.push3d", json!({}))
-        {
-          app.status = Some((
-            format!("PCB feature {} with {} bodies", r["feature"], r["bodies"].as_array().map_or(0, |a| a.len())),
-            false,
-          ));
-        }
-        if ui.button("Fab output…").on_hover_text("Gerber, Excellon drill, BOM and pick-and-place files").clicked()
-          && let Some(dir) = rfd::FileDialog::new().set_title("Folder for the fab files").pick_folder()
-          && let Some(r) = app.run("ecad.export", json!({"dir": dir}))
-        {
-          let n = r["files"].as_array().map_or(0, |a| a.len());
-          let msg = if r["drc_errors"].as_u64().unwrap_or(0) > 0 {
-            format!("Wrote {n} files to {} — the board still has DRC errors", dir.display())
-          } else {
-            format!("Wrote {n} files to {}", dir.display())
-          };
-          app.status = Some((msg, false));
-        }
-      }
-    }
-    if ui.button("Import library…").on_hover_text("KiCad .kicad_sym / .kicad_mod, or a JSON library").clicked()
-      && let Some(p) = rfd::FileDialog::new().add_filter("Libraries", &["kicad_sym", "kicad_mod", "json"]).pick_file()
-      && let Some(r) = app.run("ecad.library.import", json!({"path": p}))
-    {
-      app.status = Some((format!("Imported {} devices, {} footprints", r["devices"], r["footprints"]), false));
-    }
-  });
-  app.electronics = Some(v);
-}
-
-/// Board outline, layers and pours.
-fn board_menu(app: &mut App, ui: &mut egui::Ui, v: &mut EcadView) {
-  ui.menu_button("Board", |ui| {
+/// The BOARD panel's menu: the outline, copper layers and pours.
+pub(crate) fn board_menu(app: &mut App, ui: &mut egui::Ui, v: &mut EcadView) {
+  {
     ui.set_min_width(220.0);
     // a sketch from the design, or a selected face
     let sketches: Vec<(u32, String)> = app
@@ -295,24 +204,29 @@ fn board_menu(app: &mut App, ui: &mut egui::Ui, v: &mut EcadView) {
         ui.close();
       }
     }
-  });
+  }
 }
 
-/// The workspace's canvas, with the library on the left and the last check's findings.
+/// An electronics document's page: the start page, or the editor as Fusion's: the command row
+/// under the ribbon, PLACE COMPONENTS at the right, the sheet with the browser, the canvas
+/// toolbar and the prompt over it, and SHEETS, TEXT COMMANDS and COMMENTS along the bottom.
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let Some(mut v) = app.electronics.take() else { return };
+  if v.page == Page::Start {
+    ecad_chrome::start_page(app, ui, &mut v);
+    app.electronics = Some(v);
+    return;
+  }
   let full = ui.available_rect_before_wrap();
-  let lib_w = 230.0;
-  let lib_rect = Rect::from_min_size(full.min, vec2(lib_w, full.height()));
-  let rect = Rect::from_min_max(pos2(full.left() + lib_w, full.top()), full.max);
-  ui.scope_builder(egui::UiBuilder::new().max_rect(lib_rect), |ui| library_panel(app, ui, &mut v));
+  let l = ecad_chrome::EditorLayout::new(full, &v);
+  let rect = l.canvas;
   let resp = ui.allocate_rect(rect, Sense::click_and_drag());
   app.canvas = rect;
   let k = if v.sheet == Sheet::Schematic { 0 } else { 1 };
-  if !v.fitted[k]
-    && let Some(pr) = app.s.design.electronics.as_deref()
-  {
-    v.cam[k] = fit(pr, v.sheet, rect);
+  if !v.fitted[k] {
+    if let Some(pr) = app.s.design.electronics.as_deref() {
+      v.cam[k] = fit(pr, v.sheet, rect);
+    }
     v.fitted[k] = true;
   }
   let (mut zoom, mut pan) = v.cam[k];
@@ -334,28 +248,22 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   v.cam[k] = (zoom, pan);
   let cam = Cam { rect, zoom, pan };
   let painter = ui.painter_at(rect);
-  let bg = if v.sheet == Sheet::Schematic { Color32::from_rgb(255, 253, 245) } else { Color32::from_rgb(28, 28, 30) };
+  // Fusion's schematic is a white sheet; the board stays dark
+  let bg = if v.sheet == Sheet::Schematic { Color32::WHITE } else { Color32::from_rgb(28, 28, 30) };
   painter.rect_filled(rect, 0.0, bg);
-  grid(&painter, &cam, v.sheet);
+  if v.grid {
+    grid(&painter, &cam, v.sheet);
+  }
   let hover = resp.hover_pos().map(|h| cam.from(h));
-  match app.s.design.electronics.as_deref() {
-    Some(pr) => match v.sheet {
+  if let Some(pr) = app.s.design.electronics.as_deref() {
+    match v.sheet {
       Sheet::Schematic => draw_schematic(&painter, &cam, pr, &v),
       Sheet::Board => draw_board(&painter, &cam, pr, &v),
-    },
-    None => {
-      painter.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "Pick a part from the library to start a schematic, or open the example board",
-        egui::FontId::proportional(15.0),
-        theme::MUTED,
-      );
     }
   }
+  let snapped = hover.map(|h| snap_point(app.s.design.electronics.as_deref(), &v, h));
   // the ghost of what is being drawn
-  if let Some(h) = hover {
-    let snapped = snap_point(app.s.design.electronics.as_deref(), &v, h);
+  if let Some(snapped) = snapped {
     if !v.pending.is_empty() {
       let mut pts: Vec<Pos2> = v.pending.iter().map(|q| cam.to(q.0)).collect();
       let last = v.pending.last().map_or(snapped, |q| q.0);
@@ -385,15 +293,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         theme::ACCENT,
       );
     }
-    let txt = format!("{:.2}, {:.2} mm", snapped[0], snapped[1]);
-    painter.text(
-      rect.right_bottom() - vec2(10.0, 8.0),
-      egui::Align2::RIGHT_BOTTOM,
-      txt,
-      egui::FontId::monospace(11.0),
-      if v.sheet == Sheet::Board { Color32::from_gray(200) } else { Color32::from_gray(80) },
-    );
   }
+  ecad_chrome::command_row(app, ui, &mut v, l.command, snapped);
+  ecad_chrome::place_panel(app, ui, &mut v, l.place);
+  ecad_chrome::editor_browser(app, ui, &mut v, rect);
+  ecad_chrome::canvas_toolbar(app, ui, &mut v, &cam);
+  ecad_chrome::prompt(app, ui, &v, rect);
+  ecad_chrome::bottom_bar(app, ui, &mut v, l.bottom);
   input(app, ui, &resp, &cam, &mut v, hover);
   report_window(ui.ctx(), &mut v, &cam);
   app.electronics = Some(v);
@@ -551,6 +457,10 @@ fn input(app: &mut App, ui: &egui::Ui, resp: &egui::Response, cam: &Cam, v: &mut
   if key(egui::Key::F) && v.selected.is_none() {
     v.fitted = [false; 2];
   }
+  // Fusion: / activates the command line
+  if key(egui::Key::Slash) {
+    ctx.memory_mut(|m| m.request_focus(ecad_chrome::cmdline_id()));
+  }
   let Some(h) = hover else { return };
   // a copy: the commands below change the design
   let pr_owned = app.s.design.electronics.clone();
@@ -655,6 +565,8 @@ fn input(app: &mut App, ui: &egui::Ui, resp: &egui::Response, cam: &Cam, v: &mut
       let at = fox_engine::electronics::geom::snap(h, SCH_GRID);
       if let Some(r) = app.run("ecad.part.add", json!({"device": device, "at": at})) {
         app.status = Some((format!("Placed {}", r["refdes"].as_str().unwrap_or("")), false));
+        v.recent.retain(|d| *d != device);
+        v.recent.insert(0, device);
       }
     }
     Tool::Wire => {
@@ -723,7 +635,7 @@ fn commit_run(app: &mut App, v: &mut EcadView) -> Option<String> {
     .and_then(|r| r["net"].as_str().map(str::to_string))
 }
 
-fn finish(app: &mut App, v: &mut EcadView) {
+pub(crate) fn finish(app: &mut App, v: &mut EcadView) {
   match v.sheet {
     Sheet::Schematic => {
       let mut pts: Vec<P> = v.pending.iter().map(|q| q.0).collect();
@@ -737,77 +649,6 @@ fn finish(app: &mut App, v: &mut EcadView) {
     }
   }
   v.pending.clear();
-}
-
-fn library_panel(app: &mut App, ui: &mut egui::Ui, v: &mut EcadView) {
-  let r = ui.max_rect();
-  ui.painter().rect_filled(r, 0.0, theme::PANEL);
-  ui.painter().line_segment([r.right_top(), r.right_bottom()], Stroke::new(1.0, theme::BORDER));
-  ui.add_space(6.0);
-  ui.horizontal(|ui| {
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new("LIBRARY").strong().color(theme::GROUP_LABEL));
-  });
-  ui.horizontal(|ui| {
-    ui.add_space(6.0);
-    ui.add(egui::TextEdit::singleline(&mut v.query).hint_text("Search parts").desired_width(r.width() - 20.0));
-  });
-  let list = app.s.execute("ecad.library", &json!({"query": v.query})).unwrap_or(Value::Null);
-  egui::ScrollArea::vertical().id_salt("ecad_lib").max_height(r.height() * 0.6).show(ui, |ui| {
-    ui.set_width(r.width() - 12.0);
-    for d in list.as_array().into_iter().flatten() {
-      let name = d["device"].as_str().unwrap_or("").to_string();
-      let lib = d["library"].as_str().unwrap_or("");
-      let on = v.tool == Tool::Place(name.clone());
-      let text = egui::RichText::new(format!("{name}\n{}", d["description"].as_str().unwrap_or(""))).size(11.5);
-      let resp = ui.add(egui::Button::selectable(on, text)).on_hover_text(format!(
-        "{lib}: {} / {}",
-        d["symbol"].as_str().unwrap_or(""),
-        d["footprint"].as_str().unwrap_or("")
-      ));
-      if resp.clicked() {
-        v.tool = Tool::Place(name);
-        v.sheet = Sheet::Schematic;
-        v.pending.clear();
-      }
-    }
-  });
-  ui.separator();
-  // the project at a glance
-  let mut revalue: Option<(String, String)> = None;
-  if let Some(pr) = app.s.design.electronics.as_deref() {
-    let pads = pr.pads();
-    let air = pr.board.ratsnest(&pads).len();
-    ui.horizontal(|ui| {
-      ui.add_space(6.0);
-      ui.vertical(|ui| {
-        ui.label(egui::RichText::new(&pr.name).strong());
-        ui.label(format!(
-          "{} parts, {} nets",
-          pr.schematic.parts.iter().filter(|p| !p.refdes.starts_with('#')).count(),
-          pr.netlist().nets.len()
-        ));
-        ui.label(format!("{} tracks, {} vias, {} unrouted", pr.board.tracks.len(), pr.board.vias.len(), air));
-        if let Some(sel) = &v.selected
-          && let Some(part) = pr.schematic.parts.iter().find(|p| &p.refdes == sel)
-        {
-          ui.separator();
-          ui.label(egui::RichText::new(format!("{} — {}", part.refdes, part.device)).strong());
-          let mut value = part.value.clone();
-          let refdes = part.refdes.clone();
-          ui.horizontal(|ui| {
-            ui.label("Value");
-            if ui.add(egui::TextEdit::singleline(&mut value).desired_width(90.0)).lost_focus() && value != part.value {
-              revalue = Some((refdes.clone(), value.clone()));
-            }
-          });
-        }
-      });
-    });
-  }
-  if let Some((refdes, value)) = revalue {
-    app.run("ecad.part.edit", json!({"refdes": refdes, "value": value}));
-  }
 }
 
 fn report_window(ctx: &egui::Context, v: &mut EcadView, cam: &Cam) {
@@ -1138,7 +979,7 @@ mod tests {
   #[test]
   fn workspace_places_parts_and_draws_wires() {
     let mut h = H::new();
-    crate::panels::switch_workspace(&mut h.app, "Electronics");
+    crate::ecad_chrome::new_editor(&mut h.app, Sheet::Schematic);
     h.frames(2, vec![]);
     assert!(h.app.electronics.is_some());
     let c = h.app.canvas.center();
@@ -1164,8 +1005,8 @@ mod tests {
     h.click(to(b));
     let pr = h.app.s.design.electronics.as_deref().unwrap();
     assert_eq!(pr.netlist().net_of("R1", "1"), pr.netlist().net_of("R2", "1"));
-    // back to Design
-    crate::panels::switch_workspace(&mut h.app, "Design");
+    // the design's tab is in the Design workspace
+    crate::documents::switch_to(&mut h.app, 0);
     h.frames(2, vec![]);
     assert!(h.app.electronics.is_none());
   }
@@ -1173,7 +1014,7 @@ mod tests {
   #[test]
   fn example_board_draws_and_parts_drag() {
     let mut h = H::new();
-    crate::panels::switch_workspace(&mut h.app, "Electronics");
+    crate::ecad_chrome::new_editor(&mut h.app, Sheet::Schematic);
     h.app.run("ecad.new", json!({"example": true}));
     h.frames(3, vec![]);
     if let Some(v) = h.app.electronics.as_mut() {

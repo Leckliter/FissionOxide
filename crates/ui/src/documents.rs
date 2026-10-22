@@ -12,7 +12,7 @@ use fox_engine::{Session, model::FeatureId};
 use crate::file_dialogs;
 use crate::icons::{self, Icon};
 use crate::panels::Tab;
-use crate::{App, Tool, panels, theme};
+use crate::{App, Tool, theme};
 
 /// A document that isn't the one shown: its session and the view state that goes with it.
 pub(crate) struct Doc {
@@ -29,6 +29,8 @@ pub(crate) struct Doc {
   analyses: crate::analyses::Analyses,
   sections: Vec<crate::dialogs::KeptSection>,
   analysis_hidden: bool,
+  /// An electronics document's editor (its start page, schematic or board).
+  electronics: Option<crate::ecad_ui::EcadView>,
 }
 
 /// The open documents. The shown one lives in `App::s` (its slot here is `None`); the others
@@ -97,6 +99,12 @@ pub(crate) fn has_unsaved_work(s: &Session) -> bool {
   s.dirty
 }
 
+/// Whether the shown document asks before it closes or is replaced: unsaved changes, or an
+/// electronics document never saved (Fusion asks for a new Electronics Design too).
+fn asks_first(app: &App) -> bool {
+  has_unsaved_work(&app.s) || (app.electronics.is_some() && unsaved(&app.s))
+}
+
 // ---------------------------------------------------------------- switching
 
 /// Takes the shown document out of the app, leaving a blank session (same hub) in its place.
@@ -105,8 +113,8 @@ fn park(app: &mut App) -> Doc {
   app.doc_dialog = None;
   let drawing = app.drawing;
   let tab = app.tab;
-  // back to the Design workspace: each document opens in it
-  app.electronics = None;
+  // an electronics document keeps its editor; the others go back to the Design workspace
+  let electronics = app.electronics.take();
   app.simulation = None;
   app.manufacture = false;
   app.generative = false;
@@ -130,6 +138,7 @@ fn park(app: &mut App) -> Doc {
     analyses: std::mem::take(&mut app.analyses),
     sections: std::mem::take(&mut app.sections),
     analysis_hidden: app.analysis_hidden,
+    electronics,
   }
 }
 
@@ -150,6 +159,7 @@ fn unpark(app: &mut App, d: Doc) {
   app.analyses = d.analyses;
   app.sections = d.sections;
   app.analysis_hidden = d.analysis_hidden;
+  app.electronics = d.electronics;
   app.dialog = None;
   app.tool = Tool::Select;
   app.nav_mode = None;
@@ -190,7 +200,7 @@ pub(crate) fn new_document(app: &mut App, ty: DesignType, unit: Option<LengthUni
 /// Before a design is opened in place of the shown one: if the shown one has unsaved changes,
 /// it moves to its own tab and the design opens in a new one. Returns the kept tab when it did.
 pub(crate) fn keep_unsaved(app: &mut App) -> Option<usize> {
-  if !has_unsaved_work(&app.s) {
+  if !asks_first(app) {
     return None;
   }
   let kept = app.docs.active;
@@ -218,7 +228,7 @@ pub(crate) fn request_close(app: &mut App, i: usize) {
     return;
   }
   switch_to(app, i);
-  if has_unsaved_work(&app.s) {
+  if asks_first(app) {
     app.docs.closing = Some(i);
   } else {
     close_now(app, i);
@@ -234,6 +244,7 @@ pub(crate) fn close_now(app: &mut App, i: usize) {
   }
   if app.docs.slots.len() == 1 {
     app.new_design();
+    app.electronics = None;
     return;
   }
   app.cancel_dialog();
@@ -256,11 +267,11 @@ pub(crate) fn tab_strip(app: &mut App, ui: &mut egui::Ui, w: f32) {
   let mut close = None;
   for i in 0..n {
     let shown = i == app.docs.active;
-    let (label, locked) = match &app.docs.slots[i] {
-      Some(d) => (tab_label(&d.s), unsaved(&d.s)),
-      None => (tab_label(&app.s), unsaved(&app.s)),
+    let (label, locked, kind) = match &app.docs.slots[i] {
+      Some(d) => (tab_label(&d.s), unsaved(&d.s), crate::ecad_chrome::doc_kind(d.electronics.as_ref())),
+      None => (tab_label(&app.s), unsaved(&app.s), crate::ecad_chrome::doc_kind(app.electronics.as_ref())),
     };
-    let (clicked, closed) = document_tab(ui, i, each, &label, locked, shown);
+    let (clicked, closed) = document_tab(ui, i, each, &label, locked, shown, kind);
     if clicked {
       switch = Some(i);
     }
@@ -285,9 +296,18 @@ pub(crate) fn tab_strip(app: &mut App, ui: &mut egui::Ui, w: f32) {
 /// The "+" button's tooltip.
 pub(crate) const PLUS_TIP: &str = "New Design";
 
-/// One tab: the component icon, the name centred, a lock while unsaved and an X. The shown tab
-/// merges into the toolbar below; the others are darker. Returns (clicked, X clicked).
-fn document_tab(ui: &mut egui::Ui, i: usize, w: f32, label: &str, locked: bool, shown: bool) -> (bool, bool) {
+/// One tab: the document's icon (a component, or an electronics document's board or sheet), the
+/// name centred, a lock while unsaved and an X. The shown tab merges into the toolbar below; the
+/// others are darker. Returns (clicked, X clicked).
+fn document_tab(
+  ui: &mut egui::Ui,
+  i: usize,
+  w: f32,
+  label: &str,
+  locked: bool,
+  shown: bool,
+  kind: crate::ecad_chrome::DocKind,
+) -> (bool, bool) {
   let full = ui.max_rect();
   let (slot, resp) = ui.allocate_exact_size(vec2(w, 30.0), egui::Sense::click());
   // the tab runs to the bottom edge of the bar and merges into the toolbar
@@ -304,7 +324,7 @@ fn document_tab(ui: &mut egui::Ui, i: usize, w: f32, label: &str, locked: bool, 
   let font = egui::FontId::proportional(13.5);
   let galley = p.layout_no_wrap(label.to_string(), font, theme::TEXT);
   let tx = (rect.center().x - galley.size().x / 2.0 + 11.0).max(rect.left() + 30.0);
-  icons::draw_color(p, Rect::from_center_size(pos2(tx - 14.0, rect.center().y), Vec2::splat(17.0)), Icon::Component);
+  crate::ecad_chrome::doc_icon(p, Rect::from_center_size(pos2(tx - 14.0, rect.center().y), Vec2::splat(17.0)), kind);
   let text_w = galley.size().x;
   p.with_clip_rect(rect.shrink2(vec2(26.0, 0.0))).galley(
     pos2(tx, rect.center().y - galley.size().y / 2.0),
@@ -461,12 +481,8 @@ pub(crate) fn create(app: &mut App, c: Chooser) {
         app.tab = Tab::SheetMetal;
       }
     }
-    None => {
-      new_document(app, DesignType::Part, Some(c.unit));
-      if c.kind == NewKind::Electronics {
-        panels::switch_workspace(app, "Electronics");
-      }
-    }
+    None if c.kind == NewKind::Electronics => crate::ecad_chrome::new_electronics_design(app, Some(c.unit)),
+    None => new_document(app, DesignType::Part, Some(c.unit)),
   }
 }
 
@@ -595,7 +611,7 @@ fn tile(ui: &mut egui::Ui, k: NewKind, picked: bool) -> egui::Response {
 /// Don't Save (closes it) or Cancel.
 fn close_prompt(app: &mut App, ctx: &egui::Context) {
   let Some(i) = app.docs.closing else { return };
-  let name = doc_name(&app.s);
+  let name = crate::ecad_chrome::close_name(app.electronics.as_ref()).map_or_else(|| doc_name(&app.s), str::to_string);
   let mut act = None;
   let (_, closed) = file_dialogs::modal(ctx, "close-design", "Close", 420.0, |ui| {
     ui.add_space(6.0);

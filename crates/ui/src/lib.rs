@@ -29,6 +29,9 @@ mod doc_dialogs;
 mod documents;
 #[cfg(test)]
 mod documents_tests;
+mod ecad_chrome;
+#[cfg(test)]
+mod ecad_tests;
 mod ecad_ui;
 mod error_dialog;
 mod explode_ui;
@@ -809,6 +812,8 @@ impl App {
     // and the kept analyses
     self.sections.clear();
     self.analysis_hidden = false;
+    // a design opened in place shows in the Design workspace
+    self.electronics = None;
   }
 
   /// Opens a design (latest or a given version) from the data panel.

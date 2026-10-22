@@ -886,12 +886,15 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
       let full = ui.max_rect();
       ui.painter().line_segment([full.left_bottom(), full.right_bottom()], Stroke::new(1.0, theme::BORDER));
       ui.horizontal(|ui| {
-        workspace_switcher(app, ui);
-        ui.add_space(6.0);
+        // an electronics document has no workspace dropdown, as in Fusion
+        if app.electronics.is_none() {
+          workspace_switcher(app, ui);
+          ui.add_space(6.0);
+        }
         ui.vertical(|ui| {
           ui.spacing_mut().item_spacing.y = 0.0;
           if app.electronics.is_some() {
-            crate::ecad_ui::toolbar(app, ui);
+            crate::ecad_chrome::toolbar(app, ui);
             return;
           }
           if app.simulation.is_some() {
@@ -1024,10 +1027,10 @@ fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
   for w in WORKSPACES {
     let sub: &[&str] = match w {
       "Drawing" => &["From Design", "From Animation"],
-      "Electronics" => &["New Electronics Design", "New Schematic", "New PCB", "New Electronics Library", "New 3D PCB"],
+      "Electronics" => &["New Electronics Design", "New Electronics Library"],
       _ => &[],
     };
-    let r = workspace_row(ui, width, &w.to_uppercase(), workspace_trail(w), true);
+    let r = workspace_row(ui, width, &w.to_uppercase(), workspace_trail(w), true, true);
     if sub.is_empty() {
       let r = workspace_tip(r, w);
       if r.clicked() {
@@ -1040,7 +1043,13 @@ fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
       ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
       ui.set_min_width(SUB_WIDTH);
       for item in sub {
-        if workspace_row(ui, SUB_WIDTH, item, Trail::None, false).clicked() {
+        let why = workspace_document_unavailable(item);
+        let r = workspace_row(ui, SUB_WIDTH, item, Trail::None, false, why.is_none());
+        let r = match why {
+          Some(why) => r.on_hover_text(why),
+          None => r,
+        };
+        if r.clicked() && why.is_none() {
           ui.close();
           open_workspace_document(app, w, item);
         }
@@ -1067,18 +1076,28 @@ fn workspace_trail(w: &str) -> Trail {
   }
 }
 
+/// What a workspace submenu entry FissionOxide can't open yet says (the row is greyed).
+pub(crate) fn workspace_document_unavailable(item: &str) -> Option<&'static str> {
+  match item {
+    "New Electronics Library" => crate::documents::NewKind::ElectronicsLibrary.unavailable(),
+    _ => None,
+  }
+}
+
 /// One row of the workspace menu (`top`: semi-bold and Fusion's taller row) or of its
-/// submenus: the name, then a padlock at the row's end or a ▸ just after the name.
-fn workspace_row(ui: &mut egui::Ui, width: f32, label: &str, trail: Trail, top: bool) -> egui::Response {
+/// submenus: the name, then a padlock at the row's end or a ▸ just after the name; greyed when
+/// not `enabled`.
+fn workspace_row(ui: &mut egui::Ui, width: f32, label: &str, trail: Trail, top: bool, enabled: bool) -> egui::Response {
   let h = if top { WORKSPACE_ROW_H } else { 24.0 };
   let (rect, resp) = ui.allocate_exact_size(vec2(width, h), egui::Sense::click());
   let p = ui.painter();
-  if resp.hovered() {
+  if resp.hovered() && enabled {
     p.rect_filled(rect, 0.0, theme::HOVER);
   }
   let font = egui::FontId::proportional(if top { WORKSPACE_FONT } else { 12.5 });
   let at = rect.left_center() + vec2(WORKSPACE_PAD, 0.0);
-  let r = p.text(at, egui::Align2::LEFT_CENTER, label, font.clone(), theme::TEXT);
+  let ink = if enabled { theme::TEXT } else { theme::MUTED };
+  let r = p.text(at, egui::Align2::LEFT_CENTER, label, font.clone(), ink);
   if top {
     // the font has no semi-bold face: a second pass a little over gives the weight
     p.text(at + vec2(0.4, 0.0), egui::Align2::LEFT_CENTER, label, font, theme::TEXT);
@@ -1169,16 +1188,13 @@ fn workspace_tip(resp: egui::Response, w: &str) -> egui::Response {
   resp
 }
 
-/// A DRAWING ▸ or ELECTRONICS ▸ submenu entry: opens that workspace on the document it names.
+/// A DRAWING ▸ or ELECTRONICS ▸ submenu entry: opens that workspace on the document it names, or
+/// the new document in its own tab.
 pub(crate) fn open_workspace_document(app: &mut App, workspace: &str, item: &str) {
   match (workspace, item) {
     ("Drawing", "From Design") => switch_workspace(app, "Drawing"),
-    ("Electronics", "New Electronics Design" | "New Schematic" | "New PCB") => {
-      switch_workspace(app, "Electronics");
-      if let Some(e) = app.electronics.as_mut() {
-        e.sheet = if item == "New PCB" { crate::ecad_ui::Sheet::Board } else { crate::ecad_ui::Sheet::Schematic };
-      }
-    }
+    // a new document tab with the electronics design's start page; the open design stays
+    ("Electronics", "New Electronics Design") => crate::ecad_chrome::new_electronics_design(app, None),
     _ => app.status = Some((format!("{item} isn't in FissionOxide yet"), false)),
   }
 }
@@ -1195,17 +1211,6 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
     app.anim.dialog = None;
     app.anim.playing = None;
   }
-  if w == "Electronics" {
-    if drawing {
-      app.close_drawing();
-    }
-    app.manufacture = false;
-    app.generative = false;
-    app.simulation = None;
-    app.open_electronics();
-    return;
-  }
-  app.electronics = None;
   if w == "Simulation" {
     if drawing {
       app.close_drawing();
@@ -1329,40 +1334,44 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       tabs.push(Tab::MeshEdit);
     }
     for t in tabs {
-      let font = egui::FontId::proportional(12.5);
       let active = app.tab == t;
-      // Fusion: the active tab (the contextual SKETCH tab too) is bold black with a black
-      // underline; the others plain dark grey
-      let color = if active { theme::TAB_ACTIVE } else { Color32::from_gray(45) };
       let label = match t {
         Tab::Plugin(i) => crate::plugins_ui::tab_label(app, i),
         Tab::Solid | Tab::Surface if app.base_mode => format!("BASE FEATURE {}", t.label()),
         Tab::Solid | Tab::Surface if app.flat_mode => crate::flat_ui::tab_label(t),
         _ => t.label().to_string(),
       };
-      let tw = ui.painter().layout_no_wrap(label.clone(), font.clone(), color).size().x;
-      let (rect, resp) = ui.allocate_exact_size(vec2(tw + 26.0, 28.0), egui::Sense::click());
-      let pill = rect.shrink2(vec2(0.0, 3.0));
-      if resp.hovered() && !active {
-        ui.painter().rect_filled(pill, 2.0, theme::HOVER);
-      }
-      ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label.clone(), font.clone(), color);
-      if active {
-        // the font has no bold face: a second pass half a pixel over gives the weight
-        ui.painter().text(rect.center() + vec2(0.6, 0.0), egui::Align2::CENTER_CENTER, label, font, color);
-        ui.painter().line_segment(
-          [
-            pos2(rect.center().x - tw / 2.0 - 4.0, rect.bottom() - 2.0),
-            pos2(rect.center().x + tw / 2.0 + 4.0, rect.bottom() - 2.0),
-          ],
-          Stroke::new(3.0, theme::TAB_ACTIVE),
-        );
-      }
-      if resp.clicked() {
+      if ribbon_tab(ui, &label, active).clicked() {
         app.tab = t;
       }
     }
   });
+}
+
+/// One toolbar tab: Fusion's active tab (the contextual SKETCH tab too) is bold black with a
+/// black underline; the others plain dark grey.
+pub(crate) fn ribbon_tab(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
+  let font = egui::FontId::proportional(12.5);
+  let color = if active { theme::TAB_ACTIVE } else { Color32::from_gray(45) };
+  let tw = ui.painter().layout_no_wrap(label.to_string(), font.clone(), color).size().x;
+  let (rect, resp) = ui.allocate_exact_size(vec2(tw + 26.0, 28.0), egui::Sense::click());
+  let pill = rect.shrink2(vec2(0.0, 3.0));
+  if resp.hovered() && !active {
+    ui.painter().rect_filled(pill, 2.0, theme::HOVER);
+  }
+  ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font.clone(), color);
+  if active {
+    // the font has no bold face: a second pass half a pixel over gives the weight
+    ui.painter().text(rect.center() + vec2(0.6, 0.0), egui::Align2::CENTER_CENTER, label, font, color);
+    ui.painter().line_segment(
+      [
+        pos2(rect.center().x - tw / 2.0 - 4.0, rect.bottom() - 2.0),
+        pos2(rect.center().x + tw / 2.0 + 4.0, rect.bottom() - 2.0),
+      ],
+      Stroke::new(3.0, theme::TAB_ACTIVE),
+    );
+  }
+  resp
 }
 
 // ---------------------------------------------------------------- canvas overlays
@@ -1427,16 +1436,16 @@ fn tree_triangle(p: &egui::Painter, c: Pos2, open: bool, root: bool, color: Colo
 
 /// What happened to a browser row.
 #[derive(Default)]
-pub(super) struct RowEvents {
-  pub(super) clicked: bool,
-  pub(super) double_clicked: bool,
-  pub(super) eye: bool,
-  pub(super) response: Option<egui::Response>,
+pub(crate) struct RowEvents {
+  pub(crate) clicked: bool,
+  pub(crate) double_clicked: bool,
+  pub(crate) eye: bool,
+  pub(crate) response: Option<egui::Response>,
 }
 
 /// One browser row, drawn straight on the canvas as in Fusion: expander, visibility eye, icon
 /// and the name on a grey pill (a dark pill with an activation radio for the root component).
-pub(super) fn tree_row(
+pub(crate) fn tree_row(
   ui: &mut egui::Ui,
   id: egui::Id,
   depth: usize,
