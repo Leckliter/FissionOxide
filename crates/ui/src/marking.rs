@@ -70,6 +70,8 @@ pub(crate) struct MenuState {
   pub(crate) unselectable: Vec<BodyId>,
   /// Mesh bodies drawn flat-shaded (a mesh body's Flat Shaded; mesh bodies draw smooth).
   pub(crate) flat_shaded: Vec<BodyId>,
+  /// The Bodies folder's eye is off: no body is drawn, each keeping its own eye.
+  pub(crate) bodies_hidden: bool,
 }
 
 #[derive(Clone)]
@@ -365,6 +367,7 @@ pub(crate) fn save_as_mesh(app: &mut App, body: BodyId) {
 }
 
 fn show_all(app: &mut App) {
+  app.ctx_menu.bodies_hidden = false;
   set_all_visible(app, true);
 }
 

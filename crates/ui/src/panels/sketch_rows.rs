@@ -254,7 +254,9 @@ pub(super) fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
     ui.data_mut(|d| d.insert_temp(id.with("open"), open));
   }
   let shown = !app.sketch_rows.folder_hidden;
-  let ev = tree_row(ui, id, 1, Some(false), Some(shown), Icon::Folder, "Sketches", false, theme::TEXT);
+  let some_hidden = sketches.iter().any(|(fid, _)| !fox_engine::scene::sketch_visible(&app.s, *fid));
+  let eye = super::folder_eye(ui, shown, some_hidden);
+  let ev = tree_row(ui, id, 1, Some(false), eye, Icon::Folder, "Sketches", false, theme::TEXT);
   if ev.eye {
     app.sketch_rows.folder_hidden = shown;
   }

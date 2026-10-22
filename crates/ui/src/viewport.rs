@@ -829,7 +829,12 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     peek,
     peek_faces: app.ctx_menu.peek_faces.clone(),
     peek_sketches: app.ctx_menu.peek_sketches.clone(),
-    only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
+    // the Bodies folder's eye off draws none
+    only_bodies: if app.ctx_menu.bodies_hidden {
+      Some(Vec::new())
+    } else {
+      app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone())
+    },
     opacity: app.ctx_menu.opacity.iter().copied().chain(crate::mesh_ui::ghosted(app)).collect(),
     flat_meshes: app.ctx_menu.flat_shaded.clone(),
     // Offset Plane's preview is filled over the image (see `offset_plane_overlay`), and so are

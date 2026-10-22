@@ -1377,6 +1377,18 @@ pub(super) fn eye_rect(row: Rect, depth: usize) -> Rect {
   Rect::from_center_size(pos2(x + 24.0, row.center().y), vec2(18.0, 14.0))
 }
 
+/// A folder row's eye, as Fusion draws it: struck through while the folder is hidden; while the
+/// folder shows but some of its rows are hidden, drawn (open) only while the pointer is on the
+/// folder's row, which [`tree_row`] is about to lay out next.
+pub(super) fn folder_eye(ui: &egui::Ui, shown: bool, children_hidden: bool) -> Option<bool> {
+  if shown && children_hidden {
+    let next = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 25.0));
+    ui.rect_contains_pointer(next).then_some(true)
+  } else {
+    Some(shown)
+  }
+}
+
 fn is_open(ui: &egui::Ui, id: egui::Id, default: bool) -> bool {
   ui.data(|d| d.get_temp::<bool>(id.with("open"))).unwrap_or(default)
 }
@@ -1967,11 +1979,14 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
     return;
   }
   let id = egui::Id::new("tree-bodies");
-  let all_visible = bodies.iter().all(|b| b.2);
-  let ev = tree_row(ui, id, 1, Some(true), Some(all_visible), Icon::Folder, "Bodies", false, theme::TEXT);
+  // the folder's own eye: hiding it leaves each body's eye as it was
+  let shown = !app.ctx_menu.bodies_hidden;
+  let eye = folder_eye(ui, shown, bodies.iter().any(|b| !b.2));
+  let ev = tree_row(ui, id, 1, Some(true), eye, Icon::Folder, "Bodies", false, theme::TEXT);
   if ev.eye {
-    for (b, _, _) in &bodies {
-      app.run("body.visible", json!({"body": b.0, "visible": !all_visible}));
+    app.ctx_menu.bodies_hidden = shown;
+    if shown {
+      app.s.selection.retain(|s| !matches!(s, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. }));
     }
   }
   if let Some(r) = &ev.response {
@@ -1990,7 +2005,8 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
     let selected = app.s.selection.contains(&Sel::Body { body: bid });
     // while isolated, the bodies left out are hidden from the canvas: grey them, as Fusion does
     let isolated = app.ctx_menu.isolate.as_ref().map(|only| only.contains(&bid));
-    let color = if visible && isolated != Some(false) { theme::TEXT } else { theme::MUTED };
+    let drawn = visible && isolated != Some(false) && shown;
+    let color = if drawn { theme::TEXT } else { theme::MUTED };
     let row = id.with(bid.0);
     let ev = tree_row(ui, row, 2, None, Some(visible), body_icon(app, bid), &name, selected, color);
     if isolated == Some(true)
@@ -2018,7 +2034,7 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
       if crate::select::is_mesh(&app.s, bid) {
         r.context_menu(|ui| mesh_rows::mesh_context_menu(app, ui, row, bid, &name));
       } else {
-        r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
+        r.context_menu(|ui| browser_rows::body_context_menu(app, ui, row, bid, &name));
       }
     }
   }
@@ -2075,101 +2091,6 @@ fn body_row_edits(
   }
   browser_edit::drag_source(ui, ev, browser_edit::dragged_bodies(app, bid), name);
   browser_edit::edit_box(app, ui, ev, row, depth);
-}
-
-/// A browser body's right-click menu, as in Fusion (less what FissionOxide can't do yet). A
-/// surface body has Fusion's own list ([`browser_rows::surface_body_menu`]).
-fn body_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name: &str, visible: bool) {
-  if app.s.body_is_surface(bid) {
-    browser_rows::surface_body_context_menu(app, ui, row, bid, name);
-    return;
-  }
-  let only = vec![Sel::Body { body: bid }];
-  let start = |app: &mut App, ui: &mut egui::Ui, kind: Kind| {
-    ui.close();
-    app.s.selection = only.clone();
-    app.start(kind);
-  };
-  if menu_item(ui, Icon::Move, "Move/Copy", Some("M")).clicked() {
-    start(app, ui, Kind::Move);
-  }
-  ui.separator();
-  // like Fusion's, these act on every selected body when the row is one of them
-  let browser_edit::Dragged::Bodies(bodies) = browser_edit::dragged_bodies(app, bid) else { return };
-  if menu_item(ui, Icon::Component, "Create Components from Bodies", None)
-    .on_hover_text("Each body becomes a component of its own, named after it")
-    .clicked()
-  {
-    ui.close();
-    for b in &bodies {
-      let name = app.s.body_name(*b);
-      app.run("component.create", json!({"name": name, "bodies": [b.0]}));
-    }
-  }
-  ui.separator();
-  // a body outside a component takes a material of its own
-  if menu_item(ui, Icon::PhysMaterial, "Physical Material", None).clicked() {
-    start(app, ui, Kind::Material);
-  }
-  if menu_item(ui, Icon::Appearance, "Appearance", Some("A")).clicked() {
-    start(app, ui, Kind::Form(&crate::forms::APPEARANCE));
-  }
-  if menu_item(ui, Icon::Measure, "Properties", None).clicked() {
-    start(app, ui, Kind::Inspect);
-  }
-  ui.separator();
-  if menu_item(ui, Icon::ConvertMesh, "Save As Mesh", None)
-    .on_hover_text("Export this body as STL, OBJ or 3MF")
-    .clicked()
-  {
-    ui.close();
-    marking::save_as_mesh(app, bid);
-  }
-  ui.separator();
-  if menu_item(ui, Icon::Remove, "Delete", Some("Del")).clicked() {
-    ui.close();
-    app.s.selection = vec![Sel::Body { body: bid }];
-    app.delete_selection();
-  }
-  if menu_item(ui, Icon::RemoveBody, "Remove", None).on_hover_text("Remove the body (kept in the timeline)").clicked() {
-    ui.close();
-    app.run("body.remove", json!({"bodies": [bid.0]}));
-  }
-  if menu_item(ui, Icon::Params, "Rename", None).clicked() {
-    ui.close();
-    browser_edit::begin(ui, row, RenameTarget::Body(bid.0), name);
-  }
-  ui.separator();
-  if menu_item(ui, if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", Some("V")).clicked() {
-    ui.close();
-    marking::show_hide(app, &[bid]);
-  }
-  let isolated = app.ctx_menu.isolate.is_some();
-  if menu_item(ui, Icon::Body, if isolated { "Unisolate" } else { "Isolate" }, None).clicked() {
-    ui.close();
-    app.ctx_menu.isolate = if isolated { None } else { Some(vec![bid]) };
-  }
-  if menu_item(ui, Icon::Fit, "Find in Window", None).clicked() {
-    ui.close();
-    marking::find_in_window(app, &[bid], None);
-  }
-  ui.separator();
-  let locked = app.ctx_menu.unselectable.contains(&bid);
-  if menu_item(ui, Icon::Select, if locked { "Selectable" } else { "Selectable/Unselectable" }, None)
-    .on_hover_text(if locked { "Let the canvas pick the body again" } else { "Stop the canvas picking the body" })
-    .clicked()
-  {
-    ui.close();
-    let m = &mut app.ctx_menu;
-    m.unselectable.retain(|b| !bodies.contains(b));
-    if !locked {
-      m.unselectable.extend(&bodies);
-      app.s.selection.retain(
-        |s| !matches!(s, Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if bodies.contains(body)),
-      );
-    }
-  }
-  browser_edit::opacity_menu(app, ui, &bodies);
 }
 
 /// A context-menu row with an icon on the left and its shortcut key on the right.
@@ -2240,7 +2161,7 @@ pub(crate) enum RowCmd {
   ConvertDesignType,
   /// A sketch row's Redefine Sketch Plane.
   RedefinePlane,
-  // a surface body row (see browser_rows)
+  // the body rows (see browser_rows)
   MoveCopy,
   Copy,
   Remove,
@@ -2341,8 +2262,10 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
     return;
   }
   let id = egui::Id::new("tree-construction");
-  let ev =
-    tree_row(ui, id, 1, Some(false), Some(app.construction_shown), Icon::Folder, "Construction", false, theme::TEXT);
+  // its eye waits for the pointer while a plane's own eye is off, as the Bodies folder's
+  let some_hidden = planes.iter().any(|(fid, _)| !crate::construction::eye(app, *fid));
+  let eye = folder_eye(ui, app.construction_shown, some_hidden);
+  let ev = tree_row(ui, id, 1, Some(false), eye, Icon::Folder, "Construction", false, theme::TEXT);
   if ev.eye {
     app.construction_shown = !app.construction_shown;
   }

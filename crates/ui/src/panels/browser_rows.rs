@@ -108,8 +108,9 @@ pub(crate) fn root_show_hide(app: &mut App) {
   }
 }
 
-/// Show All Bodies: every body visible.
+/// Show All Bodies: every body visible, and the Bodies folder's eye on.
 fn show_all_bodies(app: &mut App) {
+  app.ctx_menu.bodies_hidden = false;
   for b in all_bodies(app) {
     if !app.s.body_visible(b) {
       app.run("body.visible", json!({"body": b.0, "visible": true}));
@@ -332,7 +333,53 @@ pub(crate) fn folder_context_menu(ui: &mut egui::Ui, items: &[Option<RowItem>], 
   }
 }
 
-// ---------------------------------------------------------------- a surface body row
+// ---------------------------------------------------------------- a body row
+
+/// A body row's menu: a surface body's ([`surface_body_menu`]) or a solid body's
+/// ([`solid_body_menu`]).
+pub(crate) fn body_menu_items(app: &App, bid: BodyId) -> Vec<Option<RowItem>> {
+  if app.s.body_is_surface(bid) { surface_body_menu(app, bid) } else { solid_body_menu(app, bid) }
+}
+
+/// A solid body row's menu, as Fusion's Body1: Move/Copy, Move to Group, Create Selection Set |
+/// Configure | Physical Material, Appearance, Texture Map Controls, Properties | Save As Mesh |
+/// Copy, Cut, Delete, Remove, Rename | Display Detail Control | Show/Hide,
+/// Selectable/Unselectable, Opacity Control, Isolate, Find in Window. There is no Create
+/// Components from Bodies; Move to Group, Create Selection Set, Texture Map Controls, Cut and
+/// Display Detail Control are listed greyed.
+pub(crate) fn solid_body_menu(app: &App, bid: BodyId) -> Vec<Option<RowItem>> {
+  let visible = app.s.body_visible(bid);
+  let locked = app.ctx_menu.unselectable.contains(&bid);
+  let isolated = app.ctx_menu.isolate.is_some();
+  vec![
+    row_key(Icon::Move, "Move/Copy", "M", RowCmd::MoveCopy),
+    row_item(Icon::Folder, "Move to Group", RowCmd::NotYet),
+    row_item(Icon::Select, "Create Selection Set", RowCmd::NotYet),
+    None,
+    row_item(Icon::Configure, "Configure", RowCmd::Configure),
+    None,
+    row_item(Icon::PhysMaterial, "Physical Material", RowCmd::PhysicalMaterial),
+    row_key(Icon::Appearance, "Appearance", "A", RowCmd::Appearance),
+    row_item(Icon::Decal, "Texture Map Controls", RowCmd::NotYet),
+    row_item(Icon::Properties, "Properties", RowCmd::Properties),
+    None,
+    row_item(Icon::ConvertMesh, "Save As Mesh", RowCmd::SaveAsMesh),
+    None,
+    row_key(Icon::Duplicate, "Copy", "Ctrl+C", RowCmd::Copy),
+    row_key(Icon::SkTrim, "Cut", "Ctrl+X", RowCmd::NotYet),
+    row_key(Icon::Remove, "Delete", "Del", RowCmd::Delete),
+    row_item(Icon::RemoveBody, "Remove", RowCmd::Remove),
+    row_item(Icon::Params, "Rename", RowCmd::Rename),
+    None,
+    row_item(Icon::Display, "Display Detail Control", RowCmd::NotYet),
+    None,
+    row_key(if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", "V", RowCmd::ShowHide),
+    row_item(Icon::Select, if locked { "Selectable" } else { "Selectable/Unselectable" }, RowCmd::Selectable),
+    row_item(Icon::Body, "Opacity Control", RowCmd::Opacity),
+    row_item(Icon::Body, if isolated { "Unisolate" } else { "Isolate" }, RowCmd::Isolate),
+    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
+  ]
+}
 
 /// A surface body row's menu, as Fusion's: no Create Components from Bodies, and Physical
 /// Material enabled. Move to Group, Create Selection Set, Texture Map Controls, Cut and Display
@@ -370,10 +417,10 @@ pub(crate) fn surface_body_menu(app: &App, bid: BodyId) -> Vec<Option<RowItem>> 
   ]
 }
 
-/// Draws a surface body row's menu ([`surface_body_menu`]), Opacity Control as its sub-menu,
-/// and runs what was clicked.
-pub(crate) fn surface_body_context_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name: &str) {
-  let items = surface_body_menu(app, bid);
+/// Draws a body row's menu ([`body_menu_items`]), Opacity Control as its sub-menu, and runs
+/// what was clicked.
+pub(crate) fn body_context_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name: &str) {
+  let items = body_menu_items(app, bid);
   let mut picked = None;
   for it in &items {
     let Some(it) = it else {
@@ -400,14 +447,14 @@ pub(crate) fn surface_body_context_menu(app: &mut App, ui: &mut egui::Ui, row: e
   }
   match picked {
     Some(RowCmd::Rename) => browser_edit::begin(ui, row, RenameTarget::Body(bid.0), name),
-    Some(cmd) => run_surface_body_cmd(app, ui.ctx(), bid, cmd),
+    Some(cmd) => run_body_cmd(app, ui.ctx(), bid, cmd),
     None => {}
   }
 }
 
-/// Runs a surface body row's menu command. Like Fusion's, Copy and Selectable/Unselectable act
+/// Runs a body row's menu command. Like Fusion's, Copy and Selectable/Unselectable act
 /// on every selected body when the row is one of them.
-pub(crate) fn run_surface_body_cmd(app: &mut App, ctx: &egui::Context, bid: BodyId, cmd: RowCmd) {
+pub(crate) fn run_body_cmd(app: &mut App, ctx: &egui::Context, bid: BodyId, cmd: RowCmd) {
   let only = vec![fox_engine::Sel::Body { body: bid }];
   let browser_edit::Dragged::Bodies(bodies) = browser_edit::dragged_bodies(app, bid) else { return };
   let start = |app: &mut App, kind: Kind| {
@@ -944,6 +991,70 @@ mod tests {
     (app, surface, solid)
   }
 
+  /// A solid body row's menu is Fusion's Body1 list, with its separators: no Create Components
+  /// from Bodies, and Physical Material enabled.
+  #[test]
+  fn a_solid_body_row_has_fusions_menu() {
+    let (mut app, _, solid) = patched();
+    let items = body_menu_items(&app, solid);
+    assert_eq!(
+      labels(&items),
+      [
+        "Move/Copy",
+        "Move to Group",
+        "Create Selection Set",
+        "-",
+        "Configure",
+        "-",
+        "Physical Material",
+        "Appearance",
+        "Texture Map Controls",
+        "Properties",
+        "-",
+        "Save As Mesh",
+        "-",
+        "Copy",
+        "Cut",
+        "Delete",
+        "Remove",
+        "Rename",
+        "-",
+        "Display Detail Control",
+        "-",
+        "Show/Hide",
+        "Selectable/Unselectable",
+        "Opacity Control",
+        "Isolate",
+        "Find in Window",
+      ]
+    );
+    let keys: Vec<(&str, &str)> = items.iter().flatten().filter_map(|i| i.key.map(|k| (i.label.as_str(), k))).collect();
+    assert_eq!(
+      keys,
+      [
+        ("Move/Copy", "M"),
+        ("Appearance", "A"),
+        ("Copy", "Ctrl+C"),
+        ("Cut", "Ctrl+X"),
+        ("Delete", "Del"),
+        ("Show/Hide", "V")
+      ]
+    );
+    let greyed: Vec<&str> =
+      items.iter().flatten().filter(|i| i.cmd == RowCmd::NotYet).map(|i| i.label.as_str()).collect();
+    assert_eq!(
+      greyed,
+      ["Move to Group", "Create Selection Set", "Texture Map Controls", "Cut", "Display Detail Control"]
+    );
+    let ctx = egui::Context::default();
+    run_body_cmd(&mut app, &ctx, solid, RowCmd::PhysicalMaterial);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::Material), "Physical Material opens its palette");
+    assert_eq!(app.s.selection, [Sel::Body { body: solid }]);
+    app.dialog = None;
+    run_body_cmd(&mut app, &ctx, solid, RowCmd::Copy);
+    assert_eq!(app.clipboard, Some(crate::clipboard::Clip::Bodies(vec![solid])));
+  }
+
   #[test]
   fn a_surface_body_row_has_fusions_icon_and_menu() {
     let (mut app, surface, solid) = patched();
@@ -1001,28 +1112,28 @@ mod tests {
 
     let ctx = egui::Context::default();
     // Physical Material is enabled: the body outside a component takes its own
-    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::PhysicalMaterial);
+    run_body_cmd(&mut app, &ctx, surface, RowCmd::PhysicalMaterial);
     assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::Material));
     assert_eq!(app.s.selection, [Sel::Body { body: surface }]);
     app.dialog = None;
-    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::MoveCopy);
+    run_body_cmd(&mut app, &ctx, surface, RowCmd::MoveCopy);
     assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::Move));
     app.dialog = None;
-    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Copy);
+    run_body_cmd(&mut app, &ctx, surface, RowCmd::Copy);
     assert_eq!(app.clipboard, Some(crate::clipboard::Clip::Bodies(vec![surface])));
-    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Isolate);
+    run_body_cmd(&mut app, &ctx, surface, RowCmd::Isolate);
     assert_eq!(app.ctx_menu.isolate, Some(vec![surface]));
     assert!(labels(&surface_body_menu(&app, surface)).contains(&"Unisolate".into()));
-    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Isolate);
+    run_body_cmd(&mut app, &ctx, surface, RowCmd::Isolate);
     assert!(app.ctx_menu.isolate.is_none());
-    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Selectable);
+    run_body_cmd(&mut app, &ctx, surface, RowCmd::Selectable);
     assert_eq!(app.ctx_menu.unselectable, vec![surface]);
     assert!(labels(&surface_body_menu(&app, surface)).contains(&"Selectable".into()));
-    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Selectable);
+    run_body_cmd(&mut app, &ctx, surface, RowCmd::Selectable);
     assert!(app.ctx_menu.unselectable.is_empty());
-    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::ShowHide);
+    run_body_cmd(&mut app, &ctx, surface, RowCmd::ShowHide);
     assert!(!app.s.body_visible(surface));
-    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Remove);
+    run_body_cmd(&mut app, &ctx, surface, RowCmd::Remove);
     assert!(app.s.model.body(surface).is_none(), "removed");
     assert!(app.s.model.body(solid).is_some());
   }
