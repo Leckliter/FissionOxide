@@ -14,6 +14,7 @@ mod comments;
 mod comp_drag;
 mod config_ui;
 mod constrain;
+mod construction;
 mod customize;
 mod cut_ui;
 mod data_panel;
@@ -206,6 +207,11 @@ pub struct App {
   pub(crate) picked_origin: Option<origin::OriginItem>,
   /// The origin item under the pointer in the canvas this frame.
   pub(crate) hover_origin: Option<origin::OriginItem>,
+  /// The construction plane under the pointer in the canvas this frame (see [`construction`]).
+  pub(crate) hover_cplane: Option<fox_engine::model::FeatureId>,
+  /// The browser's Construction folder is shown (its eye): its planes whose own eyes are on draw
+  /// in the canvas. On by default, as in Fusion.
+  pub(crate) construction_shown: bool,
   /// The Origin folder's children's own eyes (O, X, Y, Z, XY, XZ, YZ), on by default; a child
   /// shows only when the folder's eye is on too.
   pub(crate) origin_eyes: [bool; 7],
@@ -504,6 +510,8 @@ impl App {
       export_dxf: None,
       picked_origin: None,
       hover_origin: None,
+      hover_cplane: None,
+      construction_shown: true,
       origin_eyes: [true; 7],
       origin_shown: false,
       browser_sketches: None,
@@ -1353,19 +1361,43 @@ impl App {
     c.run(self);
   }
 
-  /// Shows or hides the bodies of the selection (bodies, or the bodies of selected faces and
-  /// edges), as V does in Fusion.
+  /// Show/Hide (V), as Fusion's: shows or hides what is selected: bodies (or the bodies of
+  /// selected faces and edges), sketches, construction planes, axes and points, and a picked
+  /// origin point, axis or plane. A picked plane or origin item stays picked, drawn selected,
+  /// until it is deselected.
   pub fn toggle_visibility(&mut self) {
+    if let Some(id) = construction::picked(self) {
+      construction::toggle_eye(self, id);
+      return;
+    }
+    if let Some(item) = origin::picked(self) {
+      origin::toggle_eye(self, item);
+      return;
+    }
     let mut bodies: Vec<fox_engine::model::BodyId> = Vec::new();
+    let mut features = Vec::new();
     for s in &self.s.selection {
-      if let Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } = s
-        && !bodies.contains(body)
-      {
-        bodies.push(*body);
+      match s {
+        Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if !bodies.contains(body) => {
+          bodies.push(*body)
+        }
+        Sel::Feature { feature } => features.push(*feature),
+        _ => {}
+      }
+    }
+    if bodies.is_empty() && features.is_empty() {
+      self.hint("Show/Hide: select bodies, faces or edges first");
+      return;
+    }
+    for f in features {
+      if construction::is_construction(self, f) {
+        construction::toggle_eye(self, f);
+      } else if self.s.design.sketch(f).is_ok() {
+        let visible = fox_engine::scene::sketch_visible(&self.s, f);
+        self.run("sketch.visible", json!({"sketch": f.0, "visible": !visible}));
       }
     }
     if bodies.is_empty() {
-      self.hint("Show/Hide: select bodies, faces or edges first");
       return;
     }
     for b in bodies {
@@ -1373,6 +1405,20 @@ impl App {
       self.run("body.visible", json!({"body": b.0, "visible": !visible}));
     }
     self.s.selection.clear();
+  }
+
+  /// Puts the dialog back after its frame while it stays open; a construction dialog's Type or
+  /// Method switches to that command's dialog instead.
+  pub(crate) fn after_dialog_frame(&mut self, mut d: Dialog, keep: bool) {
+    if let Some(kind) = d.switch_to.take() {
+      d.cancel(&mut self.s);
+      d.leave(self);
+      self.start(kind);
+    } else if keep && self.dialog.is_none() {
+      self.dialog = Some(d);
+    } else {
+      d.leave(self);
+    }
   }
 
   pub fn start(&mut self, kind: dialogs::Kind) {
@@ -1821,11 +1867,7 @@ impl App {
     doc_dialogs::show(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
-      if keep && self.dialog.is_none() {
-        self.dialog = Some(d);
-      } else {
-        d.leave(self);
-      }
+      self.after_dialog_frame(d, keep);
     }
     if self.show_params {
       params_ui::window(self, &ctx);

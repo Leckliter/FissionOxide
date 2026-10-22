@@ -2136,6 +2136,8 @@ pub(crate) enum RowCmd {
   Delete,
   CreateSketch,
   OffsetPlane,
+  /// A construction plane row's Edit Construction Plane (the timeline's Edit Feature).
+  EditFeature,
   /// Listed, greyed, as Fusion has it but FissionOxide doesn't yet.
   NotYet,
   // the root, Bodies, Origin and Units rows (see browser_rows)
@@ -2252,28 +2254,37 @@ fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
   sketch_rows::sketches_section(app, ui);
 }
 
+/// The Construction folder, as Fusion's: it appears once a plane is made (after OK), collapsed,
+/// with an eye that shows or hides every plane in it; each plane's row has its own eye (greyed
+/// while the folder's is off).
 fn planes_section(app: &mut App, ui: &mut egui::Ui) {
-  let planes: Vec<(FeatureId, String)> = app
-    .s
-    .design
-    .features
-    .iter()
-    .filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. }))
-    .map(|f| (f.id, f.name.clone()))
-    .collect();
+  let planes = crate::construction::planes(app);
   if planes.is_empty() {
     return;
   }
   let id = egui::Id::new("tree-construction");
-  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Construction", false, theme::TEXT);
-  if !is_open(ui, id, true) {
+  let ev =
+    tree_row(ui, id, 1, Some(false), Some(app.construction_shown), Icon::Folder, "Construction", false, theme::TEXT);
+  if ev.eye {
+    app.construction_shown = !app.construction_shown;
+  }
+  if !is_open(ui, id, false) {
     return;
   }
   for (fid, name) in planes {
     let plane = json!({"feature": fid.0});
     let picked = app.picked_plane.as_ref() == Some(&plane);
     let row = id.with(fid.0);
-    let ev = tree_row(ui, row, 2, None, None, Icon::Plane, &name, picked, theme::TEXT);
+    let eye = crate::construction::eye(app, fid);
+    let ev = tree_row(ui, row, 2, None, Some(eye), Icon::Plane, &name, picked, theme::TEXT);
+    if ev.eye {
+      crate::construction::toggle_eye(app, fid);
+    }
+    if let Some(r) = &ev.response
+      && !app.construction_shown
+    {
+      ui.painter().rect_filled(eye_rect(r.rect, 2), 0.0, Color32::from_white_alpha(150));
+    }
     // double-click sketches on the plane, as on the origin planes; a slow click renames it
     let target = RenameTarget::Feature(fid.0);
     browser_edit::slow_click(ui, &ev, row, target, &name, picked);
@@ -2290,30 +2301,33 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
     if let Some(r) = ev.response {
       reveal_row(app, Sel::Feature { feature: fid }, &r);
       r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
-        if ui.button("Create Sketch").clicked() {
-          ui.close();
-          app.create_sketch(plane.clone());
-        }
-        if ui.button("Rename").clicked() {
-          ui.close();
-          browser_edit::begin(ui, row, target, &name);
-        }
-        ui.separator();
-        if ui.button("Delete").clicked() {
-          ui.close();
-          app.run("feature.delete", json!({"feature": fid.0}));
+        let items = browser_rows::construction_plane_menu(app, fid);
+        match row_menu(ui, &items) {
+          // renamed in place in the browser row
+          Some(RowCmd::Rename) => browser_edit::begin(ui, row, target, &name),
+          Some(cmd) => browser_rows::run_construction_plane_cmd(app, fid, cmd),
+          None => {}
         }
       });
     }
   }
 }
 
-/// A click on a plane in the browser: while Create Sketch waits for a plane it starts the sketch
-/// there, else it selects the plane (Create Sketch then starts on it).
-pub(super) fn pick_plane(app: &mut App, plane: Value) {
+/// A click on a plane in the browser or the canvas: while Create Sketch waits for a plane it
+/// starts the sketch there, an open Offset Plane takes it as its plane, else it selects the plane
+/// (Create Sketch then starts on it).
+pub(crate) fn pick_plane(app: &mut App, plane: Value) {
   if app.dialog.as_ref().is_some_and(|d| d.kind == Kind::PickPlane) {
     app.cancel_dialog();
     app.create_sketch(plane);
+  } else if app.dialog.as_ref().is_some_and(|d| d.takes_plane()) {
+    let label = match plane.get("feature").and_then(Value::as_u64) {
+      Some(f) => app.s.design.feature(FeatureId(f as u32)).map(|f| f.name.clone()).unwrap_or_default(),
+      None => format!("{} plane", plane.as_str().unwrap_or("xy").to_uppercase()),
+    };
+    if let Some(d) = app.dialog.as_mut() {
+      d.use_plane(&mut app.s, plane, label);
+    }
   } else {
     let again = app.picked_plane.as_ref() == Some(&plane);
     app.s.selection.clear();
@@ -2842,7 +2856,7 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
     // a curve-picking sketch tool's picks read out like a selection ("2 Sketch Curves | ...")
     [] => {
       // a picked or hovered origin plane, axis or point: "XY Plane", "Y Axis", "Origin Point | X: …"
-      if let Some(t) = crate::origin::status(app) {
+      if let Some(t) = crate::origin::status(app).or_else(|| crate::construction::status(app)) {
         return Some(t);
       }
       picked = crate::viewport::picked_curves(app);

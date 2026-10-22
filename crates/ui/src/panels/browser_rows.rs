@@ -5,7 +5,7 @@
 use fox_engine::model::BodyId;
 use serde_json::json;
 
-use super::{RowCmd, RowItem, browser_edit, menu_item, row_item, row_menu};
+use super::{RowCmd, RowItem, browser_edit, menu_item, row_item, row_key, row_menu};
 use crate::dialogs::Kind;
 use crate::icons::Icon;
 use crate::origin::{self, OriginItem};
@@ -481,6 +481,80 @@ pub(crate) fn run_origin_item_cmd(app: &mut App, item: OriginItem, cmd: RowCmd) 
   }
 }
 
+// ---------------------------------------------------------------- construction planes
+
+/// A construction plane row's menu, as Fusion's.
+pub(crate) fn construction_plane_menu(app: &App, fid: fox_engine::model::FeatureId) -> Vec<Option<RowItem>> {
+  let shown = crate::construction::eye(app, fid);
+  vec![
+    row_item(Icon::Folder, "Move to Group", RowCmd::NotYet),
+    row_item(Icon::Select, "Create Selection Set", RowCmd::NotYet),
+    None,
+    row_item(Icon::Sketch, "Create Sketch", RowCmd::CreateSketch),
+    row_item(Icon::Plane, "Offset Plane", RowCmd::OffsetPlane),
+    None,
+    row_item(Icon::Plane, "Edit Construction Plane", RowCmd::EditFeature),
+    row_item(Icon::Configure, "Configure", RowCmd::Configure),
+    None,
+    row_key(Icon::Remove, "Delete", "Del", RowCmd::Delete),
+    row_item(Icon::Params, "Rename", RowCmd::Rename),
+    None,
+    row_item(Icon::LookAt, "Look At", RowCmd::LookAt),
+    row_key(if shown { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", "V", RowCmd::ShowHide),
+    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
+    row_item(Icon::History, "Find in Timeline", RowCmd::FindInTimeline),
+  ]
+}
+
+/// Runs a construction plane row's menu command (Rename is begun in the row itself).
+pub(crate) fn run_construction_plane_cmd(app: &mut App, fid: fox_engine::model::FeatureId, cmd: RowCmd) {
+  let plane = json!({"feature": fid.0});
+  let pl = app.s.model.planes.get(&fid).copied();
+  match cmd {
+    RowCmd::CreateSketch => app.create_sketch(plane),
+    RowCmd::OffsetPlane => {
+      app.s.selection.clear();
+      origin::clear(app);
+      app.start(Kind::OffsetPlane);
+      let label = app.s.design.feature(fid).map(|f| f.name.clone()).unwrap_or_default();
+      if let Some(d) = app.dialog.as_mut() {
+        d.use_plane(&mut app.s, plane, label);
+      }
+    }
+    RowCmd::EditFeature => super::edit_feature(app, fid),
+    RowCmd::Configure => {
+      // the plane's suppression becomes a column of the configuration table
+      if let Some(first) = app.s.design.configurations.list.first().map(|c| c.name.clone()) {
+        let suppressed = app.s.design.feature(fid).is_some_and(|f| f.suppressed);
+        app.run("config.set", json!({"configuration": first, "feature": fid.0, "suppressed": suppressed}));
+      }
+      crate::config_ui::open_table();
+    }
+    RowCmd::Delete => {
+      if crate::construction::picked(app) == Some(fid) {
+        origin::clear(app);
+      }
+      app.run("feature.delete", json!({"feature": fid.0}));
+    }
+    RowCmd::LookAt => {
+      if let Some(pl) = pl {
+        app.look_at_plane(&pl);
+      }
+    }
+    RowCmd::ShowHide => crate::construction::toggle_eye(app, fid),
+    RowCmd::FindInWindow => {
+      if let Some(pl) = pl {
+        marking::find_plane_in_window(app, &pl);
+      }
+    }
+    RowCmd::FindInTimeline => {
+      origin::clear(app);
+      app.s.selection = vec![fox_engine::Sel::Feature { feature: fid }];
+    }
+    _ => {}
+  }
+}
+
 // ---------------------------------------------------------------- the Units row
 
 /// The Units row's menu: Change Active Units, as Fusion's.
@@ -525,6 +599,98 @@ mod tests {
     app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
     assert_eq!(app.s.model.bodies.len(), 1, "no box");
     app
+  }
+
+  /// The Construction folder lists a plane once its Offset Plane is OK'd (not while previewed);
+  /// the plane row's menu is Fusion's, and its commands act on the plane.
+  #[test]
+  fn construction_plane_rows_follow_fusion() {
+    let mut app = App::with_session(Session::default());
+    app.start(Kind::OffsetPlane);
+    assert_eq!(app.s.model.planes.len(), 1, "previewed");
+    assert!(crate::construction::planes(&app).is_empty(), "not in the browser before OK");
+    app.dialog = None;
+    let planes = crate::construction::planes(&app);
+    assert_eq!(planes.len(), 1);
+    let fid = planes[0].0;
+    assert!(app.construction_shown, "the folder's eye is on");
+    assert_eq!(
+      labels(&construction_plane_menu(&app, fid)),
+      [
+        "Move to Group",
+        "Create Selection Set",
+        "-",
+        "Create Sketch",
+        "Offset Plane",
+        "-",
+        "Edit Construction Plane",
+        "Configure",
+        "-",
+        "Delete",
+        "Rename",
+        "-",
+        "Look At",
+        "Show/Hide",
+        "Find in Window",
+        "Find in Timeline",
+      ]
+    );
+    let keys: Vec<Option<&str>> = construction_plane_menu(&app, fid).iter().flatten().map(|i| i.key).collect();
+    assert_eq!(keys.iter().flatten().collect::<Vec<_>>(), [&"Del", &"V"]);
+    // Show/Hide is the row's eye
+    run_construction_plane_cmd(&mut app, fid, RowCmd::ShowHide);
+    assert!(!crate::construction::eye(&app, fid));
+    run_construction_plane_cmd(&mut app, fid, RowCmd::ShowHide);
+    assert!(crate::construction::eye(&app, fid));
+    run_construction_plane_cmd(&mut app, fid, RowCmd::LookAt);
+    run_construction_plane_cmd(&mut app, fid, RowCmd::FindInWindow);
+    run_construction_plane_cmd(&mut app, fid, RowCmd::FindInTimeline);
+    assert_eq!(app.s.selection, vec![Sel::Feature { feature: fid }]);
+    // Offset Plane starts from this plane: a second plane 10 mm past the first
+    run_construction_plane_cmd(&mut app, fid, RowCmd::OffsetPlane);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::OffsetPlane));
+    let made = app.dialog.as_ref().and_then(|d| d.previewed_plane()).expect("previewed");
+    assert!((app.s.model.planes[&made].origin.z - 20.0).abs() < 1e-9, "{:?}", app.s.model.planes[&made]);
+    app.cancel_dialog();
+    run_construction_plane_cmd(&mut app, fid, RowCmd::EditFeature);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.editing == Some(fid)));
+    app.cancel_dialog();
+    run_construction_plane_cmd(&mut app, fid, RowCmd::CreateSketch);
+    assert!(app.s.edit_sketch.is_some());
+    app.finish_sketch();
+    run_construction_plane_cmd(&mut app, fid, RowCmd::Delete);
+    assert!(app.s.design.feature(fid).is_none());
+  }
+
+  /// V shows or hides what is picked: a construction plane (it stays picked), an origin item, a
+  /// selected sketch; with nothing to show or hide it says what to select.
+  #[test]
+  fn v_toggles_the_picked_items_visibility() {
+    let mut app = App::with_session(Session::default());
+    let v = app.run("plane.offset", json!({"plane": "xy", "offset": 5})).unwrap();
+    let fid = fox_engine::model::FeatureId(v["feature"].as_u64().unwrap() as u32);
+    super::super::pick_plane(&mut app, json!({"feature": fid.0}));
+    app.toggle_visibility();
+    assert!(!crate::construction::eye(&app, fid));
+    assert_eq!(crate::construction::picked(&app), Some(fid), "still selected");
+    app.toggle_visibility();
+    assert!(crate::construction::eye(&app, fid));
+    origin::pick(&mut app, OriginItem::Y);
+    app.toggle_visibility();
+    assert!(!origin::eye(&app, OriginItem::Y));
+    origin::clear(&mut app);
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.unwrap();
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [5, 5]}));
+    app.finish_sketch();
+    app.s.selection = vec![Sel::Feature { feature: sk }];
+    let shown = fox_engine::scene::sketch_visible(&app.s, sk);
+    app.toggle_visibility();
+    assert_ne!(fox_engine::scene::sketch_visible(&app.s, sk), shown);
+    app.s.selection.clear();
+    app.status = None;
+    app.toggle_visibility();
+    assert_eq!(app.hint.as_deref(), Some("Show/Hide: select bodies, faces or edges first"));
   }
 
   #[test]
