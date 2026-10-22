@@ -57,7 +57,7 @@
 {"name": "ui-toolbar-customize-2", "items": 3, "status": "done", "pr": "60b9401", "fixer": "cloud session_013deoDbni63hVWKoKpKdXKY (requested 2026-10-22)"}
 {"name": "ui-toolbar-tooltips", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_06de807d (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-data-panel-2", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_31b67b87 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-file-dialogs", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_76a3d33e (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-file-dialogs", "items": 8, "status": "done", "pr": "02f5ad5", "fixer": "cloud task_76a3d33e (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-document-settings-views", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_6ece50ff (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-status-readouts", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_7bb6ebf6 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-camera-navbar", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_17e44523 (requested 2026-10-22 by the coordinator)"}
