@@ -51,15 +51,15 @@
 {"name": "ui-sketch-hud-expressions", "items": 8, "status": "done", "pr": "83357fa", "fixer": "cloud task_f95677bd (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-linetype-and-colors", "items": 6, "status": "done", "pr": "8277caf", "fixer": "cloud task_bcee3b90 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-palette-look-slice-3d", "items": 5, "status": "done", "pr": "aeafc3d", "fixer": "cloud task_0872a0e8 (requested 2026-10-21 by the coordinator)"}
-{"name": "ui-browser-sketch-rows", "items": 7, "status": "ready", "pr": null}
-{"name": "ui-sketch-project-colors", "items": 3, "status": "ready", "pr": null}
-{"name": "ui-sketch-redefine-and-dxf", "items": 2, "status": "ready", "pr": null}
-{"name": "ui-toolbar-customize-2", "items": 3, "status": "ready", "pr": null}
-{"name": "ui-toolbar-tooltips", "items": 3, "status": "ready", "pr": null}
-{"name": "ui-data-panel-2", "items": 8, "status": "ready", "pr": null}
-{"name": "ui-file-dialogs", "items": 8, "status": "ready", "pr": null}
-{"name": "ui-document-settings-views", "items": 6, "status": "ready", "pr": null}
-{"name": "ui-status-readouts", "items": 4, "status": "ready", "pr": null}
-{"name": "ui-camera-navbar", "items": 5, "status": "ready", "pr": null}
-{"name": "ui-display-settings-3", "items": 5, "status": "ready", "pr": null}
-{"name": "ui-grid-snaps-2", "items": 3, "status": "ready", "pr": null}
+{"name": "ui-browser-sketch-rows", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_1a110320 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-sketch-project-colors", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_e06e801d (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-sketch-redefine-and-dxf", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_37cf27b7 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-toolbar-customize-2", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_befd0393 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-toolbar-tooltips", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_06de807d (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-data-panel-2", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_31b67b87 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-file-dialogs", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_76a3d33e (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-document-settings-views", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_6ece50ff (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-status-readouts", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_7bb6ebf6 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-camera-navbar", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_17e44523 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-display-settings-3", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_1a57e52e (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-grid-snaps-2", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_90348c0f (requested 2026-10-22 by the coordinator)"}
