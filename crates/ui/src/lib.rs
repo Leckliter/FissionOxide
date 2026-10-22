@@ -166,6 +166,8 @@ pub struct App {
   pub(crate) canvas_px: [u32; 2],
   /// Inline dimension value editor: (constraint id, text, screen position).
   dim_edit: Option<(u32, String, egui::Pos2)>,
+  /// Values entered in dimension boxes lately, newest first: the box menu offers them.
+  pub(crate) dim_recent: Vec<String>,
   /// Feature id being renamed in the timeline/browser.
   rename: Option<(RenameTarget, String)>,
   drag: Option<viewport::Drag>,
@@ -456,6 +458,7 @@ impl App {
       ctx_menu: marking::MenuState::default(),
       canvas: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0)),
       dim_edit: None,
+      dim_recent: Vec::new(),
       rename: None,
       drag: None,
       comp_drag: None,

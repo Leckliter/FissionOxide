@@ -144,6 +144,44 @@ pub fn trim_number(v: f64) -> String {
   if s == "-0" { "0".to_string() } else { s.to_string() }
 }
 
+/// `src` re-spelt the way Fusion writes an expression back into a field once it is accepted:
+/// one space between tokens ("d1*2" → "d1 * 2", "1/2" → "1 / 2"), none inside a function's
+/// parentheses opening or before a comma, and a unary sign kept on its number ("-2 * 3").
+/// `None` when `src` doesn't lex.
+pub fn spaced(src: &str) -> Option<String> {
+  let tokens = lex(src).ok()?;
+  // a `-` or `+` not after a value or a `)` is a sign, not an operator
+  let operand = |i: usize| matches!(tokens.get(i), Some(Token::Num(_) | Token::Ident(_) | Token::Op(')')));
+  let sign = |i: usize| matches!(tokens.get(i), Some(Token::Op('-' | '+'))) && (i == 0 || !operand(i - 1));
+  let mut out = String::new();
+  // which open parentheses are a function call's (their contents hug them: "sqrt(a ^ 2)")
+  let mut calls: Vec<bool> = Vec::new();
+  for (i, t) in tokens.iter().enumerate() {
+    let call_paren = matches!(t, Token::Op('('))
+      && i > 0
+      && matches!(&tokens[i - 1], Token::Ident(n) if FUNCTIONS.contains(&n.as_str()));
+    let after_call_paren = i > 0 && matches!(tokens[i - 1], Token::Op('(')) && calls.last() == Some(&true);
+    let closes_call = matches!(t, Token::Op(')')) && calls.last() == Some(&true);
+    let glued = i == 0 || sign(i - 1) || call_paren || after_call_paren || closes_call || matches!(t, Token::Op(','));
+    if !glued {
+      out.push(' ');
+    }
+    match t {
+      Token::Op('(') => calls.push(call_paren),
+      Token::Op(')') => {
+        calls.pop();
+      }
+      _ => {}
+    }
+    match t {
+      Token::Num(n) => out.push_str(&format!("{n}")),
+      Token::Ident(s) => out.push_str(s),
+      Token::Op(c) => out.push(*c),
+    }
+  }
+  Some(out)
+}
+
 /// Is `name` usable as a parameter name (not a unit or function, valid identifier)?
 pub fn is_valid_parameter_name(name: &str) -> bool {
   let mut chars = name.chars();
@@ -156,8 +194,8 @@ pub fn is_valid_parameter_name(name: &str) -> bool {
 }
 
 const FUNCTIONS: &[&str] = &[
-  "sqrt", "abs", "sin", "cos", "tan", "asin", "acos", "atan", "min", "max", "round", "floor", "ceil", "if", "and", "or",
-  "not",
+  "sqrt", "abs", "sin", "cos", "tan", "asin", "acos", "atan", "min", "max", "round", "floor", "ceil", "if", "and",
+  "or", "not",
 ];
 
 /// Unit multiplier into base units (mm, rad).
@@ -542,6 +580,19 @@ mod tests {
 
   fn len(s: &str) -> f64 {
     eval(s, Kind::Length, &Empty).unwrap()
+  }
+
+  #[test]
+  fn spaced_rewrites_an_expression_as_fusion_does() {
+    assert_eq!(spaced("d1*2").as_deref(), Some("d1 * 2"));
+    assert_eq!(spaced("1/2").as_deref(), Some("1 / 2"));
+    assert_eq!(spaced("( 1 / 2 ) * 1 in").as_deref(), Some("( 1 / 2 ) * 1 in"));
+    assert_eq!(spaced("-2*3").as_deref(), Some("-2 * 3"));
+    assert_eq!(spaced("2*-3").as_deref(), Some("2 * -3"));
+    assert_eq!(spaced("sqrt(a^2+b^2)").as_deref(), Some("sqrt(a ^ 2 + b ^ 2)"));
+    assert_eq!(spaced("max(1,2 mm)").as_deref(), Some("max(1, 2 mm)"));
+    assert_eq!(spaced("0.5in").as_deref(), Some("0.5 in"));
+    assert_eq!(spaced("2 $"), None);
   }
 
   #[test]

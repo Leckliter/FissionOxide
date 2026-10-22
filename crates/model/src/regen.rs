@@ -491,8 +491,16 @@ fn sketch_warning(r: &SketchResult) -> Option<String> {
 }
 
 fn eval_params(design: &Design) -> (HashMap<String, f64>, HashMap<String, String>) {
-  let list: Vec<(String, String, ParamKind)> =
+  let mut list: Vec<(String, String, ParamKind)> =
     design.parameters.iter().map(|p| (p.name.clone(), p.expr.clone(), p.kind)).collect();
+  // the model parameters (d1, d2, ...) are in scope too, as in Fusion, so a dimension or a
+  // feature can read "d1 * 2"; a user parameter of the same name wins
+  let users = list.len();
+  for m in design.model_parameters() {
+    if !list[..users].iter().any(|(n, ..)| *n == m.name) {
+      list.push((m.name, m.expr, m.kind));
+    }
+  }
   let mut ok = HashMap::new();
   let mut err = HashMap::new();
   for (k, v) in fox_expr::eval_parameters(&list) {
@@ -500,9 +508,11 @@ fn eval_params(design: &Design) -> (HashMap<String, f64>, HashMap<String, String
       Ok(v) => {
         ok.insert(k, v);
       }
-      Err(e) => {
+      // a model parameter's bad expression is its own feature's warning
+      Err(e) if design.parameters.iter().any(|p| p.name == k) => {
         err.insert(k, e.to_string());
       }
+      Err(_) => {}
     }
   }
   (ok, err)

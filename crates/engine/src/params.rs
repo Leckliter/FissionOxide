@@ -193,4 +193,30 @@ mod tests {
     assert_eq!(rows[0]["expr"], "1 in");
     assert!((rows[0]["value"].as_f64().unwrap() - 25.4).abs() < 1e-9);
   }
+
+  /// A dimension can read the model parameters, as Fusion's heads-up boxes let it ("d1 * 2"):
+  /// it evaluates on creation and follows d1.
+  #[test]
+  fn a_dimension_expression_can_use_a_model_parameter() {
+    let mut s = Session::default();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
+    let r = run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let (w, h) = (r["curves"][0].as_u64().unwrap(), r["curves"][1].as_u64().unwrap());
+    run(&mut s, "sketch.dimension", json!({"type": "distance", "curves": [w], "value": "0.5"}));
+    run(&mut s, "sketch.dimension", json!({"type": "distance", "curves": [h], "value": "d1 * 2"}));
+    let rows = run(&mut s, "param.model", json!({}));
+    assert_eq!(rows[1]["expr"], "d1 * 2");
+    assert!((rows[1]["value"].as_f64().unwrap() - 1.0).abs() < 1e-9, "{rows}");
+    assert!((s.model.params["d2"] - 1.0).abs() < 1e-9, "model parameters are in the session's scope");
+    // d1 changes: d2 follows on the regeneration
+    run(&mut s, "param.model_set", json!({"feature": sk, "index": 0, "expr": "3"}));
+    let rows = run(&mut s, "param.model", json!({}));
+    assert!((rows[1]["value"].as_f64().unwrap() - 6.0).abs() < 1e-9, "{rows}");
+    let sketch = s.design.sketch(fox_model::FeatureId(sk as u32)).unwrap();
+    let dims: Vec<f64> = sketch.constraints.iter().filter_map(|c| c.kind.dim().map(|d| d.value)).collect();
+    assert_eq!(dims, [3.0, 6.0]);
+    // a user parameter named like a model parameter wins
+    run(&mut s, "param.add", json!({"name": "d1", "expr": "7", "kind": "length"}));
+    assert!((s.model.params["d1"] - 7.0).abs() < 1e-9);
+  }
 }

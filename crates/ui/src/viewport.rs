@@ -243,7 +243,10 @@ enum Field {
 fn hud_fields(tool: Tool, n: usize) -> &'static [Field] {
   match (tool, n) {
     (Tool::Line, 1..) => &[Field::Length, Field::Angle],
-    (Tool::Rect | Tool::CenterRect, 1) => &[Field::Width, Field::Height],
+    // Fusion's 2-point rectangle focuses the box beside the cursor first (the height); the
+    // width's dimension sits under the bottom edge
+    (Tool::Rect, 1) => &[Field::Height, Field::Width],
+    (Tool::CenterRect, 1) => &[Field::Width, Field::Height],
     (Tool::Circle, 1) => &[Field::Diameter],
     // Fusion's polygon boxes: the radius (or the edge's length) and the number of sides
     (Tool::Polygon | Tool::CircPolygon, 1) => &[Field::Radius, Field::Sides],
@@ -253,9 +256,8 @@ fn hud_fields(tool: Tool, n: usize) -> &'static [Field] {
     (Tool::Rect3, 1) => &[Field::Length],
     (Tool::Rect3, 2) => &[Field::Width],
     (Tool::Circle2P, 1) | (Tool::Circle3P, 2) => &[Field::Diameter],
-    (Tool::Arc3, 2) | (Tool::CenterArc | Tool::TangentArc | Tool::ArcSlotCenter, 1) | (Tool::ArcSlot3, 2) => {
-      &[Field::Radius]
-    }
+    // (the 3-point arc's third step has no box: the arc just follows the pointer)
+    (Tool::CenterArc | Tool::TangentArc | Tool::ArcSlotCenter, 1) | (Tool::ArcSlot3, 2) => &[Field::Radius],
     (Tool::CenterArc | Tool::ArcSlotCenter, 2) => &[Field::Angle],
     (Tool::Ellipse, 1 | 2) => &[Field::Length],
     (Tool::Slot | Tool::OverallSlot | Tool::CenterSlot | Tool::ArcSlot3, 1) => &[Field::Length],
@@ -1392,10 +1394,46 @@ fn hud_locks(app: &App) -> Vec<(Field, String)> {
     .collect()
 }
 
-/// Heads-up box text as an expression: a bare length means the design's unit.
+/// Heads-up box text as an expression, spelt as Fusion accepts it (see [`accepted_text`]): a bare
+/// length means the design's unit.
 fn hud_text(app: &App, field: Field, text: &str) -> String {
+  accepted_text(app.s.design.units, field, text)
+}
+
+/// Fusion's spelling of a value once a box accepts it (Tab, Enter): its tokens spaced
+/// ("d1 * 2", "3 in / 2"), a bare number given the field's unit ("2 in", "45 deg") and a bare
+/// expression multiplied by one unit ("( 1 / 2 ) * 1 in"). Text that doesn't parse is kept.
+fn accepted_text(unit: fox_engine::model::LengthUnit, field: Field, text: &str) -> String {
+  use fox_engine::expr::{Empty, eval_raw, spaced};
   let t = text.trim();
-  if matches!(field, Field::Angle | Field::Sides | Field::Rho) { t.to_string() } else { app.s.design.units.typed(t) }
+  let spaced = spaced(t).unwrap_or_else(|| t.to_string());
+  let sym = match field {
+    Field::Angle => "deg",
+    Field::Sides | Field::Rho => return spaced,
+    _ => unit.symbol(),
+  };
+  let bare = matches!(eval_raw(t, &Empty), Ok(v) if !v.has_unit);
+  if !bare {
+    return spaced;
+  }
+  if t.parse::<f64>().is_ok() { format!("{spaced} {sym}") } else { format!("( {spaced} ) * 1 {sym}") }
+}
+
+/// The value typed in the heads-up box setting `field`, if any (see [`hud_value`]).
+fn hud_field_value(app: &App, field: Field) -> Option<f64> {
+  let i = hud_fields(app.tool, hud_step(app)).iter().position(|f| *f == field)?;
+  hud_value(app, i)
+}
+
+/// What Tab writes back into heads-up box `i`: its typed text in Fusion's accepted spelling, if it
+/// evaluates (a value Fusion refuses is left as typed, padlock and all).
+fn hud_accepted(app: &App, i: usize) -> Option<String> {
+  let field = *hud_fields(app.tool, hud_step(app)).get(i)?;
+  let text = app.tstate.hud.typed.get(i)?.trim();
+  if text.is_empty() || hud_value(app, i).is_none() {
+    return None;
+  }
+  Some(accepted_text(app.s.design.units, field, text))
 }
 
 /// The number of sides typed in a polygon's heads-up box (Fusion's default is 6).
@@ -1471,7 +1509,8 @@ fn hud_apply(app: &App, cur: [f64; 2]) -> [f64; 2] {
     (Tool::Rect | Tool::CenterRect, _) => {
       // a centre rectangle's boxes hold its whole width and height
       let k = if app.tool == Tool::CenterRect { 0.5 } else { 1.0 };
-      [v(0).map_or(cur[0], |w| last[0] + sign(dx) * w * k), v(1).map_or(cur[1], |h| last[1] + sign(dy) * h * k)]
+      let (w, h) = (hud_field_value(app, Field::Width), hud_field_value(app, Field::Height));
+      [w.map_or(cur[0], |w| last[0] + sign(dx) * w * k), h.map_or(cur[1], |h| last[1] + sign(dy) * h * k)]
     }
     (Tool::Rect3, [a, b]) => v(0).map_or(cur, |h| beside(*a, *b, *b, h)),
     (Tool::Circle, _) => v(0).map_or(cur, |d| out(last, d / 2.0)),
@@ -1554,7 +1593,7 @@ fn hud_live(app: &App, cur: [f64; 2]) -> [f64; 2] {
   match (app.tool, pts) {
     (Tool::Line, _) => [d, ang],
     (Tool::MidpointLine, _) => [2.0 * d, ang],
-    (Tool::Rect, _) => [dx.abs(), dy.abs()],
+    (Tool::Rect, _) => [dy.abs(), dx.abs()],
     (Tool::CenterRect, _) => [2.0 * dx.abs(), 2.0 * dy.abs()],
     (Tool::Rect3, [a, b]) => [point_line_dist(cur, *a, *b), 0.0],
     (Tool::Circle, _) => [2.0 * d, 0.0],
@@ -2587,7 +2626,11 @@ pub fn settle_dim_edit(app: &mut App) {
 fn commit_pending_dim(app: &mut App, text: &str) {
   let (Some(sk), Some(mut cmd)) = (app.s.edit_sketch, app.tstate.pending_dim.take()) else { return };
   let unit = app.s.design.units;
-  let value = if cmd["type"] == "angle" { text.to_string() } else { unit.typed(text) };
+  let angle = cmd["type"] == "angle";
+  // an emptied box (Escape) keeps the dimension at its measured value
+  let measured = app.tstate.dim_place.as_ref().and_then(|p| p.current).map(|v| dim_full_text(unit, angle, v));
+  let text = if text.trim().is_empty() { measured.unwrap_or_default() } else { text.to_string() };
+  let value = accepted_text(unit, if angle { Field::Angle } else { Field::Length }, &text);
   cmd["sketch"] = json!(sk.0);
   cmd["value"] = json!(value);
   // the value stays where the placing click put it
@@ -2618,8 +2661,11 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
   let Some((cid, mut text, pos)) = app.dim_edit.take() else { return };
   // an existing dimension names its model parameter ("d7 : 0.4 in"), as Fusion's tooltip does
   let param = if cid == 0 { None } else { dim_param_name(app, cid) };
-  let mut open_params = false;
-  let mut delete = false;
+  let mut measure = false;
+  let recent = app.dim_recent.clone();
+  // Enter on an emptied box is refused: the box stays, with a red underline until a value is typed
+  let empty_id = egui::Id::new("dim-editor-empty");
+  let mut refused = ctx.data(|d| d.get_temp::<bool>(empty_id)).unwrap_or(false);
   // a box that wasn't showing last frame (or shows another edit) takes the keyboard with its
   // text selected
   let shown_id = egui::Id::new("dim-editor-shown");
@@ -2636,7 +2682,17 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
       egui::Frame::popup(ui.style()).inner_margin(3.0).show(ui, |ui| {
         ui.horizontal(|ui| {
           ui.spacing_mut().item_spacing.x = 2.0;
+          // a driven value (an expression with parameters) carries Fusion's greyed "fx" tag
+          if !text.trim().is_empty() && fox_engine::expr::eval_raw(&text, &fox_engine::expr::Empty).is_err() {
+            ui.label(egui::RichText::new("fx").italics().size(11.0).color(Color32::from_gray(150)));
+          }
           let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(90.0).hint_text("value or expression"));
+          if refused && text.trim().is_empty() {
+            let (a, b) = (r.rect.left_bottom(), r.rect.right_bottom());
+            ui.painter().line_segment([a, b], Stroke::new(1.5, Color32::from_rgb(214, 48, 48)));
+          } else {
+            refused = false;
+          }
           let r = match &param {
             Some(name) => r.on_hover_text(format!("{name} : {text}")),
             None => r,
@@ -2651,29 +2707,44 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
           let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
           let accept = enter || (esc && cid == 0);
           commit = accept && (r.has_focus() || r.lost_focus());
+          if commit && enter && text.trim().is_empty() {
+            commit = false;
+            refused = true;
+            // Enter dropped the box's focus: it keeps the keyboard, as Fusion's does
+            r.request_focus();
+          }
           cancel = esc && !commit;
           let m = ui.add(egui::Button::new("").min_size(Vec2::new(14.0, 20.0)).frame(false));
           let dot = Color32::from_gray(60);
           for dy in [-4.0, 0.0, 4.0] {
             ui.painter().circle_filled(m.rect.center() + Vec2::new(0.0, dy), 1.3, dot);
           }
+          // Fusion's menu: the values entered lately (picking one fills the box), then Measure
           egui::Popup::menu(&m).show(|ui| {
-            if ui.button("Change Parameters").clicked() {
-              open_params = true;
+            for v in &recent {
+              if ui.button(v).clicked() {
+                text = v.clone();
+              }
             }
-            if cid != 0 && ui.button("Delete").clicked() {
-              delete = true;
+            if !recent.is_empty() {
+              ui.separator();
             }
+            ui.horizontal(|ui| {
+              let (ir, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+              crate::icons::draw(ui.painter(), ir, crate::icons::Icon::Measure, Color32::from_gray(70));
+              if ui.button("Measure").clicked() {
+                measure = true;
+              }
+            });
           });
         });
       });
     });
-  if open_params {
-    app.show_params = true;
-  }
-  if delete && let Some(sk) = app.s.edit_sketch {
-    app.run("sketch.delete", json!({"sketch": sk.0, "constraints": [cid]}));
-    return;
+  ctx.data_mut(|d| d.insert_temp(empty_id, refused && !commit && !cancel));
+  if measure {
+    // Measure opens beside the box, as in Fusion (its readout is typed back by hand)
+    let d = crate::dialogs::Dialog::open(app, crate::dialogs::Kind::Inspect);
+    app.dialog = Some(d);
   }
   if commit {
     // the Enter is this box's, not the open dialog's OK
@@ -2693,9 +2764,10 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
           .ok()
           .and_then(|s| s.constraint(fox_engine::sketch::ConstraintId(cid)))
           .is_some_and(|c| c.kind.is_angle());
-        let value = if angle { text.clone() } else { unit.typed(&text) };
+        let value = accepted_text(unit, if angle { Field::Angle } else { Field::Length }, &text);
         app.run("sketch.set_dimension", json!({"sketch": sk.0, "constraint": cid, "value": value}));
       }
+      remember_dim_value(app, &text);
     }
   }
   if cancel {
@@ -2706,6 +2778,18 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
   if !commit && !cancel {
     app.dim_edit = Some((cid, text, pos));
   }
+}
+
+/// Keeps a value entered in a dimension box for the box menu's list of recent values, newest
+/// first, as Fusion does.
+fn remember_dim_value(app: &mut App, text: &str) {
+  let t = text.trim();
+  if t.is_empty() {
+    return;
+  }
+  app.dim_recent.retain(|v| v != t);
+  app.dim_recent.insert(0, t.to_string());
+  app.dim_recent.truncate(8);
 }
 
 /// The model parameter that drives the open sketch's dimension `cid` ("d7"), as the Parameters
@@ -3282,7 +3366,8 @@ fn dim_label(
   dim: &fox_engine::sketch::Dim,
   unit: fox_engine::model::LengthUnit,
 ) -> Option<([f64; 2], String)> {
-  // a plain value ("10", "1 in") shows as the number; an expression with parameters as "w = 10"
+  // a plain value ("10", "1 in") shows as the number; an expression with parameters as
+  // "fx: 2.00", Fusion's mark for a driven dimension
   let numeric = fox_engine::expr::eval_raw(&dim.expr, &fox_engine::expr::Empty).is_ok();
   let val = if k.is_angle() {
     // one decimal with the degree sign, as Fusion reads an angle ("17.2°")
@@ -3292,7 +3377,7 @@ fn dim_label(
     // sketch dimensions: "0.479", "12.00")
     fixed_number(unit, dim.value)
   };
-  let shown = |prefix: &str| if numeric { format!("{prefix}{val}") } else { format!("{prefix}{} = {val}", dim.expr) };
+  let shown = |prefix: &str| if numeric { format!("{prefix}{val}") } else { format!("fx: {prefix}{val}") };
   let mid = |a: PointId, b: PointId| -> Option<[f64; 2]> {
     let (p, q) = (s.pos(a)?, s.pos(b)?);
     Some([(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0])
@@ -3569,8 +3654,17 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     (Tool::Circle, [c]) => circle(*c, (cur[0] - c[0]).hypot(cur[1] - c[1])),
     (Tool::Arc3 | Tool::CenterArc | Tool::Slot, [a]) => line(*a, cur),
     (Tool::Arc3, [a, b]) => {
-      if let Some(c) = fox_engine::sketch::circumcenter(*a, cur, *b) {
-        circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
+      // the arc through the pointer, with Fusion's cross at each end and at the pointer
+      if let Some((c, r, a0, sweep)) = arc_through(*a, cur, *b) {
+        poly(&arc_points(c, r, a0, sweep), false);
+      } else {
+        line(*a, *b);
+      }
+      for p in [*a, *b, cur] {
+        if let Some(q) = s(p) {
+          painter.line_segment([q + Vec2::new(-5.0, 0.0), q + Vec2::new(5.0, 0.0)], stroke);
+          painter.line_segment([q + Vec2::new(0.0, -5.0), q + Vec2::new(0.0, 5.0)], stroke);
+        }
       }
     }
     (Tool::CenterArc, [c, a]) => {
@@ -3674,20 +3768,34 @@ pub fn route_typing(app: &mut App, ctx: &egui::Context) {
       })
       .collect()
   });
-  if !typed.starts_with(|c: char| c.is_ascii_digit() || c == '.' || c == '-') {
+  let value_start = typed.starts_with(|c: char| c.is_ascii_digit() || c == '.' || c == '-');
+  let to_hud = app.s.edit_sketch.is_some() && !hud_fields(app.tool, hud_step(app)).is_empty();
+  // the focused heads-up box takes any character, letters included ("d1*2" goes straight in, as
+  // in Fusion); a dialog's value takes what starts a number
+  let expr_start = typed.starts_with(|c: char| c.is_alphanumeric() || "(.-".contains(c));
+  if !(value_start || (to_hud && expr_start)) {
     return;
   }
-  if app.s.edit_sketch.is_some() && !hud_fields(app.tool, hud_step(app)).is_empty() {
+  use egui::Key;
+  if to_hud {
     let hud = &mut app.tstate.hud;
     hud.typed[hud.active] = typed.clone();
     hud.buf = Some(typed);
     hud.focus = Some(false);
-  } else if app.dialog.is_some() {
-    crate::dialogs::type_into(ctx, typed);
-  } else {
+    // the keys that typed it are the box's, not shortcuts
+    ctx.input_mut(|i| {
+      i.events.retain(|e| {
+        !matches!(e, egui::Event::Key { key, .. } if !matches!(key,
+          Key::Escape | Key::Enter | Key::Tab | Key::Backspace | Key::Delete | Key::ArrowLeft | Key::ArrowRight
+            | Key::ArrowUp | Key::ArrowDown | Key::Home | Key::End))
+      })
+    });
     return;
   }
-  use egui::Key;
+  if app.dialog.is_none() {
+    return;
+  }
+  crate::dialogs::type_into(ctx, typed);
   ctx.input_mut(|i| {
     i.events.retain(|e| {
       !matches!(e, egui::Event::Key { key, .. } if matches!(key,
@@ -3869,14 +3977,19 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
         rho_at = to_screen(m).map(|p| p + Vec2::new(0.0, 30.0));
         None
       }
+      // the 2-point rectangle's focused box floats beside the cursor (placed below)
+      (Tool::Rect, _, _) if fields.iter().position(|x| x == f) == Some(app.tstate.hud.active) => None,
       (Tool::Rect | Tool::CenterRect, Field::Width | Field::Height, _) => {
+        // the width under the bottom edge and the height beside the right edge, between
+        // extension lines, whichever way the rectangle was dragged
         let o = if app.tool == Tool::CenterRect { [2.0 * last[0] - cur[0], 2.0 * last[1] - cur[1]] } else { last };
-        let mid = [(o[0] + cur[0]) / 2.0, (o[1] + cur[1]) / 2.0];
-        let corner = [cur[0], o[1]];
+        let (x0, x1) = (o[0].min(cur[0]), o[0].max(cur[0]));
+        let (y0, y1) = (o[1].min(cur[1]), o[1].max(cur[1]));
+        let mid = [(x0 + x1) / 2.0, (y0 + y1) / 2.0];
         if *f == Field::Width {
-          linear_shape(o, corner, [1.0, 0.0], mid, off, wpp, &to_screen)
+          linear_shape([x0, y0], [x1, y0], [1.0, 0.0], mid, off, wpp, &to_screen)
         } else {
-          linear_shape(corner, cur, [0.0, 1.0], mid, off, wpp, &to_screen)
+          linear_shape([x1, y0], [x1, y1], [0.0, 1.0], mid, off, wpp, &to_screen)
         }
       }
       (Tool::Circle, Field::Diameter, _) => {
@@ -3900,10 +4013,23 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     let under = at.first().copied().flatten().map(|p| p + Vec2::new(0.0, 26.0));
     at[i] = under;
   }
+  let n = fields.len();
+  // the 2-point rectangle's focused box sits just left of the cursor, as Fusion's does
+  if app.tool == Tool::Rect
+    && let Some(slot) = at.get_mut(app.tstate.hud.active.min(n - 1))
+  {
+    *slot = to_screen(raw).map(|p| p + Vec2::new(-56.0, 0.0));
+  }
+  // Tab accepts the box's text and writes it back as Fusion spells it ("( 1 / 2 ) * 1 in")
+  if tab.is_some()
+    && let Some(accepted) = hud_accepted(app, app.tstate.hud.active.min(n - 1))
+  {
+    let i = app.tstate.hud.active.min(n - 1);
+    app.tstate.hud.typed[i] = accepted;
+  }
   // lengths in the design's unit (a bare number typed back means that unit, see [`hud_text`])
   let unit = app.s.design.units;
   let fmt = |i: usize| hud_display(unit, fields[i], live[i]);
-  let n = fields.len();
   let hud = &mut app.tstate.hud;
   hud.active = hud.active.min(n - 1);
   let mut commit = false;
@@ -3964,12 +4090,7 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     // the other boxes show the live value, or what was typed (locked, with its unit) with a
     // padlock to their right
-    let text = if typed {
-      let t = hud.typed[i].trim();
-      if matches!(fields[i], Field::Angle | Field::Sides) { t.to_string() } else { unit.typed(t) }
-    } else {
-      fmt(i)
-    };
+    let text = if typed { accepted_text(unit, fields[i], &hud.typed[i]) } else { fmt(i) };
     let font = egui::FontId::proportional(12.0);
     let galley = painter.layout_no_wrap(text, font, if typed { Color32::BLACK } else { Color32::from_gray(60) });
     let r = Rect::from_center_size(p, galley.size() + Vec2::new(10.0, 5.0));
@@ -3990,7 +4111,13 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
       // the box with the keyboard shows its value selected, as Fusion's does: typing replaces it
       painter.rect_filled(Rect::from_min_size(text_at, galley.size()), 0.0, Color32::from_rgb(190, 214, 248));
     }
+    let size = galley.size();
     painter.galley(text_at, galley, Color32::BLACK);
+    if active && !typed {
+      // and Fusion's blue underline under the focused value
+      let y = text_at.y + size.y + 1.0;
+      painter.line_segment([Pos2::new(text_at.x, y), Pos2::new(text_at.x + size.x, y)], Stroke::new(1.5, ink));
+    }
   }
   if commit {
     // this Enter places the point; it isn't the open dialog's OK
@@ -4277,7 +4404,7 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
       if n == 0 {
         "Place center point"
       } else {
-        "Specify diameter"
+        "Specify diameter of circle"
       }
     }
     Tool::Circle2P => {
@@ -4305,7 +4432,7 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
     Tool::Arc3 => match n {
       0 => "Place start point",
       1 => "Place end point",
-      _ => "Specify radius",
+      _ => "Place point on arc",
     },
     Tool::CenterArc => match n {
       0 => "Place center point",
@@ -4436,7 +4563,8 @@ fn cursor_prompt(app: &App, resp: &egui::Response) {
   )
   .gap(14.0)
   .show(|ui| {
-    ui.label(prompt);
+    // on one line, however long ("Specify size of rectangle")
+    ui.add(egui::Label::new(prompt).extend());
   });
 }
 
@@ -4926,7 +5054,7 @@ mod tests {
     assert_eq!(sketch_prompt(Tool::Select, &st), None);
     st.pts.push([0.0, 0.0]);
     assert_eq!(sketch_prompt(Tool::Rect, &st), Some("Specify size of rectangle"));
-    assert_eq!(sketch_prompt(Tool::Circle, &st), Some("Specify diameter"));
+    assert_eq!(sketch_prompt(Tool::Circle, &st), Some("Specify diameter of circle"));
     // the tangent circles name each tangent; the 2-tangent one then asks for its radius
     assert_eq!(sketch_prompt(Tool::Circle3T, &st), Some("Select first tangent of circle"));
     st.curves = vec![(1, [0.0, 0.0])];
@@ -5020,7 +5148,11 @@ mod tests {
     assert_eq!(f(Tool::MidpointLine, 1), [Length, Angle]);
     assert_eq!(f(Tool::Rect3, 1), [Length]);
     assert_eq!(f(Tool::Rect3, 2), [Width]);
+    // the 2-point rectangle focuses the box beside the cursor, its height, first
+    assert_eq!(f(Tool::Rect, 1), [Height, Width]);
     assert_eq!(f(Tool::CenterRect, 1), [Width, Height]);
+    // the 3-point arc's third step shows no box: the arc follows the pointer
+    assert_eq!((f(Tool::Arc3, 1), f(Tool::Arc3, 2)), (vec![], vec![]));
     assert_eq!(f(Tool::Circle2P, 1), [Diameter]);
     assert_eq!((f(Tool::Circle3P, 1), f(Tool::Circle3P, 2)), (vec![], vec![Diameter]));
     assert_eq!((f(Tool::CenterArc, 1), f(Tool::CenterArc, 2)), (vec![Radius], vec![Angle]));
@@ -5492,10 +5624,11 @@ mod tests {
   fn typed_rectangle_sizes_become_driving_dimensions() {
     let (mut app, sk) = sketching(Tool::Rect);
     place_point(&mut app, sk, [0.0, 0.0], None);
-    typed(&mut app, ["40", "25 mm"]);
+    // the height box, then the width box
+    typed(&mut app, ["25 mm", "40"]);
     // the cursor only gives the direction: up and to the left
     place_point(&mut app, sk, [-3.0, 7.0], None);
-    assert_eq!(dims(&app, sk), vec![40.0, 25.0]);
+    assert_eq!(dims(&app, sk), vec![25.0, 40.0]);
     let (lo, hi) = app.s.design.sketch(sk).unwrap().bounds().unwrap();
     assert!((lo[0] + 40.0).abs() < 1e-6 && (hi[1] - 25.0).abs() < 1e-6, "{lo:?} {hi:?}");
     // the rectangle and its dimensions are one undo step
@@ -5823,7 +5956,7 @@ mod tests {
     let (mut app, sk) = sketching(Tool::Rect);
     place_point(&mut app, sk, [0.0, 0.0], None);
     assert_eq!(hud_apply(&app, [7.0, -3.0]), [7.0, -3.0]);
-    assert_eq!(hud_live(&app, [7.0, -3.0]), [7.0, 3.0]);
+    assert_eq!(hud_live(&app, [7.0, -3.0]), [3.0, 7.0], "the height box first, then the width");
     place_point(&mut app, sk, [7.0, -3.0], None);
     assert!(dims(&app, sk).is_empty());
   }
@@ -5874,10 +6007,119 @@ mod tests {
     });
     assert_eq!(app.tstate.hud.typed[0], "4");
     assert_eq!(app.tstate.hud.buf.as_deref(), Some("4"));
-    // letters are shortcuts, not values
+    // letters are shortcuts, not values, while no box is up
     let (mut app, _) = sketching(Tool::Rect);
     frame(&ctx, vec![egui::Event::Text("l".into())], |ctx| route_typing(&mut app, ctx));
     assert!(app.tstate.hud.buf.is_none());
+  }
+
+  /// With the first box focused (as it is after the first click) any character starts typing,
+  /// letters included: "d1*2" goes straight in, and the key is no shortcut.
+  #[test]
+  fn a_letter_starts_typing_in_the_focused_heads_up_box() {
+    let (mut app, sk) = sketching(Tool::Rect);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    let ctx = egui::Context::default();
+    frame(&ctx, vec![egui::Event::Text("d".into()), key(egui::Key::D)], |ctx| {
+      route_typing(&mut app, ctx);
+      assert!(!ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { .. }))), "the key is the box's");
+    });
+    assert_eq!(app.tstate.hud.typed[0], "d");
+    assert_eq!(app.tstate.hud.buf.as_deref(), Some("d"));
+    assert_eq!(app.tool, Tool::Rect, "not the Dimension shortcut");
+  }
+
+  /// Tab (and the lock) spell a typed value as Fusion writes it back: "1/2" becomes
+  /// "( 1 / 2 ) * 1 in", a number takes the unit, an expression is spaced.
+  #[test]
+  fn tab_writes_the_accepted_spelling_back_into_the_box() {
+    use fox_engine::model::LengthUnit::{In, Mm};
+    assert_eq!(accepted_text(In, Field::Width, "1/2"), "( 1 / 2 ) * 1 in");
+    assert_eq!(accepted_text(Mm, Field::Width, "1/2"), "( 1 / 2 ) * 1 mm");
+    assert_eq!(accepted_text(In, Field::Width, " 2 "), "2 in");
+    assert_eq!(accepted_text(In, Field::Width, "3 in/2"), "3 in / 2");
+    assert_eq!(accepted_text(In, Field::Width, "d1*2"), "d1 * 2");
+    assert_eq!(accepted_text(In, Field::Angle, "45"), "45 deg");
+    assert_eq!(accepted_text(In, Field::Sides, "6"), "6");
+    assert_eq!(accepted_text(In, Field::Width, "2 +"), "2 +", "what doesn't parse is kept");
+    let (mut app, sk) = sketching(Tool::Rect);
+    app.s.design.units = In;
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["1/2", "2 +"]);
+    assert_eq!(hud_accepted(&app, 0).as_deref(), Some("( 1 / 2 ) * 1 in"));
+    assert_eq!(hud_accepted(&app, 1), None, "a value Fusion refuses stays as typed");
+  }
+
+  /// A heads-up box takes an expression in the model parameters ("d1*2"): the side is driven
+  /// by it, its dimension reads "fx: 1.00" and its edit box opens with "d1 * 2".
+  #[test]
+  fn a_heads_up_expression_can_use_a_model_parameter() {
+    let (mut app, sk) = sketching(Tool::Rect);
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 20], [0.5, 20]]})).unwrap();
+    let c = r["curves"][0].as_u64().unwrap();
+    app.run("sketch.dimension", json!({"sketch": sk.0, "type": "distance", "curves": [c], "value": "0.5"})).unwrap();
+    assert_eq!(app.s.model.params.get("d1"), Some(&0.5), "model parameters are in scope");
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["d1*2", ""]);
+    assert_eq!(hud_value(&app, 0), Some(1.0));
+    place_point(&mut app, sk, [5.0, 5.0], None);
+    assert_eq!(dims(&app, sk), vec![0.5, 1.0]);
+    let s = app.s.design.sketch(sk).unwrap();
+    let c = s.constraints.iter().filter(|c| c.kind.dim().is_some()).nth(1).unwrap();
+    let dim = c.kind.dim().unwrap();
+    assert_eq!(dim.expr, "d1 * 2");
+    let (_, label) = dim_label(s, &c.kind, dim, app.s.design.units).unwrap();
+    assert_eq!(label, "fx: 1.00");
+    assert_eq!(dim_edit_text(&c.kind, dim, app.s.design.units), "d1 * 2");
+    assert_eq!(dim_param_name(&app, c.id.0).as_deref(), Some("d2"));
+  }
+
+  /// Enter on an emptied dimension box is refused: the box stays open until a value is typed
+  /// (then remembered for the box menu) or Escape closes it unchanged.
+  #[test]
+  fn enter_on_an_empty_dimension_box_is_refused() {
+    let (mut app, sk) = sketching(Tool::Select);
+    app.run("sketch.line", json!({"points": [[0, 0], [40, 0]]})).unwrap();
+    let curve = app.s.design.sketch(sk).unwrap().curves[0].id;
+    let r = app.run("sketch.dimension", json!({"type": "distance", "curves": [curve.0], "value": "40"})).unwrap();
+    let cid = r["constraint"].as_u64().unwrap() as u32;
+    app.dim_edit = Some((cid, String::new(), Pos2::new(200.0, 200.0)));
+    let ctx = egui::Context::default();
+    frame(&ctx, vec![], |ctx| dim_editor(&mut app, ctx));
+    frame(&ctx, vec![key(egui::Key::Enter)], |ctx| dim_editor(&mut app, ctx));
+    assert!(app.dim_edit.is_some(), "the box stays open");
+    assert_eq!(dims(&app, sk), vec![40.0]);
+    assert!(app.dim_recent.is_empty());
+    frame(&ctx, vec![egui::Event::Text("25".into())], |ctx| dim_editor(&mut app, ctx));
+    frame(&ctx, vec![key(egui::Key::Enter)], |ctx| dim_editor(&mut app, ctx));
+    assert!(app.dim_edit.is_none());
+    assert_eq!(dims(&app, sk), vec![25.0]);
+    assert_eq!(app.dim_recent, ["25"]);
+    // Escape on an emptied box leaves the dimension as it was
+    app.dim_edit = Some((cid, String::new(), Pos2::new(200.0, 200.0)));
+    frame(&ctx, vec![], |ctx| dim_editor(&mut app, ctx));
+    frame(&ctx, vec![key(egui::Key::Escape)], |ctx| dim_editor(&mut app, ctx));
+    assert!(app.dim_edit.is_none());
+    assert_eq!(dims(&app, sk), vec![25.0]);
+    // and the recent values list is newest first, without repeats
+    remember_dim_value(&mut app, "0.5 in");
+    remember_dim_value(&mut app, "25");
+    assert_eq!(app.dim_recent, ["25", "0.5 in"]);
+  }
+
+  /// The 3-point arc's third step: the prompt asks for a point on the arc and there is no box.
+  #[test]
+  fn the_three_point_arc_third_step_has_no_box() {
+    let (mut app, sk) = sketching(Tool::Arc3);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [10.0, 0.0], None);
+    assert_eq!(sketch_prompt(Tool::Arc3, &app.tstate), Some("Place point on arc"));
+    assert!(hud_fields(Tool::Arc3, 2).is_empty());
+    assert_eq!(hud_apply(&app, [5.0, 3.0]), [5.0, 3.0]);
+    place_point(&mut app, sk, [5.0, 3.0], None);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert!(s.curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })));
+    assert!(dims(&app, sk).is_empty());
   }
 
   #[test]
