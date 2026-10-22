@@ -5,10 +5,10 @@
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use std::f32::consts::{PI, TAU};
 
-/// Fusion's application bar ink: a dark neutral grey.
-pub const INK: Color32 = Color32::from_rgb(76, 76, 76);
+/// Fusion's application bar ink: a flat mid grey (#808080, measured on Fusion's bar).
+pub const INK: Color32 = Color32::from_rgb(128, 128, 128);
 /// A disabled bar icon (Redo with nothing to redo).
-pub const INK_OFF: Color32 = Color32::from_rgb(168, 168, 168);
+pub const INK_OFF: Color32 = Color32::from_rgb(184, 184, 184);
 
 /// An application bar glyph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

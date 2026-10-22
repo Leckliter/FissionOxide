@@ -111,27 +111,27 @@ pub mod dark {
 pub mod app {
   use crate::Rgb;
   pub const APP_BAR: Rgb = Rgb(217, 217, 217);
-  pub const TOOLBAR: Rgb = Rgb(243, 243, 243);
+  pub const TOOLBAR: Rgb = Rgb(245, 245, 245);
   pub const CONTEXT_TAB: Rgb = Rgb(214, 233, 250);
   pub const PANEL: Rgb = Rgb(255, 255, 255);
-  pub const FLOAT_HEADER: Rgb = Rgb(238, 240, 243);
-  pub const PILL: Rgb = Rgb(229, 232, 237);
+  pub const FLOAT_HEADER: Rgb = Rgb(245, 245, 245);
+  pub const PILL: Rgb = Rgb(240, 240, 240);
   pub const PILL_ROOT: Rgb = Rgb(52, 64, 82);
-  pub const BORDER: Rgb = Rgb(204, 210, 218);
-  pub const SEPARATOR: Rgb = Rgb(220, 225, 231);
+  pub const BORDER: Rgb = Rgb(208, 208, 208);
+  pub const SEPARATOR: Rgb = Rgb(222, 222, 222);
   pub const ACCENT: Rgb = Rgb(30, 136, 229);
   pub const ACCENT_DARK: Rgb = Rgb(18, 104, 190);
   pub const HOVER: Rgb = Rgb(232, 242, 252);
   pub const SELECTED: Rgb = Rgb(208, 229, 250);
   pub const ERROR: Rgb = Rgb(214, 48, 39);
   pub const WARNING: Rgb = Rgb(232, 155, 0);
-  pub const TEXT: Rgb = Rgb(44, 54, 70);
-  pub const MUTED: Rgb = Rgb(112, 122, 136);
-  pub const GROUP_LABEL: Rgb = Rgb(52, 64, 82);
+  pub const TEXT: Rgb = Rgb(60, 60, 60);
+  pub const MUTED: Rgb = Rgb(122, 122, 122);
+  pub const GROUP_LABEL: Rgb = Rgb(60, 60, 60);
   pub const DIALOG_HEADER: Rgb = Rgb(240, 242, 245);
   pub const DIALOG_BODY: Rgb = Rgb(250, 251, 252);
   pub const TIMELINE: Rgb = Rgb(238, 240, 243);
-  pub const ICON_INK: Rgb = Rgb(52, 64, 82);
+  pub const ICON_INK: Rgb = Rgb(80, 80, 80);
   pub const ICON_TILE_DARK: [Rgb; 2] = [Rgb(42, 51, 66), Rgb(22, 27, 36)];
   pub const ICON_TILE_LIGHT: [Rgb; 2] = [Rgb(255, 255, 255), Rgb(233, 237, 242)];
 }

@@ -23,14 +23,12 @@ pub const PANEL: Color32 = color(app::PANEL);
 pub const FLOAT_HEADER: Color32 = color(app::FLOAT_HEADER);
 /// Grey pills behind browser row labels.
 pub const PILL: Color32 = Color32::from_rgba_premultiplied(app::PILL.0, app::PILL.1, app::PILL.2, 230);
-/// The dark pill of the browser's root component.
-pub const PILL_ROOT: Color32 = color(app::PILL_ROOT);
 pub const BORDER: Color32 = color(app::BORDER);
 pub const SEPARATOR: Color32 = color(app::SEPARATOR);
 /// The blue accent (the solid-modelling icon blue): selection, primary actions.
 pub const ACCENT: Color32 = color(app::ACCENT);
-/// The active toolbar tab: bold black text and underline, as in Fusion.
-pub const TAB_ACTIVE: Color32 = Color32::BLACK;
+/// The active toolbar tab's text and underline: Fusion's text grey (its weight stays regular).
+pub const TAB_ACTIVE: Color32 = color(app::TEXT);
 pub const ACCENT_DARK: Color32 = color(app::ACCENT_DARK);
 /// Light blue behind hovered / selected rows and buttons.
 pub const HOVER: Color32 = color(app::HOVER);

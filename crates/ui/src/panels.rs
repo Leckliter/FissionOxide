@@ -1338,27 +1338,25 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
   });
 }
 
-/// One toolbar tab: Fusion's active tab (the contextual SKETCH tab too) is bold black with a
-/// black underline; the others plain dark grey.
+/// One toolbar tab: every tab's name is Fusion's regular text grey; the active one (the
+/// contextual SKETCH tab too) is underlined in the same grey.
 pub(crate) fn ribbon_tab(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
   let font = egui::FontId::proportional(12.5);
-  let color = if active { theme::TAB_ACTIVE } else { Color32::from_gray(45) };
+  let color = if active { theme::TAB_ACTIVE } else { theme::TEXT };
   let tw = ui.painter().layout_no_wrap(label.to_string(), font.clone(), color).size().x;
   let (rect, resp) = ui.allocate_exact_size(vec2(tw + 26.0, 28.0), egui::Sense::click());
   let pill = rect.shrink2(vec2(0.0, 3.0));
   if resp.hovered() && !active {
     ui.painter().rect_filled(pill, 2.0, theme::HOVER);
   }
-  ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font.clone(), color);
+  ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, color);
   if active {
-    // the font has no bold face: a second pass half a pixel over gives the weight
-    ui.painter().text(rect.center() + vec2(0.6, 0.0), egui::Align2::CENTER_CENTER, label, font, color);
     ui.painter().line_segment(
       [
         pos2(rect.center().x - tw / 2.0 - 4.0, rect.bottom() - 2.0),
         pos2(rect.center().x + tw / 2.0 + 4.0, rect.bottom() - 2.0),
       ],
-      Stroke::new(3.0, theme::TAB_ACTIVE),
+      Stroke::new(2.0, theme::TAB_ACTIVE),
     );
   }
   resp
@@ -1407,21 +1405,16 @@ fn triangle(p: &egui::Painter, c: Pos2, open: bool, color: Color32) {
   p.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
 }
 
-/// Browser expander: a hollow ▷ when closed, a hollow ▽ when open, and the filled ◢ of the
-/// root component.
-fn tree_triangle(p: &egui::Painter, c: Pos2, open: bool, root: bool, color: Color32) {
+/// Browser expander, as Fusion's: a thin chevron, ">" when closed and "v" when open (the root
+/// component's too).
+fn tree_triangle(p: &egui::Painter, c: Pos2, open: bool, _root: bool, color: Color32) {
   let s = Stroke::new(1.0, color);
-  if root {
-    p.add(egui::Shape::convex_polygon(
-      vec![c + vec2(4.0, -4.0), c + vec2(4.0, 4.0), c + vec2(-4.0, 4.0)],
-      color,
-      Stroke::NONE,
-    ));
-  } else if open {
-    p.add(egui::Shape::closed_line(vec![c + vec2(-5.0, -3.0), c + vec2(5.0, -3.0), c + vec2(0.0, 4.0)], s));
+  let pts = if open {
+    vec![c + vec2(-4.0, -2.0), c + vec2(0.0, 2.0), c + vec2(4.0, -2.0)]
   } else {
-    p.add(egui::Shape::closed_line(vec![c + vec2(-3.0, -5.0), c + vec2(4.0, 0.0), c + vec2(-3.0, 5.0)], s));
-  }
+    vec![c + vec2(-2.0, -4.0), c + vec2(2.0, 0.0), c + vec2(-2.0, 4.0)]
+  };
+  p.add(egui::Shape::line(pts, s));
 }
 
 /// What happened to a browser row.
@@ -1434,7 +1427,7 @@ pub(crate) struct RowEvents {
 }
 
 /// One browser row, drawn straight on the canvas as in Fusion: expander, visibility eye, icon
-/// and the name on a grey pill (a dark pill with an activation radio for the root component).
+/// and the name on a light grey pill (bold, with an activation radio, for the root component).
 pub(crate) fn tree_row(
   ui: &mut egui::Ui,
   id: egui::Id,
@@ -1475,21 +1468,27 @@ pub(crate) fn tree_row(
     }
   }
   let font = egui::FontId::proportional(13.0);
-  let text_color = if root { Color32::WHITE } else { label_color };
+  let text_color = label_color;
   let galley = p.layout_no_wrap(label.to_string(), font, text_color);
   let icon_x = x + 44.0;
   let pill = Rect::from_min_size(pos2(icon_x - 11.0, cy - 10.5), vec2(galley.size().x + 36.0, 21.0));
   let (fill, stroke) = if selected {
     (theme::SELECTED, Stroke::new(1.0, theme::ACCENT))
   } else if resp.hovered() {
-    (if root { Color32::from_rgb(72, 86, 106) } else { theme::HOVER }, Stroke::new(1.0, theme::SELECTED))
+    (theme::HOVER, Stroke::new(1.0, theme::SELECTED))
   } else {
-    (if root { theme::PILL_ROOT } else { theme::PILL }, Stroke::NONE)
+    // every row's pill is Fusion's light grey, the root component's too
+    (theme::PILL, Stroke::NONE)
   };
   p.rect(pill, 2.0, fill, stroke, egui::StrokeKind::Inside);
   icons::draw_color(&p, Rect::from_center_size(pos2(icon_x, cy), Vec2::splat(16.0)), icon);
-  let text_color = if selected && root { theme::TEXT } else { text_color };
-  p.galley_with_override_text_color(pos2(icon_x + 13.0, cy - galley.size().y / 2.0), galley, text_color);
+  let at = pos2(icon_x + 13.0, cy - galley.size().y / 2.0);
+  if root {
+    // the root component's name is bold, as in Fusion: the font has no bold face, so a second
+    // pass half a pixel over gives the weight
+    p.galley_with_override_text_color(at + vec2(0.5, 0.0), galley.clone(), text_color);
+  }
+  p.galley_with_override_text_color(at, galley, text_color);
   if root {
     // the activation radio of the root component
     let c = pos2(pill.right() + 12.0, cy);

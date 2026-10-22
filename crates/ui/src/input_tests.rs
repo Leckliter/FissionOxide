@@ -1129,7 +1129,8 @@ fn a_window_that_fits_the_row_shows_fusions_icon_counts() {
 }
 
 /// The big FINISH SKETCH button is clickable across the whole panel, not only on its icon,
-/// and the contextual SKETCH tab is drawn like the others (bold black, no blue box).
+/// and the contextual SKETCH tab is drawn like the others (regular grey text, underlined, no
+/// blue box), as Fusion's active tab.
 #[test]
 fn finish_sketch_takes_a_click_beside_its_icon() {
   let mut h = Harness::new();
@@ -1137,7 +1138,7 @@ fn finish_sketch_takes_a_click_beside_its_icon() {
   assert!(h.app.s.edit_sketch.is_some());
   h.app.tab = crate::panels::Tab::Sketch;
   let all = h.frame_texts(1.0 / 60.0, vec![]);
-  assert_eq!(all.iter().filter(|(r, t)| t == "SKETCH" && r.top() < 60.0).count(), 2, "the active tab is bold");
+  assert_eq!(all.iter().filter(|(r, t)| t == "SKETCH" && r.top() < 60.0).count(), 1, "the active tab isn't bold");
   let label = panel_label(&all, "FINISH SKETCH").expect("the FINISH SKETCH panel");
   // just above the panel name and well left of the icon's centre
   let at = Pos2::new(label.left() + 4.0, label.top() - 14.0);
@@ -1303,8 +1304,8 @@ fn the_animation_workspace_is_fusions() {
     assert!(panel_label(&all, name).is_some(), "the {name} panel: {all:?}");
   }
   let names: Vec<&str> = all.iter().map(|(_, t)| t.as_str()).collect();
-  // the switcher and the one tab, each drawn twice for its weight
-  assert_eq!(names.iter().filter(|t| **t == "ANIMATION").count(), 4, "{names:?}");
+  // the switcher (drawn twice for its weight) and the one tab
+  assert_eq!(names.iter().filter(|t| **t == "ANIMATION").count(), 3, "{names:?}");
   for t in ["SOLID", "Document Settings", "Origin", "Bodies", "Sketches"] {
     assert!(!names.contains(&t), "{t} is not shown: {names:?}");
   }

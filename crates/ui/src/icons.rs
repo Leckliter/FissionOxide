@@ -580,7 +580,7 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
 
 const SLATE: Color32 = theme::ICON_INK;
 /// Outlines of grey bodies: a mid grey, so solids read as light shapes, not ink drawings.
-const GREY_EDGE: Color32 = Color32::from_rgb(122, 132, 146);
+const GREY_EDGE: Color32 = Color32::from_rgb(140, 140, 140);
 
 struct Pen<'a> {
   p: &'a Painter,
@@ -833,7 +833,8 @@ pub fn draw_color(p: &Painter, r: Rect, icon: Icon) {
 fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
   use Tone::*;
   use std::f32::consts::{FRAC_PI_2, PI, TAU};
-  let w = (r.width() / 24.0).clamp(0.9, 1.25);
+  // Fusion's icons keep 1 px outlines at every size
+  let w = (r.width() / 32.0).clamp(0.8, 1.0);
   let k = Pen { p, r, mono, tint, literal: literal(icon), w };
   match icon {
     Icon::Sketch => {
