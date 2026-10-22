@@ -782,7 +782,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hide_construction_points: !vis.construction_points,
     grid_step: app.grid.step(),
     // the Layout Grid carries Fusion's red X and green Y axis lines across it
-    grid_axes: app.s.edit_sketch.is_none() && vis.origins,
+    grid_axes: app.s.edit_sketch.is_none() && vis.origin_axes,
     show_profiles_of: profiles_of,
     hide_profiles_of: app.hidden_profiles.clone(),
     hide_projected_of: app.sketch_rows.hidden_projected.clone(),
