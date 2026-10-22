@@ -801,7 +801,6 @@ fn the_navigation_preset_drives_the_mouse_buttons() {
   let cases = [
     (NavPreset::Fusion, Middle, Modifiers::NONE, pan),
     (NavPreset::Fusion, Middle, Modifiers::SHIFT, orbit),
-    (NavPreset::Fusion, Secondary, Modifiers::NONE, orbit),
     (NavPreset::SolidWorks, Middle, Modifiers::NONE, orbit),
     (NavPreset::SolidWorks, Middle, Modifiers::CTRL, pan),
     (NavPreset::SolidWorks, Middle, Modifiers::SHIFT, zoom),

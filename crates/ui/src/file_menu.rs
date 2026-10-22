@@ -134,9 +134,6 @@ pub(crate) fn tip(resp: egui::Response, label: &'static str) -> egui::Response {
 /// Bar, Command Toolbar, Data Panel, Performance Overlay, Reset to Default Layout (all Ctrl+Alt).
 pub(crate) const VIEW_KEYS: [Key; 9] = [Key::V, Key::B, Key::A, Key::C, Key::N, Key::T, Key::P, Key::O, Key::R];
 
-/// The Text Commands entry: FissionOxide has no text command window.
-const TEXT_COMMANDS: usize = 3;
-
 /// File ▸ View's entries: the label (Hide while shown, Show while hidden), the shortcut and
 /// whether it is enabled.
 pub(crate) fn view_entries(app: &App) -> Vec<(String, String, bool)> {
@@ -145,19 +142,14 @@ pub(crate) fn view_entries(app: &App) -> Vec<(String, String, bool)> {
     hs(app.show_viewcube, "ViewCube"),
     hs(app.browser_open, "Browser"),
     hs(app.show_comments, "Comments"),
-    "Show Text Commands".to_string(),
+    hs(app.text_commands.open, "Text Commands"),
     hs(app.show_navbar, "Navigation Bar"),
     hs(app.show_toolbar, "Command Toolbar"),
     hs(app.data.open, "Data Panel"),
     hs(app.show_perf, "Performance Overlay"),
     "Reset to Default Layout".to_string(),
   ];
-  labels
-    .into_iter()
-    .zip(VIEW_KEYS)
-    .enumerate()
-    .map(|(i, (label, k))| (label, format!("Ctrl+Alt+{}", k.name()), i != TEXT_COMMANDS))
-    .collect()
+  labels.into_iter().zip(VIEW_KEYS).map(|(label, k)| (label, format!("Ctrl+Alt+{}", k.name()), true)).collect()
 }
 
 /// Runs File ▸ View's entry `i`.
@@ -166,6 +158,7 @@ pub(crate) fn view_action(app: &mut App, i: usize) {
     0 => app.show_viewcube = !app.show_viewcube,
     1 => app.browser_open = !app.browser_open,
     2 => app.show_comments = !app.show_comments,
+    3 => app.text_commands.open = !app.text_commands.open,
     4 => app.show_navbar = !app.show_navbar,
     5 => app.show_toolbar = !app.show_toolbar,
     6 => app.data.toggle(),
@@ -179,6 +172,7 @@ pub(crate) fn view_action(app: &mut App, i: usize) {
       app.show_toolbar = true;
       app.data.open = false;
       app.show_perf = false;
+      app.text_commands.open = false;
     }
     _ => {}
   }
@@ -187,7 +181,7 @@ pub(crate) fn view_action(app: &mut App, i: usize) {
 /// File ▸ View's Ctrl+Alt shortcuts. Returns whether one was pressed.
 pub(crate) fn view_keys(app: &mut App, ctx: &egui::Context) -> bool {
   for (i, k) in VIEW_KEYS.iter().enumerate() {
-    if i != TEXT_COMMANDS && ctx.input_mut(|inp| inp.consume_key(Modifiers::COMMAND | Modifiers::ALT, *k)) {
+    if ctx.input_mut(|inp| inp.consume_key(Modifiers::COMMAND | Modifiers::ALT, *k)) {
       view_action(app, i);
       return true;
     }
@@ -200,7 +194,7 @@ pub(crate) fn view_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(260.0);
   for (i, (label, key, on)) in view_entries(app).into_iter().enumerate() {
     let r = ui.add_enabled(on, egui::Button::new(label).shortcut_text(key).min_size(vec2(240.0, 0.0)));
-    if r.on_disabled_hover_text("FissionOxide has no text command window").clicked() {
+    if r.clicked() {
       ui.close();
       view_action(app, i);
     }

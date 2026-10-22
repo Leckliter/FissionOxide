@@ -1234,6 +1234,52 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   }
 }
 
+/// The ring slot a flick from `start` to `end` points at: its direction, once it's past the
+/// hub (a flick has no reach limit).
+fn flick_slot(start: Pos2, end: Pos2) -> Option<usize> {
+  let v = end - start;
+  if v.length() < DEAD_ZONE {
+    return None;
+  }
+  let a = v.x.atan2(-v.y).rem_euclid(std::f32::consts::TAU);
+  Some(((a / std::f32::consts::FRAC_PI_4).round() as usize) % 8)
+}
+
+/// A right-drag from `start` let go at `end`: Fusion's marking gesture runs the ring item in
+/// that direction without waiting for the menu (what is under `start` is selected first, as a
+/// right-click selects it). An item with a list opens the menu at `start` with that list shown;
+/// a flick too short, or towards an empty slot, does nothing.
+pub(crate) fn flick(app: &mut App, ctx: &egui::Context, start: Pos2, end: Pos2) {
+  let Some(i) = flick_slot(start, end) else { return };
+  if let Some(h) = app.hover {
+    let sel = match crate::select::pick_body(&h) {
+      Some(body) if crate::select::is_mesh(&app.s, body) => Sel::Body { body },
+      _ => h.to_sel(),
+    };
+    if !app.s.selection.contains(&sel) {
+      app.s.selection = vec![sel];
+    }
+  }
+  let cx = context(app);
+  let Some(it) = ring(app, &cx)[i].clone() else { return };
+  if !it.children.is_empty() {
+    app.nav_mode = None;
+    app.marking = Some(MarkingMenu { center: start, sub: Some(Sub::Ring(i)) });
+    return;
+  }
+  if !it.enabled {
+    return;
+  }
+  app.nav_mode = None;
+  match it.action {
+    Action::Mesh(body, panels::MeshCmd::Copy) => {
+      app.s.selection = vec![Sel::Body { body }];
+      crate::clipboard::copy(app, ctx);
+    }
+    a => run(app, a),
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -1601,7 +1647,7 @@ mod tests {
     app.s.selection = vec![Sel::SketchCurve { sketch, curve: long }, Sel::SketchCurve { sketch, curve: short }];
     assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Sketch Curves | Min Distance : 0.000 in"));
     app.s.selection = vec![Sel::SketchCurve { sketch, curve: circle }];
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Sketch Circle | Length : 1.237 in"));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Sketch Circle | Diameter : 0.394 in"));
     app.s.selection = vec![Sel::SketchCurve { sketch, curve: circle }, Sel::SketchCurve { sketch, curve: short }];
     assert_eq!(panels::selection_text(&app).as_deref(), Some("Multiple selections | 2"));
     // the far corner of the rectangle, in world coordinates

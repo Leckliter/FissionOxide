@@ -134,9 +134,9 @@ pub fn apply(ctx: &egui::Context) {
   ctx.style_mut_of(egui::Theme::Dark, |style| {
     style.visuals = egui::Visuals::dark();
     let v = &mut style.visuals;
-    v.panel_fill = Color32::from_rgb(43, 43, 43);
-    v.window_fill = Color32::from_rgb(43, 43, 43);
-    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(80, 80, 80));
+    v.panel_fill = color(fox_brand::dark::SURFACE_RAISED);
+    v.window_fill = color(fox_brand::dark::SURFACE_RAISED);
+    v.window_stroke = Stroke::new(1.0, color(fox_brand::neutral::GRAPHITE));
     v.window_corner_radius = CornerRadius::same(3);
     v.menu_corner_radius = CornerRadius::same(2);
     v.window_shadow = egui::Shadow { offset: [0, 2], blur: 10, spread: 0, color: Color32::from_black_alpha(120) };
@@ -172,4 +172,151 @@ pub fn set_tooltips(ctx: &egui::Context, show: bool) {
     (i.tooltip_delay, i.tooltip_grace_time) =
       if show { (default.tooltip_delay, default.tooltip_grace_time) } else { (1.0e6, 0.0) };
   });
+}
+
+// ---------------------------------------------------------------- Theme: Dark
+
+/// Whether the window is drawn with the dark theme (Preferences → General → Theme: Dark, or the
+/// device's dark setting with Match Device).
+pub fn is_dark(ctx: &egui::Context) -> bool {
+  ctx.theme() == egui::Theme::Dark
+}
+
+/// The dark theme's colour for a light one painted as a fill, from the brand's dark palette:
+/// bars and panels go dark, borders and separators dim, hover and selection turn deep blue.
+/// Colours not in the light palette stay (the timeline's strip is the floating headers' colour).
+fn dark_fill(c: Color32) -> Option<Color32> {
+  use fox_brand::{BLUE, dark, neutral};
+  Some(match c {
+    APP_BAR | FLOAT_HEADER | DIALOG_HEADER => color(dark::SURFACE),
+    TOOLBAR | PANEL | DIALOG_BODY => color(dark::SURFACE_RAISED),
+    PILL => Color32::from_rgba_premultiplied(neutral::GRAPHITE.0, neutral::GRAPHITE.1, neutral::GRAPHITE.2, 230),
+    BORDER | SEPARATOR => color(neutral::GRAPHITE),
+    HOVER | CONTEXT_TAB => color(BLUE.deep),
+    SELECTED => color(BLUE.dark),
+    _ => return None,
+  })
+}
+
+/// The dark theme's colour for a light-theme line: as a fill, and dark ink (outlines, icon
+/// strokes, the active tab's underline) light.
+fn dark_line(c: Color32) -> Option<Color32> {
+  use fox_brand::dark;
+  match c {
+    TEXT | ICON_INK | Color32::BLACK => Some(color(dark::TEXT_MUTED)),
+    c => dark_fill(c),
+  }
+}
+
+/// The dark theme's colour for light-theme text: dark ink reads light on the dark panels.
+fn dark_text(c: Color32) -> Option<Color32> {
+  use fox_brand::dark;
+  Some(match c {
+    TEXT | GROUP_LABEL | Color32::BLACK => color(dark::TEXT),
+    MUTED => color(dark::TEXT_MUTED),
+    _ => return None,
+  })
+}
+
+/// Layers painted directly (not through an egui area), which the area order doesn't list.
+const PAINTED_LAYERS: [(egui::Order, &str); 5] = [
+  (egui::Order::Tooltip, "tree-drag"),
+  (egui::Order::Middle, "warning-icon"),
+  (egui::Order::Middle, "selection-info"),
+  (egui::Order::Middle, "canvas-status"),
+  (egui::Order::Foreground, "marking-menu"),
+];
+
+/// Theme: Dark for the chrome FissionOxide paints itself (the application bar, toolbar, browser,
+/// timeline, command dialogs, menus and canvas overlays), which uses the light palette's colours:
+/// at the end of a frame each of them is swapped for its dark counterpart. egui's own widgets
+/// already follow the dark style, and images and the 3D view are left alone.
+pub fn darken_chrome(ctx: &egui::Context) {
+  if !is_dark(ctx) {
+    return;
+  }
+  let mut layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().collect());
+  layers.push(egui::LayerId::background());
+  layers.extend(PAINTED_LAYERS.iter().map(|(o, id)| egui::LayerId::new(*o, egui::Id::new(*id))));
+  let mut seen = std::collections::HashSet::new();
+  layers.retain(|l| seen.insert(*l));
+  ctx.graphics_mut(|g| {
+    for layer in layers {
+      let Some(list) = g.get_mut(layer) else { continue };
+      let n = list.all_entries().len();
+      for i in 0..n {
+        list.mutate_shape(egui::layers::ShapeIdx(i), |c| darken_shape(&mut c.shape));
+      }
+    }
+  });
+}
+
+fn darken_shape(shape: &mut egui::Shape) {
+  use egui::Shape;
+  let paint = |c: &mut Color32| {
+    if let Some(d) = dark_fill(*c) {
+      *c = d;
+    }
+  };
+  let stroke = |s: &mut Stroke| {
+    if let Some(d) = dark_line(s.color) {
+      s.color = d;
+    }
+  };
+  let path_stroke = |s: &mut egui::epaint::PathStroke| {
+    if let egui::epaint::ColorMode::Solid(c) = &mut s.color
+      && let Some(d) = dark_line(*c)
+    {
+      *c = d;
+    }
+  };
+  match shape {
+    Shape::Vec(v) => v.iter_mut().for_each(darken_shape),
+    Shape::Rect(r) => {
+      paint(&mut r.fill);
+      stroke(&mut r.stroke);
+    }
+    Shape::Circle(c) => {
+      paint(&mut c.fill);
+      stroke(&mut c.stroke);
+    }
+    Shape::Ellipse(e) => {
+      paint(&mut e.fill);
+      stroke(&mut e.stroke);
+    }
+    Shape::LineSegment { stroke: s, .. } => stroke(s),
+    Shape::Path(p) => {
+      paint(&mut p.fill);
+      path_stroke(&mut p.stroke);
+    }
+    Shape::QuadraticBezier(b) => {
+      paint(&mut b.fill);
+      path_stroke(&mut b.stroke);
+    }
+    Shape::CubicBezier(b) => {
+      paint(&mut b.fill);
+      path_stroke(&mut b.stroke);
+    }
+    Shape::Text(t) => {
+      // one colour for the whole text (a label, a painted string): its dark counterpart
+      let job = &t.galley.job;
+      let first = job.sections.first().map(|s| s.format.color);
+      let single = first.filter(|c| job.sections.iter().all(|s| s.format.color == *c));
+      let base = match t.override_text_color.or(single) {
+        Some(Color32::PLACEHOLDER) => Some(t.fallback_color),
+        c => c,
+      };
+      if let Some(d) = base.and_then(dark_text) {
+        t.override_text_color = Some(d);
+      }
+    }
+    // images (the viewport's picture, thumbnails) and GPU callbacks keep their colours
+    Shape::Mesh(_) | Shape::Callback(_) | Shape::Noop => {}
+  }
+}
+
+/// The canvas's background in the dark theme, a gradient top to bottom (Fusion's dark canvas).
+pub fn dark_canvas() -> ([u8; 4], [u8; 4]) {
+  let (t, b) = (fox_brand::neutral::GRAPHITE, fox_brand::dark::BACKGROUND);
+  ([t.0, t.1, t.2, 255], [b.0, b.1, b.2, 255])
 }

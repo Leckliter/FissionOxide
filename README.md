@@ -299,7 +299,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 
 | Action                 | How                                                         |
 |------------------------|-------------------------------------------------------------|
-| Orbit / pan / zoom     | Right-drag / middle-drag (or Shift+right-drag) / wheel, or the navigation bar's Orbit, Pan and Zoom modes |
+| Orbit / pan / zoom     | Shift+middle-drag / middle-drag / wheel (Fusion's preset), or the navigation bar's Orbit, Pan and Zoom modes; a right-drag runs the marking menu item it points at |
 | Standard views         | Click the ViewCube faces; ⌂ or Home for the home view       |
 | New sketch             | Select a planar face, then Create Sketch, or pick XY/XZ/YZ; double-click an origin plane in the browser |
 | Sketch tools           | L line, R rectangle, C circle, A arc, P point, D dimension, T trim, O offset |
@@ -322,7 +322,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 | Joints in the viewport | Click a joint origin's glyph to use it in Joint, a joint's to drive it (or select it) |
 | Appearance             | A                                                           |
 | Compute All            | Ctrl+B (in the background)                                  |
-| Marking menu           | Right-click (without dragging): click an item, or anywhere in its direction; the list below has commands for what you clicked |
+| Marking menu           | Right-click (without dragging): click an item, or anywhere in its direction; the list below has commands for what you clicked. Right-drag towards an item to run it without the menu |
+| Multiple views         | Navigation bar → Viewports → Multiple Views: Top, Front, Right and the current view side by side; click a view to make it the one you work in |
+| Text commands          | File → View → Show Text Commands (Ctrl+Alt+C): type a command and its JSON parameters (`box {"width": 10}`; `help` lists them) |
 | All commands of a group | Click the group name under the toolbar icons (CREATE ▾, MODIFY ▾, …) |
 | Undo / Redo            | Ctrl+Z / Ctrl+Y                                             |
 | Save a version         | Ctrl+S (Ctrl+Shift+S: save as a new design)                 |

@@ -25,8 +25,8 @@ fn detail(app: &App, kind: &FeatureKind) -> String {
   match kind {
     FeatureKind::JointOrigin { component, .. } => comp(*component),
     FeatureKind::RigidGroup { components, .. } => components.iter().map(|c| comp(*c)).collect::<Vec<_>>().join(", "),
-    FeatureKind::MotionLink { leader, follower, .. } => format!("{} → {}", name(*leader), name(*follower)),
-    FeatureKind::CamFollower { cam, follower, .. } => format!("{} → {}", comp(*cam), name(*follower)),
+    FeatureKind::MotionLink { leader, follower, .. } => format!("{} > {}", name(*leader), name(*follower)),
+    FeatureKind::CamFollower { cam, follower, .. } => format!("{} > {}", comp(*cam), name(*follower)),
     _ => String::new(),
   }
 }

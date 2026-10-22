@@ -16,6 +16,8 @@ mod bom_ui_tests;
 mod cam_ui;
 mod canvas_ui;
 mod capture;
+#[cfg(test)]
+mod chrome_tests;
 mod clipboard;
 mod comments;
 mod comp_drag;
@@ -86,6 +88,7 @@ mod sheet;
 mod sheet_rules_ui;
 mod sim_ui;
 mod sketch_modify;
+mod text_commands;
 mod theme;
 mod thread_form;
 #[cfg(test)]
@@ -98,6 +101,7 @@ mod updates;
 mod value_box;
 mod viewcube;
 mod viewport;
+mod viewports;
 
 use std::path::PathBuf;
 
@@ -407,6 +411,10 @@ pub struct App {
   pub show_toolbar: bool,
   /// File ▸ View ▸ Show Performance Overlay.
   pub show_perf: bool,
+  /// File ▸ View ▸ Show Text Commands: the TEXT COMMANDS panel.
+  pub(crate) text_commands: text_commands::TextCommands,
+  /// The navigation bar's Viewports: Single View or Multiple Views.
+  pub(crate) viewports: viewports::Viewports,
   /// File ▸ Open... and File ▸ Export..., while open.
   pub files: file_dialogs::Files,
   /// Change Active Units or Convert Design Type, docked at the right (see `doc_dialogs`).
@@ -700,6 +708,8 @@ impl App {
       modify: sketch_modify::Prefs::default(),
       show_toolbar: true,
       show_perf: false,
+      text_commands: text_commands::TextCommands::default(),
+      viewports: viewports::Viewports::default(),
       files: file_dialogs::Files::default(),
       doc_dialog: None,
       sheet_rules: sheet_rules_ui::SheetRulesUi::default(),
@@ -2196,6 +2206,8 @@ impl App {
       panels::toolbar(self, ui);
     }
     if self.drawing.is_none() && self.electronics.is_none() {
+      // Fusion docks TEXT COMMANDS under the timeline, along the bottom of the window
+      text_commands::panel(self, ui);
       self.bottom_strip(ui);
     }
     data_panel::heartbeat(self, &ctx);
@@ -2402,6 +2414,8 @@ fn now() -> f64 {
 impl eframe::App for App {
   fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
     self.draw(ui);
+    // Theme: Dark recolours the chrome painted in the light palette
+    theme::darken_chrome(ui.ctx());
   }
 
   fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

@@ -137,11 +137,9 @@ impl NavPreset {
     const CTRL: Held = (false, true, false);
     const SHIFT_ALT: Held = (true, false, true);
     match self {
-      // Fusion's: middle pans, Shift+middle orbits; FissionOxide also orbits with a right drag
-      // (a right click without dragging opens the marking menu)
-      NavPreset::Fusion => {
-        &[(Middle, NONE, Pan), (Middle, SHIFT, Orbit), (Secondary, NONE, Orbit), (Secondary, SHIFT, Pan)]
-      }
+      // Fusion's: middle pans, Shift+middle orbits; the right button is the marking menu's (a
+      // click opens it, a drag runs the item it points at)
+      NavPreset::Fusion => &[(Middle, NONE, Pan), (Middle, SHIFT, Orbit)],
       NavPreset::SolidWorks => &[(Middle, NONE, Orbit), (Middle, CTRL, Pan), (Middle, SHIFT, Zoom)],
       NavPreset::Inventor => &[(Middle, NONE, Pan), (Middle, SHIFT, Orbit)],
       NavPreset::Alias => &[(Primary, SHIFT_ALT, Orbit), (Middle, SHIFT_ALT, Pan), (Secondary, SHIFT_ALT, Zoom)],
@@ -1198,8 +1196,8 @@ mod tests {
     let f = NavPreset::Fusion;
     assert_eq!(f.action(Middle, none), Some(Pan));
     assert_eq!(f.action(Middle, shift), Some(Orbit));
-    assert_eq!(f.action(Secondary, none), Some(Orbit));
-    assert_eq!(f.action(Secondary, shift), Some(Pan));
+    assert_eq!(f.action(Secondary, none), None, "right drags are marking gestures");
+    assert_eq!(f.action(Secondary, shift), None);
     assert_eq!(f.action(Primary, none), None, "left drags select");
     let sw = NavPreset::SolidWorks;
     assert_eq!(sw.action(Middle, none), Some(Orbit));

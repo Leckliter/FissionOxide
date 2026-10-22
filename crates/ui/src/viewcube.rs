@@ -462,6 +462,18 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, re
 
 /// The four triangles round a face view that step to the next face: (hot area, triangle,
 /// (dx, dy) with y up).
+/// The ViewCube of a view that isn't active (Multiple Views): drawn as `cam` sees it, without
+/// its buttons; a click in the view makes it active first.
+pub(crate) fn paint_passive(app: &App, painter: &egui::Painter, rect: Rect, cam: &Camera) {
+  if !app.show_viewcube {
+    return;
+  }
+  let k = app.preferences.values.cube_size.factor(rect.height());
+  let mut b = Basis::new(&app.cube, cam);
+  b.scale = SCALE * k;
+  draw(painter, rect.right_top() + Vec2::new(-92.0, 80.0) * k, &b, None, false);
+}
+
 fn face_arrows(center: Pos2, scale: f32) -> Vec<(Rect, [Pos2; 3], (i32, i32))> {
   let reach = scale + 12.0;
   [(0, 1), (0, -1), (1, 0), (-1, 0)]

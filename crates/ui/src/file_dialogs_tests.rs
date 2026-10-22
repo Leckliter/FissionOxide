@@ -114,7 +114,12 @@ fn file_view_lists_fusions_hide_and_show_entries_with_their_shortcuts() {
       "Reset to Default Layout Ctrl+Alt+R",
     ]
   );
-  assert!(!entries[3].2, "no text command window: greyed");
+  assert!(entries.iter().all(|e| e.2), "every entry runs, Text Commands too");
+  h.key(Key::C, Modifiers::COMMAND | Modifiers::ALT);
+  assert!(h.app.text_commands.open, "Ctrl+Alt+C shows the TEXT COMMANDS panel");
+  assert_eq!(labels(&h.app)[3].0, "Hide Text Commands");
+  h.key(Key::C, Modifiers::COMMAND | Modifiers::ALT);
+  assert!(!h.app.text_commands.open);
   // the shortcuts flip them, and the labels with them
   let ctrl_alt = Modifiers::COMMAND | Modifiers::ALT;
   h.key(Key::V, ctrl_alt);

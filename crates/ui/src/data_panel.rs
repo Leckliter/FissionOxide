@@ -1811,7 +1811,7 @@ fn compare_window(app: &mut App, ctx: &egui::Context) {
   let Some(c) = app.data.compare.clone() else { return };
   let mut open = true;
   let title = format!(
-    "Changes v{} → v{}",
+    "Changes v{} > v{}",
     c.get("a").and_then(Value::as_u64).unwrap_or(0),
     c.get("b").and_then(Value::as_u64).unwrap_or(0)
   );

@@ -145,9 +145,8 @@ minutes, P2 is polish.
 | Overflow position | Directly under the ring | Off to the right of the ring (empty space) / under the ring (face) |
 
 The ring is context-aware in Fusion: its slots change for faces, edges, bodies and sketches. Right
-**drag** in Fusion is a marking-menu flick gesture, but FissionOxide uses right drag to orbit
-(`navigate`, [viewport.rs:243](../crates/ui/src/viewport.rs)), so flick gestures can't be added
-without changing that.
+**drag** in Fusion is a marking-menu flick gesture; FissionOxide does the same (`marking::flick`)
+and, as Fusion's preset, orbits with Shift+middle instead.
 
 ### 15. Face right-click
 - **Fusion:** Create Selection Set, Create Sketch, Extrude, Offset Plane, Shell, Edit Feature, Edit
@@ -201,7 +200,8 @@ without changing that.
 
 ### 21. Panels and chrome
 - Fusion opens with the Data Panel closed; FissionOxide opens with it open.
-- Fusion has a TEXT COMMANDS panel under the timeline (Txt / Py / TS). FissionOxide has none.
+- Fusion has a TEXT COMMANDS panel under the timeline (Txt / Py / TS). FissionOxide has it too
+  (`text_commands.rs`): Txt runs FissionOxide's JSON commands; Py and TS are greyed (no interpreter).
 - Fusion has no EXPORT group on the SOLID ribbon. FissionOxide adds one, which is fine to keep.
 - Status messages in FissionOxide are lowercase and dev-flavoured (`extrude done`,
   `fillet done`), and the sketch hint (`Sketching — draw with the Create tools…`) stayed after

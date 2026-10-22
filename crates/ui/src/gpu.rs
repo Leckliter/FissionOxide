@@ -170,6 +170,44 @@ pub fn paint(app: &mut App, painter: &egui::Painter, rect: Rect, size: [u32; 2],
   true
 }
 
+/// Draws the scene from another camera into `rect` (a view of Multiple Views that isn't active).
+/// It shares the active view's image buffer, so that view is drawn again after it. Returns
+/// false when the CPU renderer draws instead.
+pub fn paint_view(app: &App, painter: &egui::Painter, rect: Rect, cam: Camera, size: [u32; 2]) -> bool {
+  if !active(app) || app.gpu.key.is_none() {
+    return false;
+  }
+  let shared = app.gpu.shared.clone();
+  let callback = egui_glow::CallbackFn::new(move |info, painter| {
+    let gl = painter.gl();
+    let Ok(mut sh) = shared.lock() else { return };
+    if sh.error.is_some() {
+      return;
+    }
+    // upload what's pending first, without drawing the active view
+    if let Err(e) = draw(gl, &mut sh, None) {
+      sh.error = Some(e);
+      return;
+    }
+    sh.drawn = None;
+    let Some(r) = sh.renderer.as_mut() else { return };
+    if let Err(e) = r.draw(gl, &cam, size[0], size[1]) {
+      sh.error = Some(e);
+      return;
+    }
+    let (v, c) = (info.viewport_in_pixels(), info.clip_rect_in_pixels());
+    r.composite(
+      gl,
+      painter.intermediate_fbo(),
+      [v.left_px, v.from_bottom_px, v.width_px, v.height_px],
+      [c.left_px, c.from_bottom_px, c.width_px, c.height_px],
+      [1.0; 4],
+    );
+  });
+  painter.add(egui::PaintCallback { rect, callback: Arc::new(callback) });
+  true
+}
+
 /// The last GPU image, dimmed (while a regeneration runs). False when there is none.
 pub fn paint_last(app: &App, painter: &egui::Painter, rect: Rect, tint: Color32) -> bool {
   if !active(app) || app.gpu.key.is_none() {

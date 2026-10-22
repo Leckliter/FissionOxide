@@ -151,6 +151,12 @@ pub enum Drag {
   ConicRho,
   /// Dragging the arrow of an applied sketch fillet or chamfer (see [`crate::sketch_modify`]).
   ToolManip,
+  /// A right-drag the preset doesn't navigate with: Fusion's marking gesture from `start`, run
+  /// when the button is let go (see [`crate::marking::flick`]).
+  Flick {
+    start: Pos2,
+    now: Pos2,
+  },
 }
 
 /// Clicks collected by the active sketch tool (sketch coordinates).
@@ -400,7 +406,9 @@ impl View {
 }
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
-  let rect = ui.available_rect_before_wrap();
+  // with Multiple Views the active view's quarter of the canvas, the others drawn beside it
+  let full = ui.available_rect_before_wrap();
+  let rect = crate::viewports::show_others(app, ui, full);
   app.canvas = rect;
   let resp = ui.allocate_rect(rect, Sense::click_and_drag());
   let ctx = ui.ctx().clone();
@@ -546,6 +554,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
       painter.add(egui::Shape::dashed_line(&corners, Stroke::new(1.0, CROSSING_BOX.1), 4.0, 3.0));
     }
   }
+  // the marking gesture's trail, from where the right button went down
+  if let Some(Drag::Flick { start, now }) = app.drag {
+    painter.circle(start, 4.0, Color32::from_white_alpha(170), Stroke::new(1.0, Color32::from_gray(110)));
+    painter.line_segment([start, now], Stroke::new(2.0, crate::theme::ACCENT));
+  }
   if let Some(Drag::ZoomWindow { start, now }) = app.drag {
     let col = Color32::from_rgb(40, 120, 230);
     painter.rect_stroke(Rect::from_two_pos(start, now), 0.0, Stroke::new(1.0, col), egui::StrokeKind::Inside);
@@ -633,6 +646,21 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
       });
     }
   }
+  // a right-drag that doesn't move the camera is a marking gesture (Fusion's preset orbits
+  // with Shift+middle and leaves the right button to the marking menu)
+  if resp.drag_started_by(egui::PointerButton::Secondary)
+    && preset.action(egui::PointerButton::Secondary, mods).is_none()
+    && app.drag.is_none()
+  {
+    let start = ctx.input(|i| i.pointer.press_origin()).unwrap_or_default();
+    app.marking = None;
+    app.drag = Some(Drag::Flick { start, now: start });
+  }
+  if let Some(Drag::Flick { now, .. }) = &mut app.drag
+    && let Some(p) = ctx.pointer_latest_pos()
+  {
+    *now = p;
+  }
   if let Some(mode) = app.nav_mode
     && resp.drag_started_by(egui::PointerButton::Primary)
   {
@@ -666,6 +694,7 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
     match drag {
       Drag::SketchPoint { sketch, point } => finish_point_drag(app, sketch, point),
       Drag::Component => crate::comp_drag::finish(app),
+      Drag::Flick { start, now } => crate::marking::flick(app, ctx, start, now),
       Drag::Box { start, now } => {
         let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
         finish_box(app, view, start, now, add);
@@ -901,7 +930,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     profiles_of,
     hidden_profiles: app.hidden_profiles.clone(),
     sketch_rows: app.sketch_rows.clone(),
-    view: view_params(app),
+    view: dark_view(view_params(app), ctx),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().chain(&crate::select::hover_bodies(app)).map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
@@ -946,6 +975,12 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     scene.post.dome = None;
     scene.background_top = [c[0], c[1], c[2], 255];
     scene.background_bottom = scene.background_top;
+  } else if crate::theme::is_dark(ctx) {
+    // Theme: Dark darkens the canvas too; a sketch's plain background stays plain
+    let (top, bottom) = crate::theme::dark_canvas();
+    let plain = scene.background_top == scene.background_bottom;
+    scene.background_top = top;
+    scene.background_bottom = if plain { top } else { bottom };
   }
   if crate::gpu::active(app) {
     // the Render workspace shades the bodies with their materials
@@ -1019,6 +1054,15 @@ fn sketch_3d_manipulator(app: &App, painter: &egui::Painter, view: &View) {
     painter.line_segment([a, b], Stroke::new(1.5, Color32::from_rgb(6, 150, 214)));
   }
   crate::manipulators::sketch_axes(painter, &project, &app.cam, at, plane.normal());
+}
+
+/// The render parameters with the theme: Theme: Dark draws the canvas dark (see
+/// [`render_if_needed`]), so switching themes draws it again.
+fn dark_view(mut v: serde_json::Value, ctx: &egui::Context) -> serde_json::Value {
+  if crate::theme::is_dark(ctx) {
+    v["dark_theme"] = json!(true);
+  }
+  v
 }
 
 /// The section and analysis settings as render parameters.

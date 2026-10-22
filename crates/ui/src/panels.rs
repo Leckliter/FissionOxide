@@ -349,7 +349,7 @@ pub(crate) enum Cmd {
   FinishSketch,
   /// Remove the selected bodies (a timeline feature, unlike Delete).
   RemoveBodies,
-  /// EXPORT > 3D Print: the design as an STL mesh.
+  /// EXPORT > 3D Print (and UTILITIES > MAKE): File > 3D Print's docked 3D PRINT dialog.
   Print3d,
   Undo,
   Redo,
@@ -516,7 +516,7 @@ impl Cmd {
       Cmd::Redo => (Icon::Redo, "Redo", "Redo (Ctrl+Y)"),
       Cmd::Delete => (Icon::Remove, "Delete", "Delete the selection (Del)"),
       Cmd::RemoveBodies => (Icon::RemoveBody, "Remove", "Remove the selected bodies (kept in the timeline)"),
-      Cmd::Print3d => (Icon::Print3d, "3D Print", "Export the design as an STL mesh for printing"),
+      Cmd::Print3d => (Icon::Print3d, "3D Print", "Prepare bodies for 3D printing (the 3D PRINT dialog)"),
       Cmd::LookAt => (Icon::LookAt, "Look At", "Look at the sketch plane or a selected planar face"),
       Cmd::Fit => (Icon::Fit, "Fit", "Fit the design in the view (F6)"),
       Cmd::Home => (Icon::Views, "Home View", "Go to the home view"),
@@ -2627,7 +2627,8 @@ pub fn comments(app: &mut App, ctx: &egui::Context) {
 
 /// Fusion's navigation bar at the bottom centre of the canvas.
 pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
-  let canvas = app.canvas;
+  // centred under the whole canvas, all four views with Multiple Views on
+  let canvas = crate::viewports::canvas(app);
   egui::Area::new(egui::Id::new("navbar"))
     .fixed_pos(canvas.center_bottom() + vec2(0.0, -8.0))
     .pivot(egui::Align2::CENTER_BOTTOM)
@@ -2667,12 +2668,8 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
         egui::Popup::menu(&c).show(|ui| crate::navbar::grid_menu(app, ui, adaptive));
         let v = tip(icons::icon_button(ui, Icon::Viewports, 28.0, "", false, None), viewports);
         let c = nav_caret(ui, "Viewports");
-        egui::Popup::menu(&v).show(|ui| {
-          let _ = ui.selectable_label(true, "Single View");
-        });
-        egui::Popup::menu(&c).show(|ui| {
-          let _ = ui.selectable_label(true, "Single View");
-        });
+        egui::Popup::menu(&v).show(|ui| crate::viewports::menu(app, ui));
+        egui::Popup::menu(&c).show(|ui| crate::viewports::menu(app, ui));
       });
     });
 }
@@ -3229,6 +3226,20 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
         .map(|d| format!("Min Distance : {}", u.fixed(d, crate::viewport::display_decimals(u)))),
       _ => None,
     },
+    // a circle or an arc reads its diameter, a line its length, trailing zeros trimmed:
+    // "1 Sketch Arc | Diameter : 0.50 in", "1 Sketch Line | Length : 1.00 in"
+    Sel::SketchCurve { sketch, curve } if n == 1 => model.sketches.get(&sketch).and_then(|r| {
+      let kind = &r.sketch.curve(curve)?.kind;
+      let (what, mm) = match kind {
+        fox_engine::sketch::CurveKind::Circle { radius, .. } => ("Diameter", 2.0 * radius),
+        fox_engine::sketch::CurveKind::Arc { center, start, .. } => {
+          let (c, s) = (r.sketch.pos(*center)?, r.sketch.pos(*start)?);
+          ("Diameter", 2.0 * (s[0] - c[0]).hypot(s[1] - c[1]))
+        }
+        _ => ("Length", sketch_curve_length(&r.sketch, kind)),
+      };
+      Some(format!("{what} : {} {}", sketch_coord(u, mm), u.symbol()))
+    }),
     // "1 Sketch Line | Length : 0.524 in", as Fusion spaces it
     Sel::SketchCurve { .. } => sum(&|s| match s {
       Sel::SketchCurve { sketch, curve } => {
