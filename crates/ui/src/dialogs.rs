@@ -2299,7 +2299,7 @@ impl Dialog {
   /// Sketch Offset: has the distance left 0.00 (a value the arrow, the box or the row set)? A
   /// distance naming a user parameter counts as set; a half-typed one (".", "-") doesn't.
   fn offset_set(&self) -> bool {
-    match fox_engine::expr::eval(&self.distance, fox_engine::expr::Kind::Length, &Value::Null) {
+    match fox_engine::expr::eval(&self.distance, fox_engine::expr::Kind::Length, &fox_engine::expr::Empty) {
       Ok(v) => v.abs() >= 1e-9,
       Err(_) => !self.distance.trim().trim_matches(['.', '-', '+', ' ']).is_empty(),
     }
