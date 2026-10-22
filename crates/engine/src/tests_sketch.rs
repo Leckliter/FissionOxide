@@ -654,3 +654,37 @@ fn slots_keep_a_centreline_and_fusions_glyphs() {
   ends.sort_by(|a, b| a[0].total_cmp(&b[0]));
   assert!((ends[0][0]).abs() < 1e-9 && (ends[1][0] - 20.0).abs() < 1e-9, "{ends:?}");
 }
+
+/// A window box over a whole sketch selects every curve, point and dimension; Delete removes
+/// them all even though deleting one curve already takes its points and dimensions with it.
+#[test]
+fn deleting_a_window_selection_of_mixed_geometry_clears_the_sketch() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  for (x, w) in [(0, 20), (40, 15)] {
+    let rect = run(&mut s, "sketch.rect", json!({"corner1": [x, 0], "corner2": [x + w, 10]}));
+    let sides = ids(&rect["curves"]);
+    run(&mut s, "sketch.dimension", json!({"type": "distance", "curves": [sides[0]], "value": w}));
+    run(&mut s, "sketch.dimension", json!({"type": "distance", "curves": [sides[1]], "value": 10}));
+  }
+  let c = run(&mut s, "sketch.circle", json!({"center": [10, 30], "radius": 5}));
+  run(&mut s, "sketch.dimension", json!({"type": "diameter", "curves": ids(&c["curves"]), "value": 10}));
+  run(&mut s, "sketch.circle", json!({"center": [30, 30], "radius": 3}));
+  run(&mut s, "sketch.polygon", json!({"center": [60, 30], "vertex": [65, 30], "sides": 6}));
+  run(&mut s, "sketch.polygon", json!({"center": [80, 30], "vertex": [84, 30], "sides": 5, "circumscribed": true}));
+  run(&mut s, "sketch.slot", json!({"start": [0, 50], "end": [20, 50], "width": 6}));
+  run(&mut s, "sketch.slot", json!({"center": [40, 50], "end": [50, 50], "width": 4}));
+  run(&mut s, "sketch.ellipse", json!({"center": [70, 50], "major": [80, 50], "minor": 4}));
+  run(&mut s, "sketch.slot", json!({"arc_center": [90, 50], "start": [100, 50], "end": [90, 60], "width": 3}));
+  let sk = s.design.sketch(s.edit_sketch.unwrap()).unwrap().clone();
+  let curves: Vec<u32> = sk.curves.iter().map(|c| c.id.0).collect();
+  let points: Vec<u32> = sk.points.iter().map(|p| p.id.0).filter(|p| *p != 0).collect();
+  let cons: Vec<u32> = sk.constraints.iter().map(|c| c.id.0).collect();
+  assert!(curves.len() > 20 && cons.len() > 10, "{} curves, {} constraints", curves.len(), cons.len());
+  run(&mut s, "sketch.delete", json!({"curves": curves, "points": points, "constraints": cons}));
+  let sk = s.design.sketch(s.edit_sketch.unwrap()).unwrap();
+  assert!(sk.curves.is_empty() && sk.constraints.is_empty(), "{:?}", sk.curves);
+  assert_eq!(sk.points.len(), 1, "only the origin is left: {:?}", sk.points);
+  // an id that never existed is still an error
+  assert!(s.execute("sketch.delete", &json!({"curves": [9999]})).is_err());
+}

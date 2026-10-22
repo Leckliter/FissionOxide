@@ -3264,3 +3264,57 @@ fn flatten_ground_is_live_and_a_new_scene_is_grey() {
   h.frame(vec![]);
   assert!(h.app.s.design.render.environment.flatten_ground);
 }
+
+/// The Sketch Palette as Fusion's: Feature Options is its first section for every tool that has
+/// one (the chamfers and Blend Curve too), and once the tool ends the palette shrinks back to
+/// Options and Finish Sketch with no blank band left.
+#[test]
+fn sketch_palette_feature_options_lead_and_the_palette_shrinks_back() {
+  use crate::viewport::Tool;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  let palette = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette"))).expect("the palette");
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let bare = palette(&h);
+  for tool in [Tool::Rect, Tool::Line, Tool::Chamfer, Tool::Chamfer2, Tool::Blend] {
+    h.app.set_tool(tool);
+    h.frame(vec![]);
+    let texts = h.frame_texts(1.0 / 60.0, vec![]);
+    let top = |label: &str| texts.iter().find(|(_, t)| t == label).map(|(r, _)| r.top());
+    let (fo, opts) = (top("Feature Options").expect("Feature Options"), top("Options").expect("Options"));
+    assert!(fo < opts, "{tool:?}: Feature Options {fo} above Options {opts}");
+    assert!(palette(&h).height() > bare.height() + 20.0, "{tool:?}");
+    h.app.set_tool(Tool::Select);
+    for _ in 0..3 {
+      h.frame(vec![]);
+    }
+    let after = palette(&h);
+    assert!((after.height() - bare.height()).abs() < 1.0, "{tool:?}: {after:?} after, {bare:?} before");
+  }
+}
+
+/// 3D Sketch on, the sketch grid hides while Line runs, before and after its first point, and
+/// shows again once the tool ends.
+#[test]
+fn sketch_3d_hides_the_grid_while_line_runs() {
+  use crate::viewport::Tool;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  h.frame(vec![]);
+  let grid = |h: &Harness| h.app.render_key.as_ref().expect("a rendered frame").show_grid;
+  assert!(grid(&h));
+  h.app.palette.sketch_3d = true;
+  h.app.set_tool(Tool::Line);
+  let c = h.app.canvas.center();
+  h.frame(vec![Event::PointerMoved(c)]);
+  assert!(!grid(&h), "the grid hides under the manipulator");
+  h.move_then_click(c);
+  assert!(!h.app.tstate.is_empty(), "the first point is placed");
+  h.frame(vec![Event::PointerMoved(c + vec2(80.0, 0.0))]);
+  assert!(!grid(&h), "and stays hidden while the line is drawn");
+  h.app.set_tool(Tool::Select);
+  h.frame(vec![]);
+  assert!(grid(&h));
+}

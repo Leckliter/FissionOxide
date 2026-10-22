@@ -2151,11 +2151,12 @@ impl App {
       let mut curves = Vec::new();
       let mut points = Vec::new();
       let mut cons = Vec::new();
+      // only the geometry of the sketch being edited
       for s in &self.s.selection {
-        match s {
-          Sel::SketchCurve { curve, .. } => curves.push(curve.0),
-          Sel::SketchPoint { point, .. } => points.push(point.0),
-          Sel::SketchConstraint { constraint, .. } => cons.push(constraint.0),
+        match *s {
+          Sel::SketchCurve { sketch, curve } if sketch == sk => curves.push(curve.0),
+          Sel::SketchPoint { sketch, point } if sketch == sk => points.push(point.0),
+          Sel::SketchConstraint { sketch, constraint } if sketch == sk => cons.push(constraint.0),
           _ => {}
         }
       }

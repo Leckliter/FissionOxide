@@ -2832,22 +2832,49 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
           };
           // while a tool with several types runs, its types sit above Options, as in Fusion: a row
           // named after the family (Line, Rectangle, ...) with an icon toggle per type, the running
-          // one lit, each with the ribbon's tooltip
+          // one lit, each with the ribbon's tooltip; a chamfer's three kinds and Blend Curve's
+          // continuity sit there too, so the section is always the palette's first
           let variants = feature_options(app.tool);
-          if !variants.is_empty() {
+          if !variants.is_empty() || app.tool.is_chamfer() || app.tool == Tool::Blend {
             section(ui, "Feature Options");
-            row(ui, feature_options_label(app.tool), &mut |ui| {
-              // laid out right to left, so the last listed is the leftmost
-              for &t in variants.iter().rev() {
-                let (icon, _, _) = Cmd::SketchTool(t).info();
-                let resp = icons::icon_button(ui, icon, 22.0, "", app.tool == t, None);
-                let resp = crate::menus::sketch_tool_tip(resp, &app.prefs, t);
-                if resp.clicked() && app.tool != t {
-                  // the points already placed carry over to the other kind
-                  switch_feature_option(app, t);
+            if !variants.is_empty() {
+              row(ui, feature_options_label(app.tool), &mut |ui| {
+                // laid out right to left, so the last listed is the leftmost
+                for &t in variants.iter().rev() {
+                  let (icon, _, _) = Cmd::SketchTool(t).info();
+                  let resp = icons::icon_button(ui, icon, 22.0, "", app.tool == t, None);
+                  let resp = crate::menus::sketch_tool_tip(resp, &app.prefs, t);
+                  if resp.clicked() && app.tool != t {
+                    // the points already placed carry over to the other kind
+                    switch_feature_option(app, t);
+                  }
                 }
-              }
-            });
+              });
+            } else if app.tool.is_chamfer() {
+              row(ui, "Chamfer", &mut |ui| {
+                // laid out right to left, so the last listed is the leftmost
+                for (tool, icon, hint) in [
+                  (Tool::Chamfer2, Icon::SkChamfer2, "Two Distance Chamfer"),
+                  (Tool::ChamferAngle, Icon::SkChamferAngle, "Distance and Angle Chamfer"),
+                  (Tool::Chamfer, Icon::SkChamfer, "Equal Distance Chamfer"),
+                ] {
+                  if icons::icon_button(ui, icon, 22.0, hint, app.tool == tool, None).clicked() && app.tool != tool {
+                    // the line already picked carries over to the other kind
+                    crate::sketch_modify::switch_chamfer(app, tool);
+                  }
+                }
+              });
+            } else {
+              row(ui, "Blend Curve", &mut |ui| {
+                for (g2, icon, hint) in
+                  [(true, Icon::Curvature, "Curvature (G2)"), (false, Icon::Tangent, "Tangent (G1)")]
+                {
+                  if icons::icon_button(ui, icon, 22.0, hint, app.modify.blend_g2 == g2, None).clicked() {
+                    app.modify.blend_g2 = g2;
+                  }
+                }
+              });
+            }
             ui.add_space(2.0);
           }
           section(ui, "Options");
@@ -2900,45 +2927,6 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
           row(ui, "3D Sketch", &mut |ui| {
             ui.add_enabled(sketch_3d_enabled, egui::Checkbox::without_text(&mut app.palette.sketch_3d));
           });
-          // Fusion's Feature Options while a chamfer runs (equal distance, distance and angle, two
-          // distance) and while Blend Curve runs (tangent G1, curvature G2)
-          if app.tool.is_chamfer() || app.tool == Tool::Blend {
-            ui.add_space(4.0);
-            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
-            triangle(ui.painter(), r.left_center() + vec2(5.0, 0.0), true, theme::GROUP_LABEL);
-            ui.painter().text(
-              r.left_center() + vec2(16.0, 0.0),
-              egui::Align2::LEFT_CENTER,
-              "Feature Options",
-              egui::FontId::proportional(13.0),
-              theme::TEXT,
-            );
-            if app.tool.is_chamfer() {
-              row(ui, "Chamfer", &mut |ui| {
-                // laid out right to left, so the last listed is the leftmost
-                for (tool, icon, hint) in [
-                  (Tool::Chamfer2, Icon::SkChamfer2, "Two Distance Chamfer"),
-                  (Tool::ChamferAngle, Icon::SkChamferAngle, "Distance and Angle Chamfer"),
-                  (Tool::Chamfer, Icon::SkChamfer, "Equal Distance Chamfer"),
-                ] {
-                  if icons::icon_button(ui, icon, 22.0, hint, app.tool == tool, None).clicked() && app.tool != tool {
-                    // the line already picked carries over to the other kind
-                    crate::sketch_modify::switch_chamfer(app, tool);
-                  }
-                }
-              });
-            } else {
-              row(ui, "Blend Curve", &mut |ui| {
-                for (g2, icon, hint) in
-                  [(true, Icon::Curvature, "Curvature (G2)"), (false, Icon::Tangent, "Tangent (G1)")]
-                {
-                  if icons::icon_button(ui, icon, 22.0, hint, app.modify.blend_g2 == g2, None).clicked() {
-                    app.modify.blend_g2 = g2;
-                  }
-                }
-              });
-            }
-          }
           // Fusion's palette ends with the 3D Sketch row; the solver's readout is a preference
           if let Some(r) = app.s.model.sketches.get(&sk).filter(|_| app.preferences.values.show_dof) {
             ui.add_space(4.0);
@@ -2959,7 +2947,11 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
         let sep = ui.allocate_exact_size(vec2(width, 1.0), egui::Sense::hover()).0;
         ui.painter().rect_filled(sep, 0.0, Color32::from_gray(215));
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
-          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+          // a row the button's height: a layout filling the space left would keep the area at
+          // its tallest (an Area's content gets the last frame's size), leaving a blank band once
+          // Feature Options goes
+          let layout = egui::Layout::right_to_left(egui::Align::Center);
+          ui.allocate_ui_with_layout(vec2(ui.available_width(), 24.0), layout, |ui| {
             if primary_button(ui, "Finish Sketch", icons::accent_of(Icon::Sketch)).clicked() {
               app.finish_sketch();
             }

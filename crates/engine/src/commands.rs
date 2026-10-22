@@ -791,16 +791,37 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let curves = ids(p, "curves").into_iter().map(CurveId).collect::<Vec<_>>();
       let points = ids(p, "points").into_iter().map(PointId).collect::<Vec<_>>();
       let cons = ids(p, "constraints").into_iter().map(ConstraintId).collect::<Vec<_>>();
+      let only_origin = curves.is_empty() && cons.is_empty() && points.iter().all(|pt| *pt == fox_sketch::ORIGIN);
       s.edit(|d| {
         let sketch = d.sketch_mut(sk)?;
+        // a window selection holds a curve's points and dimensions as well as the curve, and
+        // removing the curve takes them with it: skip what an earlier removal already took
+        let before = sketch.clone();
+        let has_curve = |sk: &Sketch, c: CurveId| {
+          sk.curve(c).is_some()
+            || sk.curve3d(c).is_some()
+            || sk.text_of(c).is_some()
+            || sk.spun_of(c).is_some()
+            || sk.flat_of(c).is_some()
+        };
         for c in cons {
-          sketch.remove_constraint(c)?;
+          if sketch.constraint(c).is_some() || before.constraint(c).is_none() {
+            sketch.remove_constraint(c)?;
+          }
         }
         for c in curves {
-          sketch.remove_curve(c)?;
+          if has_curve(sketch, c) || !has_curve(&before, c) {
+            sketch.remove_curve(c)?;
+          }
         }
         for pt in points {
-          sketch.remove_point(pt)?;
+          // the origin can't go, but it doesn't stop the rest of a selection going
+          if pt == fox_sketch::ORIGIN && !only_origin {
+            continue;
+          }
+          if sketch.point(pt).is_some() || before.point(pt).is_none() {
+            sketch.remove_point(pt)?;
+          }
         }
         Ok(())
       })?;

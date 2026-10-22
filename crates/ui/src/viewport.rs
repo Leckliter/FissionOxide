@@ -1474,6 +1474,12 @@ fn line_3d_click(app: &mut App, view: &View, pos: Pos2, sk: FeatureId, plane: &P
 /// boxes override the cursor and become driving dimensions.
 fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointId>) {
   let step_locks = hud_locks(app);
+  // a value typed in a heads-up box joins a dimension box's recent values, as in Fusion
+  for (f, t) in &step_locks {
+    if !matches!(f, Field::Sides | Field::Rho) {
+      remember_dim_value(app, t);
+    }
+  }
   let (p, snapped) = if step_locks.is_empty() { (p, snapped) } else { (hud_apply(app, p), None) };
   let rho = conic_rho(app);
   app.tstate.hud = HeadsUp::default();
@@ -3211,9 +3217,7 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       // Fusion's tooltip under the text names the parameter with its full value, light text on
       // its dark tooltip panel
       let resp = match dim_param_name(app, c.id.0) {
-        Some(name) => {
-          crate::navbar::dark_tip(resp, &dim_tooltip(&name, c.kind.is_angle(), dim.value, app.s.design.units))
-        }
+        Some(name) => crate::navbar::dark_tip(resp, &dim_hover_tip(&name, c.kind.is_angle(), dim, app.s.design.units)),
         None => resp,
       };
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {
@@ -3443,6 +3447,21 @@ const DIM_TEXT_HOT: Color32 = Color32::from_rgb(70, 113, 219);
 pub(crate) fn dim_tooltip(name: &str, angle: bool, value: f64, unit: fox_engine::model::LengthUnit) -> String {
   let (value, symbol) = if angle { (value.to_degrees(), "deg") } else { (unit.from_mm(value), unit.symbol()) };
   format!("{name} = {} {symbol}", full_number(value))
+}
+
+/// The hovered dimension's tooltip: a driven one (an expression with parameters) names its
+/// expression as Fusion does ("d21 : d1 * 2"), any other its full value (see [`dim_tooltip`]).
+fn dim_hover_tip(
+  name: &str,
+  angle: bool,
+  dim: &fox_engine::sketch::Dim,
+  unit: fox_engine::model::LengthUnit,
+) -> String {
+  if fox_engine::expr::eval_raw(&dim.expr, &fox_engine::expr::Empty).is_err() {
+    format!("{name} : {}", dim.expr)
+  } else {
+    dim_tooltip(name, angle, dim.value, unit)
+  }
 }
 
 /// A value to ten decimals without trailing zeros, one decimal at least ("0.4787837888", "0.5").
@@ -5545,6 +5564,11 @@ mod tests {
     assert_eq!(dim_tooltip("d1", false, 12.7, LengthUnit::In), "d1 = 0.5 in");
     assert_eq!(dim_tooltip("d2", false, 40.0, LengthUnit::Mm), "d2 = 40.0 mm");
     assert_eq!(dim_tooltip("d3", true, std::f64::consts::FRAC_PI_4, LengthUnit::Mm), "d3 = 45.0 deg");
+    // a driven dimension names its expression; a typed plain value still reads as its value
+    let driven = fox_engine::sketch::Dim::expr("d1 * 2", 2.0);
+    assert_eq!(dim_hover_tip("d21", false, &driven, LengthUnit::Mm), "d21 : d1 * 2");
+    let plain = fox_engine::sketch::Dim::expr("( 1 / 2 ) * 1 in", 12.7);
+    assert_eq!(dim_hover_tip("d4", false, &plain, LengthUnit::In), "d4 = 0.5 in");
   }
 
   /// The origin planes keep about 60 px on screen whatever the zoom: their size follows
@@ -6699,6 +6723,22 @@ mod tests {
     remember_dim_value(&mut app, "0.5 in");
     remember_dim_value(&mut app, "25");
     assert_eq!(app.dim_recent, ["25", "0.5 in"]);
+  }
+
+  /// Values typed in the heads-up boxes join the dimension box menu's recent values, in Fusion's
+  /// spelling and newest first; a polygon's side count doesn't.
+  #[test]
+  fn heads_up_values_join_the_recent_values() {
+    let (mut app, sk) = sketching(Tool::Rect);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["20", "1/2"]);
+    place_point(&mut app, sk, [3.0, 3.0], None);
+    assert_eq!(app.dim_recent, ["( 1 / 2 ) * 1 mm", "20 mm"]);
+    app.set_tool(Tool::Polygon);
+    place_point(&mut app, sk, [50.0, 0.0], None);
+    typed(&mut app, ["5", "6"]);
+    place_point(&mut app, sk, [55.0, 0.0], None);
+    assert_eq!(app.dim_recent, ["5 mm", "( 1 / 2 ) * 1 mm", "20 mm"]);
   }
 
   /// The 3-point arc's third step: the prompt asks for a point on the arc and there is no box.
