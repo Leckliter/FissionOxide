@@ -165,7 +165,9 @@ impl Desktop {
         Action::CheckForUpdates => {
           ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
           ctx.send_viewport_cmd(ViewportCommand::Focus);
+          // as Help ▸ Check for Updates, it reports in Job Status, shown open
           self.app.updates.check_now();
+          self.app.jobs.open = true;
         }
         Action::OpenDataFolder => {
           let root = self.app.hub_root();

@@ -797,7 +797,7 @@ fn project_list(app: &mut App, ui: &mut egui::Ui) {
 }
 
 /// New Project: a project named "New Project" at once, its name selected in an inline editor.
-fn new_project(app: &mut App) {
+pub(crate) fn new_project(app: &mut App) {
   let taken: Vec<String> = app.data.projects.iter().map(|p| s(p, "name")).collect();
   let name = unique_name("New Project", &taken);
   if let Some(v) = hub(app, "hub.project.create", json!({"name": name})) {

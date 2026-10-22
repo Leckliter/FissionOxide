@@ -954,6 +954,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
       .map(|d| d.tint_faces(&app.s).into_iter().map(|(b, f, _)| (b.0, f)).collect())
       .unwrap_or_default(),
     display: (app.display.ground(), app.display.environment),
+    bodies_hidden: app.ctx_menu.bodies_hidden,
   };
   if crate::gpu::active(app) {
     crate::gpu::set_quads(app, &key.quads);

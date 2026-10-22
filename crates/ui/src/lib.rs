@@ -53,10 +53,12 @@ mod gpu;
 mod grid_dialogs;
 mod handles;
 mod help;
+mod home;
 mod icons;
 #[cfg(test)]
 mod input_tests;
 mod insert_window;
+mod job_status;
 mod library_ui;
 mod logo;
 mod manip_arrow;
@@ -441,6 +443,10 @@ pub struct App {
   pub flat_mode: bool,
   /// Its browser's Bend Lines: Center Lines and Extent Lines shown.
   pub(crate) flat_lines: [bool; 2],
+  /// The application bar's Job Status panel (Check for Updates reports there).
+  pub jobs: job_status::JobStatus,
+  /// The Home view the application bar's house opens in place of the design.
+  pub home: home::Home,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -503,6 +509,8 @@ struct RenderKey {
   quads: Vec<fox_engine::render::Quad>,
   /// Ground Plane Offset (`None`: Adaptive) and the Environment, whose dome Environment Dome draws.
   display: (Option<f32>, navbar::Environment),
+  /// The Bodies folder's eye is off: no body is drawn.
+  bodies_hidden: bool,
 }
 
 impl App {
@@ -722,6 +730,8 @@ impl App {
       mesh_edit: mesh_ui::MeshEdit::default(),
       flat_mode: false,
       flat_lines: [true, true],
+      jobs: job_status::JobStatus::default(),
+      home: home::Home::default(),
     }
   }
 
@@ -2211,24 +2221,32 @@ impl App {
     plugins_ui::sync(self);
     preferences::recovery_tick(self, now());
     panels::app_bar(self, ui);
-    if self.show_toolbar {
+    // the Home view takes the place of the design: no toolbar, panels or canvas
+    let home = self.home.open;
+    if self.show_toolbar && !home {
       panels::toolbar(self, ui);
     }
-    if self.drawing.is_none() && self.electronics.is_none() {
+    if self.drawing.is_none() && self.electronics.is_none() && !home {
       // Fusion docks TEXT COMMANDS under the timeline, along the bottom of the window
       text_commands::panel(self, ui);
       self.bottom_strip(ui);
     }
     data_panel::heartbeat(self, &ctx);
-    data_panel::show(self, ui);
-    if self.drawing.is_none() {
+    if !home {
+      data_panel::show(self, ui);
+    }
+    if self.drawing.is_none() && !home {
       props_ui::show(self, ui);
     }
     if self.step_cam_move(now()) {
       ctx.request_repaint();
     }
     viewcube::keep_projection(self);
-    if self.electronics.is_some() {
+    if home {
+      egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+        home::show(self, ui);
+      });
+    } else if self.electronics.is_some() {
       egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
         ecad_ui::show(self, ui);
       });
@@ -2266,6 +2284,7 @@ impl App {
     error_dialog::badge(self, &ctx);
     error_dialog::window(self, &ctx);
     notifications::panel(self, &ctx);
+    job_status::panel(self, &ctx);
     marking::end_frame(self, &ctx);
     doc_dialogs::show(self, &ctx);
     anim_ui::show_dialog(self, &ctx);

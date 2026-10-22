@@ -203,38 +203,40 @@ fn insert_window(app: &mut App, ctx: &egui::Context) {
   const TABLE_H: f32 = 330.0;
   let (_, closed) = modal(ctx, "insert", w.target.title(), 760.0, |ui| {
     ui.horizontal_top(|ui| {
-      // the projects
+      // the projects, a column of their own (the frame's ui is horizontal, as the row it is in)
       egui::Frame::new().stroke(Stroke::new(1.0, theme::BORDER)).show(ui, |ui| {
-        ui.set_width(220.0);
-        ui.set_height(TABLE_H);
-        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        let (head, _) = ui.allocate_exact_size(vec2(220.0, 26.0), egui::Sense::hover());
-        ui.painter().rect_filled(head, 0.0, Color32::from_gray(246));
-        ui.painter().text(
-          pos2(head.left() + 10.0, head.center().y),
-          egui::Align2::LEFT_CENTER,
-          "PROJECT",
-          egui::FontId::proportional(11.0),
-          theme::GROUP_LABEL,
-        );
-        egui::ScrollArea::vertical().id_salt("insert-projects").auto_shrink([false, false]).show(ui, |ui| {
-          for p in w.projects.clone() {
-            let id = s(&p, "id");
-            let on = w.project.as_deref() == Some(id.as_str());
-            let (rect, r) = row(ui, on);
-            row_text(ui, rect, 10.0, &s(&p, "name"), theme::TEXT);
-            if r.clicked() {
-              w.project = Some(id);
-              w.folder = None;
-              w.selected = None;
-              w.stale = true;
+        ui.vertical(|ui| {
+          ui.set_width(220.0);
+          ui.set_height(TABLE_H);
+          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+          let (head, _) = ui.allocate_exact_size(vec2(220.0, 26.0), egui::Sense::hover());
+          ui.painter().rect_filled(head, 0.0, Color32::from_gray(246));
+          ui.painter().text(
+            pos2(head.left() + 10.0, head.center().y),
+            egui::Align2::LEFT_CENTER,
+            "PROJECT",
+            egui::FontId::proportional(11.0),
+            theme::GROUP_LABEL,
+          );
+          egui::ScrollArea::vertical().id_salt("insert-projects").auto_shrink([false, false]).show(ui, |ui| {
+            for p in w.projects.clone() {
+              let id = s(&p, "id");
+              let on = w.project.as_deref() == Some(id.as_str());
+              let (rect, r) = row(ui, on);
+              row_text(ui, rect, 10.0, &s(&p, "name"), theme::TEXT);
+              if r.clicked() {
+                w.project = Some(id);
+                w.folder = None;
+                w.selected = None;
+                w.stale = true;
+              }
             }
-          }
-          if w.projects.is_empty() {
-            let (rect, _) = row(ui, false);
-            row_text(ui, rect, 10.0, "No projects yet", theme::MUTED);
-          }
-        });
+            if w.projects.is_empty() {
+              let (rect, _) = row(ui, false);
+              row_text(ui, rect, 10.0, "No projects yet", theme::MUTED);
+            }
+          });
+        })
       });
       ui.add_space(12.0);
       ui.vertical(|ui| {

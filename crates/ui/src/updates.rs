@@ -1,5 +1,6 @@
-//! Software updates in the UI: Help → Check for Updates, the Software Update window (what's new,
-//! download progress, install), and the setting for how updates happen. The checking,
+//! Software updates in the UI: the Software Update window (what's new, download progress,
+//! install; the bell's update notice opens it), and the setting for how updates happen. Help →
+//! Check for Updates reports in Job Status (`crate::job_status`). The checking,
 //! downloading and installing is `fox_desktop::update::Updater`'s, on its own thread.
 
 use egui::{Color32, RichText, vec2};
@@ -36,12 +37,27 @@ impl Updates {
     self.updater.as_ref().map_or(Status::Idle, Updater::status)
   }
 
-  /// Help → Check for Updates: opens the window and looks now.
+  /// Help → Check for Updates: looks now. As in Fusion it opens no window; the result shows in
+  /// Job Status (`crate::job_status`).
   pub fn check_now(&mut self) {
-    self.open = true;
     if let Some(u) = &self.updater {
       u.check(true);
     }
+  }
+
+  /// Job Status's Update Now on a release not downloaded yet.
+  pub fn download(&self) {
+    if let Some(u) = &self.updater {
+      u.download();
+    }
+  }
+
+  /// Job Status's Update Now on a downloaded release: starts its installer (the app then closes).
+  pub fn install(&mut self, style: InstallStyle) -> Result<(), String> {
+    let Some(u) = &self.updater else { return Err("FissionOxide isn't set up to update itself".into()) };
+    u.install(style)?;
+    self.installing = true;
+    Ok(())
   }
 
   /// What the tray icon's update entry says.
@@ -97,7 +113,8 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
     && app.updates.announced.as_deref() != Some(&r.version.to_string())
   {
     app.updates.announced = Some(r.version.to_string());
-    app.updates.open = true;
+    // Fusion announces a new version on Job Status's icon, not in a window
+    crate::job_status::announce(app);
   }
   if !app.updates.open {
     return;

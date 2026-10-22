@@ -118,7 +118,7 @@ pub fn action(app: &mut App, label: &str) {
       let gpu = if crate::gpu::active(app) { "OpenGL on the GPU" } else { "the software renderer" };
       app.status = Some((format!("Graphics: the canvas draws with {gpu}"), false));
     }
-    "Check for Updates" => app.updates.check_now(),
+    "Check for Updates" => crate::job_status::check_for_updates(app),
     "What's New" => whats_new(app),
     "Release Notes" => open(app, fox_desktop::update::RELEASES_PAGE),
     "About" => app.help.about = true,

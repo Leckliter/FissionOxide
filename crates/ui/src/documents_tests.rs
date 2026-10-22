@@ -573,3 +573,125 @@ fn a_decal_goes_on_as_an_opaque_image() {
   assert_eq!(f.name, "label");
   assert!(matches!(&f.kind, fox_engine::model::FeatureKind::Canvas { opacity, .. } if *opacity == 1.0), "{:?}", f.kind);
 }
+
+/// Where each text drawn this frame starts, by its text (the tests find labels with it).
+fn texts(h: &mut Harness) -> Vec<(String, Pos2)> {
+  h.time += 1.0 / 60.0;
+  let input = RawInput {
+    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+    time: Some(h.time),
+    ..Default::default()
+  };
+  let app = &mut h.app;
+  let out = h.ctx.run_ui(input, |ui| app.draw(ui));
+  out
+    .shapes
+    .iter()
+    .filter_map(|c| match &c.shape {
+      egui::Shape::Text(t) => Some((t.galley.text().to_string(), t.pos)),
+      _ => None,
+    })
+    .collect()
+}
+
+/// The Insert window's PROJECT column lists the hub's projects (Default Project picked) under
+/// its heading, each once; a click on one shows its files.
+#[test]
+fn the_insert_window_lists_the_projects_in_their_column() {
+  let mut h = Harness::new("insert-projects");
+  for name in ["Default Project", "Other"] {
+    h.app.s.execute("hub.project.create", &json!({"name": name})).unwrap();
+  }
+  Cmd::Insert(Target::Svg).run(&mut h.app);
+  h.frame(vec![]);
+  assert!(h.area(crate::file_dialogs::modal_id("insert")).is_some(), "the Insert window shows");
+  let shown = texts(&mut h);
+  let heading = shown.iter().find(|(t, _)| t == "PROJECT").expect("the PROJECT heading").1;
+  // the column is 220 wide, its texts 10 in from its left
+  let column = heading.x + 210.0;
+  let other = shown.iter().find(|(t, _)| t == "Other").expect("the other project is listed").1;
+  assert!(other.x < column && other.y > heading.y + 10.0, "under the heading, in the column: {other:?} {heading:?}");
+  let defaults: Vec<Pos2> = shown.iter().filter(|(t, _)| t == "Default Project").map(|p| p.1).collect();
+  assert_eq!(defaults.len(), 2, "the list row and the file table's heading: {defaults:?}");
+  assert!(defaults.iter().filter(|p| p.x < column).count() == 1, "one in the column: {defaults:?}");
+  let at = other + vec2(4.0, 6.0);
+  h.frame(vec![Event::PointerMoved(at)]);
+  h.frame(vec![
+    Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+    Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+  ]);
+  h.frame(vec![]);
+  let w = h.app.inserts.window.as_ref().expect("still open");
+  let picked = w.projects.iter().find(|p| p["id"].as_str() == w.project.as_deref()).map(|p| p["name"].clone());
+  assert_eq!(picked, Some(json!("Other")));
+}
+
+/// A click at `at`.
+fn click(h: &mut Harness, at: Pos2) {
+  h.frame(vec![Event::PointerMoved(at)]);
+  h.frame(vec![
+    Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+    Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+  ]);
+  h.frame(vec![]);
+}
+
+/// The house shows the Home view in place of the design (Fusion's title, Start working, Recent
+/// with the hub's designs, Ways to explore; no toolbar); a document's tab goes back to it.
+#[test]
+fn the_house_opens_home_and_a_tab_goes_back() {
+  let mut h = Harness::new("home");
+  h.app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+  h.app.s.execute("hub.save", &json!({"name": "Bracket"})).unwrap();
+  h.frame(vec![]);
+  // the first icon of the application bar is the house
+  click(&mut h, egui::pos2(8.0 + 13.0, 17.0));
+  assert!(h.app.home.open, "the house opens Home");
+  assert_eq!(h.app.title(), "Home - FissionOxide");
+  let shown = texts(&mut h);
+  let has = |t: &str| shown.iter().any(|(s, _)| s == t);
+  for t in
+    ["Home", "My FissionOxide", "Projects", "Samples", "Start working", "+ New Design", "Recent", "Ways to explore"]
+  {
+    assert!(has(t), "{t} shows");
+  }
+  for c in crate::home::COLUMNS {
+    assert!(has(c), "Recent's {c} column");
+  }
+  assert!(has("Bracket"), "the saved design is in Recent");
+  assert!(!has("SOLID") && !has("Bodies"), "no toolbar or browser in place of the design");
+  // a click on the document's tab goes back to the design
+  let tab = shown.iter().find(|(s, _)| s.starts_with("Bracket v")).expect("the document's tab").1;
+  click(&mut h, tab + vec2(4.0, 6.0));
+  assert!(!h.app.home.open, "the tab shows the design again");
+  assert!(h.app.title().starts_with("Bracket"));
+  // Start working's New Part Design leaves Home for a new design
+  crate::home::open(&mut h.app);
+  crate::home::act(&mut h.app, crate::home::Act::Start("New Part Design"));
+  assert!(!h.app.home.open);
+  assert_eq!(h.app.docs.count(), 2, "in a tab of its own");
+}
+
+/// The profile menu has Fusion's entries; Preferences opens the Preferences dialog.
+#[test]
+fn the_profile_menu_lists_fusions_entries() {
+  let labels: Vec<Option<&str>> = crate::panels::PROFILE_MENU.iter().map(|e| e.map(|(l, _)| l)).collect();
+  assert_eq!(
+    labels,
+    [
+      Some("Autodesk Account"),
+      Some("Preferences"),
+      Some("My Profile"),
+      Some("Share Feedback"),
+      None,
+      Some("Subscribe Now"),
+      None,
+      Some("Sign Out")
+    ]
+  );
+  let enabled: Vec<&str> = crate::panels::PROFILE_MENU.iter().flatten().filter(|e| e.1).map(|e| e.0).collect();
+  assert_eq!(enabled, ["Preferences", "Share Feedback"], "the account entries are greyed");
+  let mut h = Harness::new("profile");
+  crate::panels::profile_action(&mut h.app, "Preferences");
+  assert!(h.app.preferences.open, "Preferences opens");
+}

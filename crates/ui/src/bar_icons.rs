@@ -25,7 +25,6 @@ pub enum Glyph {
   Plugins,
   Assistant,
   JobStatus,
-  Recent,
   Bell,
   Help,
 }
@@ -132,11 +131,6 @@ pub fn draw(p: &Painter, r: Rect, g: Glyph, ink: Color32, bg: Color32) {
       p.circle_filled(b.u(0.5, 0.5), b.len(0.46), ink);
       p.circle_filled(b.u(0.5, 0.5), b.len(0.3), bg);
       p.add(Shape::convex_polygon(b.pts(&[(0.5, 0.5), (0.5, 0.2), (0.8, 0.5)]), ink, Stroke::NONE));
-    }
-    Glyph::Recent => {
-      p.circle_filled(b.u(0.5, 0.5), b.len(0.46), ink);
-      let s = Stroke::new(b.len(0.1), bg);
-      p.add(Shape::line(b.pts(&[(0.5, 0.2), (0.5, 0.52), (0.72, 0.66)]), s));
     }
     Glyph::Bell => {
       let mut dome = b.arc((0.5, 0.42), 0.28, 0.0, PI);

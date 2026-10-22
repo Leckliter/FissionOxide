@@ -13,6 +13,16 @@ use crate::{App, RenameTarget, marking, theme};
 
 // ---------------------------------------------------------------- labels
 
+/// Who is signed in: FissionOxide has the machine's user (the profile button's tooltip, Home's
+/// greeting).
+pub(crate) fn user_name() -> String {
+  std::env::var("USER")
+    .or_else(|_| std::env::var("USERNAME"))
+    .ok()
+    .filter(|u| !u.trim().is_empty())
+    .unwrap_or_else(|| "Local user".into())
+}
+
 /// Whether the design has never been saved (no hub version, no file).
 pub(crate) fn unsaved(app: &App) -> bool {
   crate::documents::unsaved(&app.s)
@@ -37,6 +47,10 @@ pub(crate) fn root_label(app: &App) -> String {
 /// The window title, as Fusion's "Untitled - Autodesk Fusion": the shown tab's label, then the
 /// product.
 pub(crate) fn window_title(app: &App) -> String {
+  // the Home view's own title, as Fusion's "Home - Autodesk Fusion"
+  if app.home.open {
+    return "Home - FissionOxide".into();
+  }
   format!("{} - FissionOxide", crate::documents::tab_label(&app.s))
 }
 

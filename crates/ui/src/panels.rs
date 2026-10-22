@@ -118,8 +118,9 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
+        // the house opens the Home view, as Fusion's first icon
         if bar_icon(ui, Glyph::Home, crate::data_panel::HOME_TIP, true).clicked() {
-          app.data.home();
+          crate::home::open(app);
         }
         ui.add_space(4.0);
         if bar_icon(ui, Glyph::DataPanel, crate::data_panel::BUTTON_TIP, true).clicked() {
@@ -170,8 +171,13 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           if crate::notifications::unread(app) {
             ui.painter().circle_filled(bell.rect.center() + vec2(6.0, -7.0), 3.5, theme::ICON_ORANGE);
           }
-          let _ = bar_icon(ui, Glyph::Recent, "Recent activity", true);
-          let _ = bar_icon(ui, Glyph::JobStatus, "Job Status: all changes are local", true);
+          // Job Status opens its panel under it; Check for Updates reports there, with a badge
+          let jobs = bar_icon(ui, Glyph::JobStatus, crate::job_status::TIP, true);
+          if jobs.clicked() {
+            crate::job_status::toggle(app);
+          }
+          app.jobs.anchor = jobs.rect;
+          crate::job_status::paint_badge(app, ui.painter(), jobs.rect);
           if bar_icon(ui, Glyph::Assistant, "Autodesk Assistant", true).clicked() {
             crate::help::assistant(app);
           }
@@ -316,21 +322,73 @@ pub(crate) fn file_menu_action(app: &mut App, label: &str) {
   }
 }
 
-/// The profile button; its menu has Preferences, as in Fusion.
+/// The profile button. Its menu has Fusion's entries: Autodesk Account, Preferences, My Profile,
+/// Share Feedback, Subscribe Now and Sign Out; those that need an Autodesk account are greyed.
 fn avatar(app: &mut App, ui: &mut egui::Ui) {
   let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::click());
   ui.painter().circle_filled(rect.center(), 12.0, Color32::from_rgb(92, 84, 196));
   ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "CL", egui::FontId::proportional(11.0), Color32::WHITE);
-  let resp = resp.on_hover_text("Local user");
-  egui::Popup::menu(&resp).show(|ui| {
-    ui.set_min_width(180.0);
-    ui.label(RichText::new("Local user").strong());
-    ui.separator();
-    if ui.button("Preferences").clicked() {
+  let resp = resp.on_hover_text(user_name());
+  egui::Popup::menu(&resp).show(|ui| profile_menu(app, ui));
+}
+
+/// Why the profile menu's account entries are greyed.
+pub(crate) const NO_ACCOUNT: &str = "FissionOxide has no Autodesk account: it works without signing in";
+
+/// Where Share Feedback goes: the project's issue tracker.
+pub(crate) const FEEDBACK_PAGE: &str = "https://github.com/leckliter/FissionOxide/issues";
+
+/// The profile menu's entries in Fusion's order, `None` for a separator; `false` entries are
+/// greyed.
+pub(crate) const PROFILE_MENU: [Option<(&str, bool)>; 8] = [
+  Some(("Autodesk Account", false)),
+  Some(("Preferences", true)),
+  Some(("My Profile", false)),
+  Some(("Share Feedback", true)),
+  None,
+  Some(("Subscribe Now", false)),
+  None,
+  Some(("Sign Out", false)),
+];
+
+fn profile_menu(app: &mut App, ui: &mut egui::Ui) {
+  ui.set_min_width(200.0);
+  for entry in PROFILE_MENU {
+    let Some((label, enabled)) = entry else {
+      ui.separator();
+      continue;
+    };
+    let r = if label == "Sign Out" {
+      // Sign Out carries an icon after its name, as in Fusion
+      ui.add_enabled_ui(enabled, |ui| {
+        let r = ui.add(egui::Button::new(label).frame(false).min_size(vec2(ui.available_width(), 0.0)));
+        let at = egui::Rect::from_center_size(r.rect.right_center() - vec2(12.0, 0.0), vec2(14.0, 14.0));
+        icons::draw(ui.painter(), at, Icon::SignOut, if enabled { theme::ICON_INK } else { theme::MUTED });
+        r
+      })
+      .inner
+    } else {
+      ui.add_enabled(enabled, egui::Button::new(label).frame(false).min_size(vec2(ui.available_width(), 0.0)))
+    };
+    let r = r.on_disabled_hover_text(NO_ACCOUNT);
+    if r.clicked() {
       ui.close();
-      crate::preferences::open(app);
+      profile_action(app, label);
     }
-  });
+  }
+}
+
+/// Runs a profile menu entry.
+pub(crate) fn profile_action(app: &mut App, label: &str) {
+  match label {
+    "Preferences" => crate::preferences::open(app),
+    "Share Feedback" => {
+      if let Err(e) = fox_desktop::open(FEEDBACK_PAGE) {
+        app.status = Some((format!("Couldn't open {FEEDBACK_PAGE}: {e}"), true));
+      }
+    }
+    _ => {}
+  }
 }
 
 // ---------------------------------------------------------------- toolbar
@@ -4686,6 +4744,7 @@ mod timeline_groups;
 mod timeline_tip;
 
 pub(crate) use browser_edit::set_opacity;
+pub(crate) use browser_rows::user_name;
 pub(crate) use browser_rows::{body_menu_items, construction_plane_menu, run_body_cmd, run_construction_plane_cmd};
 pub(crate) use browser_rows::{doc_name, root_label, unsaved as is_unsaved, window_title};
 pub(crate) use mesh_rows::{MeshCmd, OPACITY_LEVELS, mesh_body_menu, run_mesh_cmd};

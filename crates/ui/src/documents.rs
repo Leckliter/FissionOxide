@@ -428,9 +428,11 @@ pub(crate) fn tab_strip(app: &mut App, ui: &mut egui::Ui, w: f32) {
   app.docs.overflow_at = None;
   let mut switch = None;
   let mut close = None;
+  // on the Home view no document is shown
+  let home = app.home.open;
   let mut tabs = |ui: &mut egui::Ui, each: f32| {
     for (i, (label, locked, kind)) in labels.iter().enumerate() {
-      let shown = i == app.docs.active;
+      let shown = i == app.docs.active && !home;
       let (resp, closed) = document_tab(ui, i, each, bottom, label, *locked, shown, *kind);
       if shown && reveal {
         resp.scroll_to_me(None);
@@ -486,7 +488,12 @@ pub(crate) fn tab_strip(app: &mut App, ui: &mut egui::Ui, w: f32) {
   let g = Rect::from_center_size(r.center(), Vec2::splat(13.0));
   crate::bar_icons::draw(ui.painter(), g, crate::bar_icons::Glyph::Plus, crate::bar_icons::INK, bg);
   if resp.on_hover_text(PLUS_TIP).clicked() {
+    app.home.open = false;
     open_chooser(app);
+  }
+  // a click on a document's tab leaves the Home view for it
+  if switch.is_some() {
+    app.home.open = false;
   }
   if let Some(i) = close {
     request_close(app, i);

@@ -2238,6 +2238,28 @@ fn bodies_folder_eye_waits_for_the_pointer_while_a_body_is_hidden() {
   assert!(!h.app.s.body_visible(body), "the body keeps its own eye");
 }
 
+/// The Bodies folder's eye takes every body out of the canvas, not just the browser: the
+/// viewport renders again without them (no face left to pick), and the eye brings them back.
+#[test]
+fn bodies_folder_eye_takes_the_bodies_out_of_the_canvas() {
+  use fox_engine::scene::Pick;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+  h.settle();
+  let body = h.app.s.model.bodies[0].id;
+  let drawn = |h: &Harness| (0..=6).any(|face| h.app.picks.id_of(&Pick::Face { body, face }).is_some());
+  assert!(drawn(&h), "the box is drawn");
+  let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("browser"))).expect("the browser is shown");
+  let folder_eye = egui::pos2(area.min.x + 8.0 + 16.0 + 24.0, area.min.y + 30.0 + 25.0 * 6.0 + 12.5);
+  h.move_then_click(folder_eye);
+  assert!(h.app.ctx_menu.bodies_hidden);
+  h.frame(vec![]);
+  assert!(!drawn(&h), "the canvas no longer draws the box");
+  h.move_then_click(folder_eye);
+  h.frame(vec![]);
+  assert!(drawn(&h), "the eye shows it again");
+}
+
 /// The first offset plane adds a collapsed Construction folder with an eye, as in Fusion; the
 /// eye hides the construction planes.
 #[test]

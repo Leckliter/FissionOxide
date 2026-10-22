@@ -337,6 +337,7 @@ mod tests {
       quads: Vec::new(),
       tints: Vec::new(),
       display: (None, Default::default()),
+      bodies_hidden: false,
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

@@ -485,6 +485,14 @@ pub enum Icon {
   Assembly,
   /// Mesh Combine's Merge: two meshes side by side, joined as they are.
   OpMerge,
+  /// The application bar's Home: a house outline.
+  AppHome,
+  /// Job Status's update card: a wrapped gift.
+  Gift,
+  /// After a link that opens a web page: a box with an arrow out of its corner.
+  ExternalLink,
+  /// The profile menu's Sign Out: a door with an arrow leaving it.
+  SignOut,
 }
 
 #[derive(Clone, Copy)]
@@ -3112,6 +3120,28 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.54, 0.2), (0.94, 0.2), (0.94, 0.8), (0.54, 0.8)], BlueLight);
       k.closed(&[(0.06, 0.2), (0.94, 0.2), (0.94, 0.8), (0.06, 0.8)], Blue);
       k.line((0.5, 0.2), (0.5, 0.8), Blue);
+    }
+    Icon::AppHome => {
+      k.path(&[(0.08, 0.5), (0.5, 0.12), (0.92, 0.5)], Ink);
+      k.path(&[(0.2, 0.4), (0.2, 0.88), (0.8, 0.88), (0.8, 0.4)], Ink);
+      k.path(&[(0.42, 0.88), (0.42, 0.62), (0.58, 0.62), (0.58, 0.88)], Ink);
+    }
+    Icon::Gift => {
+      k.solid(&[(0.14, 0.44), (0.86, 0.44), (0.86, 0.92), (0.14, 0.92)], BlueLight);
+      k.solid(&[(0.08, 0.28), (0.92, 0.28), (0.92, 0.44), (0.08, 0.44)], Blue);
+      k.solid(&[(0.44, 0.28), (0.56, 0.28), (0.56, 0.92), (0.44, 0.92)], BlueDark);
+      k.closed(&[(0.5, 0.28), (0.3, 0.1), (0.22, 0.22)], BlueDark);
+      k.closed(&[(0.5, 0.28), (0.7, 0.1), (0.78, 0.22)], BlueDark);
+    }
+    Icon::ExternalLink => {
+      k.path(&[(0.44, 0.2), (0.16, 0.2), (0.16, 0.84), (0.8, 0.84), (0.8, 0.56)], Ink);
+      k.line((0.44, 0.56), (0.86, 0.14), Ink);
+      k.path(&[(0.58, 0.14), (0.86, 0.14), (0.86, 0.42)], Ink);
+    }
+    Icon::SignOut => {
+      k.path(&[(0.56, 0.3), (0.56, 0.12), (0.12, 0.12), (0.12, 0.88), (0.56, 0.88), (0.56, 0.7)], Ink);
+      k.line((0.34, 0.5), (0.9, 0.5), Ink);
+      k.path(&[(0.74, 0.34), (0.9, 0.5), (0.74, 0.66)], Ink);
     }
   }
 }
