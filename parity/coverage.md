@@ -7,7 +7,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 ## Design workspace: chrome
 - [done (2026-10-21)] Application bar, document tabs, File menu, undo/redo lists, Help, profile, notifications
 - [done (2026-10-21)] Toolbar tabs and panel dropdowns at full width; responsive collapse at narrow widths
-- [todo] Tooltips on every ribbon button (short and expanded), pin/unpin, customise shortcuts
+- [in progress (2026-10-21, prober 7)] Tooltips on every ribbon button (short and expanded), pin/unpin, customise shortcuts
 - [done (2026-10-21)] Preferences dialog (layout, General); todo: every other Preferences page vs Fusion's
 - [todo] Data Panel: projects, folders, upload, versions, search, Recent/Activity/Trash
 - [todo] Save, Save As, Open, Open Recent, Export, New Drawing, Insert into Design, Capture Image, 3D Print dialogs
