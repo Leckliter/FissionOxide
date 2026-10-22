@@ -55,6 +55,7 @@ use fox_model::{BodyId, Design, FeatureId};
 use serde_json::Value;
 
 pub use commands::{COMMANDS, CONSTRAINTS_REMOVED, CommandSpec};
+pub use features::APPEARANCE_FOLDERS;
 pub use fillet::tangent_neighbours;
 pub use fox_ecad as electronics;
 pub use fox_exchange as exchange;

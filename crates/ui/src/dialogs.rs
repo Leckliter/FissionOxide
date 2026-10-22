@@ -360,12 +360,19 @@ impl Kind {
     )
   }
 
+  /// Fusion's library palettes (Appearance, Physical Material): swatches applied by a drag or a
+  /// click, with Close rather than OK.
+  pub(crate) fn palette(self) -> bool {
+    matches!(self, Kind::Appearance | Kind::Material)
+  }
+
   /// Dialogs that only show information (no OK, nothing applied).
   pub(crate) fn reports(self) -> bool {
     matches!(
       self,
       Kind::Inspect
         | Kind::Appearance
+        | Kind::Material
         | Kind::FlatPattern
         | Kind::Interference
         | Kind::Bom
@@ -549,8 +556,8 @@ pub struct Dialog {
   manip: manip::Cache,
   /// Measure: the selection filter as it was before the dialog changed it.
   saved_filter: Option<(crate::select::Priority, bool)>,
-  /// Appearance applies to faces rather than bodies.
-  appearance_faces: bool,
+  /// The Appearance and Physical Material palettes' state (see [`crate::material_ui`]).
+  palette: crate::material_ui::Palette,
   /// Move/Copy's inputs (see [`move_copy`]).
   mv: move_copy::MoveForm,
   /// Live preview (see [`live`]).
@@ -695,7 +702,7 @@ impl Dialog {
       trace: (kind == Kind::TraceImage).then(Box::default),
       manip: manip::Cache::default(),
       saved_filter: None,
-      appearance_faces: false,
+      palette: Default::default(),
       mv: move_copy::MoveForm::default(),
       live: live::Live::default(),
       follow: false,
@@ -950,7 +957,6 @@ impl Dialog {
         d.origins = sel_origins(s);
         d.e = "2 mm".into();
       }
-      Kind::Material => d.name = "Steel".into(),
       Kind::SkFillet => d.radius = "2 mm".into(),
       Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => {
         d.distance = "2 mm".into();
@@ -1268,6 +1274,7 @@ impl Dialog {
       Kind::PickPlane
       | Kind::Inspect
       | Kind::Appearance
+      | Kind::Material
       | Kind::FlatPattern
       | Kind::Interference
       | Kind::Bom
@@ -1420,9 +1427,6 @@ impl Dialog {
           p["lead"] = json!(self.e);
         }
         ("joint", p)
-      }
-      Kind::Material => {
-        ("component.material", json!({"component": self.comps.iter().flatten().next()?, "material": self.name}))
       }
       Kind::SkFillet => ("sketch.fillet", json!({"curves": self.curves, "radius": self.radius})),
       Kind::SkChamfer => ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance})),
@@ -1786,7 +1790,6 @@ impl Dialog {
         let need = self.saved.iter().filter(|n| n.is_empty()).count();
         self.origins.len() >= need && (!self.saved[0].is_empty() || self.comps.first().is_some_and(Option::is_some))
       }
-      Kind::Material => self.comps.iter().any(Option::is_some),
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
       Kind::SkCircPattern | Kind::SkScale => !self.curves.is_empty() && self.center.is_some(),
@@ -2063,7 +2066,7 @@ impl Dialog {
           self.dirty = true;
         }
       }
-      Kind::NewComponent | Kind::Material => {
+      Kind::NewComponent => {
         let b = sel_bodies(s);
         if b != self.bodies {
           self.comps = b.iter().map(|x| s.design.component_of(BodyId(*x)).map(|c| c.id.0)).collect();
@@ -2192,9 +2195,19 @@ impl Dialog {
         panels::dialog_header(ui, self.kind.icon(), &title, width);
         egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 10, bottom: 8 }).show(ui, |ui| {
           ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
-          egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
-            self.fields(app, ui);
-          });
+          if self.kind.palette() {
+            egui::ScrollArea::vertical().max_height(560.0).auto_shrink([false, true]).show(ui, |ui| {
+              if self.kind == Kind::Material {
+                crate::material_ui::material_palette(app, ui, &mut self.palette);
+              } else {
+                crate::material_ui::appearance_palette(app, ui, &mut self.palette);
+              }
+            });
+          } else {
+            egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
+              self.fields(app, ui);
+            });
+          }
           if let Some(e) = &self.error {
             ui.add_space(6.0);
             ui.label(RichText::new(format!("⚠ {e}")).color(theme::ERROR));
@@ -2401,7 +2414,6 @@ impl Dialog {
           | Kind::Flange
           | Kind::NewComponent
           | Kind::Project
-          | Kind::Material
           | Kind::Mirror
           | Kind::RectPattern
           | Kind::CircPattern
@@ -2472,7 +2484,6 @@ impl Dialog {
         "select the moving component, then the one it's jointed to, then a face, edge or point for the joint"
       }
       Kind::ComponentProps => "pick a component in the browser",
-      Kind::Material => "select a body of a component",
       Kind::SkFillet => "select two lines or arcs that meet",
       Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "select two lines",
       Kind::SkMirror if self.curves.is_empty() => "select sketch objects to mirror",
@@ -2691,7 +2702,8 @@ impl Dialog {
       }
       Kind::Move => self.move_fields(app, ui),
       Kind::Inspect => self.inspect(app, ui),
-      Kind::Appearance => self.appearance(app, ui),
+      // the palettes draw outside the grid (see `show`)
+      Kind::Appearance | Kind::Material => {}
       Kind::RedefinePlane => self.redefine_rows(app, ui),
       Kind::ExportDxf => self.dxf_rows(app, ui),
       Kind::Section => section_fields(app, ui),
@@ -3501,23 +3513,6 @@ impl Dialog {
         Self::field(ui, "Angle", &mut self.angle, dirty);
         Self::field(ui, "Offset", &mut self.distance, dirty);
         Self::check(ui, "Flip", &mut self.flip, dirty);
-      }
-      Kind::Material => {
-        ui.label("Component");
-        let n = self.comps.iter().flatten().count();
-        chip(ui, n.min(1), "component");
-        ui.end_row();
-        ui.label("Material");
-        let cur = self.name.clone();
-        egui::ComboBox::from_id_salt("mat").selected_text(&cur).width(140.0).show_ui(ui, |ui| {
-          for (m, _) in fox_engine::model::assembly::MATERIALS {
-            if ui.selectable_label(cur == *m, *m).clicked() {
-              self.name = m.to_string();
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
       }
       Kind::Interference => {
         let rows = self.report.as_ref().and_then(Value::as_array).cloned().unwrap_or_default();
@@ -4905,48 +4900,10 @@ impl Dialog {
     }
   }
 
-  /// Fusion's Appearance panel: Apply To (bodies or faces), the appearances In This Design, and
-  /// the library. Swatches drag onto the model, or a click applies one to the selection.
-  fn appearance(&mut self, app: &mut App, ui: &mut egui::Ui) {
-    ui.label("Apply To");
-    ui.horizontal(|ui| {
-      if ui.selectable_label(!self.appearance_faces, "Bodies/Components").clicked() {
-        self.appearance_faces = false;
-      }
-      if ui.selectable_label(self.appearance_faces, "Faces").clicked() {
-        self.appearance_faces = true;
-      }
-    });
-    ui.end_row();
-    let lib = appearance_library(app);
-    let used = in_this_design(app, &lib);
-    let faces = self.appearance_faces;
-    let mut apply: Option<(String, [u8; 3])> = None;
-    for (title, list) in [("In This Design", used), ("Library", lib.iter().map(|(n, c)| (n.clone(), *c, 0)).collect())]
-    {
-      for (i, (name, color, n)) in list.into_iter().enumerate() {
-        ui.label(if i == 0 { RichText::new(title).color(theme::GROUP_LABEL) } else { RichText::new("") });
-        let label = if n > 0 { format!("{name}  ({n})") } else { name.clone() };
-        if swatch_row(ui, (title, i), &label, &name, color, faces) {
-          apply = Some((name, color));
-        }
-        ui.end_row();
-      }
-    }
-    ui.label("");
-    ui.label(
-      RichText::new("Drag a swatch onto a body or face, or click one to apply it to the selection")
-        .small()
-        .color(theme::MUTED),
-    );
-    ui.end_row();
-    if let Some((name, color)) = apply {
-      let sel = app.s.selection.clone();
-      if !apply_appearance(app, &name, color, faces, &sel) {
-        let what = if faces { "faces" } else { "bodies" };
-        app.status = Some((format!("Select {what} first, or drag the swatch onto the model"), false));
-      }
-    }
+  /// The palettes' state (tests set the search, tab and favorites).
+  #[cfg(test)]
+  pub(crate) fn palette_mut(&mut self) -> &mut crate::material_ui::Palette {
+    &mut self.palette
   }
 
   /// Puts back what the dialog changed in the app while open (Measure's selection filter).
@@ -4958,25 +4915,16 @@ impl Dialog {
   }
 }
 
-/// A swatch dragged from the Appearance panel onto the canvas.
+/// A swatch dragged from the Appearance or Physical Material palette (or the Material Browser)
+/// onto the canvas.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SwatchDrag {
   pub name: String,
   pub color: [u8; 3],
   /// Apply to the face under the pointer rather than its body.
   pub faces: bool,
-}
-
-/// The appearance library (name, colour), as the engine knows it.
-pub(crate) fn appearance_library(app: &mut App) -> Vec<(String, [u8; 3])> {
-  let Ok(v) = app.s.execute("appearances", &json!({})) else { return Vec::new() };
-  let rgb = |c: &Value| -> Option<[u8; 3]> {
-    let a = c.as_array()?;
-    Some([a.first()?.as_u64()? as u8, a.get(1)?.as_u64()? as u8, a.get(2)?.as_u64()? as u8])
-  };
-  v.as_array()
-    .map(|a| a.iter().filter_map(|x| Some((x.get("name")?.as_str()?.to_string(), rgb(x.get("color")?)?))).collect())
-    .unwrap_or_default()
+  /// A physical material (applied to the body's component) rather than an appearance.
+  pub material: bool,
 }
 
 /// What bodies show without an appearance of their own: Fusion's default, Steel - Satin.
@@ -5040,44 +4988,6 @@ pub(crate) fn apply_appearance(app: &mut App, name: &str, color: [u8; 3], faces:
   }
   p["bodies"] = json!(bodies);
   app.run("body.appearance", p).is_some()
-}
-
-/// One swatch of the Appearance panel: drags as a [`SwatchDrag`]; returns whether it was clicked.
-fn swatch_row(
-  ui: &mut egui::Ui,
-  salt: impl std::hash::Hash + std::fmt::Debug,
-  label: &str,
-  name: &str,
-  color: [u8; 3],
-  faces: bool,
-) -> bool {
-  let size = egui::vec2(ui.available_width().clamp(120.0, 180.0), 20.0);
-  let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-  let resp = ui.interact(rect, ui.id().with(("swatch", salt)), egui::Sense::click_and_drag());
-  resp.dnd_set_drag_payload(SwatchDrag { name: name.to_string(), color, faces });
-  let p = ui.painter();
-  if resp.hovered() {
-    p.rect_filled(rect, 2.0, theme::HOVER);
-  }
-  let fill = egui::Color32::from_rgb(color[0], color[1], color[2]);
-  let sw = egui::Rect::from_center_size(egui::pos2(rect.min.x + 10.0, rect.center().y), egui::vec2(14.0, 14.0));
-  p.rect(sw, 2.0, fill, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-  p.text(
-    egui::pos2(sw.max.x + 6.0, rect.center().y),
-    egui::Align2::LEFT_CENTER,
-    label,
-    egui::FontId::proportional(12.5),
-    theme::TEXT,
-  );
-  if resp.dragged()
-    && let Some(at) = ui.ctx().pointer_latest_pos()
-  {
-    // the swatch follows the pointer
-    let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("swatch-drag"));
-    let r = egui::Rect::from_center_size(at + egui::vec2(14.0, 14.0), egui::vec2(18.0, 18.0));
-    ui.ctx().layer_painter(layer).rect(r, 3.0, fill, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-  }
-  resp.on_hover_text("Drag onto a body or face, or click to apply to the selection").clicked()
 }
 
 /// The section analysis settings, edited in place (the view updates as they change).
@@ -6327,10 +6237,8 @@ mod tests {
       apply(&mut s, &mut d);
     }
     let comp = |s: &Session, b: u32| s.design.component_of(BodyId(b)).map(|c| c.id.0);
-    let mut d = Dialog::blank(Kind::Material);
-    d.comps = vec![comp(&s, arm)];
-    d.name = "Aluminum".into();
-    apply(&mut s, &mut d);
+    let arm_comp = comp(&s, arm);
+    run(&mut s, "component.material", json!({"component": arm_comp, "material": "Aluminum"}));
     let mut d = Dialog::blank(Kind::Joint);
     d.choice = "rigid";
     d.origins = vec![
@@ -7320,7 +7228,8 @@ mod tests {
     assert!(d.kind.reports());
     assert!(show_once(&mut app, &mut d));
 
-    let lib = appearance_library(&mut app);
+    let lib: Vec<(String, [u8; 3])> =
+      crate::material_ui::appearances(&mut app).into_iter().map(|s| (s.name, s.color)).collect();
     assert!(lib.len() >= 16 && lib.iter().any(|(n, _)| n == "Copper"));
     // a new body shows the default appearance
     assert_eq!(in_this_design(&app, &lib), [("Steel - Satin".to_string(), [205, 200, 190], 1)]);

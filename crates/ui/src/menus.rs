@@ -182,7 +182,7 @@ const SOLID_MODIFY: &[E] = &[
   E::Sep,
   c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
   c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
-  x("Manage Materials", Icon::ManageMaterials),
+  c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
@@ -412,7 +412,7 @@ const SURFACE_MODIFY: &[E] = &[
   E::Sep,
   c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
   c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
-  x("Manage Materials", Icon::ManageMaterials),
+  c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
@@ -481,7 +481,7 @@ const SHEET_MODIFY: &[E] = &[
   E::Sep,
   c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
   c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
-  x("Manage Materials", Icon::ManageMaterials),
+  c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
@@ -983,7 +983,7 @@ const ADD_INS: &[E] =
   &[c("Scripts and Add-Ins...", Icon::Scripts, Cmd::Plugins), x("Design and Make Marketplace", Icon::Marketplace)];
 
 const UTILITY: &[E] = &[
-  x("Manage Materials", Icon::ManageMaterials),
+  c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
   x("Manage Threads Library", Icon::Configure),
   c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
 ];

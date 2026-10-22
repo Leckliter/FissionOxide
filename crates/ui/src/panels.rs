@@ -449,6 +449,8 @@ pub(crate) enum Cmd {
   Canvas,
   /// UTILITIES > ADD-INS: the Plugins window.
   Plugins,
+  /// MODIFY > Manage Materials: the Material Browser window.
+  ManageMaterials,
   /// INSPECT > Properties: show or hide the docked Properties panel.
   Properties,
   /// A Form workspace command (see [`crate::form_ui`]).
@@ -655,6 +657,9 @@ impl Cmd {
         (Icon::Canvas, "Canvas", "Place an image on a plane to model over; right-click it to Calibrate its size")
       }
       Cmd::Plugins => (Icon::Scripts, "Scripts and Add-Ins", "Install, update and manage plugins (.foxplugin)"),
+      Cmd::ManageMaterials => {
+        (Icon::ManageMaterials, "Manage Materials", "Browse the physical material and appearance libraries")
+      }
       Cmd::Properties => (
         Icon::Properties,
         "Properties",
@@ -806,6 +811,7 @@ impl Cmd {
       Cmd::Gen(w) => app.gen_command(w),
       Cmd::Canvas => crate::canvas_ui::start_insert(app),
       Cmd::Plugins => crate::plugins_ui::open_window(app),
+      Cmd::ManageMaterials => crate::material_ui::open_browser(app),
       Cmd::Properties => crate::props_ui::toggle(),
       Cmd::SketchLibrary => crate::library_ui::open(app),
       Cmd::Render(r) => r.run(app),

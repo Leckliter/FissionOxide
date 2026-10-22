@@ -1028,6 +1028,24 @@ fn body_topology_lists_faces_and_edges() {
 }
 
 #[test]
+fn appearance_and_material_libraries_sort_into_fusion_folders() {
+  let mut s = Session::default();
+  let lib = run(&mut s, "appearances", json!({}));
+  let folder = |name: &str| lib.as_array().unwrap().iter().find(|a| a["name"] == name).unwrap()["folder"].clone();
+  assert_eq!(folder("Steel - Satin"), "Metal");
+  assert_eq!(folder("ABS (Red)"), "Plastic");
+  assert_eq!(folder("Wood - Oak"), "Wood");
+  assert_eq!(folder("Glass - Clear"), "Glass");
+  for a in lib.as_array().unwrap() {
+    assert!(crate::features::APPEARANCE_FOLDERS.contains(&a["folder"].as_str().unwrap()), "{a}");
+  }
+  use fox_model::assembly::{MATERIAL_FOLDERS, MATERIALS, material_folder};
+  assert!(MATERIALS.iter().all(|(m, _)| MATERIAL_FOLDERS.contains(&material_folder(m))));
+  assert_eq!(material_folder("Steel"), "Metal");
+  assert_eq!(material_folder("PLA"), "Plastic");
+}
+
+#[test]
 fn colour_selection_and_sketch_visibility() {
   let mut s = Session::default();
   plate(&mut s);

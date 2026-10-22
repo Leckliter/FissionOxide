@@ -654,8 +654,9 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
 
 // ---------------------------------------------------------------- picking
 
-/// A swatch from the Appearance panel over the canvas: the face under it lights up, and letting
-/// go applies the appearance to that face or its body.
+/// A swatch from the Appearance or Physical Material palette over the canvas: the face under it
+/// lights up, and letting go applies the appearance to that face or its body, or the material to
+/// the body's component.
 fn appearance_drop(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context) {
   let Some(drag) = egui::DragAndDrop::payload::<crate::dialogs::SwatchDrag>(ctx) else { return };
   let Some(pos) = ctx.pointer_latest_pos().filter(|p| resp.rect.contains(*p)) else { return };
@@ -666,8 +667,7 @@ fn appearance_drop(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui
   if ctx.input(|i| i.pointer.any_released()) {
     egui::DragAndDrop::clear_payload(ctx);
     if let Some(Pick::Face { body, face }) = under {
-      let target = if drag.faces { Sel::Face { body, face } } else { Sel::Body { body } };
-      crate::dialogs::apply_appearance(app, &drag.name, drag.color, drag.faces, &[target]);
+      crate::material_ui::drop_swatch(app, &drag, body, face);
     }
   }
 }

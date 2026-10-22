@@ -40,6 +40,7 @@ mod library_ui;
 mod logo;
 mod manipulators;
 mod marking;
+mod material_ui;
 mod menus;
 mod navbar;
 mod notifications;
@@ -301,6 +302,8 @@ pub struct App {
   pub(crate) clipboard: Option<clipboard::Clip>,
   /// Installed plugins: the Plugins window, their toolbar tabs and command dialogs.
   pub(crate) plugins: plugins_ui::PluginsUi,
+  /// Manage Materials' Material Browser, while open.
+  pub(crate) material_browser: Option<material_ui::Browser>,
   /// Insert > Sketch Library: the part picker and placing parts with clicks.
   pub(crate) library_ui: library_ui::LibraryUi,
   /// View ▸ Render Components….
@@ -549,6 +552,7 @@ impl App {
       close_menus: false,
       clipboard: None,
       plugins: plugins_ui::PluginsUi::default(),
+      material_browser: None,
       library_ui: library_ui::LibraryUi::default(),
       render_components: explode_ui::RenderComponents::default(),
       render: render_ui::RenderUi::default(),
@@ -1854,6 +1858,7 @@ impl App {
     library_ui::window(self, &ctx);
     help::window(self, &ctx);
     plugins_ui::window(self, &ctx);
+    material_ui::browser_window(self, &ctx);
     explode_ui::window(self, &ctx);
     service_ui::window(self, &ctx);
     if std::mem::take(&mut self.close_menus) {
