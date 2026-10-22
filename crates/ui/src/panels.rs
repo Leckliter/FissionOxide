@@ -2886,11 +2886,17 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   if let Some(l) = &app.ctx_menu.peek_label {
     return Some(l.clone());
   }
-  let hovered;
+  let (hovered, picked);
   let sel = match app.s.selection.as_slice() {
+    // a curve-picking sketch tool's picks read out like a selection ("2 Sketch Curves | ...")
     [] => {
-      hovered = [app.hover?.to_sel()];
-      &hovered[..]
+      picked = crate::viewport::picked_curves(app);
+      if picked.is_empty() {
+        hovered = [app.hover?.to_sel()];
+        &hovered[..]
+      } else {
+        &picked[..]
+      }
     }
     s => s,
   };
@@ -2934,6 +2940,17 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
     .map(|a| format!("Area : {}", u.area(a, 2))),
     Sel::Body { body } if n == 1 => return Some(app.s.body_name(body)),
     Sel::Feature { feature } if n == 1 => return app.s.design.feature(feature).map(|f| f.name.clone()),
+    // two sketch curves: how close they come, at the document precision ("Min Distance : 0.206 in")
+    Sel::SketchCurve { sketch, curve: a } if n == 2 => match sel[1] {
+      Sel::SketchCurve { sketch: other, curve: b } if other == sketch => app
+        .s
+        .design
+        .sketch(sketch)
+        .ok()
+        .and_then(|s| crate::viewport::curve_min_distance(s, a, b))
+        .map(|d| format!("Min Distance : {}", u.fixed(d, crate::viewport::display_decimals(u)))),
+      _ => None,
+    },
     _ => None,
   };
   Some(match readout {

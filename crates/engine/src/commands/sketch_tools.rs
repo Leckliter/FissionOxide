@@ -1,6 +1,8 @@
 //! Sketch commands for editable text, Break, tangent circles and blend curves.
 
-use fox_sketch::{CurveId, Dim, HAlign, PointId, PtSpec, Sketch, TextAlign, TextId, TextPath, TextStyle, VAlign};
+use fox_sketch::{
+  ConstraintKind, CurveId, Dim, HAlign, PointId, PtSpec, Sketch, TextAlign, TextId, TextPath, TextStyle, VAlign,
+};
 use serde_json::{Value, json};
 
 use super::{ids, opt_expr, opt_str, params_scope, pt_of, req_expr, req_pt, req_str, sketch_id};
@@ -244,6 +246,9 @@ fn tangent_circle(s: &mut Session, p: &Value) -> CmdResult {
     None => None,
   };
   let near = p.get("near").and_then(pt_of);
+  // Fusion's 2-Tangent Circle sizes the circle without dimensioning it; the radius drives only
+  // when asked (the default, for scripts)
+  let dimension = p.get("dimension").and_then(Value::as_bool).unwrap_or(true);
   let (out, made) = change(s, p, move |sk| {
     // by default the circle nearest the middle of the picked curves (inside a corner or triangle)
     let mids: Vec<[f64; 2]> = curves.iter().filter_map(|c| sk.curve_segs(*c).first().map(|g| g.mid())).collect();
@@ -252,6 +257,17 @@ fn tangent_circle(s: &mut Session, p: &Value) -> CmdResult {
       mids.iter().map(|m| m[1]).sum::<f64>() / mids.len().max(1) as f64,
     ];
     let c = sk.add_tangent_circle(&curves, radius, near.unwrap_or(centroid))?;
+    if !dimension {
+      let radius_dims: Vec<_> = sk
+        .constraints
+        .iter()
+        .filter(|k| matches!(k.kind, ConstraintKind::Radius { curve, .. } if curve == c))
+        .map(|k| k.id)
+        .collect();
+      for id in radius_dims {
+        sk.remove_constraint(id)?;
+      }
+    }
     Ok(json!({"circle": c.0}))
   })?;
   finish(s, p, out, &made)

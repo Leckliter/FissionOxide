@@ -239,6 +239,9 @@ fn is_cubic(d: &u8) -> bool {
 pub struct Constraint {
   pub id: ConstraintId,
   pub kind: ConstraintKind,
+  /// Where a dimension's value was placed (sketch coordinates), when the user put it somewhere.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub label: Option<[f64; 2]>,
 }
 
 /// A driving dimension: the expression the user typed and the value it last evaluated to
@@ -630,7 +633,7 @@ impl Sketch {
       self.add_spline_handle(b, a, curvature);
     }
     let id = ConstraintId(self.alloc());
-    self.constraints.push(Constraint { id, kind });
+    self.constraints.push(Constraint { id, kind, label: None });
     Ok(id)
   }
 

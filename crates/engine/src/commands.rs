@@ -95,7 +95,7 @@ cmds! {
   "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width, ccw?: bool (default: the shorter arc)} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
   "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature|polygon, points?: [id], curves?: [id]} (symmetric: points [a, b] + curves [axis], or curves [a, b, axis] for two lines or circles/arcs; fix takes a point or curves; delete its constraints to unfix) (polygon: lines already forming a regular polygon; returns its centre point)";
-  "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr}";
+  "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr, at?: [x,y] (where its value sits)}";
   "sketch.set_dimension" => "Change a dimension's value (expression)", "{constraint, value}";
   "sketch.delete" => "Delete sketch geometry or constraints", "{curves?, points?, constraints?}";
   "sketch.construction" => "Toggle construction geometry", "{curves: [id], on?: bool}";
@@ -325,7 +325,7 @@ cmds! {
   "sketch.text_edit" => "Change a text's string, height, angle, font, style, position or path (its glyphs regenerate)", "{text_id? | curve?, text?, height?, angle?: deg, font?, bold?, italic?, underline?, halign?, valign?, spacing?, at?: [x,y], path?: curve id | null, above?, align?}";
   "sketch.text_explode" => "Turn a text into plain curves", "{text_id? | curve?}";
   "sketch.break" => "Split a curve without removing anything: at its crossings around a point, or at the point", "{curve?, at: [x,y], at_point?, snap?}";
-  "sketch.tangent_circle" => "Circle tangent to two curves (with a radius) or three; the one nearest 'near'", "{curves: [id, id, id?], radius?, near?: [x,y]}";
+  "sketch.tangent_circle" => "Circle tangent to two curves (with a radius) or three; the one nearest 'near'", "{curves: [id, id, id?], radius?, near?: [x,y], dimension?: bool (false: no radius dimension, as Fusion's tool)}";
   "sketch.blend" => "Blend curve: Fusion's spline joining the ends of two curves, tangent (g1, the default) or curvature continuous (g2)", "{curves: [id, id], near?: [[x,y], [x,y]], continuity?: g1|g2}";
   "config.list" => "Configurations (named variants), the active one and whether design history is captured", "{}";
   "config.create" => "Add a configuration, empty or copying another's overrides", "{name, copy?, activate?: bool}";
@@ -3413,6 +3413,7 @@ fn dimension(s: &mut Session, p: &Value) -> CmdResult {
   let kind = if t == "angle" { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
   let value = fox_expr::eval(&expr, kind, &params_scope(s))?;
   let dim = Dim::expr(expr, value);
+  let at = p.get("at").and_then(pt_of);
   let id = s.edit(move |d| {
     let sketch = d.sketch_mut(sk)?;
     // a line given instead of two points dimensions its endpoints
@@ -3463,6 +3464,10 @@ fn dimension(s: &mut Session, p: &Value) -> CmdResult {
       o => return Err(CmdError::new(format!("unknown dimension '{o}'"))),
     };
     let id = sketch.add_constraint(kind)?;
+    // the value stays where the Dimension tool's placing click put it
+    if let Some(c) = sketch.constraints.iter_mut().find(|c| c.id == id) {
+      c.label = at;
+    }
     let r = sketch.solve();
     if !r.ok() {
       return Err(CmdError::new("that dimension conflicts with the existing constraints"));

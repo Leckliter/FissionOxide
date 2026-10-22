@@ -151,6 +151,9 @@ pub struct ToolState {
   held: Vec<(Field, String)>,
   /// Conic: the rho its arrow was dragged to (None: [`CONIC_RHO`], or what its box holds).
   rho: Option<f64>,
+  /// Where a curve-picking tool's last click made its result: nothing is hovered until the
+  /// pointer leaves that spot, so the result draws like any other curve.
+  hover_hold: Option<Pos2>,
 }
 
 /// Fusion's rho for a new conic curve.
@@ -226,8 +229,16 @@ fn hud_fields(tool: Tool, n: usize) -> &'static [Field] {
       &[Field::Width]
     }
     (Tool::Conic, 3) => &[Field::Rho],
+    // the 2-tangent circle's radius box, once both tangents are picked
+    (Tool::Circle2T, 2) => &[Field::Radius],
     _ => &[],
   }
+}
+
+/// The step the heads-up boxes are keyed on: points placed, or for the 2-tangent circle the
+/// curves picked.
+fn hud_step(app: &App) -> usize {
+  if app.tool == Tool::Circle2T { app.tstate.curves.len() } else { app.tstate.pts.len() }
 }
 
 impl ToolState {
@@ -252,8 +263,7 @@ pub fn reset_tool_state(app: &mut App) {
 /// The conic's rho as the tool has it now: typed in its box, dragged with its arrow, or Fusion's
 /// default.
 fn conic_rho(app: &App) -> f64 {
-  let typed =
-    hud_fields(app.tool, app.tstate.pts.len()).iter().position(|f| *f == Field::Rho).and_then(|i| hud_value(app, i));
+  let typed = hud_fields(app.tool, hud_step(app)).iter().position(|f| *f == Field::Rho).and_then(|i| hud_value(app, i));
   typed.or(app.tstate.rho).unwrap_or(CONIC_RHO)
 }
 
@@ -597,6 +607,11 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
     app.hover = None;
     return;
   };
+  if app.tstate.hover_hold == Some(pos) {
+    app.hover = None;
+    return;
+  }
+  app.tstate.hover_hold = None;
   let Some(frame) = &app.frame else { return };
   let (x, y) = view.to_px(pos);
   let sketching = app.s.edit_sketch.is_some();
@@ -1228,7 +1243,7 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
 
 /// The heads-up values typed for the shape being drawn, with their text.
 fn hud_locks(app: &App) -> Vec<(Field, String)> {
-  let fields = hud_fields(app.tool, app.tstate.pts.len());
+  let fields = hud_fields(app.tool, hud_step(app));
   fields
     .iter()
     .enumerate()
@@ -1253,7 +1268,7 @@ fn hud_sides(locks: &[(Field, String)]) -> u64 {
 
 /// The value typed in heads-up box `i` (mm, or radians for an angle), if any.
 fn hud_value(app: &App, i: usize) -> Option<f64> {
-  let field = *hud_fields(app.tool, app.tstate.pts.len()).get(i)?;
+  let field = *hud_fields(app.tool, hud_step(app)).get(i)?;
   let text = app.tstate.hud.typed.get(i)?.trim();
   if text.is_empty() {
     return None;
@@ -1276,6 +1291,9 @@ fn hud_value(app: &App, i: usize) -> Option<f64> {
 /// The cursor moved to where the typed heads-up values put it.
 fn hud_apply(app: &App, cur: [f64; 2]) -> [f64; 2] {
   let pts = app.tstate.pts.as_slice();
+  if app.tool == Tool::Circle2T {
+    return cur;
+  }
   let Some(&last) = pts.last() else { return cur };
   if hud_fields(app.tool, pts.len()).is_empty() {
     return cur;
@@ -1382,6 +1400,10 @@ fn tangent_arc_end(app: &App, start: [f64; 2], r: f64, cur: [f64; 2]) -> [f64; 2
 /// The values the heads-up boxes show for a cursor at `cur` (mm, degrees, a count or rho).
 fn hud_live(app: &App, cur: [f64; 2]) -> [f64; 2] {
   let pts = app.tstate.pts.as_slice();
+  if app.tool == Tool::Circle2T {
+    let curves: Vec<u32> = app.tstate.curves.iter().map(|c| c.0).collect();
+    return [app.s.edit_sketch.map_or(0.0, |sk| tangent_radius(app, sk, &curves, cur)), 0.0];
+  }
   let Some(&last) = pts.last() else { return [0.0; 2] };
   let (dx, dy) = (cur[0] - last[0], cur[1] - last[1]);
   let d = dx.hypot(dy);
@@ -1484,7 +1506,7 @@ fn arc_slot_outline(c: [f64; 2], r: f64, a0: f64, sweep: f64, w: f64) -> Vec<[f6
 
 /// The number of sides the polygon being drawn will have: what its heads-up box holds, else 6.
 fn hud_sides_live(app: &App) -> usize {
-  let i = hud_fields(app.tool, app.tstate.pts.len()).iter().position(|f| *f == Field::Sides);
+  let i = hud_fields(app.tool, hud_step(app)).iter().position(|f| *f == Field::Sides);
   i.and_then(|i| hud_value(app, i)).map_or(6, |v| v as usize)
 }
 
@@ -1501,7 +1523,7 @@ fn hud_display(unit: fox_engine::model::LengthUnit, field: Field, v: f64) -> Str
 }
 
 /// Fusion's default display precision for a unit (Document Settings → Units).
-fn display_decimals(unit: fox_engine::model::LengthUnit) -> usize {
+pub(crate) fn display_decimals(unit: fox_engine::model::LengthUnit) -> usize {
   use fox_engine::model::LengthUnit;
   match unit {
     LengthUnit::Mm | LengthUnit::Cm => 2,
@@ -1946,10 +1968,8 @@ fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
   let picked = app.tstate.curves.len();
   // the 2-tangent circle's third click is anywhere: it places the circle
   if app.tool == Tool::Circle2T && picked == 2 {
-    let curves: Vec<u32> = app.tstate.curves.iter().map(|c| c.0).collect();
-    let r = tangent_radius(app, sk, &curves, at);
-    app.tstate.curves.clear();
-    app.run("sketch.tangent_circle", json!({"sketch": sk.0, "curves": curves, "radius": r, "near": at}));
+    place_tangent_circle(app, sk, at);
+    app.tstate.hover_hold = Some(pos);
     return;
   }
   // a click on nothing picks nothing (the cursor prompt still says what to click)
@@ -1965,14 +1985,50 @@ fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
       app.tstate.curves.clear();
       let near = [(a.1[0] + b.1[0] + c.1[0]) / 3.0, (a.1[1] + b.1[1] + c.1[1]) / 3.0];
       app.run("sketch.tangent_circle", json!({"sketch": sk.0, "curves": curves, "near": near}));
+      // the new circle draws like any other curve until the pointer moves (nothing is hovered)
+      app.tstate.hover_hold = Some(pos);
     }
     (Tool::Blend, [a, b]) => {
       app.tstate.curves.clear();
       let continuity = if shift { "g2" } else { "g1" };
       app.run("sketch.blend", json!({"sketch": sk.0, "curves": curves, "near": [a.1, b.1], "continuity": continuity}));
+      app.tstate.hover_hold = Some(pos);
     }
     _ => {}
   }
+}
+
+/// A 2-tangent circle's radius for a cursor at `at`: what its box holds, else the cursor's
+/// mean distance to the two curves.
+fn tangent_circle_radius(app: &App, sk: FeatureId, at: [f64; 2]) -> f64 {
+  let curves: Vec<u32> = app.tstate.curves.iter().map(|c| c.0).collect();
+  hud_value(app, 0).unwrap_or_else(|| tangent_radius(app, sk, &curves, at))
+}
+
+/// The 2-tangent circle the tool would place for a cursor at `at`: its centre and radius.
+fn tangent_circle_geometry(app: &App, sk: FeatureId, at: [f64; 2]) -> Option<([f64; 2], f64)> {
+  let curves: Vec<u32> = app.tstate.curves.iter().map(|c| c.0).collect();
+  if curves.len() != 2 {
+    return None;
+  }
+  let r = tangent_circle_radius(app, sk, at);
+  let mut sketch = app.s.design.sketch(sk).ok()?.clone();
+  let ids: Vec<_> = curves.iter().map(|c| fox_engine::sketch::CurveId(*c)).collect();
+  let c = sketch.add_tangent_circle(&ids, Some(fox_engine::sketch::Dim::new(r)), at).ok()?;
+  let center = sketch.curve_points(c).first().and_then(|p| sketch.pos(*p))?;
+  Some((center, r))
+}
+
+/// Places the 2-tangent circle at the cursor (or Enter in its radius box): tangent to both
+/// picks, sized by the box, and, as in Fusion, without a radius dimension. The tool then waits
+/// for the next first tangent.
+fn place_tangent_circle(app: &mut App, sk: FeatureId, at: [f64; 2]) {
+  let curves: Vec<u32> = app.tstate.curves.iter().map(|c| c.0).collect();
+  let r = tangent_circle_radius(app, sk, at);
+  app.tstate.curves.clear();
+  app.tstate.hud = HeadsUp::default();
+  let params = json!({"sketch": sk.0, "curves": curves, "radius": r, "near": at, "dimension": false});
+  app.run("sketch.tangent_circle", params);
 }
 
 /// A 2-tangent circle's radius for a cursor at `at`: its mean distance to the two curves.
@@ -2244,9 +2300,14 @@ fn dim_shape_at(
       let c = s.pos(*s.curve_points(*curve).first()?)?;
       let r = s.radius(*curve)?;
       let diameter = matches!(k, ConstraintKind::Diameter { .. });
+      let outside = (cur[0] - c[0]).hypot(cur[1] - c[1]) > r;
+      // a diameter's value inside the circle sits on the diameter line towards it
+      if diameter && !outside {
+        return diameter_shape_towards(c, r, cur, to_screen);
+      }
       let mut shape = radial_shape(c, r, cur, diameter, size, to_screen)?;
       // the leader carries on to the cursor once it is outside the circle
-      if (cur[0] - c[0]).hypot(cur[1] - c[1]) > r {
+      if outside {
         let at = to_screen(cur)?;
         let on = shape.arrows.first()?.0;
         let u = (at - on).normalized();
@@ -2286,6 +2347,10 @@ fn commit_pending_dim(app: &mut App, text: &str) {
   let value = if cmd["type"] == "angle" { text.to_string() } else { unit.typed(text) };
   cmd["sketch"] = json!(sk.0);
   cmd["value"] = json!(value);
+  // the value stays where the placing click put it
+  if let Some(at) = app.tstate.dim_place.as_ref().and_then(|p| p.placed) {
+    cmd["at"] = json!(at);
+  }
   app.run("sketch.dimension", cmd);
 }
 
@@ -2409,17 +2474,14 @@ fn dim_param_name(app: &App, cid: u32) -> Option<String> {
   app.s.design.model_parameters().into_iter().find(|p| p.feature == sk && p.index == index).map(|p| p.name)
 }
 
-/// What the dimension editor opens with: a plain value with its unit ("0.4 in", "45 deg") as Fusion
-/// shows it; an expression with parameters as it was typed.
+/// What the dimension editor opens with: a plain value in full with its unit ("0.2815284896 in",
+/// "17.220379275 deg") as Fusion shows it; an expression with parameters as it was typed.
 fn dim_edit_text(k: &ConstraintKind, dim: &fox_engine::sketch::Dim, unit: fox_engine::model::LengthUnit) -> String {
   if fox_engine::expr::eval_raw(&dim.expr, &fox_engine::expr::Empty).is_err() {
     return dim.expr.clone();
   }
-  if k.is_angle() {
-    format!("{} deg", fox_engine::sketch::Dim::new(dim.value.to_degrees()).expr)
-  } else {
-    unit.format(dim.value)
-  }
+  let angle = k.is_angle();
+  dim_full_text(unit, angle, if angle { dim.value.to_degrees() } else { dim.value })
 }
 
 /// Gives a text box the keyboard, with all its text selected (typing replaces it) or the caret
@@ -2453,7 +2515,7 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
       let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim, app.s.design.units) else { continue };
       let text = DimText::new(painter, &label, font.clone());
       let size = text.size() + Vec2::new(8.0, 4.0);
-      let shape = dim_shape(&r.sketch, &c.kind, dim, size, wpp, &to_screen);
+      let shape = dim_shape(&r.sketch, &c.kind, dim, c.label, size, wpp, &to_screen);
       let at = match &shape {
         Some(s) => s.label,
         None => match to_screen(anchor) {
@@ -2492,7 +2554,7 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       let text = DimText::new(painter, &label, font.clone());
       let size = text.size() + Vec2::new(8.0, 4.0);
       // extension lines, dimension line and arrows, offset from the geometry as in Fusion
-      let shape = dim_shape(&sketch, &c.kind, dim, size, wpp, &to_screen);
+      let shape = dim_shape(&sketch, &c.kind, dim, c.label, size, wpp, &to_screen);
       let at = match &shape {
         Some(s) => s.label,
         None => match to_screen(anchor) {
@@ -2763,6 +2825,26 @@ fn diameter_shape(center: [f64; 2], r: f64, to_screen: &dyn Fn([f64; 2]) -> Opti
   Some(DimShape { lines: vec![[a, b]], arc: Vec::new(), arrows: vec![(a, -d), (b, d)], label: c })
 }
 
+/// A diameter line through the centre in the direction of `at` (inside the circle), arrowheads
+/// on the circle, with the value at `at`.
+fn diameter_shape_towards(
+  center: [f64; 2],
+  r: f64,
+  at: [f64; 2],
+  to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
+) -> Option<DimShape> {
+  let (dx, dy) = (at[0] - center[0], at[1] - center[1]);
+  let l = dx.hypot(dy);
+  let (ux, uy) = if l > 1e-9 { (dx / l, dy / l) } else { (1.0, 0.0) };
+  let a = to_screen([center[0] - r * ux, center[1] - r * uy])?;
+  let b = to_screen([center[0] + r * ux, center[1] + r * uy])?;
+  let d = b - a;
+  if !d.is_finite() || d.length() < 1e-6 {
+    return None;
+  }
+  Some(DimShape { lines: vec![[a, b]], arc: Vec::new(), arrows: vec![(a, -d), (b, d)], label: to_screen(at)? })
+}
+
 /// An angle between two lines: an arc between them around where they meet, with extension lines
 /// when the arc lands beyond a line's ends.
 fn angular_shape(
@@ -2828,15 +2910,20 @@ fn angular_shape(
   Some(DimShape { lines, arc, arrows, label })
 }
 
-/// The leader graphics of dimension `k` (see [`DimShape`]); `size` is its value's box.
+/// The leader graphics of dimension `k` (see [`DimShape`]); `size` is its value's box. A
+/// dimension placed by the Dimension tool keeps its value where the click put it (`label`).
 fn dim_shape(
   s: &Sketch,
   k: &ConstraintKind,
   dim: &fox_engine::sketch::Dim,
+  label: Option<[f64; 2]>,
   size: Vec2,
   wpp: f64,
   to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
 ) -> Option<DimShape> {
+  if let Some(at) = label {
+    return dim_shape_at(s, k, at, size, wpp, to_screen);
+  }
   let center = sketch_center(s).unwrap_or([0.0, 0.0]);
   let off = DIM_OFFSET_PX * wpp;
   let unit = |p: [f64; 2], q: [f64; 2]| -> Option<[f64; 2]> {
@@ -2893,7 +2980,8 @@ fn dim_label(
   // a plain value ("10", "1 in") shows as the number; an expression with parameters as "w = 10"
   let numeric = fox_engine::expr::eval_raw(&dim.expr, &fox_engine::expr::Empty).is_ok();
   let val = if k.is_angle() {
-    format!("{}°", fox_engine::sketch::Dim::new(dim.value.to_degrees()).expr)
+    // one decimal with the degree sign, as Fusion reads an angle ("17.2°")
+    format!("{:.1}°", dim.value.to_degrees())
   } else {
     // in the design's unit at the document precision, without the unit (as Fusion labels
     // sketch dimensions: "0.479", "12.00")
@@ -2934,6 +3022,76 @@ fn sketch_center(s: &Sketch) -> Option<[f64; 2]> {
   Some([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0])
 }
 
+/// The point of curve `a` nearest curve `b` (where a tangent pair touches): the best of samples
+/// along `a`, refined on the stretch around it.
+fn touch_point(s: &Sketch, a: fox_engine::sketch::CurveId, b: fox_engine::sketch::CurveId) -> Option<[f64; 2]> {
+  let pts = fox_engine::scene::curve_polyline(s, &s.curve(a)?.kind);
+  let lerp = |p: [f64; 2], q: [f64; 2], t: f64| [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+  let d = |p: [f64; 2]| s.distance_to_curve(b, p).unwrap_or(f64::INFINITY);
+  let mut best: Option<(f64, usize, f64)> = None;
+  for (i, w) in pts.windows(2).enumerate() {
+    for k in 0..=16 {
+      let t = k as f64 / 16.0;
+      let dist = d(lerp(w[0], w[1], t));
+      if best.is_none_or(|(bd, _, _)| dist < bd) {
+        best = Some((dist, i, t));
+      }
+    }
+  }
+  let (dist, i, t) = best?;
+  if !dist.is_finite() {
+    return None;
+  }
+  let (p, q) = (pts[i], pts[i + 1]);
+  // ternary search on the sixteenth around the best sample
+  let (mut lo, mut hi) = ((t - 1.0 / 16.0).max(0.0), (t + 1.0 / 16.0).min(1.0));
+  for _ in 0..40 {
+    let (m1, m2) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+    if d(lerp(p, q, m1)) < d(lerp(p, q, m2)) { hi = m2 } else { lo = m1 }
+  }
+  Some(lerp(p, q, (lo + hi) / 2.0))
+}
+
+/// The curves a curve-picking sketch tool has picked so far, for the status bar's readout.
+pub(crate) fn picked_curves(app: &App) -> Vec<Sel> {
+  let Some(sk) = app.s.edit_sketch else { return Vec::new() };
+  app.tstate.curves.iter().map(|c| Sel::SketchCurve { sketch: sk, curve: fox_engine::sketch::CurveId(c.0) }).collect()
+}
+
+/// The least distance between two curves (Fusion's "Min Distance" readout for two selected
+/// sketch curves): the nearest of samples along each to the other, zero when two lines cross.
+pub(crate) fn curve_min_distance(
+  s: &Sketch,
+  a: fox_engine::sketch::CurveId,
+  b: fox_engine::sketch::CurveId,
+) -> Option<f64> {
+  let sample = |from: fox_engine::sketch::CurveId, to: fox_engine::sketch::CurveId| -> Option<f64> {
+    let pts = fox_engine::scene::curve_polyline(s, &s.curve(from)?.kind);
+    let mut best = f64::INFINITY;
+    for w in pts.windows(2) {
+      for k in 0..=16 {
+        let t = k as f64 / 16.0;
+        best =
+          best.min(s.distance_to_curve(to, [w[0][0] + (w[1][0] - w[0][0]) * t, w[0][1] + (w[1][1] - w[0][1]) * t])?);
+      }
+    }
+    best.is_finite().then_some(best)
+  };
+  let d = sample(a, b)?.min(sample(b, a)?);
+  if let (Some(CurveKind::Line { a: a0, b: a1 }), Some(CurveKind::Line { a: b0, b: b1 })) =
+    (s.curve(a).map(|c| &c.kind), s.curve(b).map(|c| &c.kind))
+  {
+    let (p0, p1, q0, q1) = (s.pos(*a0)?, s.pos(*a1)?, s.pos(*b0)?, s.pos(*b1)?);
+    let cross = |o: [f64; 2], p: [f64; 2], q: [f64; 2]| (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+    let (d1, d2) = (cross(p0, p1, q0), cross(p0, p1, q1));
+    let (d3, d4) = (cross(q0, q1, p0), cross(q0, q1, p1));
+    if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
+      return Some(0.0);
+    }
+  }
+  Some(d)
+}
+
 /// Where a geometric constraint's glyph goes, and a key grouping glyphs on the same curve/point.
 fn glyph_anchor(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], u32)> {
   // a polygon's glyph sits by its centre point
@@ -2945,6 +3103,13 @@ fn glyph_anchor(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], u32)> {
     && let Some(p) = s.curve_points(*a).iter().find(|p| s.curve_points(*b).contains(p))
   {
     return Some((s.pos(*p)?, p.0 | 0x8000_0000));
+  }
+  // a tangent circle on a line: the glyph sits beside the circle where it touches the line, in
+  // its own row (not with the line's other glyphs at its midpoint)
+  if let ConstraintKind::Tangent { a, b } = k
+    && let Some(at) = touch_point(s, *a, *b)
+  {
+    return Some((at, 0x4000_0000 | (a.0 ^ b.0.rotate_left(16))));
   }
   if let Some(c) = k.curves().first() {
     let curve = s.curve(*c)?;
@@ -3265,7 +3430,7 @@ pub fn route_typing(app: &mut App, ctx: &egui::Context) {
   if !typed.starts_with(|c: char| c.is_ascii_digit() || c == '.' || c == '-') {
     return;
   }
-  if app.s.edit_sketch.is_some() && !hud_fields(app.tool, app.tstate.pts.len()).is_empty() {
+  if app.s.edit_sketch.is_some() && !hud_fields(app.tool, hud_step(app)).is_empty() {
     let hud = &mut app.tstate.hud;
     hud.typed[hud.active] = typed.clone();
     hud.buf = Some(typed);
@@ -3289,6 +3454,7 @@ pub fn route_typing(app: &mut App, ctx: &egui::Context) {
 /// text box has the keyboard). It's taken before any widget runs, so egui's focus traversal
 /// can't also move the keyboard (to a panel's field, or back to the box it came from).
 fn take_hud_tab(app: &mut App, ctx: &egui::Context) {
+  let has_boxes = !hud_fields(app.tool, hud_step(app)).is_empty();
   let hud = &mut app.tstate.hud;
   hud.tab = None;
   // a text box elsewhere has the keyboard: Tab moves egui's focus between fields
@@ -3305,7 +3471,7 @@ fn take_hud_tab(app: &mut App, ctx: &egui::Context) {
   // button, which Enter then presses); in Fusion Tab never reaches the toolbar
   ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
   if app.s.edit_sketch.is_some()
-    && !hud_fields(app.tool, app.tstate.pts.len()).is_empty()
+    && has_boxes
     && app.drawing.is_none()
     && app.dim_edit.is_none()
     && app.marking.is_none()
@@ -3318,7 +3484,7 @@ fn take_hud_tab(app: &mut App, ctx: &egui::Context) {
 /// with its box. Typing sets the active box, Tab moves to the next, Enter places the point.
 fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view: &View, ctx: &egui::Context) {
   let tab = app.tstate.hud.tab.take();
-  let fields = hud_fields(app.tool, app.tstate.pts.len());
+  let fields = hud_fields(app.tool, hud_step(app));
   let Some((sk, plane)) = sketch_plane(app).filter(|_| !fields.is_empty()) else {
     if app.tstate.hud.buf.is_some() || !app.tstate.hud.typed.iter().all(String::is_empty) {
       app.tstate.hud = HeadsUp::default();
@@ -3331,7 +3497,8 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     app.tstate.hud.cursor = Some(c);
   }
   let Some((raw, snapped)) = app.tstate.hud.cursor else { return };
-  let Some(&last) = app.tstate.pts.last() else { return };
+  // the 2-tangent circle has placed no point yet: its box follows the circle under the cursor
+  let last = app.tstate.pts.last().copied().unwrap_or(raw);
   let cur = hud_apply(app, raw);
   let live = hud_live(app, cur);
   let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
@@ -3463,6 +3630,11 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
         let r = (cur[0] - last[0]).hypot(cur[1] - last[1]);
         radial_shape(last, r, cur, true, Vec2::new(60.0, 18.0), &to_screen)
       }
+      // the radius box beside the tangent circle, on the cursor's side of its centre
+      (Tool::Circle2T, Field::Radius, _) => tangent_circle_geometry(app, sk, cur).and_then(|(c, r)| {
+        let on = if (cur[0] - c[0]).hypot(cur[1] - c[1]) > 1e-9 { cur } else { [c[0], c[1] + r] };
+        radial(c, r, on)
+      }),
       _ => None,
     };
     if let Some(s) = &shape {
@@ -3568,7 +3740,11 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     // this Enter places the point; it isn't the open dialog's OK
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     let ends = matches!(app.tool, Tool::Rect | Tool::CenterRect) && app.tstate.pts.len() == 1;
-    place_point(app, sk, raw, snapped);
+    if app.tool == Tool::Circle2T {
+      place_tangent_circle(app, sk, raw);
+    } else {
+      place_point(app, sk, raw, snapped);
+    }
     // Enter on typed values finishes the rectangle and its command; a click-drawn one keeps the
     // tool, as in Fusion
     if ends && app.tstate.pts.is_empty() {
@@ -3660,18 +3836,10 @@ fn hud_sweep_shape(
 /// The 2-tangent circle the next click would place.
 fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: Pos2, plane: Plane) {
   let Some(sk) = app.s.edit_sketch else { return };
-  let curves: Vec<u32> = app.tstate.curves.iter().map(|c| c.0).collect();
-  if curves.len() != 2 {
-    return;
-  }
   let (o, d) = view.ray(&app.cam, pos);
   let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
   let at = plane.to_local(hit);
-  let r = tangent_radius(app, sk, &curves, at);
-  let Ok(mut sketch) = app.s.design.sketch(sk).cloned() else { return };
-  let ids: Vec<_> = curves.iter().map(|c| fox_engine::sketch::CurveId(*c)).collect();
-  let Ok(c) = sketch.add_tangent_circle(&ids, Some(fox_engine::sketch::Dim::new(r)), at) else { return };
-  let Some(center) = sketch.curve_points(c).first().and_then(|p| sketch.pos(*p)) else { return };
+  let Some((center, r)) = tangent_circle_geometry(app, sk, at) else { return };
   let stroke = Stroke::new(1.5, Color32::from_rgb(30, 110, 235));
   let pts: Vec<Pos2> = (0..=64)
     .filter_map(|i| {
@@ -3681,16 +3849,6 @@ fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: 
     .collect();
   for w in pts.windows(2) {
     painter.line_segment([w[0], w[1]], stroke);
-  }
-  if let Some(p) = view.to_screen(&app.cam, plane.to_world(at)) {
-    let txt = format!("R {}", app.s.design.units.number(r));
-    painter.text(
-      p + Vec2::new(10.0, 10.0),
-      egui::Align2::LEFT_TOP,
-      txt,
-      egui::FontId::proportional(11.0),
-      Color32::from_gray(70),
-    );
   }
 }
 
@@ -3856,9 +4014,13 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
     Tool::Circle2T => match picked {
       0 => "Select first tangent of circle",
       1 => "Select second tangent of circle",
-      _ => "Specify diameter",
+      _ => "Specify radius of circle",
     },
-    Tool::Circle3T => "Select line, circle, or arc",
+    Tool::Circle3T => match picked {
+      0 => "Select first tangent of circle",
+      1 => "Select second tangent of circle",
+      _ => "Select third tangent on circle",
+    },
     Tool::Arc3 => match n {
       0 => "Place start point",
       1 => "Place end point",
@@ -3934,13 +4096,12 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
         "Select end of line"
       }
     }
-    Tool::Dimension => {
-      if state.dim_picks.is_empty() && state.dim_place.is_none() {
-        "Select sketch objects to dimension"
-      } else {
-        "Select additional sketch geometry or location to place dimension"
-      }
-    }
+    Tool::Dimension => match &state.dim_place {
+      None if state.dim_picks.is_empty() => "Select sketch objects to dimension",
+      // an angle only waits for its place; a length or diameter can still take more geometry
+      Some(p) if p.kind.is_angle() => "Select location for dimension",
+      _ => "Select additional sketch geometry or location for dimension",
+    },
     Tool::Trim => "Select curve to trim",
     Tool::Extend => "Select curve to extend",
     Tool::Break => "Select curve to break",
@@ -4391,8 +4552,14 @@ mod tests {
     st.pts.push([0.0, 0.0]);
     assert_eq!(sketch_prompt(Tool::Rect, &st), Some("Specify size of rectangle"));
     assert_eq!(sketch_prompt(Tool::Circle, &st), Some("Specify diameter"));
+    // the tangent circles name each tangent; the 2-tangent one then asks for its radius
+    assert_eq!(sketch_prompt(Tool::Circle3T, &st), Some("Select first tangent of circle"));
+    st.curves = vec![(1, [0.0, 0.0])];
+    assert_eq!(sketch_prompt(Tool::Circle2T, &st), Some("Select second tangent of circle"));
+    assert_eq!(sketch_prompt(Tool::Circle3T, &st), Some("Select second tangent of circle"));
     st.curves = vec![(1, [0.0, 0.0]), (2, [1.0, 0.0])];
-    assert_eq!(sketch_prompt(Tool::Circle2T, &st), Some("Specify diameter"));
+    assert_eq!(sketch_prompt(Tool::Circle2T, &st), Some("Specify radius of circle"));
+    assert_eq!(sketch_prompt(Tool::Circle3T, &st), Some("Select third tangent on circle"));
   }
 
   /// The per-step prompts Fusion shows for the create tools (observed 2026-10-21), and the
@@ -4452,7 +4619,7 @@ mod tests {
     st.dim_picks.push(Pick::SketchPoint { sketch: FeatureId(1), point: PointId(1) });
     assert_eq!(
       sketch_prompt(Tool::Dimension, &st),
-      Some("Select additional sketch geometry or location to place dimension")
+      Some("Select additional sketch geometry or location for dimension")
     );
     // the point-placing tools draw with a crosshair; selecting and curve picking don't
     assert!(places_points(Tool::Slot) && places_points(Tool::Conic) && places_points(Tool::Point));
@@ -4474,6 +4641,8 @@ mod tests {
     assert_eq!(f(Tool::TangentArc, 1), [Radius]);
     assert_eq!(f(Tool::Polygon, 1), [Radius, Sides]);
     assert_eq!(f(Tool::EdgePolygon, 1), [Length, Sides]);
+    // the 2-tangent circle's box appears once both tangents are picked
+    assert_eq!((f(Tool::Circle2T, 1), f(Tool::Circle2T, 2)), (vec![], vec![Radius]));
     assert_eq!((f(Tool::Ellipse, 1), f(Tool::Ellipse, 2)), (vec![Length], vec![Length]));
     for slot in [Tool::Slot, Tool::OverallSlot, Tool::CenterSlot] {
       assert_eq!((f(slot, 1), f(slot, 2)), (vec![Length], vec![Width]), "{slot:?}");
@@ -4612,7 +4781,7 @@ mod tests {
     assert!(matches!(place.kind, ConstraintKind::Distance { .. }));
     assert_eq!(
       sketch_prompt(Tool::Dimension, &app.tstate),
-      Some("Select additional sketch geometry or location to place dimension")
+      Some("Select additional sketch geometry or location for dimension")
     );
     app.hover = None;
     app.tstate.hud.cursor = Some(([6.0, -8.0], None));
@@ -4643,6 +4812,8 @@ mod tests {
     assert!(matches!(place.kind, ConstraintKind::Angle { .. }), "{:?}", place.kind);
     assert!((place.current.unwrap() - 90.0).abs() < 1e-9);
     assert_eq!(dim_full_text(fox_engine::model::LengthUnit::Mm, true, 90.0), "90 deg");
+    // an angle only waits for its place
+    assert_eq!(sketch_prompt(Tool::Dimension, &app.tstate), Some("Select location for dimension"));
     // a linear dimension placed below the line sits on that side, at the cursor's offset
     let s = app.s.design.sketch(sk).unwrap();
     let d = s.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Distance { .. })).unwrap();
@@ -4783,6 +4954,104 @@ mod tests {
 
   fn typed(app: &mut App, values: [&str; 2]) {
     app.tstate.hud.typed = values.map(String::from);
+  }
+
+  /// 2-Tangent Circle, as Fusion: after two picks the radius box reads the circle under the
+  /// cursor and the status bar reads out the picks with their least distance; the placed circle
+  /// has its two tangencies and no dimension, each tangent glyph beside the circle on its line;
+  /// a typed radius sizes it.
+  #[test]
+  fn two_tangent_circle_has_a_radius_box_and_no_dimension() {
+    let (mut app, sk) = sketching(Tool::Circle2T);
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [40, 0]]})).unwrap();
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [0, 40]]})).unwrap();
+    let ids: Vec<u32> = app.s.design.sketch(sk).unwrap().curves.iter().map(|c| c.id.0).collect();
+    app.tstate.curves = vec![(ids[0], [20.0, 0.0]), (ids[1], [0.0, 20.0])];
+    assert_eq!(hud_fields(app.tool, hud_step(&app)), [Field::Radius]);
+    // the box follows the cursor: its mean distance to the picks
+    assert!((hud_live(&app, [6.0, 4.0])[0] - 5.0).abs() < 1e-9, "{:?}", hud_live(&app, [6.0, 4.0]));
+    let (c, r) = tangent_circle_geometry(&app, sk, [6.0, 4.0]).unwrap();
+    assert!((r - 5.0).abs() < 1e-9 && (c[0] - 5.0).abs() < 1e-6 && (c[1] - 5.0).abs() < 1e-6, "{c:?} {r}");
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    assert_eq!(hud_display(app.s.design.units, Field::Radius, 5.0), "0.197 in");
+    assert_eq!(
+      crate::panels::selection_text(&app).as_deref(),
+      Some("2 Sketch Curves | Min Distance : 0.000 in"),
+      "the picks read out like a selection"
+    );
+    app.s.design.units = fox_engine::model::LengthUnit::Mm;
+    // a typed radius sizes the circle
+    typed(&mut app, ["3", ""]);
+    assert!((tangent_circle_geometry(&app, sk, [6.0, 4.0]).unwrap().1 - 3.0).abs() < 1e-9);
+    place_tangent_circle(&mut app, sk, [6.0, 4.0]);
+    assert!(app.tstate.is_empty() && app.tstate.hud.typed.iter().all(String::is_empty));
+    let s = app.s.design.sketch(sk).unwrap();
+    let circle = s.curves.iter().find(|c| matches!(c.kind, CurveKind::Circle { .. })).unwrap();
+    assert!((s.radius(circle.id).unwrap() - 3.0).abs() < 1e-9);
+    assert_eq!(s.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).count(), 2);
+    assert!(s.constraints.iter().all(|c| c.kind.dim().is_none()), "no dimension: {:?}", s.constraints);
+    // each tangent glyph sits where the circle touches its line, not at the line's midpoint
+    let anchors: Vec<([f64; 2], u32)> = s
+      .constraints
+      .iter()
+      .filter(|c| matches!(c.kind, ConstraintKind::Tangent { .. }))
+      .map(|c| glyph_anchor(s, &c.kind).unwrap())
+      .collect();
+    let near = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-3;
+    assert!(near(anchors[0].0, [3.0, 0.0]) && near(anchors[1].0, [0.0, 3.0]), "{anchors:?}");
+    assert_ne!(anchors[0].1, anchors[1].1);
+    assert_ne!(anchors[0].1, glyph_anchor(s, &ConstraintKind::Horizontal { line: circle.id }).unwrap().1);
+  }
+
+  /// Two lines that don't meet read out their least distance; crossing ones none.
+  #[test]
+  fn min_distance_between_sketch_curves() {
+    let (mut app, sk) = sketching(Tool::Select);
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [10, 0]]})).unwrap();
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[12, 3], [20, 3]]})).unwrap();
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[5, -5], [5, 5]]})).unwrap();
+    app.run("sketch.circle", json!({"sketch": sk.0, "center": [0, 20], "radius": 4})).unwrap();
+    let s = app.s.design.sketch(sk).unwrap();
+    let c: Vec<_> = s.curves.iter().map(|c| c.id).collect();
+    assert!((curve_min_distance(s, c[0], c[1]).unwrap() - 13f64.sqrt()).abs() < 1e-9);
+    assert_eq!(curve_min_distance(s, c[0], c[2]), Some(0.0));
+    assert!((curve_min_distance(s, c[0], c[3]).unwrap() - 16.0).abs() < 1e-6);
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve: c[0] }, Sel::SketchCurve { sketch: sk, curve: c[1] }];
+    assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("2 Sketch Curves | Min Distance : 3.61 mm"));
+  }
+
+  /// A placed dimension keeps its value where the click put it: a diameter's text sits there
+  /// with a leader to the circle (a diameter line towards it when inside), and the sketch stores
+  /// the spot.
+  #[test]
+  fn placed_dimension_keeps_its_place() {
+    let (mut app, sk) = sketching(Tool::Dimension);
+    app.run("sketch.circle", json!({"sketch": sk.0, "center": [0, 0], "radius": 5}));
+    let s = app.s.design.sketch(sk).unwrap().clone();
+    let circle = s.curves[0].id;
+    app.hover = Some(Pick::SketchCurve { sketch: sk, curve: circle });
+    dimension_click(&mut app, Pos2::new(100.0, 100.0), false);
+    app.hover = None;
+    app.tstate.hud.cursor = Some(([20.0, 10.0], None));
+    dimension_click(&mut app, Pos2::new(120.0, 140.0), false);
+    assert_eq!(app.dim_edit.clone().unwrap().1, "10 mm");
+    settle_dim_edit(&mut app);
+    let s = app.s.design.sketch(sk).unwrap();
+    let d = s.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Diameter { .. })).unwrap();
+    assert_eq!(d.label, Some([20.0, 10.0]));
+    let to_screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, -p[1] as f32));
+    let shape = dim_shape(s, &d.kind, d.kind.dim().unwrap(), d.label, Vec2::new(40.0, 16.0), 1.0, &to_screen).unwrap();
+    assert!((shape.label.x - 20.0).abs() < 1e-3 && (shape.label.y + 10.0).abs() < 1e-3, "{:?}", shape.label);
+    assert_eq!(shape.arrows.len(), 2, "the leader runs through the circle");
+    // inside the circle: a diameter line through the centre towards the value
+    let inside = dim_shape_at(s, &d.kind, [2.0, 1.0], Vec2::new(40.0, 16.0), 1.0, &to_screen).unwrap();
+    assert!((inside.label.x - 2.0).abs() < 1e-3 && (inside.label.y + 1.0).abs() < 1e-3);
+    assert_eq!(inside.lines.len(), 1);
+    let [a, b] = inside.lines[0];
+    assert!((a.distance(b) - 10.0).abs() < 1e-3, "{a:?} {b:?}");
+    // without a place the dimension draws as before, through the centre
+    let free = dim_shape(s, &d.kind, d.kind.dim().unwrap(), None, Vec2::new(40.0, 16.0), 1.0, &to_screen).unwrap();
+    assert_eq!(free.label, Pos2::new(0.0, 0.0));
   }
 
   #[test]
@@ -5013,7 +5282,7 @@ mod tests {
     assert_eq!(label, "⌀12.00");
     // sketch units are screen points
     let to_screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, p[1] as f32));
-    let shape = dim_shape(s, &c.kind, c.kind.dim().unwrap(), Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap();
+    let shape = dim_shape(s, &c.kind, c.kind.dim().unwrap(), None, Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap();
     assert_eq!(shape.label, Pos2::new(10.0, 5.0), "the value sits on the line at the centre");
     assert_eq!(shape.lines, vec![[Pos2::new(4.0, 5.0), Pos2::new(16.0, 5.0)]]);
     assert_eq!(shape.arrows.len(), 2);
@@ -5022,7 +5291,7 @@ mod tests {
     app.run("sketch.dimension", json!({"sketch": sk.0, "type": "radius", "curves": [curve], "value": "6"})).unwrap();
     let s = app.s.design.sketch(sk).unwrap();
     let r = s.constraints.iter().filter(|c| c.kind.dim().is_some()).nth(1).unwrap();
-    let shape = dim_shape(s, &r.kind, r.kind.dim().unwrap(), Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap();
+    let shape = dim_shape(s, &r.kind, r.kind.dim().unwrap(), None, Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap();
     assert_eq!(shape.arrows.len(), 1);
     // the ⌀ is painted, not a missing glyph: the text takes room for it
     let ctx = egui::Context::default();
@@ -5069,6 +5338,20 @@ mod tests {
       value: fox_engine::sketch::Dim::expr("45", 45f64.to_radians()),
     };
     assert_eq!(dim_edit_text(&angle, angle.dim().unwrap(), unit), "45 deg");
+    // a measured value opens in full, as Fusion's box shows it, and reads at one decimal
+    let measured = ConstraintKind::Angle {
+      a: fox_engine::sketch::CurveId(lines[0]),
+      b: fox_engine::sketch::CurveId(lines[1]),
+      value: fox_engine::sketch::Dim::expr("17.220379275 deg", 17.220379275f64.to_radians()),
+    };
+    assert_eq!(dim_edit_text(&measured, measured.dim().unwrap(), unit), "17.220379275 deg");
+    let s = app.s.design.sketch(sk).unwrap();
+    assert_eq!(dim_label(s, &measured, measured.dim().unwrap(), unit).unwrap().1, "17.2°");
+    let dia = ConstraintKind::Diameter {
+      curve: fox_engine::sketch::CurveId(lines[0]),
+      value: fox_engine::sketch::Dim::new(7.150823636),
+    };
+    assert_eq!(dim_edit_text(&dia, dia.dim().unwrap(), inch), "0.2815284896 in");
   }
 
   #[test]

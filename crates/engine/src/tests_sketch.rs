@@ -148,6 +148,36 @@ fn break_tangent_circles_and_blend_from_commands() {
   let l2 = run(&mut s, "sketch.line", json!({"points": [[130, 20], [130, 30]]}))["curves"][0].as_u64().unwrap();
   let bl = run(&mut s, "sketch.blend", json!({"curves": [l1, l2], "near": [[110, 0], [130, 20]], "continuity": "g2"}));
   assert!(bl["blend"].as_u64().is_some());
+  // the UI's 2-tangent circle: sized by its radius but not dimensioned, as Fusion's tool
+  let free =
+    run(&mut s, "sketch.tangent_circle", json!({"curves": [h, v], "radius": 2, "near": [-3, 3], "dimension": false}));
+  let free = fox_sketch::CurveId(free["circle"].as_u64().unwrap() as u32);
+  let sk = s.design.sketch(fid).unwrap();
+  assert!((sk.radius(free).unwrap() - 2.0).abs() < 1e-9);
+  assert!(
+    !sk.constraints.iter().any(|c| matches!(c.kind, fox_sketch::ConstraintKind::Radius { curve, .. } if curve == free))
+  );
+  assert_eq!(
+    sk.constraints
+      .iter()
+      .filter(|c| matches!(c.kind, fox_sketch::ConstraintKind::Tangent { b, .. } if b == free))
+      .count(),
+    2
+  );
+  // a dimension remembers where its value was placed
+  let d = run(
+    &mut s,
+    "sketch.dimension",
+    json!({"type": "diameter", "curves": [free.0], "value": "4 mm", "at": [7.5, 2.25]}),
+  );
+  let sk = s.design.sketch(fid).unwrap();
+  let d = sk.constraint(fox_sketch::ConstraintId(d["constraint"].as_u64().unwrap() as u32)).unwrap();
+  assert_eq!(d.label, Some([7.5, 2.25]));
+  let json = serde_json::to_value(d).unwrap();
+  assert_eq!(json["label"], json!([7.5, 2.25]));
+  let plain: fox_sketch::Constraint =
+    serde_json::from_value(json!({"id": 1, "kind": {"type": "horizontal", "line": 1}})).unwrap();
+  assert_eq!(plain.label, None, "older files have no label");
   let info = run(&mut s, "sketch.info", json!({}));
   let curvature = info["constraints"].as_array().unwrap().iter().filter(|c| c["kind"]["type"] == "curvature").count();
   assert_eq!(curvature, 2, "{}", info["constraints"]);
