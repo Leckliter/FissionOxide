@@ -76,7 +76,7 @@
 {"name": "ui-material-appearance", "items": 3, "status": "done", "pr": "351dceb", "fixer": "cloud task_4e643365 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-dialog-selection-state", "items": 3, "status": "done", "pr": "e5a053c", "fixer": "cloud task_7ce0d07b (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-edit-feature-errors", "items": 5, "status": "done", "pr": "9013806", "fixer": "cloud task_e354b219 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-extrude-manipulator", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_d7232407 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-extrude-manipulator", "items": 7, "status": "done", "pr": "b5bca5e", "fixer": "cloud task_d7232407 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-feature-handles", "items": 4, "status": "done", "pr": "42a19ac", "fixer": "cloud session_018uJAiqgvZtF5E1eA9peR6D (requested 2026-10-22)"}
 {"name": "ui-edit-more-features", "items": 6, "status": "done", "pr": "967a7dc", "fixer": "cloud task_4f758622 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-inspect-insert-assemble", "items": 5, "status": "done", "pr": "2d50bd3", "fixer": "cloud task_5e3e7433 (requested 2026-10-22 by the coordinator)"}
