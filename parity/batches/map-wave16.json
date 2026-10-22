@@ -1,0 +1,9 @@
+{
+  "ui:chrome:open-dialog": "ui-file-dialogs",
+  "ui:chrome:export-dialog": "ui-file-dialogs",
+  "ui:chrome:save-dialog-layout": "ui-file-dialogs",
+  "ui:chrome:view-submenu": "ui-file-dialogs",
+  "ui:chrome:3d-print-dialog": "ui-file-dialogs",
+  "ui:chrome:capture-image-dialog": "ui-file-dialogs",
+  "ui:chrome:windows-ignore-escape": "ui-file-dialogs"
+}
