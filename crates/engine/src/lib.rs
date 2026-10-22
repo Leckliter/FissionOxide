@@ -621,6 +621,8 @@ mod tests_cam_checks;
 #[cfg(test)]
 mod tests_canvas;
 #[cfg(test)]
+mod tests_combine;
+#[cfg(test)]
 mod tests_config;
 #[cfg(test)]
 mod tests_config2;
@@ -650,6 +652,8 @@ mod tests_include;
 mod tests_mechanism;
 #[cfg(test)]
 mod tests_mesh;
+#[cfg(test)]
+mod tests_mesh_body;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]

@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::{egui_glow, glow};
 use egui::{Color32, Rect};
-use fox_engine::render::{Camera, Frame, Scene};
+use fox_engine::render::{Camera, Frame, Quad, Scene};
 use fox_engine::scene::PickTable;
 use fox_render_gl::Renderer;
 
@@ -39,6 +39,8 @@ pub struct Gpu {
   pending_picks: Vec<(u64, PickTable)>,
   /// Generation of the pick table in `App::picks`.
   picks_generation: u64,
+  /// The see-through quads last handed over.
+  quads: Vec<Quad>,
 }
 
 /// What the paint callback (on the render thread, with the GL context current) shares with the UI.
@@ -56,6 +58,8 @@ struct Shared {
   ids: Option<(u64, Frame)>,
   /// The Render workspace's look for the next scene uploaded (`Some(None)`: the usual shading).
   look: Option<Option<crate::render_ui::LookData>>,
+  /// See-through quads to upload (the origin planes).
+  quads: Option<Vec<Quad>>,
 }
 
 impl Gpu {
@@ -70,6 +74,7 @@ impl Gpu {
       generation: 0,
       pending_picks: Vec::new(),
       picks_generation: 0,
+      quads: Vec::new(),
     }
   }
 }
@@ -80,7 +85,7 @@ pub fn active(app: &App) -> bool {
 }
 
 fn scene_part(k: &RenderKey) -> RenderKey {
-  RenderKey { cam: Camera::default(), size: [0, 0], ..k.clone() }
+  RenderKey { cam: Camera::default(), size: [0, 0], quads: Vec::new(), ..k.clone() }
 }
 
 /// Whether the scene must be rebuilt for `key` (anything but the camera and size changed).
@@ -102,6 +107,18 @@ pub fn set_scene(app: &mut App, scene: Scene, picks: PickTable, key: RenderKey) 
     sh.scene = Some((g.generation, scene, reuse));
   }
   app.render_key = Some(key);
+}
+
+/// The see-through quads drawn over the scene (the origin planes, which follow the camera):
+/// handed over, and the image redrawn, only when they change.
+pub fn set_quads(app: &mut App, quads: &[Quad]) {
+  if app.gpu.quads == quads {
+    return;
+  }
+  app.gpu.quads = quads.to_vec();
+  if let Ok(mut sh) = app.gpu.shared.lock() {
+    sh.quads = Some(quads.to_vec());
+  }
 }
 
 /// The look the next scene is drawn with (materials and environment in the Render workspace,
@@ -207,6 +224,11 @@ fn draw(gl: &glow::Context, sh: &mut Shared, view: Option<(Camera, [u32; 2], boo
       r.set_look(gl, look.as_ref().map(|l| l.look()).as_ref())?;
     }
   }
+  if let Some(q) = sh.quads.take() {
+    r.set_quads(gl, &q)?;
+    // they write no ids: only the picture is drawn again
+    sh.drawn = None;
+  }
   let Some((cam, size, read)) = view else { return Ok(()) };
   let state = Some((sh.uploaded, cam, size));
   let drawn = sh.drawn.map(|(g, c, s, full)| (Some((g, c, s)), full));
@@ -271,6 +293,8 @@ mod tests {
       glyph_hover: Vec::new(),
       palette: Default::default(),
       ghosts: Vec::new(),
+      grid_plane: None,
+      quads: Vec::new(),
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());
@@ -278,6 +302,14 @@ mod tests {
     moved.cam.orbit(0.3, 0.1);
     moved.size = [200, 160];
     assert!(!scene_changed(&app, &moved));
+    // nor do the origin planes, which follow the camera: they are handed over on their own
+    moved.quads = vec![Quad { corners: [[0.0; 3], [1.0, 0.0, 0.0], [1.0; 3], [0.0, 1.0, 0.0]], color: [9; 4] }];
+    assert!(!scene_changed(&app, &moved));
+    set_quads(&mut app, &moved.quads);
+    assert_eq!(app.gpu.shared.lock().unwrap().quads.as_deref(), Some(&moved.quads[..]));
+    app.gpu.shared.lock().unwrap().quads = None;
+    set_quads(&mut app, &moved.quads);
+    assert!(app.gpu.shared.lock().unwrap().quads.is_none(), "unchanged: not handed over again");
     let hovered = RenderKey {
       hover: Some(fox_engine::scene::Pick::Face { body: fox_engine::model::BodyId(1), face: 2 }),
       ..key.clone()

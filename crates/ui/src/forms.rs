@@ -1081,21 +1081,6 @@ pub static WEB: Form = Form {
   picks_model: false,
 };
 
-pub static SCALE: Form = Form {
-  title: "SCALE",
-  name: "Scale",
-  hint: "Scale bodies about a point",
-  icon: Icon::Scale,
-  cmd: "scale",
-  fixed: &[],
-  inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies (default all)", required: false },
-    Input::Vec3 { key: "center", label: "Point", default: ["0", "0", "0"] },
-    Input::Expr { key: "factor", label: "Scale factor", default: "2" },
-  ],
-  picks_model: false,
-};
-
 pub static SPLIT_FACE: Form = Form {
   title: "SPLIT FACE",
   name: "Split Face",
@@ -1118,20 +1103,6 @@ pub static REMOVE_FACES: Form = Form {
   cmd: "remove_faces",
   fixed: &[],
   inputs: &[Input::Faces { key: "faces", label: "Faces" }],
-  picks_model: true,
-};
-
-pub static OFFSET_FACE: Form = Form {
-  title: "OFFSET FACE",
-  name: "Offset Face",
-  hint: "Offset faces, flat or curved, along their normals",
-  icon: Icon::OffsetFace,
-  cmd: "press_pull",
-  fixed: &[],
-  inputs: &[
-    Input::Faces { key: "faces", label: "Faces" },
-    Input::Expr { key: "distance", label: "Distance", default: "1 mm" },
-  ],
   picks_model: true,
 };
 
@@ -1165,7 +1136,7 @@ pub static PLANE_ANGLE: Form = Form {
   title: "PLANE AT ANGLE",
   name: "Plane at Angle",
   hint: "A plane through an edge or axis, turned by an angle",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneAngle,
   cmd: "plane",
   fixed: &[("method", "angle")],
   inputs: &[
@@ -1180,7 +1151,7 @@ pub static MIDPLANE: Form = Form {
   title: "MIDPLANE",
   name: "Midplane",
   hint: "A plane halfway between two planes or faces",
-  icon: Icon::Plane,
+  icon: Icon::Midplane,
   cmd: "plane",
   fixed: &[("method", "midplane")],
   inputs: &[Input::Plane { key: "a", label: "First plane" }, Input::Plane { key: "b", label: "Second plane" }],
@@ -1191,7 +1162,7 @@ pub static TANGENT_PLANE: Form = Form {
   title: "TANGENT PLANE",
   name: "Tangent Plane",
   hint: "A plane tangent to a cylinder, cone or sphere at the picked point",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneTangent,
   cmd: "plane",
   fixed: &[("method", "tangent")],
   inputs: &[Input::Face { key: "face", label: "Face", near: Some("near") }],
@@ -1202,7 +1173,7 @@ pub static PLANE_TWO_EDGES: Form = Form {
   title: "PLANE THROUGH TWO EDGES",
   name: "Plane Through Two Edges",
   hint: "A plane through two coplanar straight edges",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneTwoEdges,
   cmd: "plane",
   fixed: &[("method", "two_edges")],
   inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
@@ -1213,7 +1184,7 @@ pub static PLANE_THREE_POINTS: Form = Form {
   title: "PLANE THROUGH THREE POINTS",
   name: "Plane Through Three Points",
   hint: "A plane through three points",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneThreePoints,
   cmd: "plane.points",
   fixed: &[],
   inputs: &[
@@ -1228,7 +1199,7 @@ pub static PLANE_ALONG_PATH: Form = Form {
   title: "PLANE ALONG PATH",
   name: "Plane Along Path",
   hint: "A plane across an edge, a fraction of the way along it",
-  icon: Icon::PlaneAlt,
+  icon: Icon::PlaneAlongPath,
   cmd: "plane",
   fixed: &[("method", "along_path")],
   inputs: &[
@@ -1242,7 +1213,7 @@ pub static AXIS_FACE: Form = Form {
   title: "AXIS THROUGH CYLINDER/CONE/TORUS",
   name: "Axis Through Cylinder/Cone/Torus",
   hint: "The axis of a round face",
-  icon: Icon::Axis,
+  icon: Icon::AxisCylinder,
   cmd: "axis",
   fixed: &[("method", "face")],
   inputs: &[Input::Face { key: "face", label: "Face", near: None }],
@@ -1253,7 +1224,7 @@ pub static AXIS_NORMAL: Form = Form {
   title: "AXIS PERPENDICULAR TO FACE",
   name: "Axis Perpendicular to Face",
   hint: "An axis normal to a face through the picked point",
-  icon: Icon::Axis,
+  icon: Icon::AxisNormal,
   cmd: "axis",
   fixed: &[("method", "normal")],
   inputs: &[Input::Face { key: "face", label: "Face", near: Some("near") }],
@@ -1264,7 +1235,7 @@ pub static AXIS_TWO_PLANES: Form = Form {
   title: "AXIS THROUGH TWO PLANES",
   name: "Axis Through Two Planes",
   hint: "The line where two planes meet",
-  icon: Icon::Axis,
+  icon: Icon::AxisTwoPlanes,
   cmd: "axis",
   fixed: &[("method", "two_planes")],
   inputs: &[Input::Plane { key: "a", label: "First plane" }, Input::Plane { key: "b", label: "Second plane" }],
@@ -1275,7 +1246,7 @@ pub static AXIS_EDGE: Form = Form {
   title: "AXIS THROUGH EDGE",
   name: "Axis Through Edge",
   hint: "An axis along a straight edge (or a circle's axis)",
-  icon: Icon::Axis,
+  icon: Icon::AxisEdge,
   cmd: "axis",
   fixed: &[("method", "edge")],
   inputs: &[Input::Edge { key: "edge", label: "Edge" }],
@@ -1286,7 +1257,7 @@ pub static AXIS_TWO_POINTS: Form = Form {
   title: "AXIS THROUGH TWO POINTS",
   name: "Axis Through Two Points",
   hint: "An axis through two points",
-  icon: Icon::Axis,
+  icon: Icon::AxisTwoPoints,
   cmd: "axis.points",
   fixed: &[],
   inputs: &[
@@ -1300,7 +1271,7 @@ pub static POINT_VERTEX: Form = Form {
   title: "POINT AT VERTEX",
   name: "Point at Vertex",
   hint: "A point at an end of an edge",
-  icon: Icon::CPoint,
+  icon: Icon::PointVertex,
   cmd: "point.vertex",
   fixed: &[],
   inputs: &[
@@ -1314,7 +1285,7 @@ pub static POINT_TWO_EDGES: Form = Form {
   title: "POINT THROUGH TWO EDGES",
   name: "Point Through Two Edges",
   hint: "Where two edges meet",
-  icon: Icon::CPoint,
+  icon: Icon::PointTwoEdges,
   cmd: "point",
   fixed: &[("method", "two_edges")],
   inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
@@ -1325,7 +1296,7 @@ pub static POINT_THREE_PLANES: Form = Form {
   title: "POINT THROUGH THREE PLANES",
   name: "Point Through Three Planes",
   hint: "Where three planes meet",
-  icon: Icon::CPoint,
+  icon: Icon::PointThreePlanes,
   cmd: "point",
   fixed: &[("method", "three_planes")],
   inputs: &[
@@ -1340,7 +1311,7 @@ pub static POINT_CENTER: Form = Form {
   title: "POINT AT CENTER",
   name: "Point at Center of Circle/Sphere/Torus",
   hint: "The centre of a round face",
-  icon: Icon::CPoint,
+  icon: Icon::PointCenter,
   cmd: "point",
   fixed: &[("method", "center")],
   inputs: &[Input::Face { key: "face", label: "Face", near: None }],
@@ -1351,7 +1322,7 @@ pub static POINT_EDGE_PLANE: Form = Form {
   title: "POINT AT EDGE AND PLANE",
   name: "Point at Edge and Plane",
   hint: "Where an edge crosses a plane",
-  icon: Icon::CPoint,
+  icon: Icon::PointEdgePlane,
   cmd: "point",
   fixed: &[("method", "edge_plane")],
   inputs: &[Input::Edge { key: "edge", label: "Edge" }, Input::Plane { key: "plane", label: "Plane" }],
@@ -1362,7 +1333,7 @@ pub static POINT_ALONG_PATH: Form = Form {
   title: "POINT ALONG PATH",
   name: "Point Along Path",
   hint: "A point a fraction of the way along an edge",
-  icon: Icon::CPoint,
+  icon: Icon::PointAlongPath,
   cmd: "point",
   fixed: &[("method", "along_path")],
   inputs: &[
@@ -1416,6 +1387,9 @@ pub static PATCH: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Patch's boundary pick
+// (batch ui-surface-create-dialogs)
+#[allow(dead_code)]
 pub static PATCH_SKETCH: Form = Form {
   title: "PATCH",
   name: "Patch (Sketch)",
@@ -2524,6 +2498,9 @@ pub static UNTRIM: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Trim's Trim Tool pick
+// (batch ui-surface-modify-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static TRIM_BODY: Form = Form {
   title: "TRIM",
   name: "Trim with Body",
@@ -2540,6 +2517,9 @@ pub static TRIM_BODY: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Trim's Trim Tool pick
+// (batch ui-surface-modify-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static TRIM_SKETCH: Form = Form {
   title: "TRIM",
   name: "Trim with Sketch",
@@ -2589,6 +2569,9 @@ pub static REPLACE_FACE: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Offset's Offset Type
+// (batch ui-surface-create-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static VARIABLE_OFFSET: Form = Form {
   title: "OFFSET",
   name: "Variable Offset",

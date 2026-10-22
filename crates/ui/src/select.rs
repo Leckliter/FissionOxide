@@ -160,6 +160,18 @@ impl Filters {
     *slot = !*slot;
   }
 
+  /// [`Filters::allows`], with picks on a mesh body governed by the Mesh Bodies filter (the
+  /// body is picked whole, so the face and edge filters don't apply to it).
+  pub fn allows_on(&self, s: &Session, p: &Pick, priority: Priority) -> bool {
+    match pick_body(p) {
+      Some(b) if is_mesh(s, b) => match priority {
+        Priority::Component => self.components,
+        _ => self.get("mesh_bodies"),
+      },
+      _ => self.allows(p, priority),
+    }
+  }
+
   /// Can this pick be hovered and selected with this priority?
   pub fn allows(&self, p: &Pick, priority: Priority) -> bool {
     let whole = match priority {
@@ -195,10 +207,16 @@ pub fn targets(s: &Session, p: Pick, priority: Priority) -> Vec<Sel> {
     _ => None,
   };
   match (priority, body) {
-    (Priority::Body, Some(b)) => vec![Sel::Body { body: b }],
     (Priority::Component, Some(b)) => component_bodies(s, b).into_iter().map(|body| Sel::Body { body }).collect(),
+    // a mesh body is picked whole whatever the priority, as Fusion's are
+    (_, Some(b)) if priority == Priority::Body || is_mesh(s, b) => vec![Sel::Body { body: b }],
     _ => vec![p.to_sel()],
   }
+}
+
+/// Whether a body is a mesh body (picked whole, never by face or edge).
+pub(crate) fn is_mesh(s: &Session, body: BodyId) -> bool {
+  s.model.body(body).is_some_and(|b| b.is_mesh())
 }
 
 /// The bodies the pointer lights as a whole: a face, edge or vertex under it while the
@@ -206,7 +224,10 @@ pub fn targets(s: &Session, p: Pick, priority: Priority) -> Vec<Sel> {
 /// the whole body then, not the face under the pointer.
 pub(crate) fn hover_bodies(app: &App) -> Vec<BodyId> {
   match app.hover {
-    Some(p) if pick_body(&p).is_some() && matches!(app.sel_priority, Priority::Body | Priority::Component) => {
+    Some(p)
+      if pick_body(&p)
+        .is_some_and(|b| matches!(app.sel_priority, Priority::Body | Priority::Component) || is_mesh(&app.s, b)) =>
+    {
       targets(&app.s, p, app.sel_priority)
         .into_iter()
         .filter_map(|x| if let Sel::Body { body } = x { Some(body) } else { None })
@@ -627,7 +648,7 @@ pub(crate) fn select_ids(app: &mut App, inside: &HashMap<u32, usize>, window: bo
     let keep = if sketching {
       matches!(p, Pick::SketchCurve { .. } | Pick::SketchPoint { .. })
     } else {
-      filter.allows(&p, priority)
+      filter.allows_on(&app.s, &p, priority)
         && !pick_body(&p).is_some_and(|b| app.ctx_menu.unselectable.contains(&b))
         && !matches!(
           (priority, p),

@@ -911,25 +911,73 @@ fn escape_discards_a_spline_and_enter_commits_it() {
 }
 
 /// The browser's Origin folder is hidden by default; its bulb shows the three origin planes in
-/// the canvas (and the scene's short axes), each about 120 px wide.
+/// the canvas, each reaching about 60 px from the origin.
 #[test]
 fn the_origin_folder_shows_camera_sized_planes() {
   use fox_engine::kernel::glam::DVec3;
   let mut h = Harness::new();
   assert!(!h.app.origin_shown, "Origin is hidden by default");
+  assert!(crate::origin::plane_quads(&h.app).is_empty());
   h.app.origin_shown = true;
   h.frame(vec![]);
-  let half = crate::viewport::origin_plane_half_size(&h.app);
-  let a = on_screen(&h.app, DVec3::new(-half, 0.0, 0.0));
-  let b = on_screen(&h.app, DVec3::new(half, 0.0, 0.0));
-  // the XY square's width along X, foreshortened by the home view's turn
+  assert_eq!(crate::origin::plane_quads(&h.app).len(), 15, "three squares, each a fill and four edges");
+  let size = crate::viewport::origin_plane_size(&h.app);
+  let a = on_screen(&h.app, DVec3::ZERO);
+  let b = on_screen(&h.app, DVec3::new(size, 0.0, 0.0));
+  // the XY square's reach along X, foreshortened by the home view's turn
   let w = (b - a).length();
-  assert!((60.0..=125.0).contains(&w), "the origin plane spans {w} px");
-  // looked at straight on it is the full 120 px
+  assert!((30.0..=62.0).contains(&w), "the origin plane reaches {w} px");
+  // looked at straight on it is the full 60 px
   h.app.cam.set_view(fox_engine::render::StandardView::Top);
-  let a = on_screen(&h.app, DVec3::new(-half, 0.0, 0.0));
-  let b = on_screen(&h.app, DVec3::new(half, 0.0, 0.0));
-  assert!(((b - a).length() - 120.0).abs() < 1.0, "{}", (b - a).length());
+  let a = on_screen(&h.app, DVec3::ZERO);
+  let b = on_screen(&h.app, DVec3::new(size, 0.0, 0.0));
+  assert!(((b - a).length() - 60.0).abs() < 1.0, "{}", (b - a).length());
+}
+
+/// While Create Sketch waits for a plane, every pointer position away from the bodies hovers an
+/// origin plane, taken as infinite (the one the ray meets first), and its sketch grid is
+/// previewed with its labels; a click there sketches on it.
+#[test]
+fn create_sketch_picks_infinite_planes_and_previews_their_grid() {
+  use fox_engine::kernel::glam::DVec3;
+  use fox_engine::model::OriginPlane;
+  let mut h = Harness::new();
+  h.settle();
+  h.app.new_sketch();
+  h.frame(vec![]);
+  // far from every square (the canvas's lower left): the origin plane the ray meets first
+  let far = h.app.canvas.left_bottom() + vec2(120.0, -80.0);
+  let [w, ht] = h.app.canvas_px;
+  let ppp = w as f32 / h.app.canvas.width();
+  let (o, d) =
+    h.app.cam.ray(((far.x - h.app.canvas.min.x) * ppp) as f64, ((far.y - h.app.canvas.min.y) * ppp) as f64, w, ht);
+  let frames = h.app.s.design.frames();
+  let first = [OriginPlane::Xy, OriginPlane::Xz, OriginPlane::Yz]
+    .map(|p| p.plane(frames))
+    .into_iter()
+    .filter_map(|pl| fox_engine::render::ray_plane(o, d, pl.origin, pl.normal()).map(|hit| ((hit - o).dot(d), pl)))
+    .filter(|(t, _)| *t > 0.0)
+    .min_by(|a, b| a.0.total_cmp(&b.0))
+    .map(|(_, pl)| pl);
+  assert!(first.is_some());
+  h.frame(vec![Event::PointerMoved(far)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.grid_preview, first, "the first plane met is previewed");
+  // a point well up the Z axis: the ray meets an upright plane first
+  let side = h.screen(DVec3::new(0.0, 60.0, 80.0));
+  h.frame(vec![Event::PointerMoved(side)]);
+  h.frame(vec![]);
+  let (yz, xz) = (OriginPlane::Yz.plane(frames), OriginPlane::Xz.plane(frames));
+  assert!(
+    h.app.grid_preview.is_some_and(|p| p == yz || p == xz),
+    "an upright plane under the pointer: {:?}",
+    h.app.grid_preview
+  );
+  let previewed = h.app.grid_preview;
+  h.move_then_click(side);
+  let sk = h.app.s.edit_sketch.expect("the click sketches on the hovered plane");
+  assert_eq!(h.app.s.model.sketches.get(&sk).map(|r| r.plane), previewed);
+  assert_eq!(h.app.grid_preview, None, "no preview once the sketch is open");
 }
 
 /// The File button (after the logo and the data panel button) and the Help (?) button (left of
@@ -1026,6 +1074,20 @@ fn a_narrow_window_keeps_every_panel_through_select_on_screen() {
   let label = h.create_label();
   h.move_then_click(label.center());
   assert!(h.find(vec![], "Create Form").is_some(), "Create Form stays in the CREATE menu");
+}
+
+/// `ui:toolbar:responsive-collapse`: once the row fits, SOLID shows Fusion's counts, CREATE 5
+/// icons and MODIFY 4 (Press Pull, Fillet, Shell, Combine), and every panel through SELECT.
+#[test]
+fn a_window_that_fits_the_row_shows_fusions_icon_counts() {
+  let mut h = Harness::with_width(1100.0);
+  h.frame(vec![]);
+  let counts: Vec<(&str, usize)> =
+    h.ctx.data(|d| d.get_temp(crate::menus::fit_id(crate::panels::Tab::Solid))).expect("the SOLID toolbar drew");
+  let of = |name: &str| counts.iter().find(|(l, _)| *l == name).map(|(_, n)| *n);
+  assert_eq!(of("CREATE"), Some(5), "{counts:?}");
+  assert_eq!(of("MODIFY"), Some(4), "{counts:?}");
+  assert!(counts.iter().all(|(_, n)| *n >= 1), "{counts:?}");
 }
 
 /// The big FINISH SKETCH button is clickable across the whole panel, not only on its icon,
@@ -1244,8 +1306,9 @@ fn the_floating_value_box_takes_typing_and_enter_is_ok() {
   // its value is selected: typing replaces it, and the dialog's field says the same
   h.frame(typing("25"));
   h.frame(vec![]);
+  // the row gets the unit written out, as Fusion's does (`ui:manip:typed-value-units`)
   let distance = h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone();
-  assert_eq!(distance, "25");
+  assert_eq!(distance, "25 mm");
   let features = h.app.s.design.features.len();
   h.frame(vec![key(egui::Key::Enter)]);
   h.frame(vec![]);
@@ -1315,6 +1378,10 @@ fn dragging_drafts_arc_turns_the_angle_in_five_degree_steps() {
   let front = h.app.s.model.bodies[0].faces().iter().find(|f| f.normal.y < -0.9).unwrap().id;
   h.app.s.selection = vec![fox_engine::Sel::Face { body, face: front }];
   h.app.start(crate::dialogs::Kind::Draft);
+  // the face is the face to draft; the XY plane, picked in the viewport, the pull direction
+  if let Some(d) = h.app.dialog.as_mut() {
+    d.pick_pull_plane(&mut h.app.s, json!("xy"));
+  }
   h.app.fit_view_now();
   for _ in 0..3 {
     h.frame(vec![]);
@@ -1324,7 +1391,7 @@ fn dragging_drafts_arc_turns_the_angle_in_five_degree_steps() {
   let placed = crate::handles::placed_points(&h.app, &project);
   let (_, arc) = placed[0].clone().expect("the disc on its arc");
   // the arc's 33 points run a quarter turn either side of the pull direction: from 45° before
-  // it to about 17° before it is a 28° turn from 3°, 31° snapped to 30°
+  // it to about 17° before it is a 28° turn from 0.0°, snapped to 30°
   let (from, to) = (arc[8], arc[13]);
   h.drag(from, to);
   assert!(!matches!(h.app.drag, Some(crate::viewport::Drag::Box { .. })), "no window selection");
@@ -1485,7 +1552,7 @@ fn offset_on_a_preselected_line_starts_at_zero_and_takes_a_typed_distance() {
   // typing replaces the value; Enter applies it and the tool ends
   h.frame(typing(".1"));
   h.frame(vec![]);
-  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), ".1");
+  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), ".1 mm");
   h.frame(vec![key(egui::Key::Enter)]);
   h.frame(vec![]);
   assert!(h.app.dialog.is_none(), "Enter is OK");
@@ -1629,7 +1696,7 @@ fn origin_items_are_hovered_and_picked_in_the_canvas() {
   h.frame(vec![]);
   assert_eq!(origin::picked(&h.app), None);
   // an axis: along X, well clear of the origin point
-  let reach = crate::viewport::origin_plane_half_size(&h.app) * crate::viewport::ORIGIN_AXIS_REACH;
+  let reach = crate::viewport::origin_plane_size(&h.app) * crate::viewport::ORIGIN_AXIS_REACH;
   let on_x = h.screen(DVec3::X * reach * 0.6);
   h.frame(vec![Event::PointerMoved(on_x)]);
   h.frame(vec![]);
@@ -2165,4 +2232,141 @@ fn escape_clears_a_timeline_pick_and_its_highlight() {
   h.frame(vec![Event::PointerMoved(icon + vec2(1.0, 0.0))]);
   h.frame(vec![]);
   assert_eq!(h.app.ctx_menu.peek, vec![body]);
+}
+
+/// Fusion's Cancel closes a dialog with nothing selected: Combine's two bodies and Offset Face's
+/// face go back to unselected (no blue, an empty status bar), and Combine's whole-body picking
+/// ends with the dialog.
+#[test]
+fn cancel_leaves_nothing_selected() {
+  use crate::dialogs::Kind;
+  use fox_engine::Sel;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20, "at": [40, 0]})).unwrap();
+  let (b1, b2) = (h.app.s.model.bodies[0].id, h.app.s.model.bodies[1].id);
+  h.app.s.selection.clear();
+  h.app.start(Kind::Combine);
+  h.frame(vec![]);
+  assert_eq!(h.app.sel_priority, crate::select::Priority::Body, "Combine picks whole bodies");
+  h.app.s.selection = vec![Sel::Body { body: b1 }, Sel::Body { body: b2 }];
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!(h.app.s.model.body(b2).is_none(), "the preview consumes the tool body");
+  h.move_then_click(cancel_pos(h.dialog_rect()));
+  assert!(h.app.dialog.is_none(), "Cancel closes the dialog");
+  assert!(h.app.s.selection.is_empty(), "{:?}", h.app.s.selection);
+  assert!(h.app.s.model.body(b2).is_some(), "the preview is withdrawn");
+  assert_eq!(h.app.sel_priority, crate::select::Priority::Face);
+
+  let b = &h.app.s.model.bodies[0];
+  let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  h.app.s.selection = vec![Sel::Face { body: b.id, face: top }];
+  h.app.start(Kind::OffsetFace);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!(h.app.dialog.is_some());
+  h.move_then_click(cancel_pos(h.dialog_rect()));
+  assert!(h.app.dialog.is_none());
+  assert!(h.app.s.selection.is_empty(), "{:?}", h.app.s.selection);
+}
+
+/// A 20 mm square sketched on XY with its profile picked and Extrude open on it, its floating
+/// value box shown.
+fn extrude_on_a_square() -> Harness {
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  h.app.run("sketch.rect", json!({"corner1": [-10, -10], "corner2": [10, 10]})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.run("sketch.finish", json!({})).unwrap();
+  h.app.s.selection = vec![fox_engine::Sel::Profile { sketch: sk, index: 0 }];
+  h.app.start(crate::dialogs::Kind::Extrude);
+  h.app.fit_view_now();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  h
+}
+
+/// `ui:manip:tab-cycles-boxes`: Tab in Extrude's floating box applies the typed distance and
+/// moves the box (and the keyboard) to the taper handle with "0.0 deg" selected; typing there
+/// sets the taper, and Tab brings the box back to the distance, as in Fusion.
+#[test]
+fn tab_moves_the_value_box_to_the_taper_handle_and_back() {
+  let mut h = extrude_on_a_square();
+  let field = |h: &mut Harness| h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone();
+  let taper = |h: &mut Harness| h.app.dialog.as_mut().unwrap().handle_field(0).unwrap().clone();
+  h.frame(typing("25"));
+  h.frame(vec![]);
+  assert_eq!(field(&mut h), "25 mm");
+  h.frame(vec![key(egui::Key::Tab)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.manip.value_box.at_handle, Some(0), "the box is at the taper handle");
+  let focused = h.ctx.memory(|m| m.focused()).expect("the box keeps the keyboard");
+  assert_eq!(h.ctx.read_response(focused).map(|r| r.layer_id), Some(crate::value_box::layer()));
+  assert_eq!(taper(&mut h), "0.0 deg");
+  assert_eq!(field(&mut h), "25 mm", "Tab applied the typed distance");
+  // the taper's value is selected: typing replaces it, with its unit written out
+  h.frame(typing("5"));
+  h.frame(vec![]);
+  assert_eq!(taper(&mut h), "5 deg");
+  h.frame(vec![key(egui::Key::Tab)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.manip.value_box.at_handle, None, "back at the distance arrow");
+  assert!(h.ctx.memory(|m| m.focused()).is_some());
+  h.frame(typing("30"));
+  h.frame(vec![]);
+  assert_eq!((field(&mut h), taper(&mut h)), ("30 mm".to_string(), "5 deg".to_string()));
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert!(h.app.dialog.is_none(), "Enter is OK");
+  let f = h.app.s.design.features.last().unwrap();
+  let fox_engine::model::FeatureKind::Extrude { extent, .. } = &f.kind else { panic!("{:?}", f.kind) };
+  // Edit Feature shows the values with their units
+  assert_eq!((extent.distance.as_str(), extent.taper.as_str()), ("30 mm", "5 deg"));
+}
+
+/// `ui:manip:preview-hover-highlight`: the pointer over Extrude's preview body lights nothing up.
+#[test]
+fn the_extrude_preview_is_not_hover_highlighted() {
+  let mut h = extrude_on_a_square();
+  h.frame(typing("20"));
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let preview = h.app.dialog.as_ref().unwrap().preview_bodies(&h.app.s);
+  assert_eq!(preview.len(), 1, "the preview shows");
+  // the canvas's middle is on the preview (the profile is centred on the origin, the view fitted)
+  let c = h.app.canvas.center();
+  for at in [c, c + vec2(4.0, 6.0), c + vec2(-5.0, -3.0)] {
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![]);
+    let on_preview = h.app.hover.as_ref().and_then(crate::select::pick_body).is_some_and(|b| preview.contains(&b));
+    assert!(!on_preview, "{:?} lit up at {at:?}", h.app.hover);
+  }
+  // the pointer still reads as over the model: the prompt is Fusion's "Hold Ctrl to modify
+  // selection"
+  assert!(h.app.tstate.over_preview);
+  let prompt = h.app.dialog.as_ref().unwrap().prompt(h.app.hover.is_some() || h.app.tstate.over_preview);
+  assert_eq!(prompt.as_deref(), Some("Hold Ctrl to modify selection"));
+}
+
+/// `ui:surface:finish-sketch-returns-tab`: a sketch started from the SURFACE tab comes back to
+/// SURFACE on Finish Sketch, and one started from SOLID to SOLID.
+#[test]
+fn finish_sketch_returns_to_the_tab_it_started_from() {
+  use crate::panels::Tab;
+  let mut h = Harness::new();
+  for tab in [Tab::Surface, Tab::Solid, Tab::Surface] {
+    h.app.tab = tab;
+    h.frame(vec![]);
+    h.app.create_sketch(json!("xy"));
+    h.frame(vec![]);
+    assert_eq!(h.app.tab, Tab::Sketch);
+    h.app.finish_sketch();
+    h.frame(vec![]);
+    assert_eq!(h.app.tab, tab);
+  }
 }

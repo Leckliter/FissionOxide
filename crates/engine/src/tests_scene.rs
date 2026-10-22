@@ -192,6 +192,13 @@ fn object_visibility_and_grid_spacing() {
   let bad = lines(&mut b, &ViewOptions { grid_step: Some(0.0), ..Default::default() });
   assert_eq!(grid(&bad), grid(&plain), "a zero step adapts");
 
+  // Create Sketch's preview: the grid on another plane (every grid line lies in it)
+  let yz = fox_kernel::Plane::YZ;
+  let preview = lines(&mut b, &ViewOptions { grid_plane: Some(yz), hide_origin: true, ..Default::default() });
+  let preview: Vec<_> = preview.iter().filter(|l| l.behind).collect();
+  assert_eq!(preview.len(), grid(&plain) - 3, "the same grid, without the origin stubs");
+  assert!(preview.iter().all(|l| l.points.iter().all(|p| p[0].abs() < 1e-6)), "the grid lies in YZ");
+
   // hidden sketches stay shown while one is edited
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [5, 5]}));

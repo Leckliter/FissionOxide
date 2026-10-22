@@ -63,33 +63,43 @@
 {"name": "ui-camera-navbar", "items": 5, "status": "done", "pr": "6951023", "fixer": "cloud task_17e44523 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-display-settings-3", "items": 5, "status": "done", "pr": "e315cfc", "fixer": "cloud session_011WRufzngKGK1csRsEmb2Lu (requested 2026-10-21)"}
 {"name": "ui-grid-snaps-2", "items": 3, "status": "done", "pr": "26b9c61", "fixer": "cloud task_90348c0f (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-origin-display", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_99c1f3b0 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-origin-display", "items": 6, "status": "done", "pr": "0d0b876", "fixer": "cloud task_99c1f3b0 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-construction-display", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_84272e49 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-primitive-dialogs", "items": 6, "status": "done", "pr": "a1388ce", "fixer": "cloud task_89459e77 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-sweep-loft-revolve", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_28b804e8 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-sweep-loft-revolve", "items": 4, "status": "done", "pr": "f8897ef", "fixer": "cloud session_01BiavQyPVY1ivsBnuTCwwnA (requested 2026-10-22)"}
 {"name": "ui-rib-emboss-thread", "items": 6, "status": "done", "pr": "c12d36c", "fixer": "cloud session_01TVQaTUzwYTy9sQ6Qv2ywhd (requested 2026-10-22)"}
 {"name": "ui-pattern-mirror-misc", "items": 6, "status": "done", "pr": "a5ac71d", "fixer": "cloud session_019ittuH1iJEcjum9vWapYVJ (requested 2026-10-22)"}
-{"name": "ui-modify-menu-tooltips", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_09b73edb (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-draft-scale-dialogs", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_fbb41230 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-modify-menu-tooltips", "items": 5, "status": "done", "pr": "c0c37ea", "fixer": "cloud task_09b73edb (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-draft-scale-dialogs", "items": 4, "status": "done", "pr": "2e7c2d7", "fixer": "cloud task_fbb41230 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-combine-split-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_9635415e (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-align-remove-simplify", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_10b85414 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-material-appearance", "items": 3, "status": "done", "pr": "351dceb", "fixer": "cloud task_4e643365 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-dialog-selection-state", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_7ce0d07b (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-edit-feature-errors", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_e354b219 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-extrude-manipulator", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_d7232407 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-dialog-selection-state", "items": 3, "status": "done", "pr": "e5a053c", "fixer": "cloud task_7ce0d07b (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-edit-feature-errors", "items": 5, "status": "done", "pr": "9013806", "fixer": "cloud task_e354b219 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-extrude-manipulator", "items": 7, "status": "done", "pr": "b5bca5e", "fixer": "cloud task_d7232407 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-feature-handles", "items": 4, "status": "done", "pr": "42a19ac", "fixer": "cloud session_018uJAiqgvZtF5E1eA9peR6D (requested 2026-10-22)"}
-{"name": "ui-edit-more-features", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_4f758622 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-inspect-insert-assemble", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_5e3e7433 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-timeline-failed-items", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_b864e6d7 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-edit-more-features", "items": 6, "status": "done", "pr": "967a7dc", "fixer": "cloud task_4f758622 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-inspect-insert-assemble", "items": 5, "status": "done", "pr": "2d50bd3", "fixer": "cloud task_5e3e7433 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-timeline-failed-items", "items": 7, "status": "done", "pr": "809ea2a", "fixer": "cloud task_b864e6d7 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-construct-methods", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_3fa70da0 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-insert-new-design", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_749e3adf (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-inspect-analyses", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_12943e51 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-inspect-measure-section", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_5841e2e8 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-inspect-measure-section", "items": 3, "status": "done", "pr": "0f678c1", "fixer": "cloud task_5841e2e8 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-surface-create-dialogs", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_30e60d68 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-surface-menus", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_f0efebd1 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-surface-menus", "items": 5, "status": "done", "pr": "3a812bd", "fixer": "cloud task_f0efebd1 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-surface-modify-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_5bf3c132 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-surface-results", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_de1420ec (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-mesh-body-and-insert", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_fe0e6853 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-mesh-modify-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_b104991d (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-mesh-new-modify", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_c3b91987 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-mesh-prepare-create", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_830371a8 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-sheet-flange-dialog", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_56ad6604 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-sheet-flat-pattern-env", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_e4b2a7dc (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-sheet-menus-dialogs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_59980ba5 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-sheet-rules-library", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_eb0b3ece (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-manage-bom-palette", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_4cc1c457 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-utilities-addins-make", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_b240d544 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-utilities-tips-status", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_899ce0b8 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-browser-body-rows", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_60b58a79 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-timeline-menus-groups", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_5b79f6ea (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-timeline-rollback-play", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_9ee4eb9c (requested 2026-10-22 by the coordinator)"}

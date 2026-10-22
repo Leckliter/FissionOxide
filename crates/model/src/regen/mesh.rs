@@ -9,8 +9,9 @@ use crate::construct::{ConvertMethod, FillType, MeshOp, PlaneCutType, ReduceType
 use crate::meshtools::{self, Target};
 use crate::{FeatureId, FeatureKind};
 
-/// A body's triangles for the mesh tools, welded. Mesh bodies are faceted solids today, so these
-/// are its display tessellation's; a mesh body kind hands over its own triangles here.
+/// A body's triangles for the mesh tools, welded: a mesh body's (its shape is one planar face
+/// per triangle, or per merged region, so its tessellation gives them back), or any other body's
+/// tessellation.
 pub(crate) fn triangles(b: &Body) -> Result<(Vec<DVec3>, Vec<u32>), String> {
   Ok(crate::meshops::weld(b.mesh().ok_or("the body has no mesh")?))
 }
@@ -123,7 +124,13 @@ impl Ctx<'_> {
             let (pb, tb) = meshtools::compact(&p, &b);
             let (sa, sb) = (shape(&pa, &ta, false)?, shape(&pb, &tb, false)?);
             self.state.bodies[bi] = self.state.bodies[bi].with_shape(sa, id);
-            self.new_body(id, sb);
+            // the part split off is the same kind of body, a mesh named after the one it came from
+            if self.state.bodies[bi].is_mesh() {
+              let name = format!("{} (2)", self.state.bodies[bi].name);
+              self.new_mesh_body(id, sb, name);
+            } else {
+              self.new_body(id, sb);
+            }
           }
           PlaneCutType::SplitFaces => {
             let all: Vec<u32> = behind.into_iter().chain(front).collect();

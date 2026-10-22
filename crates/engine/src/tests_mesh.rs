@@ -97,6 +97,7 @@ fn convert_mesh_adds_a_solid_and_hides_the_mesh() {
   assert!(!s.body_visible(b), "the mesh is hidden");
   let solid = s.model.bodies.iter().find(|x| x.id != b).unwrap();
   assert!(s.body_visible(solid.id));
+  assert!(!solid.is_mesh() && s.model.body(b).unwrap().is_mesh(), "a new solid beside the mesh");
   assert_eq!(solid.faces().len(), 6, "prismatic: one face per side");
   run(&mut s, "undo", json!({}));
   assert!(s.body_visible(b) && s.model.bodies.len() == 1, "undo takes back both");
@@ -129,6 +130,8 @@ fn plane_cut_trims_splits_and_fills() {
   // split body: both parts, closed
   let s = cut(json!({"plane": "xy", "distance": 4, "type": "split_body"}));
   assert_eq!(s.model.bodies.len(), 2);
+  assert!(s.model.bodies.iter().all(|b| b.is_mesh()), "both parts stay mesh bodies");
+  assert_eq!(s.model.bodies[1].name, "cube (2)");
   assert!((volume(&s) - 1000.0).abs() < 1e-3, "{}", volume(&s));
   // split faces: one body, the same volume, more triangles
   let s = cut(json!({"plane": "xy", "distance": 4, "type": "split_faces"}));

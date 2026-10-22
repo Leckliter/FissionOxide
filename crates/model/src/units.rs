@@ -130,10 +130,27 @@ impl LengthUnit {
     if t.parse::<f64>().is_ok() { format!("{t} {}", self.symbol()) } else { format!("({t}) {}", self.symbol()) }
   }
 
+  /// A length typed into a manipulator's value box, as Fusion's box fills it in: a bare number
+  /// gets this unit written out even in millimetres (`"25"` → `"25 mm"`), so the dialog's row and
+  /// the stored feature show it. Anything else is kept as typed.
+  pub fn labelled(self, expr: &str) -> String {
+    if !bare(expr) {
+      return expr.to_string();
+    }
+    let t = expr.trim();
+    if t.parse::<f64>().is_ok() { format!("{t} {}", self.symbol()) } else { format!("({t}) {}", self.symbol()) }
+  }
+
   /// A stored length expression as a field shows it: stored bare numbers are millimetres, so in
   /// a design in another unit they are shown with "mm" to keep their meaning.
   pub fn shown(self, expr: &str) -> String {
     LengthUnit::Mm.typed_from(expr, self)
+  }
+
+  /// A stored length expression as an edit box shows it: always with a unit, as Fusion's boxes
+  /// are. Stored bare numbers are millimetres, so `"2"` → `"2 mm"` in every design.
+  pub fn pinned(expr: &str) -> String {
+    LengthUnit::Mm.typed_from(expr, LengthUnit::In)
   }
 
   /// Pins a bare `expr` to `self` when the design unit is `design` (see [`LengthUnit::shown`]).
@@ -359,6 +376,11 @@ mod tests {
     assert_eq!(u.typed("w / 2"), "w / 2", "parameters carry their own unit");
     assert_eq!(u.typed("2 +"), "2 +", "broken input is left for the field to report");
     assert_eq!(LengthUnit::Mm.typed("2"), "2", "bare numbers already mean mm");
+    assert_eq!(LengthUnit::Mm.labelled("25"), "25 mm", "the box writes millimetres out");
+    assert_eq!(LengthUnit::Mm.labelled("2 * 3"), "(2 * 3) mm");
+    assert_eq!(u.labelled("2"), "2 in");
+    assert_eq!(u.labelled("w / 2"), "w / 2");
+    assert_eq!(u.labelled("-"), "-", "half-typed input is kept");
     let mm = |s: &str| fox_expr::eval(s, ParamKind::Length, &fox_expr::Empty).unwrap();
     assert_eq!(mm(&u.typed("2")), 50.8);
     assert_eq!(mm(&LengthUnit::Cm.typed("1.5")), 15.0);
@@ -367,6 +389,12 @@ mod tests {
     assert_eq!(u.shown("10"), "10 mm");
     assert_eq!(u.shown("1 in"), "1 in");
     assert_eq!(LengthUnit::Mm.shown("10"), "10");
+    // an edit box always shows the unit, in a mm design too
+    assert_eq!(LengthUnit::pinned("2"), "2 mm");
+    assert_eq!(LengthUnit::pinned("2 * 3"), "(2 * 3) mm");
+    assert_eq!(LengthUnit::pinned("0.1 in"), "0.1 in");
+    assert_eq!(LengthUnit::pinned("w / 2"), "w / 2");
+    assert_eq!(LengthUnit::pinned(""), "");
     assert_eq!(u.localize("10 mm"), "0.393701 in");
     assert_eq!(u.localize("30 deg"), "30 deg");
     assert_eq!(LengthUnit::parse("IN"), Some(LengthUnit::In));

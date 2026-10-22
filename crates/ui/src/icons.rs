@@ -99,6 +99,12 @@ pub enum Icon {
   SilhouetteSplit,
   Align,
   RemoveBody,
+  /// Simplify > Remove Features: a block losing its small features.
+  RemoveFeatures,
+  /// Simplify > Remove Faces: a block losing a face.
+  RemoveFaces,
+  /// Simplify > Replace with Primitives: a body turned into a box.
+  ReplacePrimitives,
   PhysMaterial,
   Appearance,
   ManageMaterials,
@@ -126,6 +132,43 @@ pub enum Icon {
   PlaneAlt,
   Axis,
   CPoint,
+  // CONSTRUCT's own icon for each command, as Fusion's
+  /// Plane at Angle: a plane tilted up from an edge, with the angle.
+  PlaneAngle,
+  /// Tangent Plane: a plane resting on a cylinder.
+  PlaneTangent,
+  /// Midplane: a plane halfway between two others.
+  Midplane,
+  /// Perpendicular Plane: a plane standing square on another.
+  PlanePerpendicular,
+  /// Plane Through Two Edges: a plane through two lines.
+  PlaneTwoEdges,
+  /// Plane Through Three Points: a plane through three points.
+  PlaneThreePoints,
+  /// Plane Along Path: a plane across a curved path.
+  PlaneAlongPath,
+  /// Axis Through Cylinder/Cone/Torus: a cylinder's axis.
+  AxisCylinder,
+  /// Axis Perpendicular To Face: an axis standing on a face.
+  AxisNormal,
+  /// Axis Through Two Planes: the line where two planes cross.
+  AxisTwoPlanes,
+  /// Axis Through Two Points: an axis through two points.
+  AxisTwoPoints,
+  /// Axis Through Edge: an axis along a block's edge.
+  AxisEdge,
+  /// Point At Vertex: a point on a block's corner.
+  PointVertex,
+  /// Point Through Two Edges: a point where two lines cross.
+  PointTwoEdges,
+  /// Point Through Three Planes: a point where three planes meet.
+  PointThreePlanes,
+  /// Point At Center Of Circle/Sphere/Torus: a point at a circle's centre.
+  PointCenter,
+  /// Point At Edge And Plane: a point where a line pierces a plane.
+  PointEdgePlane,
+  /// Point Along Path: a point on a curved path.
+  PointAlongPath,
   Interference,
   Section,
   CurvComb,
@@ -179,6 +222,10 @@ pub enum Icon {
   Separate,
   ScaleMesh,
   ConvertMesh,
+  /// A mesh body's browser row: a yellow triangulated block.
+  MeshBody,
+  /// A mesh feature in the timeline (Insert Mesh's "Base Mesh Feature").
+  MeshFeature,
   Flange,
   Hem,
   LoftedFlange,
@@ -371,6 +418,9 @@ pub enum Icon {
   OriginSimple,
   OriginBetween,
   OriginTwoEdge,
+  // Draft's Type row
+  DraftFixedPlane,
+  DraftPartingLine,
   // Reduce's Remesh Type, Plane Cut's Fill Type and Convert Mesh's Method (see `mesh`)
   RemeshAdaptive,
   RemeshUniform,
@@ -448,10 +498,14 @@ fn family(icon: Icon) -> Tint {
   use Icon::*;
   match icon {
     Plane | PlaneAlt | Axis | CPoint => Tint::Amber,
+    PlaneAngle | PlaneTangent | Midplane | PlanePerpendicular | PlaneTwoEdges | PlaneThreePoints | PlaneAlongPath
+    | AxisCylinder | AxisNormal | AxisTwoPlanes | AxisTwoPoints | AxisEdge | PointVertex | PointTwoEdges
+    | PointThreePlanes | PointCenter | PointEdgePlane | PointAlongPath => Tint::Amber,
     Measure | Interference | Section | CurvComb | CurvMap | DraftAnalysis | EnvMap | Isocurve | Zebra
     | Accessibility | CenterOfMass | MinRadius | Navigator | ComponentColors | FaceGroups | History
     | Sustainability | Select | WindowSel | FreeformSel | PaintSel => Tint::Green,
     Sketch | SketchSmall | Construction => Tint::Teal,
+    MeshBody | MeshFeature => Tint::Gold,
     _ => Tint::Blue,
   }
 }
@@ -741,8 +795,9 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.arrow_head((0.37, 0.0), (0.0, -1.0), 0.13, Ink);
     }
     Icon::Revolve => {
-      k.band(k.arc_pts((0.5, 0.5), 0.36, 0.3, -2.9, 0.1), 4.6);
-      k.arrow_head((0.92, 0.47), (0.25, -1.0), 0.16, Blue);
+      // a wide revolved sheet, not a thin ring
+      k.band(k.arc_pts((0.5, 0.48), 0.34, 0.28, -2.9, 0.1), 8.0);
+      k.arrow_head((0.92, 0.42), (0.25, -1.0), 0.18, Blue);
       k.dashed((0.5, 0.02), (0.5, 0.98), Ink);
     }
     Icon::Box => k.block(0.1, 0.38, 0.66, 0.9, 0.26, BlueLight, Blue, BlueDark),
@@ -1049,6 +1104,15 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.38, 0.64), 0.1, Some(Blue), None);
     }
     Icon::Body => k.block(0.1, 0.38, 0.66, 0.9, 0.26, Light, Fill, Dark),
+    Icon::MeshBody | Icon::MeshFeature => {
+      // a yellow block cut into triangles on every face
+      let (x0, y0, x1, y1, d) =
+        if icon == Icon::MeshBody { (0.1, 0.38, 0.66, 0.9, 0.26) } else { (0.06, 0.4, 0.6, 0.94, 0.3) };
+      k.block(x0, y0, x1, y1, d, BlueLight, Blue, BlueDark);
+      k.line((x0, y1), (x1, y0), BlueDark);
+      k.line((x0, y0), (x1 + d, y0 - d * 0.7), BlueDark);
+      k.line((x1, y1), (x1 + d, y0 - d * 0.7), BlueDark);
+    }
     Icon::SketchSmall => {
       k.solid(&[(0.08, 0.2), (0.92, 0.2), (0.92, 0.84), (0.08, 0.84)], White);
       k.path(&[(0.22, 0.7), (0.22, 0.36), (0.54, 0.36)], Teal);
@@ -1181,6 +1245,23 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.76, 0.5), 0.17, Some(Blue), None);
       k.thick((0.6, 0.5), (0.2, 0.5), Blue, 2.4);
       k.arrow_head((0.04, 0.5), (-1.0, 0.0), 0.2, Blue);
+    }
+    Icon::RemoveFeatures => {
+      k.block(0.06, 0.42, 0.62, 0.94, 0.24, Light, Fill, Dark);
+      k.circle((0.34, 0.28), 0.1, Some(Blue), Some(Ink));
+      k.thick((0.62, 0.06), (0.94, 0.38), Red, 1.6);
+      k.thick((0.94, 0.06), (0.62, 0.38), Red, 1.6);
+    }
+    Icon::RemoveFaces => {
+      k.block(0.06, 0.42, 0.62, 0.94, 0.24, BlueLight, Light, Dark);
+      k.thick((0.62, 0.06), (0.94, 0.38), Red, 1.6);
+      k.thick((0.94, 0.06), (0.62, 0.38), Red, 1.6);
+    }
+    Icon::ReplacePrimitives => {
+      k.circle((0.26, 0.5), 0.2, Some(Fill), Some(Ink));
+      k.thick((0.48, 0.5), (0.58, 0.5), Ink, 1.2);
+      k.arrow_head((0.64, 0.5), (1.0, 0.0), 0.12, Ink);
+      k.block(0.66, 0.42, 0.9, 0.74, 0.1, BlueLight, Blue, BlueDark);
     }
     Icon::PhysMaterial => {
       k.circle((0.5, 0.5), 0.42, Some(White), Some(Ink));
@@ -1330,6 +1411,99 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.sk(&[(0.5, 0.06), (0.5, 0.94)], Slate);
       k.sk(&[(0.06, 0.5), (0.94, 0.5)], Slate);
       k.circle((0.5, 0.5), 0.2, Some(Amber), Some(Amber));
+    }
+    Icon::PlaneAngle => {
+      k.skc(&[(0.04, 0.94), (0.24, 0.72), (0.96, 0.72), (0.76, 0.94)], Slate);
+      k.solid(&[(0.14, 0.83), (0.3, 0.12), (0.98, 0.12), (0.86, 0.83)], Amber);
+      k.thick((0.14, 0.83), (0.86, 0.83), Slate, 1.4);
+      k.ska((0.14, 0.83), 0.28, 0.0, 1.35, Slate);
+    }
+    Icon::PlaneTangent => {
+      k.circle((0.5, 0.66), 0.27, Some(Light), Some(Slate));
+      k.solid(&[(0.04, 0.39), (0.24, 0.17), (0.96, 0.17), (0.76, 0.39)], Amber);
+      k.dot((0.5, 0.39), Slate);
+    }
+    Icon::Midplane => {
+      k.skc(&[(0.04, 0.3), (0.24, 0.06), (0.96, 0.06), (0.76, 0.3)], Slate);
+      k.skc(&[(0.04, 0.94), (0.24, 0.7), (0.96, 0.7), (0.76, 0.94)], Slate);
+      k.solid(&[(0.04, 0.62), (0.24, 0.38), (0.96, 0.38), (0.76, 0.62)], Amber);
+    }
+    Icon::PlanePerpendicular => {
+      k.skc(&[(0.04, 0.94), (0.28, 0.68), (0.96, 0.68), (0.72, 0.94)], Slate);
+      k.solid(&[(0.22, 0.81), (0.22, 0.08), (0.78, 0.08), (0.78, 0.81)], Amber);
+      k.sk(&[(0.78, 0.69), (0.88, 0.69), (0.88, 0.8)], Slate);
+    }
+    Icon::PlaneTwoEdges => {
+      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Amber);
+      k.thick((0.0, 0.9), (0.36, 0.16), Slate, 1.4);
+      k.thick((0.62, 0.9), (0.98, 0.16), Slate, 1.4);
+    }
+    Icon::PlaneThreePoints => {
+      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Amber);
+      for c in [(0.26, 0.64), (0.5, 0.38), (0.74, 0.62)] {
+        k.dot(c, Slate);
+      }
+    }
+    Icon::PlaneAlongPath => {
+      k.sk(&[(0.04, 0.92), (0.26, 0.74), (0.48, 0.6), (0.7, 0.42), (0.86, 0.22), (0.96, 0.04)], Slate);
+      k.solid(&[(0.36, 0.22), (0.58, 0.06), (0.82, 0.78), (0.6, 0.94)], Amber);
+      k.dot((0.59, 0.5), Slate);
+    }
+    Icon::AxisCylinder => {
+      k.solid(&[(0.24, 0.26), (0.76, 0.26), (0.76, 0.78), (0.24, 0.78)], Light);
+      k.ellipse((0.5, 0.78), 0.26, 0.09, Some(Light), Slate);
+      k.ellipse((0.5, 0.26), 0.26, 0.09, Some(Light), Slate);
+      k.thick((0.5, 0.02), (0.5, 0.98), Amber, 2.0);
+    }
+    Icon::AxisNormal => {
+      k.solid(&[(0.04, 0.92), (0.28, 0.62), (0.96, 0.62), (0.72, 0.92)], Light);
+      k.thick((0.5, 0.77), (0.5, 0.04), Amber, 2.0);
+      k.sk(&[(0.5, 0.62), (0.62, 0.62), (0.62, 0.72)], Slate);
+    }
+    Icon::AxisTwoPlanes => {
+      k.solid(&[(0.17, 0.6), (0.17, 0.1), (0.83, 0.1), (0.83, 0.6)], Light);
+      k.solid(&[(0.04, 0.76), (0.3, 0.44), (0.96, 0.44), (0.7, 0.76)], Light);
+      k.thick((0.02, 0.6), (0.98, 0.6), Amber, 2.0);
+    }
+    Icon::AxisTwoPoints => {
+      k.thick((0.06, 0.94), (0.94, 0.06), Amber, 2.0);
+      k.circle((0.27, 0.73), 0.09, Some(White), Some(Slate));
+      k.circle((0.73, 0.27), 0.09, Some(White), Some(Slate));
+    }
+    Icon::AxisEdge => {
+      k.block(0.16, 0.42, 0.7, 0.92, 0.22, Light, Light, Dark);
+      k.thick((0.02, 0.42), (0.98, 0.42), Amber, 2.0);
+    }
+    Icon::PointVertex => {
+      k.block(0.1, 0.42, 0.66, 0.92, 0.24, Light, Light, Dark);
+      k.circle((0.66, 0.42), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointTwoEdges => {
+      k.thick((0.08, 0.88), (0.92, 0.18), Slate, 1.3);
+      k.thick((0.08, 0.22), (0.92, 0.8), Slate, 1.3);
+      k.circle((0.5, 0.53), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointThreePlanes => {
+      k.solid(&[(0.4, 0.08), (0.94, 0.08), (0.94, 0.6), (0.4, 0.6)], Light);
+      k.solid(&[(0.4, 0.08), (0.4, 0.6), (0.1, 0.86), (0.1, 0.34)], Dark);
+      k.solid(&[(0.4, 0.6), (0.94, 0.6), (0.64, 0.86), (0.1, 0.86)], Light);
+      k.circle((0.4, 0.6), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointCenter => {
+      k.circle((0.5, 0.5), 0.4, None, Some(Slate));
+      k.dashed((0.5, 0.16), (0.5, 0.84), Slate);
+      k.dashed((0.16, 0.5), (0.84, 0.5), Slate);
+      k.circle((0.5, 0.5), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointEdgePlane => {
+      k.thick((0.5, 0.6), (0.5, 0.98), Slate, 1.3);
+      k.solid(&[(0.04, 0.76), (0.3, 0.44), (0.96, 0.44), (0.7, 0.76)], Light);
+      k.thick((0.5, 0.02), (0.5, 0.6), Slate, 1.3);
+      k.circle((0.5, 0.6), 0.11, Some(Amber), Some(Amber));
+    }
+    Icon::PointAlongPath => {
+      k.sk(&[(0.04, 0.84), (0.2, 0.56), (0.38, 0.42), (0.56, 0.5), (0.74, 0.46), (0.96, 0.16)], Slate);
+      k.circle((0.56, 0.5), 0.11, Some(Amber), Some(Amber));
     }
     Icon::Interference => {
       k.solid(&[(0.06, 0.06), (0.62, 0.06), (0.62, 0.62), (0.06, 0.62)], White);
@@ -1532,8 +1706,9 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       }
     }
     Icon::Patch => {
-      k.solid(&[(0.08, 0.2), (0.56, 0.2), (0.56, 0.56), (0.08, 0.56)], Blue);
-      k.solid(&[(0.56, 0.2), (0.92, 0.5), (0.92, 0.9), (0.56, 0.56)], BlueDark);
+      // a folded sheet, both halves in the family colour
+      k.solid(&[(0.06, 0.16), (0.52, 0.16), (0.52, 0.66), (0.06, 0.66)], Blue);
+      k.solid(&[(0.52, 0.16), (0.94, 0.42), (0.94, 0.92), (0.52, 0.66)], BlueLight);
     }
     Icon::Ruled => {
       k.solid(&[(0.06, 0.66), (0.46, 0.2), (0.94, 0.2), (0.54, 0.66)], BlueLight);
@@ -1544,10 +1719,14 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.p.add(Shape::line(k.arc_pts((0.5, 1.1), 0.8, 0.8, 0.6, PI - 0.6), Stroke::new(w * 1.3, k.col(Blue))));
     }
     Icon::Trim => {
-      k.circle((0.24, 0.78), 0.14, None, Some(Ink));
-      k.circle((0.76, 0.78), 0.14, None, Some(Ink));
-      k.thick((0.32, 0.66), (0.78, 0.06), Ink, 1.3);
-      k.thick((0.68, 0.66), (0.22, 0.06), Ink, 1.3);
+      // a sheet with a piece cut away along the dashed line, scissors over it
+      k.solid(&[(0.04, 0.3), (0.62, 0.3), (0.62, 0.96), (0.04, 0.96)], Blue);
+      k.solid(&[(0.7, 0.3), (0.96, 0.3), (0.96, 0.96), (0.7, 0.96)], BlueLight);
+      k.dashed((0.66, 0.24), (0.66, 1.0), Ink);
+      k.circle((0.3, 0.2), 0.1, Some(White), Some(Ink));
+      k.circle((0.3, 0.52), 0.1, Some(White), Some(Ink));
+      k.thick((0.38, 0.24), (0.9, 0.5), Ink, 1.3);
+      k.thick((0.38, 0.48), (0.9, 0.2), Ink, 1.3);
     }
     Icon::Untrim | Icon::Unstitch => {
       if icon == Icon::Untrim {
@@ -2675,6 +2854,17 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.thick((0.12, 0.2), (0.88, 0.8), Ink, 1.2);
       k.thick((0.12, 0.8), (0.88, 0.2), Ink, 1.2);
       k.circle((0.5, 0.5), 0.08, Some(Blue), None);
+    }
+    Icon::DraftFixedPlane => {
+      // a block tapering down from the fixed plane across its top
+      k.solid(&[(0.26, 0.32), (0.74, 0.32), (0.9, 0.9), (0.1, 0.9)], Fill);
+      k.thick((0.04, 0.32), (0.96, 0.32), Blue, 1.4);
+    }
+    Icon::DraftPartingLine => {
+      // two tapers meeting at the parting line
+      k.solid(&[(0.22, 0.1), (0.78, 0.1), (0.92, 0.5), (0.08, 0.5)], Fill);
+      k.solid(&[(0.08, 0.5), (0.92, 0.5), (0.78, 0.9), (0.22, 0.9)], Fill);
+      k.thick((0.04, 0.5), (0.96, 0.5), Blue, 1.4);
     }
   }
 }

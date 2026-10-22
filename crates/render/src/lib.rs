@@ -297,9 +297,36 @@ pub struct Mesh {
 
 impl Mesh {
   /// Drawn see-through (colour alpha below 255): after the opaque geometry, blended, without
-  /// writing depth.
+  /// writing depth. One without a pick id ([`NO_ID`]) leaves the ids behind it alone too.
   pub fn transparent(&self) -> bool {
     self.color[3] < 255
+  }
+}
+
+/// A flat see-through quad drawn with the scene's transparent meshes: hidden by what is in front
+/// of it, blended over what is behind, unlit, writing neither depth nor pick ids. The viewport's
+/// origin planes are these: they keep their size on screen, so they change with the camera and
+/// are handed to the renderer apart from the scene.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Quad {
+  pub corners: [[f32; 3]; 4],
+  pub color: [u8; 4],
+}
+
+impl Quad {
+  /// The quad as a mesh of two triangles.
+  pub fn mesh(&self) -> Mesh {
+    let [a, b, c, _] = self.corners.map(Vec3::from);
+    let n = (b - a).cross(c - a).normalize_or_zero().to_array();
+    Mesh {
+      positions: self.corners.to_vec(),
+      normals: vec![n; 4],
+      indices: vec![0, 1, 2, 0, 2, 3],
+      id: NO_ID,
+      color: self.color,
+      unlit: true,
+      ..Default::default()
+    }
   }
 }
 
@@ -1195,7 +1222,9 @@ fn raster_tri(
         }
         p[3] = 255;
       }
-      if let Some(slot) = f.ids.get_mut(i) {
+      if (color[3] == 255 || id != NO_ID)
+        && let Some(slot) = f.ids.get_mut(i)
+      {
         *slot = id;
       }
     }
@@ -1418,6 +1447,40 @@ mod tests {
     // the edge under it shows through, tinted
     let row = (0..100).find(|&y| f.rgba[(y * 200 + 100) * 4 + 1] > 60).expect("the line shows");
     assert!(f.rgba[(row * 200 + 100) * 4 + 2] > 60);
+  }
+
+  /// A [`Quad`] (an origin plane) is hidden by a body in front of it, blends over one behind it,
+  /// and leaves that body's pick id alone.
+  #[test]
+  fn quads_hide_behind_bodies_and_pick_nothing() {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Top);
+    cam.distance = 100.0;
+    let q = |z: f32| Quad {
+      corners: [[-10.0, -10.0, z], [10.0, -10.0, z], [10.0, 10.0, z], [-10.0, 10.0, z]],
+      color: [0, 0, 255, 128],
+    };
+    let px = |f: &Frame| f.rgba[(50 * 200 + 100) * 4..(50 * 200 + 100) * 4 + 3].to_vec();
+    // behind the body: hidden
+    let f = render(
+      &Scene { meshes: vec![quad(5.0, [255, 0, 0, 255], 1), q(0.0).mesh()], ..Default::default() },
+      &cam,
+      200,
+      100,
+    );
+    let body =
+      px(&render(&Scene { meshes: vec![quad(5.0, [255, 0, 0, 255], 1)], ..Default::default() }, &cam, 200, 100));
+    assert_eq!(px(&f), body, "the body covers it");
+    // in front: blended over the body, which still picks
+    let f = render(
+      &Scene { meshes: vec![quad(0.0, [255, 0, 0, 255], 1), q(5.0).mesh()], ..Default::default() },
+      &cam,
+      200,
+      100,
+    );
+    let c = px(&f);
+    assert!(c[0] > 90 && c[2] > 90, "blended: {c:?}");
+    assert_eq!(f.pick(100.0, 50.0, 0, |_| true), 1, "the body behind it still picks");
   }
 
   /// A body face at z = 5 over an edge at z = 0, from the top.

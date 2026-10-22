@@ -1007,9 +1007,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        thickness.",
     ),
     (_, "Draft") => (
-      "Tapers faces about a pull direction.",
-      "Pick the pull direction and the faces, then set the angle. Moulded and cast parts need draft to \
-       release from the mould.",
+      "Applies a fixed or parting line draft angle to planar faces.",
+      "Select a pull direction, parting tool, and faces to draft, then specify the draft angle.\n\nPress \
+       Ctrl+/ for more help.",
     ),
     (_, "Scale") => (
       "Scales bodies about a point.",
@@ -1087,9 +1087,10 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        that other values can reference.\n\nPress Ctrl+/ for more help.",
     ),
     (_, "Compute All") => (
-      "Recomputes the whole timeline.",
-      "Every feature is rebuilt in order. Use it after changing linked data or when something looks out \
-       of date.",
+      "Computes all of the parameters, features, and assembly relationships in a design.",
+      "Use at major milestones in the design process and after making significant changes to features \
+       in the Timeline, to ensure all assembly relationships are calculated properly.\n\nPress Ctrl+/ \
+       for more help.",
     ),
     (_, "Bill of Materials") => (
       "Lists the components with their quantities, materials and masses.",
@@ -1657,13 +1658,19 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // SURFACE CREATE
     (_, "Patch") => (
-      "Creates a surface filling a closed boundary of edges.",
-      "Pick the edges that form a closed loop; a surface spans them. Set how it meets the neighbouring \
-       faces, such as tangent, to close holes smoothly.",
+      "Creates a planar or 3D surface within the boundary of a specified closed loop.",
+      "Select the loop to patch then apply connected (G0), tangent (G1), and curvature (G2) boundary \
+       conditions.",
     ),
-    (_, "Patch from Sketch") => (
-      "Creates a flat surface filling a closed sketch profile.",
-      "Pick closed profiles; each becomes a surface body. Use it for caps and flat panels.",
+    (_, SURFACE_EXTRUDE) => (
+      "Adds depth to open or closed sketch profiles or planar faces.",
+      "Select the profile or planar face then specify the distance to extrude.\n\nPress Ctrl+/ for more \
+       help.",
+    ),
+    (_, SURFACE_SWEEP) => (
+      "Sweeps a sketch profile or planar face along a selected path.",
+      "Select the profile then select the sweep path. The distance for the sweep is a decimal percentage \
+       of the selected path.",
     ),
     (_, "Ruled") => (
       "Creates a ruled surface from an edge.",
@@ -1675,28 +1682,11 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick faces and set the distance and side. The originals stay; use the copies as walls or \
        references.",
     ),
-    (_, "Variable Offset") => (
-      "Offsets surface bodies, with chosen faces at distances of their own.",
-      "Pick the body and the base distance, then add faces with their own distances. Neighbouring faces \
-       adjust to keep it joined.",
-    ),
 
     // SURFACE MODIFY
     (_, "Trim") => (
-      "Trims surface bodies where they cross a plane or another surface.",
-      "Pick the cutting tool, then click the pieces to remove. Use it to cut surfaces back to where \
-       they meet.",
-    ),
-    (_, "Trim with Body") => (
-      "Trims surface bodies with a solid or another surface.",
-      "Pick the surfaces and the body to cut with, then the pieces to keep or remove. Use it when the \
-       cutting shape is already modelled as a body.",
-    ),
-    (_, "Trim with Sketch") => (
-      "Trims surface bodies with sketch curves projected onto them.",
-      "Pick the surfaces and the curves; the curves are projected onto the surfaces to cut them, or \
-       switch on picking and click the pieces to remove. Use it for openings and outlines on curved \
-       surfaces.",
+      "Removes the selected area of a surface body using the specified cutting tool.",
+      "Select the cutting tool to use then select faces or surface bodies to remove.",
     ),
     (_, "Untrim") => (
       "Removes holes from faces or restores their original boundary.",
@@ -1705,20 +1695,18 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        close holes in a surface.",
     ),
     (_, "Extend") => (
-      "Extends open surface edges by a distance.",
-      "Pick the edges, set the distance and choose whether the extension continues the curvature or \
-       goes straight; Close corners fills the gap where two extended edges meet. Use it so surfaces \
-       overlap before trimming.",
+      "Enlarges a surface by extending its edges a specified distance.",
+      "Select the edges of a surface, select an extension type, then specify the distance to extend. \
+       Select an edge alignment option to control the curvature continuity between faces.",
     ),
     (_, "Stitch") => (
-      "Sews surface bodies together along their edges.",
-      "Pick the surfaces and set the gap tolerance. When the surfaces close up completely, the result \
-       becomes a solid.",
+      "Joins surfaces to make a single surface body or solid body.",
+      "Select the surfaces to join. Edges within the tolerance are highlighted green.",
     ),
     (_, "Unstitch") => (
-      "Breaks bodies apart into one surface per face.",
-      "Pick the bodies or faces. Use it to replace or rebuild individual faces, then stitch them back \
-       together.",
+      "Breaks joined surfaces into individual surfaces.",
+      "Select faces to unstitch. The selected face is unhooked from the parent body and the result body \
+       contains the unhooked face.",
     ),
     (_, "Reverse Normal") => (
       "Flips which way faces point.",
@@ -1947,6 +1935,20 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     _ => return None,
   };
   Some(Tip { line, more })
+}
+
+/// The SURFACE tab's Extrude and Sweep: Fusion's surface commands of those names, whose
+/// tooltips differ from the SOLID ones.
+pub(crate) const SURFACE_EXTRUDE: &str = "Surface Extrude";
+pub(crate) const SURFACE_SWEEP: &str = "Surface Sweep";
+
+/// The label the SURFACE tab's own version of the command `label` has its tooltip under.
+pub(crate) fn surface_label(label: &'static str) -> &'static str {
+  match label {
+    "Extrude" => SURFACE_EXTRUDE,
+    "Sweep" => SURFACE_SWEEP,
+    other => other,
+  }
 }
 
 /// What a dropdown row's tooltip says, as Fusion's: its paragraphs, then "Press Ctrl+/ for more

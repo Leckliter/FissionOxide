@@ -33,6 +33,8 @@ pub(super) struct Cache {
   /// Draft: the angle handle has been dragged, so its floating value box shows (Fusion opens it
   /// with the drag, not before).
   draft_box: bool,
+  /// Draft: the pull direction it was found for, a point on its face or plane and the normal.
+  pull: Option<(Value, DVec3, DVec3)>,
 }
 
 /// Draft's angle handle turns in 5° steps, as Fusion's does.
@@ -140,7 +142,8 @@ impl Dialog {
   /// on the first face) or face (Press Pull), or the offset curves (Sketch Offset).
   fn anchor_key(&self) -> Value {
     match self.kind {
-      Kind::PressPull | Kind::Shell | Kind::Draft => json!(self.faces.first()),
+      Kind::PressPull | Kind::OffsetFace | Kind::Shell | Kind::Draft => json!(self.faces.first()),
+      Kind::Scale => json!([self.bodies, self.point]),
       Kind::SkOffset => json!({"offset": self.curves}),
       Kind::Fillet => json!(self.edges.first().or(self.faces.first())),
       _ => json!(self.edges.first()),
@@ -149,14 +152,27 @@ impl Dialog {
 
   /// Brings the cached manipulator geometry up to date; the viewport calls it every frame.
   pub fn refresh_manip(&mut self, s: &Session) {
-    if self.editing.is_some() {
+    // Edit Move keeps its triad, on the moved bodies
+    if self.picks_fixed() && !(self.kind == Kind::Move && self.mv.adds) {
       return;
     }
     match self.kind {
-      Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::Shell | Kind::Draft if !self.applied => {
+      Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::OffsetFace | Kind::Shell | Kind::Draft
+        if !self.applied =>
+      {
         let key = self.anchor_key();
         if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
           self.manip.anchor = anchor(s, &key).map(|(o, d)| (key, o, d));
+        }
+        if self.kind == Kind::Draft && self.manip.pull.as_ref().is_none_or(|p| p.0 != self.plane) {
+          self.manip.pull = pull_anchor(s, &self.plane).map(|(o, n)| (self.plane.clone(), o, n));
+        }
+      }
+      // the bodies' reach from the point, measured before the preview scales them
+      Kind::Scale if !self.applied => {
+        let key = self.anchor_key();
+        if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
+          self.manip.anchor = self.body_scale_anchor(s).map(|(o, d)| (key, o, d));
         }
       }
       // the offset curves stay as they are under the preview
@@ -177,6 +193,33 @@ impl Dialog {
       Kind::SkScale => self.manip.anchor = self.scale_anchor(s).map(|(o, d)| (Value::Null, o, d)),
       _ => {}
     }
+  }
+
+  /// Scale: the arrow's foot (the point) and the world X axis as long as the bodies reach from
+  /// the point (the arrow is that long at a factor of 1).
+  fn body_scale_anchor(&self, s: &Session) -> Option<(DVec3, DVec3)> {
+    let at = DVec3::from(self.point?);
+    let mut reach: f64 = 0.0;
+    for b in &self.bodies {
+      let Some(m) = s.model.body(BodyId(*b)).and_then(|b| b.mesh()) else { continue };
+      for p in &m.positions {
+        reach = reach.max((DVec3::from(p.map(f64::from)) - at).length());
+      }
+    }
+    if reach < 1e-6 {
+      reach = 10.0;
+    }
+    Some((at, DVec3::X * reach))
+  }
+
+  /// Draft: the pull direction once it is picked, as it was before the preview: a point on its
+  /// face or plane and the way it points (flipped with Flip Pull Direction).
+  pub fn draft_pull(&self) -> Option<(DVec3, DVec3)> {
+    if self.kind != Kind::Draft || self.editing.is_some() {
+      return None;
+    }
+    let (key, o, n) = self.manip.pull.as_ref()?;
+    (*key == self.plane).then_some((*o, if self.flip { -*n } else { *n }))
   }
 
   /// Sketch Scale's factor as a number.
@@ -219,6 +262,16 @@ impl Dialog {
   /// feature stored (see [`Dialog::load_edit_anchor`]); Press Pull's picks name the body before
   /// it, so it has none while editing.
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
+    // Scale (uniform): the arrow from the point, the factor times the bodies' reach long
+    if self.kind == Kind::Scale {
+      let (key, origin, reach) = self.manip.anchor.as_ref().filter(|_| self.choice != "non_uniform")?;
+      if *key != self.anchor_key() {
+        return None;
+      }
+      let r = reach.length();
+      let f = fox_engine::expr::eval(&self.a, fox_engine::expr::Kind::Unitless, &s.model.params).ok()?;
+      return Some(Manipulator { origin: *origin, dir: *reach / r, value: f * r });
+    }
     // Sketch Scale: the arrow from the point, the factor times the entities' reach long
     if self.kind == Kind::SkScale {
       let (_, origin, reach) =
@@ -226,7 +279,7 @@ impl Dialog {
       let r = reach.length();
       return Some(Manipulator { origin: *origin, dir: *reach / r, value: self.scale_factor(s)? * r });
     }
-    if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset)
+    if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::OffsetFace | Kind::SkOffset)
       || (self.editing.is_some() && !matches!(self.kind, Kind::Fillet | Kind::Chamfer))
     {
       return None;
@@ -235,7 +288,11 @@ impl Dialog {
     if *key != self.anchor_key() {
       return None;
     }
-    let field = if matches!(self.kind, Kind::PressPull | Kind::SkOffset) { &self.distance } else { &self.radius };
+    let field = if matches!(self.kind, Kind::PressPull | Kind::OffsetFace | Kind::SkOffset) {
+      &self.distance
+    } else {
+      &self.radius
+    };
     let value = match self.len(s, field) {
       Some(v) => v,
       // Sketch Offset's arrow stays on its curve (and its value box stays put) while the distance
@@ -243,7 +300,9 @@ impl Dialog {
       None if self.kind == Kind::SkOffset => 0.0,
       None => return None,
     };
-    Some(Manipulator { origin: *origin, dir: *dir, value })
+    // Press Pull editing a primitive: the arrow runs from its base, as long as its height
+    let origin = *origin - *dir * if self.kind == Kind::PressPull { self.press_pull_base() } else { 0.0 };
+    Some(Manipulator { origin, dir: *dir, value })
   }
 
   /// Does the floating value box sit by the pointer rather than at the arrow's head? Sketch
@@ -274,9 +333,6 @@ impl Dialog {
   /// Shell's thickness arrows, Draft's angle dial, the rectangular pattern's distance and count
   /// handles along each direction and the circular pattern's angle and count dials.
   pub fn handles(&self, s: &Session) -> Vec<Handle> {
-    if self.editing.is_some() {
-      return Vec::new();
-    }
     match self.kind {
       Kind::Extrude => self.taper_handle(s),
       Kind::Shell => self.shell_handles(s),
@@ -286,9 +342,11 @@ impl Dialog {
       Kind::SkCircPattern => self.sk_circ_handles(s),
       Kind::SkRectPattern => self.sk_rect_handles(s),
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => self.text_handles(s),
+      Kind::Revolve => self.revolve_handles(s),
       Kind::PlaneCut => self.plane_cut_handles(s),
       // Box, Cylinder, Sphere, Torus and Coil (see [`super::primitive`])
       k if super::primitive::base_of(k).is_some() => self.primitive_handles(s),
+      Kind::Section if !self.plane.is_null() => self.section_handles(s),
       _ => None,
     }
     .unwrap_or_default()
@@ -367,6 +425,7 @@ impl Dialog {
   pub fn set_handle(&mut self, s: &Session, i: usize, v: f64, step: f64) {
     let v_snapped = snap(v, step);
     match self.kind {
+      Kind::Section => self.set_section_handle(i, v_snapped),
       // a taper stays short of a right angle; none at all is an empty box
       Kind::Extrude => {
         let a = v_snapped.clamp(-89f64.to_radians(), 89f64.to_radians());
@@ -418,6 +477,14 @@ impl Dialog {
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => {
         self.set_text_angle(snap(v, step).to_degrees());
       }
+      // a revolve turns by something, up to a whole turn either way
+      Kind::Revolve => {
+        let a = v_snapped.clamp(-std::f64::consts::TAU, std::f64::consts::TAU);
+        if a.abs() < 1e-9 {
+          return;
+        }
+        self.angle = deg(a);
+      }
       k if super::primitive::base_of(k).is_some() => {
         if !self.set_primitive_handle(s, i, v, step) {
           return;
@@ -441,13 +508,24 @@ impl Dialog {
     (*key == self.anchor_key() && !self.faces.is_empty()).then_some((*o, *n))
   }
 
-  /// Extrude: Fusion's taper handle, a dial at the distance arrow's head turning away from the
-  /// extrude direction about the sketch plane's X axis, for the taper angle.
+  /// Extrude: Fusion's taper handle, a disc on a short arc beside the profile's edge farthest from
+  /// the distance arrow's foot (never on the arrow), turning about that edge from the extrude direction
+  /// inward for a positive taper (which narrows the extrusion), for the taper angle.
   fn taper_handle(&self, s: &Session) -> Option<Vec<Handle>> {
     let m = self.manipulator(s)?;
-    let axis = s.model.sketches.get(&self.sketch?)?.plane.x.try_normalize()?;
+    let r = s.model.sketches.get(&self.sketch?)?;
+    // (an edited extrude without picks keeps its stored profile, as its arrow does)
+    let at = match self.profiles.first() {
+      Some(p) => *p,
+      None => r.profiles.first()?.interior_point(),
+    };
+    let profile = r.profiles.iter().find(|p| p.contains(at))?;
+    let (mid, inward) = taper_edge(&profile.outer.polygon(), at, &|p| profile.contains(p))?;
+    let up = if m.value < 0.0 { -m.dir } else { m.dir };
+    let inward = (r.plane.x * inward[0] + r.plane.y * inward[1]).try_normalize()?;
     let a = self.ang(s, self.solid.ext.taper())?;
-    Some(vec![Handle::dial(m.origin + m.dir * m.value, axis, m.dir, None, a, deg(a))])
+    let center = r.plane.to_world(mid);
+    Some(vec![Handle::dial(center, up.cross(inward), up, None, a, deg(a)).taper()])
   }
 
   /// Shell: an arrow from the first opened face into the wall for an inside thickness, out of it
@@ -472,9 +550,9 @@ impl Dialog {
   /// tilts the face in 5° steps; and the pull direction as a hollow arrow from the hinge.
   fn draft_handles(&self, s: &Session) -> Option<Vec<Handle>> {
     let (c, n) = self.face_anchor()?;
-    let pl = super::plane_of(s, &self.plane)?;
-    let pull = if self.flip { -pl.normal() } else { pl.normal() };
-    let (zero, axis, hinge) = draft_dial(c, n, pl.origin, pull)?;
+    // (the pull plane as picked: a pull face may change under the preview)
+    let (origin, pull) = self.draft_pull()?;
+    let (zero, axis, hinge) = draft_dial(c, n, origin, pull)?;
     let a = self.ang(s, &self.angle)?;
     Some(vec![Handle::dial(hinge, axis, zero, None, a, deg(a)).disc(DRAFT_STEP), Handle::pull(hinge, pull)])
   }
@@ -522,11 +600,16 @@ impl Dialog {
     match self.kind {
       // a radius or distance can't reach zero: the smallest step is as far as it goes
       Kind::Fillet | Kind::Chamfer => self.radius = mm(self.unit, v.max(step.max(1e-3))),
-      Kind::PressPull => self.distance = mm(self.unit, v),
+      Kind::PressPull | Kind::OffsetFace => self.distance = mm(self.unit, v),
       // an offset is never zero: it keeps to the side it is on
       Kind::SkOffset => {
         self.distance = mm(self.unit, nonzero(v, step));
         self.follow = false;
+      }
+      // the factor to two decimals, never zero or negative (as Fusion's box shows it)
+      Kind::Scale => {
+        let Some(r) = self.manip.anchor.as_ref().map(|a| a.2.length()).filter(|r| *r > 1e-9) else { return false };
+        self.a = format!("{:.2}", (v / r).max(0.01));
       }
       // the factor to two decimals, never zero or negative
       Kind::SkScale => {
@@ -540,9 +623,11 @@ impl Dialog {
   }
 
   /// The field feature handle `i`'s floating value box (see [`crate::value_box`]) edits: Shell's
-  /// inside (or only) thickness, and its outside one for Both.
+  /// inside (or only) thickness, and its outside one for Both; Extrude's taper angle once Tab
+  /// moves the box there.
   pub fn handle_field(&mut self, i: usize) -> Option<&mut String> {
     match (self.kind, i) {
+      (Kind::Extrude, 0) => Some(self.solid.ext.taper_mut()),
       (Kind::Shell, 0) => Some(&mut self.radius),
       (Kind::Shell, 1) => Some(&mut self.solid.thickness_out),
       // Draft's angle, once its handle has been dragged
@@ -553,6 +638,7 @@ impl Dialog {
       (Kind::SkRectPattern, 1) => Some(&mut self.count),
       (Kind::SkRectPattern, 2) => Some(&mut self.spacing2),
       (Kind::SkRectPattern, 3) => Some(&mut self.count2),
+      (Kind::Revolve, 0) => Some(&mut self.angle),
       (k, _) if super::primitive::base_of(k).is_some() => self.primitive_field(i),
       _ => None,
     }
@@ -562,6 +648,12 @@ impl Dialog {
   /// distance and quantity boxes), rather than the first alone?
   pub fn boxes_every_handle(&self) -> bool {
     self.kind == Kind::SkRectPattern
+  }
+
+  /// Does the drag arrow snap to model vertices and edges the pointer passes (Extrude's distance
+  /// and Offset Plane's offset, as in Fusion)?
+  pub(crate) fn arrow_snaps(&self) -> bool {
+    matches!(self.kind, Kind::Extrude | Kind::OffsetPlane)
   }
 
   /// Does Sketch Offset follow the cursor (curves picked, not placed by a click yet)?
@@ -594,7 +686,7 @@ impl Dialog {
   /// The move/rotate triad this dialog shows: Move's on the moved bodies' centre, Joint's (an
   /// offset arrow and an angle ring about the joint's Z) on the fixed side's joint origin.
   pub fn triad(&self, s: &Session) -> Option<Triad> {
-    if self.editing.is_some() {
+    if self.editing.is_some() && !(self.kind == Kind::Move && self.mv.adds) {
       return None;
     }
     match self.kind {
@@ -725,6 +817,19 @@ pub(super) fn axis_line(s: &Session, key: &str) -> Option<(DVec3, DVec3)> {
       (o, d.try_normalize()?)
     }
   })
+}
+
+/// A point on Draft's pull direction and its normal: a picked face's centre and normal, else the
+/// plane's origin and normal.
+fn pull_anchor(s: &Session, plane: &Value) -> Option<(DVec3, DVec3)> {
+  if plane.is_null() {
+    return None;
+  }
+  if plane.get("face").is_some() {
+    return anchor(s, plane);
+  }
+  let pl = super::plane_of(s, plane)?;
+  Some((pl.origin, pl.normal()))
 }
 
 /// Draft's dial for a face through `c` with outward normal `n`, the neutral plane through
@@ -866,6 +971,27 @@ fn pick_frame(s: &Session, body: BodyId, o: &Value) -> Option<DMat4> {
   assembly::frame(at, DVec3::Z, DVec3::X).ok()
 }
 
+/// Where Extrude's taper handle sits on a profile's outline `poly` (sketch coordinates, closed):
+/// the middle of the side farthest from `at` (the distance arrow's foot, so it stays clear of it), with the unit direction
+/// across it into the profile (`inside` tells which way that is).
+fn taper_edge(poly: &[[f64; 2]], at: [f64; 2], inside: &dyn Fn([f64; 2]) -> bool) -> Option<([f64; 2], [f64; 2])> {
+  let n = poly.len();
+  let (a, b) = (0..n)
+    .map(|k| (poly[k], poly[(k + 1) % n]))
+    .filter(|(a, b)| (b[0] - a[0]).hypot(b[1] - a[1]) > 1e-9)
+    .max_by(|x, y| {
+      let d = |(a, b): &([f64; 2], [f64; 2])| ((a[0] + b[0]) / 2.0 - at[0]).hypot((a[1] + b[1]) / 2.0 - at[1]);
+      d(x).total_cmp(&d(y))
+    })?;
+  let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+  let mid = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+  let across = [-(b[1] - a[1]) / len, (b[0] - a[0]) / len];
+  let eps = (len * 1e-3).max(1e-6);
+  let inward =
+    if inside([mid[0] + across[0] * eps, mid[1] + across[1] * eps]) { across } else { [-across[0], -across[1]] };
+  Some((mid, inward))
+}
+
 #[cfg(test)]
 mod tests {
   use fox_engine::Sel;
@@ -957,9 +1083,19 @@ mod tests {
     let m = d.manipulator(&s).unwrap();
     let h = d.handles(&s);
     assert_eq!(h.len(), 1);
+    // `ui:manip:extrude-taper-handle`: a disc on the middle of the profile's side farthest from
+    // the arrow's foot (on the sketch plane, clear of the arrow), turning about that side from the
+    // extrude direction inward (a positive taper narrows)
     let Shape::Dial { center, axis, zero, radius } = h[0].shape else { panic!("{:?}", h[0]) };
-    assert!(close(center, m.origin + m.dir * 5.0) && close(zero, DVec3::Z) && close(axis, DVec3::X), "{:?}", h[0]);
-    assert!(radius.is_none() && h[0].value.abs() < 1e-9 && h[0].label == "0 deg");
+    assert_eq!(h[0].head, crate::handles::Head::Taper);
+    assert!(center.z.abs() < 1e-9 && close(zero, DVec3::Z), "{:?}", h[0]);
+    let (foot, edge_mid) = (m.origin, center);
+    assert!((edge_mid - foot).length() > 4.9, "{edge_mid:?} beside the arrow at {foot:?}");
+    let on_side = [0.0, 10.0].iter().any(|v| (center.x - v).abs() < 1e-9 || (center.y - v).abs() < 1e-9);
+    assert!(on_side, "{center:?}");
+    let inward = axis.cross(zero);
+    assert!(((foot - center).normalize() - inward).length() < 0.3, "{inward:?}");
+    assert!(radius.is_none() && h[0].value.abs() < 1e-9);
     // dragged to 10°: the taper angle box says so; back to nothing: the box is empty again
     d.set_handle(&s, 0, 10f64.to_radians() + 0.001, 1f64.to_radians());
     assert_eq!(d.solid.ext.taper(), "10 deg");
@@ -1252,8 +1388,8 @@ mod tests {
     d.axis = format!("axis:{}", ax["feature"]);
     let Shape::Dial { center, radius, .. } = d.handles(&s)[0].shape else { panic!() };
     assert!(close(center, DVec3::new(10.0, 0.0, 15.0)) && (radius.unwrap() - 20.0).abs() < 1e-6);
-    // no handles while editing a feature
+    // Edit Feature shows the handles as creation does
     d.editing = Some(FeatureId(1));
-    assert!(d.handles(&s).is_empty());
+    assert!(!d.handles(&s).is_empty());
   }
 }

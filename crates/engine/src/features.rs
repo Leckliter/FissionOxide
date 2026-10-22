@@ -87,8 +87,19 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       add_feature(s, FeatureKind::IntersectionCurve { curves, faces, with })
     })(),
     "pipe" => (|| {
-      const KEYS: [&str; 10] =
-        ["cmd", "path", "path_curves", "diameter", "size", "wall", "section", "distance", "distance_one", "operation"];
+      const KEYS: [&str; 11] = [
+        "cmd",
+        "path",
+        "path_curves",
+        "diameter",
+        "size",
+        "wall",
+        "section",
+        "distance",
+        "distance_one",
+        "operation",
+        "targets",
+      ];
       if let Some(k) = p.as_object().and_then(|o| o.keys().find(|k| !KEYS.contains(&k.as_str()))) {
         return Err(CmdError::new(format!("pipe doesn't take '{k}' ({})", KEYS[1..].join(", "))));
       }
@@ -113,7 +124,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         Some(size) => size,
         None => req_expr(p, "diameter").map_err(|_| CmdError::new("missing 'diameter' (or 'size')"))?,
       };
-      add_feature(
+      crate::commands::add_op_feature(
         s,
         FeatureKind::Pipe {
           path_sketch,
@@ -124,6 +135,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           section,
           distance: opt_expr(p, "distance").or_else(|| opt_expr(p, "distance_one")).unwrap_or_default(),
         },
+        p,
       )
     })(),
     "rib" | "web" => (|| {

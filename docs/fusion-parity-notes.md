@@ -534,3 +534,43 @@ Body, Reduce and Smooth have other rows (and their previews collapse or shrink t
 entries (Tessellate, Remesh, Repair, face groups, Direct Edit and others) are stubs. 20 rows in four
 batches (`parity/batches/map-wave29.json`), two match rows, 18 command-ledger rows set, eight
 fixing-merged keys verified. The area is done; SHEET METAL is next.
+
+## 2026-10-22, prober 15: SHEET METAL tab
+
+The SHEET METAL tab in a new millimeter Part Design in each app (report
+`parity/reports/2026-10-22-sheet-metal-tab.md`): a base flange and an edge flange made in both, and in
+Fusion Create Flat Pattern, its environment, Unfold and Refold. The tab's panels match. Fusion keeps
+sheet metal rules in a library palette with a modal Edit Rule window and shows the design's rule in
+the browser; FissionOxide has one "Default" rule edited in a command dialog. Fusion's single Flange
+dialog changes with the pick (Base / Edge, Type icons for Hem and Lofted Flange, Orientation, rule
+list, manipulator); FissionOxide auto-picks the profile, folds edge flanges the other way and cannot
+edit any sheet metal feature. Create Flat Pattern is a face pick and an environment in Fusion, an info
+panel in FissionOxide; Fusion's Unfold opens a REFOLD ribbon panel. 17 rows in four batches
+(`parity/batches/map-wave30.json`), one match row, one blocked row (subscription commands), five
+fixing-merged keys verified. The area is done; PLASTIC is next.
+
+## 2026-10-22, prober 16: PLASTIC, MANAGE and UTILITIES tabs
+
+The three tabs side by side at 908 px (report `parity/reports/2026-10-22-plastic-manage-utilities.md`).
+On this Personal licence Fusion's PLASTIC tab is SOLID's menus with Web, Rib and Create Form up front;
+the plastic commands (rules, Boss, Snap Fit, Rest, Lip/Groove, Rule Fillet) are not offered, so they are
+recorded blocked. FissionOxide's PLASTIC panels, quick icons and lists match; only tooltip texts differ.
+MANAGE's Bill of Materials is a full palette in Fusion (view and version dropdowns, column settings, empty
+state) and a small dialog in FissionOxide. UTILITIES: Fusion's three-pane Scripts and Add-Ins window
+(Shift+S) against FissionOxide's Plugins window, MAKE's 3D Print skipping the 3D PRINT dialog, the
+Material Browser's tree drawn on one line, and Compute All's "Computed in" message. 10 rows in three
+batches (`parity/batches/map-wave31.json`, two of them reopened keys), six match rows, two blocked rows,
+six fixing-merged keys verified. Both areas are done; the Timeline is next.
+
+## 2026-10-22, prober 17: Timeline and Browser
+
+The timeline and browser side by side at 908 px after building sketch, extrude, fillet, offset plane,
+two more sketches and a rectangular pattern in FissionOxide (report
+`parity/reports/2026-10-22-timeline-browser.md`). Suppress, Create Group, stepping and reorder drops
+match. Fusion's sketch item menu, Shift-range multi-selection with its Create Group menu, group
+icon/bracket/tooltip/menu, live recompute during a marker drag, Play replaying from the start, the gear's
+Direct Modeling and swatch options, the dark item tooltip with the component name, and removing
+rolled-back rows from the browser all differ. In the browser the solid body menu and two folder details
+differ. 16 rows in three batches (`parity/batches/map-wave32.json`), seven match rows, 13 fixing-merged
+keys verified. Component rows, Activate and the Joints folder need an Assembly Design with saved
+designs and are left for the ASSEMBLY row. Both areas are done; Workspaces is next.

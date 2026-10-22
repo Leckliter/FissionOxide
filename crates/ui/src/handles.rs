@@ -14,6 +14,10 @@ use crate::viewport::Drag;
 
 /// Radius on screen (points) of a dial without a radius of its own.
 const DIAL_PX: f64 = 70.0;
+/// Radius on screen (points) of Extrude's taper handle, and how far (radians) its short arc runs
+/// past the angle's ends.
+const TAPER_PX: f64 = 36.0;
+const TAPER_ARC: f64 = 0.35;
 /// Pointer distance that catches a handle's head (points).
 const CATCH_PX: f32 = 12.0;
 /// Angle snap (radians) without Incremental Move: 1°.
@@ -27,6 +31,9 @@ const DARK: Color32 = Color32::from_gray(25);
 const PULL_PX: f64 = 44.0;
 /// Pointer distance from a disc handle's arc that catches it (points).
 const TRACK_PX: f32 = 6.0;
+/// Extrude's taper handle: its arc at rest, and its blue when it has the value box.
+const TAPER_GREY: Color32 = Color32::from_rgb(150, 150, 150);
+const TAPER_BLUE: Color32 = Color32::from_rgb(30, 155, 215);
 
 /// Where a handle sits and how its value moves it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -41,13 +48,15 @@ pub enum Shape {
 
 /// How a handle's head is drawn: an arrowhead for a distance or angle, a dot for a count,
 /// Fusion's white disc with a dark dot riding a dark arc for Draft's angle, and a hollow white
-/// arrow (shown, not dragged) for Draft's pull direction.
+/// arrow (shown, not dragged) for Draft's pull direction; Extrude's taper is a white disc with a
+/// black dot on a short grey arc, without a label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Head {
   Arrow,
   Dot,
   Disc,
   Pull,
+  Taper,
 }
 
 /// One handle: its shape, current value and the text shown by its head.
@@ -78,6 +87,11 @@ impl Handle {
   /// The same dial drawn as Draft's disc on an arc, turning in steps of `snap` radians.
   pub fn disc(self, snap: f64) -> Handle {
     Handle { head: Head::Disc, snap: Some(snap), ..self }
+  }
+
+  /// The same dial drawn as Extrude's taper handle: a disc on a short arc beside a profile edge.
+  pub fn taper(self) -> Handle {
+    Handle { head: Head::Taper, ..self }
   }
 
   /// A direction shown as a hollow arrow of fixed size on screen from `origin` along `dir`
@@ -180,11 +194,21 @@ fn place(h: &Handle, right: DVec3, project: &dyn Fn(DVec3) -> Option<Pos2>) -> O
       Some(Placed { line: vec![a, b], circle: Vec::new(), head: b, dir: d, grab, on_track: false })
     }
     Shape::Dial { center, axis, zero, radius } => {
+      let taper = h.head == Head::Taper;
       let r = match radius {
         Some(r) if r > 1e-9 => r,
-        _ => world_size(project, right, center, DIAL_PX)?,
+        _ => world_size(project, right, center, if taper { TAPER_PX } else { DIAL_PX })?,
       };
       let at = |a: f64| project(dial_point(center, axis, zero, r, a));
+      if taper {
+        // a short arc through the head, from the angle's start (the side face at no taper)
+        let (a0, a1) = (h.value.min(0.0) - TAPER_ARC, h.value.max(0.0) + TAPER_ARC);
+        let line: Vec<Pos2> = (0..=24).filter_map(|k| at(a0 + (a1 - a0) * k as f64 / 24.0)).collect();
+        let head = at(h.value)?;
+        let d = (at(h.value + 0.05)? - head).normalized();
+        let dir = if d.is_finite() { d } else { Vec2::new(1.0, 0.0) };
+        return Some(Placed { line, circle: Vec::new(), head, dir, grab, on_track: false });
+      }
       let circle: Vec<Pos2> = (0..=64).filter_map(|k| at(std::f64::consts::TAU * k as f64 / 64.0)).collect();
       let disc = h.head == Head::Disc;
       let line: Vec<Pos2> = if disc {
@@ -318,7 +342,39 @@ fn draw_draft(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active
   painter.circle_filled(b, 2.5, if active { Color32::WHITE } else { DARK });
 }
 
+/// Extrude's taper handle as Fusion draws it: a white disc with a black dot on a short grey arc;
+/// blue in a white ring on a blue arc with white ticks while it has the value box or is
+/// dragged; faded while the distance arrow is dragged.
+fn draw_taper(painter: &egui::Painter, p: &Placed, blue: bool, faded: bool) {
+  let fade = |c: Color32| if faded { c.gamma_multiply(0.3) } else { c };
+  if p.line.len() > 1 {
+    let col = if blue { TAPER_BLUE } else { TAPER_GREY };
+    painter.add(egui::Shape::line(p.line.clone(), Stroke::new(if blue { 3.0 } else { 2.0 }, fade(col))));
+    if blue {
+      for w in p.line.windows(2).step_by(4) {
+        let d = (w[1] - w[0]).normalized();
+        if d.is_finite() {
+          let n = d.rot90() * 2.0;
+          painter.line_segment([w[0] - n, w[0] + n], Stroke::new(1.0, fade(Color32::WHITE)));
+        }
+      }
+    }
+  }
+  let b = p.head;
+  if blue {
+    painter.circle_filled(b, 7.0, fade(Color32::WHITE));
+    painter.circle_filled(b, 5.0, fade(TAPER_BLUE));
+  } else {
+    painter.circle_filled(b, 6.0, fade(Color32::WHITE));
+    painter.circle_stroke(b, 6.0, Stroke::new(1.0, fade(Color32::from_gray(110))));
+    painter.circle_filled(b, 2.0, fade(Color32::BLACK));
+  }
+}
+
 fn draw(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool, label: bool) {
+  if h.head == Head::Taper {
+    return draw_taper(painter, p, active, false);
+  }
   if matches!(h.head, Head::Disc | Head::Pull) {
     return draw_draft(painter, h, p, lit, active);
   }
@@ -339,7 +395,7 @@ fn draw(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool
       painter.circle_filled(b, 6.0, col);
       painter.circle_stroke(b, 6.0, Stroke::new(1.5, Color32::WHITE));
     }
-    Head::Disc | Head::Pull => {}
+    Head::Disc | Head::Pull | Head::Taper => {}
   }
   let at = label_at(p);
   if !label {
@@ -376,6 +432,10 @@ pub(crate) fn show(
   }
   let handles = app.dialog.as_ref().map(|d| d.handles(&app.s)).unwrap_or_default();
   if handles.is_empty() {
+    // Tab put the box at a handle that is gone: it goes back to its first place
+    if app.manip.value_box.at_handle.is_some() {
+      app.manip.value_box.hide();
+    }
     return false;
   }
   let (right, _, _) = app.cam.basis();
@@ -431,16 +491,24 @@ pub(crate) fn show(
     }
   }
   // Fusion's floating value box beside the first handle that edits a field (Shell's thickness);
-  // a dialog with a drag arrow has the box there instead (see `viewport::manipulator`)
-  let arrow_box = app.dialog.as_mut().is_some_and(|d| d.value_box_field().is_some());
+  // a dialog with a drag arrow has the box there instead (see `viewport::manipulator`), until
+  // Tab moves it to a handle (Extrude's taper)
+  let at_handle = app.manip.value_box.at_handle;
+  let arrow_box = at_handle.is_none() && app.dialog.as_mut().is_some_and(|d| d.value_box_field().is_some());
   let every = app.dialog.as_ref().is_some_and(|d| d.boxes_every_handle());
+  // the distance arrow is being dragged: the taper handle fades, as in Fusion
+  let faded = matches!(app.drag, Some(Drag::Manip));
   let params = crate::value_box::params_of(&app.s);
   let mut shown = 0;
+  let mut tabbed = false;
   for (k, (h, p)) in handles.iter().zip(&placed).enumerate() {
     let Some(p) = p else { continue };
     let mut boxed = false;
-    if !arrow_box
-      && (shown == 0 || every)
+    let wants_box = match at_handle {
+      Some(j) => j == k,
+      None => !arrow_box && (shown == 0 || every),
+    };
+    if wants_box
       && let Some(dlg) = app.dialog.as_mut()
       && let Some(field) = dlg.handle_field(k)
     {
@@ -448,18 +516,57 @@ pub(crate) fn show(
         Shape::Arrow { .. } => box_beside(p.line[0], p.head, p.dir, resp.rect),
         Shape::Dial { .. } => box_beside(p.head - p.dir * 20.0, p.head, p.dir, resp.rect),
       };
-      if crate::value_box::show_nth(ctx, &mut app.manip.value_box, shown, at, field, &params).changed {
+      let out = crate::value_box::show_nth(ctx, &mut app.manip.value_box, shown, at, field, &params);
+      if out.changed {
         dlg.value_box_edited();
       }
+      tabbed |= out.tab;
       shown += 1;
       boxed = true;
     }
-    draw(painter, h, p, hot == Some(k), false, !boxed);
+    if h.head == Head::Taper {
+      draw_taper(painter, p, boxed, faded);
+    } else {
+      draw(painter, h, p, hot == Some(k), false, !boxed);
+    }
   }
-  if !arrow_box && shown == 0 {
+  if shown == 0 && (at_handle.is_some() || !arrow_box) {
     app.manip.value_box.hide();
   }
+  if tabbed {
+    tab(app);
+  }
   hot.is_some() || pressed.is_some() && ctx.input(|i| i.pointer.primary_down())
+}
+
+/// Tab in the floating value box: it moves to the command's next value in Fusion's order (the
+/// drag arrow's, then each handle's with a field: Extrude's distance, then its taper angle) and
+/// round again, the value selected. An empty angle opens as Fusion shows it, "0.0 deg".
+pub(crate) fn tab(app: &mut App) {
+  let Some(dlg) = app.dialog.as_mut() else { return };
+  if dlg.boxes_every_handle() {
+    return;
+  }
+  let handles = dlg.handles(&app.s);
+  let arrow = dlg.value_box_field().is_some();
+  let fields: Vec<usize> = (0..handles.len()).filter(|k| dlg.handle_field(*k).is_some()).collect();
+  // None is the box's first place: the arrow, else the first handle with a field
+  let mut stops = vec![None];
+  stops.extend(fields.iter().skip(usize::from(!arrow)).map(|k| Some(*k)));
+  if stops.len() < 2 {
+    return;
+  }
+  let now = stops.iter().position(|s| *s == app.manip.value_box.at_handle).unwrap_or(0);
+  let next = stops[(now + 1) % stops.len()];
+  if let Some(k) = next
+    && handles[k].angular()
+    && let Some(f) = dlg.handle_field(k)
+    && f.trim().is_empty()
+  {
+    *f = "0.0 deg".into();
+  }
+  app.manip.value_box.refocus();
+  app.manip.value_box.at_handle = next;
 }
 
 /// The open dialog's handles on screen: each one's head and its shaft or arc (tests press them).

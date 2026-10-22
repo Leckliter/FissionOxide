@@ -527,9 +527,9 @@ mod tests {
     app.run("sketch.constrain", json!({"sketch": sk.0, "type": "horizontal", "curves": [a.0]})).unwrap();
     assert!(app.status.is_none(), "{:?}", app.status);
     // a message that isn't a command's refusal stays
-    app.status = Some(("Computed in 0.1 s".into(), false));
+    app.status = Some(("Still computing — wait for it to finish".into(), false));
     app.run("sketch.constrain", json!({"sketch": sk.0, "type": "fix", "curves": [a.0]})).unwrap();
-    assert_eq!(app.status, Some(("Computed in 0.1 s".into(), false)));
+    assert_eq!(app.status, Some(("Still computing — wait for it to finish".into(), false)));
   }
 
   #[test]

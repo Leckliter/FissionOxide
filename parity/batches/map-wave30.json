@@ -1,0 +1,19 @@
+{
+  "ui:sheet:rules-palette": "ui-sheet-rules-library",
+  "ui:sheet:edit-rule-dialog": "ui-sheet-rules-library",
+  "ui:sheet:default-rule": "ui-sheet-rules-library",
+  "ui:sheet:browser-rule-row": "ui-sheet-rules-library",
+  "ui:sheet:flange-dialog-open": "ui-sheet-flange-dialog",
+  "ui:sheet:base-flange-rows": "ui-sheet-flange-dialog",
+  "ui:sheet:edge-flange-rows": "ui-sheet-flange-dialog",
+  "ui:sheet:edit-feature": "ui-sheet-flange-dialog",
+  "ui:sheet:flat-pattern-environment": "ui-sheet-flat-pattern-env",
+  "ui:sheet:export-flat-pattern": "ui-sheet-flat-pattern-env",
+  "ui:sheet:flat-pattern-row": "ui-sheet-flat-pattern-env",
+  "ui:sheet:unfold-refold": "ui-sheet-flat-pattern-env",
+  "ui:sheet:ribbon-lists": "ui-sheet-menus-dialogs",
+  "ui:sheet:fold-dialog": "ui-sheet-menus-dialogs",
+  "ui:sheet:convert-dialog": "ui-sheet-menus-dialogs",
+  "ui:sheet:rip-corner-dialogs": "ui-sheet-menus-dialogs",
+  "ui:sheet:hem-rows": "ui-sheet-menus-dialogs"
+}
