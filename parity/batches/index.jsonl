@@ -100,6 +100,18 @@
 {"name": "ui-manage-bom-palette", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_4cc1c457 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-utilities-addins-make", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_b240d544 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-utilities-tips-status", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_899ce0b8 (requested 2026-10-22 by the coordinator)"}
+<<<<<<< HEAD
 {"name": "ui-browser-body-rows", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_60b58a79 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-timeline-menus-groups", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_5b79f6ea (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-timeline-rollback-play", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_9ee4eb9c (requested 2026-10-22 by the coordinator)"}
+=======
+{"name": "ui-browser-body-rows", "items": 3, "status": "ready", "pr": null}
+{"name": "ui-timeline-menus-groups", "items": 6, "status": "ready", "pr": null}
+{"name": "ui-timeline-rollback-play", "items": 7, "status": "ready", "pr": null}
+{"name": "ui-animation-workspace", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-electronics-workspace", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-extrude-body-face", "items": 1, "status": "ready", "pr": null}
+{"name": "ui-manufacture-workspace", "items": 6, "status": "ready", "pr": null}
+{"name": "ui-render-workspace", "items": 7, "status": "ready", "pr": null}
+{"name": "ui-workspace-menu", "items": 3, "status": "ready", "pr": null}
+>>>>>>> a89a11bb (Parity: Workspaces done; 27 rows in six wave-33 batches, 3 match, 4 blocked, 2 keys verified)
