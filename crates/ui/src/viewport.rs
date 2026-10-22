@@ -862,6 +862,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     // a base flange's previewed sheet is Fusion's solid preview blue
     preview: app.dialog.as_ref().map(|d| d.sheet_preview_bodies(&app.s)).unwrap_or_default(),
     tint_faces: app.dialog.as_ref().map(|d| d.tint_faces(&app.s)).unwrap_or_default(),
+    component_colors: app.ctx_menu.component_colors,
     // the palette's Slice reaches the scene as the `slice` render parameter (see `slice_params`)
     ..analysis
   }
@@ -907,6 +908,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     palette: app.palette,
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies().iter().map(|b| b.0).collect()).unwrap_or_default(),
     grid_plane: app.grid_preview,
+    component_colors: app.ctx_menu.component_colors,
     quads: if crate::render_ui::shading(app) {
       Vec::new()
     } else {

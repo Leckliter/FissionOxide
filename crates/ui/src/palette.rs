@@ -33,6 +33,9 @@ pub struct SketchPalette {
   pub construction: bool,
   /// 3D Sketch: out-of-plane input.
   pub sketch_3d: bool,
+  /// Linetype ▸ Construction with nothing selected: new curves are drawn as construction (X
+  /// toggles it, as in Fusion; it stays on after Escape).
+  pub construction_linetype: bool,
   pub dock: Dock,
 }
 
@@ -45,6 +48,7 @@ impl Default for SketchPalette {
       projected: true,
       construction: true,
       sketch_3d: false,
+      construction_linetype: false,
       dock: Dock::Open,
     }
   }

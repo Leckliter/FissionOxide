@@ -33,6 +33,9 @@ const TILE: f32 = 96.0;
 /// The application bar button's tooltip, as Fusion's.
 pub(crate) const BUTTON_TIP: &str = "Data Panel";
 
+/// The Home button's tooltip.
+pub(crate) const HOME_TIP: &str = "Home";
+
 /// The hub drop-down's tooltip.
 const HUB_TIP: &str = "FissionOxide Hub with Collaborative Editing";
 
@@ -271,6 +274,20 @@ impl DataPanel {
 
   pub fn toggle(&mut self) {
     self.open = !self.open;
+    self.stale = true;
+  }
+
+  /// The application bar's Home button, as Fusion's: shows your recent designs (closes the panel
+  /// when it already shows them).
+  pub fn home(&mut self) {
+    if self.open && self.view == View::Recent {
+      self.open = false;
+      return;
+    }
+    self.open = true;
+    self.view = View::Recent;
+    self.picked = None;
+    self.searching = false;
     self.stale = true;
   }
 
@@ -2029,12 +2046,16 @@ fn download_dialog(app: &mut App, item: &str, version: Option<u32>, name: &str, 
 
 /// The Save dialog (Ctrl+S), as Fusion's white modal "Save": the first save (and Save As) asks
 /// for the name and location only; a later save asks for a description and an optional
-/// milestone. It closes with Cancel or its X, not Escape, as in Fusion.
+/// milestone. It closes with Cancel or its X, not Escape, as in Fusion. Closing a never-saved
+/// design's tab opens it with Don't Save at the left: Don't Save closes the tab, Save saves and
+/// closes it, Cancel keeps it.
 pub fn save_window(app: &mut App, ctx: &egui::Context) {
   let Some(mut f) = app.data.save.clone() else { return };
   let linked = app.s.hub.is_some() && !f.as_new;
   let title = if linked { "Save version" } else { "Save" };
+  let closing = app.docs.closing.filter(|_| !linked);
   let mut done = false;
+  let mut dont_save = false;
   let projects = app.data.projects.clone();
   let version = app.s.hub.as_ref().map(|h| h.version);
   let (cancel, closed) = crate::file_dialogs::modal(ctx, "save", title, 440.0, |ui| {
@@ -2091,21 +2112,29 @@ pub fn save_window(app: &mut App, ctx: &egui::Context) {
         );
       }
     }
-    let b = crate::file_dialogs::footer(ui, None, "Save", true);
+    let b = crate::file_dialogs::footer(ui, closing.map(|_| "Don't Save"), "Save", true);
     done |= b.primary;
+    dont_save = b.left;
     b.cancel
   });
   let cancel = cancel || closed;
   if cancel {
     app.data.save = None;
+    app.docs.closing = None;
     return;
   }
   // the click or Enter that brought the window to the front wasn't aimed at this dialog
-  if !done || app.just_activated(ctx) {
+  if !(done || dont_save) || app.just_activated(ctx) {
     app.data.save = Some(f);
     return;
   }
   app.data.save = None;
+  if dont_save {
+    if let Some(i) = closing {
+      crate::documents::close_now(app, i);
+    }
+    return;
+  }
   // the user asked for this save: even an empty "Untitled" design is kept
   let mut p = json!({"description": f.description, "new": f.as_new || app.s.hub.is_none(), "explicit": true});
   if !f.milestone.trim().is_empty() {
@@ -2121,7 +2150,11 @@ pub fn save_window(app: &mut App, ctx: &egui::Context) {
     app.status = Some((format!("Saved {} v{v}", app.s.design.name), false));
     app.data.selected = r.get("item").and_then(Value::as_str).map(str::to_string);
     app.data.stale = true;
+    if let Some(i) = closing {
+      crate::documents::close_now(app, i);
+    }
   }
+  app.docs.closing = None;
 }
 
 /// Inserts a hub design into the open design as a linked component.

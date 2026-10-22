@@ -184,8 +184,8 @@ std::unique_ptr<Shape> ruled_from_edge(const Shape &edge, const Shape &face, dou
     GeomAPI_Interpolate interp(pts, closed ? Standard_True : Standard_False, 1e-7);
     interp.Perform();
     if (!interp.IsDone()) throw std::runtime_error("the far edge could not be built");
-    TopoDS_Edge far = BRepBuilderAPI_MakeEdge(interp.Curve()).Edge();
-    TopoDS_Face r = BRepFill::Face(e, far);
+    TopoDS_Edge far_edge = BRepBuilderAPI_MakeEdge(interp.Curve()).Edge();
+    TopoDS_Face r = BRepFill::Face(e, far_edge);
     return out(r);
   } catch (...) {
     fail("ruled surface");

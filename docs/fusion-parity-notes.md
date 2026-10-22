@@ -609,3 +609,12 @@ without asking to save, its ring puts every slot after Repeat one position clock
 Bodies folder eye does not hide the bodies. Preferences has content on four of Fusion's thirty pages. 24
 rows in four batches (`parity/batches/map-wave35.json`), five match rows, four keys verified and three
 reopened. The three areas are done; the ASSEMBLY tab still waits for the owner's decision on saving.
+
+## 2026-10-22, verifier 1: re-verification sweep, sketch
+
+Re-checked the 85 sketch keys marked fixing-merged on the rebuilt app (report
+`parity/reports/2026-10-22-reverify-sketch.md`): 74 verified, 7 reopened, 4 left for a sketch plane that
+crosses a body. Three new rows, one P1: a window box over a whole sketch then Delete fails with "no point
+Point(d2) in this sketch". Of the seven open rows in done batches, five verified and two set to match as
+superseded. Two wave-37 batches (`ui-reverify-sketch-1`, `ui-reverify-sketch-2`); 271 keys remain
+fixing-merged, dialogs next.

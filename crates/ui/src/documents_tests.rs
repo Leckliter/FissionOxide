@@ -1,7 +1,7 @@
 //! Document tabs, "What do you want to design?", the Assembly Design document and its New
 //! Component, and Fusion's Insert window, driven through a real egui context.
 
-use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
 use fox_engine::Session;
 use fox_engine::model::DesignType;
 use serde_json::json;
@@ -50,6 +50,20 @@ impl Harness {
     let ev = |pressed| Event::Key { key, physical_key: None, pressed, repeat: false, modifiers };
     self.frame(vec![ev(true), ev(false)]);
     self.frame(vec![]);
+  }
+
+  fn click(&mut self, pos: Pos2) {
+    let button =
+      |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+    self.frame(vec![Event::PointerMoved(pos), button(true), button(false)]);
+    self.frame(vec![]);
+  }
+
+  /// Frames until the window's activation grace is over (a click then counts as aimed).
+  fn settle(&mut self) {
+    for _ in 0..40 {
+      self.frame(vec![]);
+    }
   }
 
   fn area(&self, id: egui::Id) -> Option<Rect> {
@@ -124,12 +138,117 @@ fn closing_a_tab_with_unsaved_changes_asks_first() {
   documents::request_close(&mut h.app, 0);
   assert_eq!(h.app.docs.closing, Some(0));
   h.frame(vec![]);
-  assert!(h.area(crate::file_dialogs::modal_id("close-design")).is_some(), "Save changes? shows");
   assert!(h.app.s.dirty, "nothing is dropped while it asks");
   // Don't Save: the last tab closing leaves a new empty design
   documents::close_now(&mut h.app, 0);
   assert_eq!(h.app.docs.count(), 1);
   assert!(h.app.s.design.parameters.is_empty() && !h.app.s.dirty);
+  // a saved design with changes asks "Save changes?"
+  h.app.run("param.add", json!({"name": "saved", "expr": "1 mm"})).unwrap();
+  h.app.run("hub.save", json!({"name": "Saved"})).unwrap();
+  h.app.run("param.add", json!({"name": "more", "expr": "2 mm"})).unwrap();
+  documents::request_close(&mut h.app, 0);
+  h.frame(vec![]);
+  assert!(h.area(crate::file_dialogs::modal_id("close-design")).is_some(), "Save changes? shows");
+  assert!(h.app.data.save.is_none());
+}
+
+/// Where the Save dialog's buttons are: (Don't Save, Cancel, Save).
+fn save_buttons(h: &Harness) -> (Pos2, Pos2, Pos2) {
+  use crate::file_dialogs::{BUTTON, MARGIN};
+  let d = h.area(crate::file_dialogs::modal_id("save")).expect("the Save dialog shows");
+  let y = d.bottom() - MARGIN - BUTTON.y / 2.0;
+  let save = Pos2::new(d.right() - MARGIN - BUTTON.x / 2.0, y);
+  let cancel = Pos2::new(save.x - BUTTON.x - 8.0, y);
+  (Pos2::new(d.left() + MARGIN + BUTTON.x / 2.0, y), cancel, save)
+}
+
+#[test]
+fn closing_a_never_saved_design_opens_the_save_dialog() {
+  let mut h = Harness::new("close-save");
+  work(&mut h.app);
+  documents::new_document(&mut h.app, DesignType::Part, None);
+  h.settle();
+  // the X on the first, unsaved tab shows it and opens Save with Don't Save, not "Save changes?"
+  documents::request_close(&mut h.app, 0);
+  assert_eq!(h.app.docs.active(), 0, "the closing tab shows");
+  assert_eq!(h.app.docs.closing, Some(0));
+  let form = h.app.data.save.clone().expect("the Save dialog opens");
+  assert_eq!(form.name, "Untitled");
+  assert!(form.first, "the name is selected");
+  h.frame(vec![]);
+  assert!(h.area(crate::file_dialogs::modal_id("close-design")).is_none());
+  assert!(h.app.docs.modal_open());
+  h.frame(vec![]);
+  // Cancel keeps the tab, changes and all
+  let (_, cancel, _) = save_buttons(&h);
+  h.click(cancel);
+  assert!(h.app.data.save.is_none() && h.app.docs.closing.is_none());
+  assert_eq!(h.app.docs.count(), 2);
+  assert!(h.app.s.dirty);
+  // Don't Save closes it
+  documents::request_close(&mut h.app, 0);
+  h.frame(vec![]);
+  h.frame(vec![]);
+  let (dont, _, _) = save_buttons(&h);
+  h.click(dont);
+  assert_eq!(h.app.docs.count(), 1);
+  assert!(h.app.data.save.is_none() && h.app.docs.closing.is_none());
+  assert!(h.app.s.design.parameters.is_empty(), "the other tab shows");
+  // Save saves it to the hub, then closes it
+  work(&mut h.app);
+  documents::new_document(&mut h.app, DesignType::Part, None);
+  documents::request_close(&mut h.app, 0);
+  h.frame(vec![]);
+  h.frame(vec![]);
+  let (_, _, save) = save_buttons(&h);
+  h.click(save);
+  assert_eq!(h.app.docs.count(), 1);
+  assert!(h.app.docs.closing.is_none());
+  let recent = h.app.s.execute("hub.recent", &json!({})).unwrap();
+  assert_eq!(recent.as_array().map(Vec::len), Some(1), "{recent}");
+}
+
+#[test]
+fn tabs_star_unsaved_changes_and_number_new_designs() {
+  let mut h = Harness::new("labels");
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled");
+  work(&mut h.app);
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled*", "a never-saved design with changes is starred");
+  // Ctrl+N numbers the new tabs, as Fusion's "Untitled(1)".."Untitled(4)"
+  for n in 1..=4 {
+    h.key(Key::N, Modifiers::COMMAND);
+    assert_eq!(documents::tab_label(&h.app.s), format!("Untitled({n})"));
+  }
+  assert!(h.app.title().starts_with("Untitled(4) ("), "{}", h.app.title());
+  // a closed number is the next one used
+  documents::request_close(&mut h.app, 2);
+  assert_eq!(h.app.docs.count(), 4);
+  documents::new_document(&mut h.app, DesignType::Part, None);
+  assert_eq!(h.app.s.design.name, "Untitled(2)");
+  // the first save offers the tab's name
+  h.app.save(false);
+  assert_eq!(h.app.data.save.as_ref().map(|f| f.name.as_str()), Some("Untitled(2)"));
+}
+
+#[test]
+fn an_overflowing_tab_strip_scrolls_and_lists_the_tabs() {
+  assert!(!documents::tabs_overflow(4, 4.0 * documents::TAB_MIN_W));
+  assert!(documents::tabs_overflow(5, 4.0 * documents::TAB_MIN_W));
+  let mut h = Harness::new("overflow");
+  for _ in 0..9 {
+    h.key(Key::N, Modifiers::COMMAND);
+  }
+  assert_eq!(h.app.docs.count(), 10);
+  h.frame(vec![]);
+  // the "v" at the strip's end lists every tab; picking one shows it
+  let v = h.app.docs.overflow_at.expect("the strip overflows and shows the v");
+  assert!(!egui::Popup::is_any_open(&h.ctx));
+  h.click(v.center());
+  assert!(egui::Popup::is_any_open(&h.ctx), "the tab list opens");
+  documents::switch_to(&mut h.app, 0);
+  h.frame(vec![]);
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled");
 }
 
 #[test]
@@ -153,6 +272,33 @@ fn opening_a_design_over_unsaved_work_opens_it_in_a_new_tab() {
   documents::switch_to(&mut h.app, 1);
   h.app.open_hub_item(&item, None);
   assert_eq!(h.app.docs.count(), 2);
+}
+
+#[test]
+fn every_opened_design_gets_its_own_tab_as_in_fusion() {
+  let mut h = Harness::new("tabs-open");
+  // two saved designs
+  h.app.run("param.add", json!({"name": "a", "expr": "1 mm"})).unwrap();
+  let a = h.app.run("hub.save", json!({"name": "A"})).unwrap()["item"].as_str().unwrap().to_string();
+  h.app.new_design();
+  h.app.run("param.add", json!({"name": "b", "expr": "2 mm"})).unwrap();
+  let b = h.app.run("hub.save", json!({"name": "B"})).unwrap()["item"].as_str().unwrap().to_string();
+  // the blank start-up design is replaced by the first design opened
+  h.app.new_design();
+  assert_eq!(h.app.docs.count(), 1);
+  h.app.open_hub_item(&a, None);
+  assert_eq!(h.app.docs.count(), 1, "a blank design's tab is reused");
+  assert_eq!(h.app.s.design.parameters[0].name, "a");
+  // a saved, unchanged design stays open: the next one gets a new tab
+  h.app.open_hub_item(&b, None);
+  assert_eq!(h.app.docs.count(), 2, "the open design keeps its tab");
+  assert_eq!(h.app.s.design.parameters[0].name, "b");
+  // opening a design that is already open shows its tab
+  h.app.open_hub_item(&a, None);
+  assert_eq!(h.app.docs.count(), 2);
+  assert_eq!(h.app.docs.active(), 0);
+  assert_eq!(h.app.s.design.parameters[0].name, "a");
+  h.frame(vec![]);
 }
 
 #[test]

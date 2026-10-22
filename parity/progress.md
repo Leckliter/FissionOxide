@@ -1,44 +1,53 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 15:40, session "Parity prober 20"
+## Last stop: 2026-10-22, 16:45, session "Re-verification sweep, verifier 1"
 
-Finished this session: "Startup, new design, multiple documents, closing with unsaved changes, recovery,
-update flow", the rest of "Preferences dialog" (every page other than General) and the rest of "Marking
-menus" (body, vertex, sketch point, construction plane, timeline item, in-sketch). All three `done` in
-`coverage.md`. Report `parity/reports/2026-10-22-startup-preferences-marking.md`, `map-wave35.json`, batches
-`ui-documents-window-tabs` (5, one P1: the window close quits without asking), `ui-appbar-home-updates`
-(4 + reopened `ui:insert:file-chooser`, one P1: the Bodies folder eye does not hide bodies),
-`ui-preferences-pages` (8 + reopened `ui:chrome:preferences-general-settings`) and `ui-marking-menu-targets`
-(7 + reopened `ui:context-menus:face-list-contents`, one P1: the ring's slots are one position off), all
-`ready` in `index.jsonl` with no fixer yet. `ui-documents-window-tabs` edits `crates/ui/src/documents.rs`
-like the wave-34 `ui-documents-tabs-close` (still `ready`): start that one first or give both to one fixer.
-`ui-appbar-home-updates` and `ui-marking-menu-targets` both touch `crates/ui/src/panels.rs` (different
-functions) and `viewport.rs`.
-Verified: `ui:assemble:assembly-design-document`, `ui:assemble:assembly-new-component`,
-`ui:marking-menu:ring-at-cursor`, `ui:chrome:preferences-layout`.
+Swept the sketch area of the re-verification line in `coverage.md` (kept `in progress`). On the rebuilt
+binary (`main` at `ef887079`) 85 sketch keys were `fixing-merged`: 74 now `verified`, 7 reopened
+(`mismatch`), 4 not re-checked and still `fixing-merged`: `ui:sketch:intersect-missing` (the body did not
+cross the sketch plane, so no curves to compare), `ui:sketch:look-at-sketch-up` (needs an XZ and a YZ
+sketch side by side with Fusion), `ui:sketch:tangent-line-circle-motion` (my test line was also
+collinear-constrained, so it could not pivot: redo with a line joined to another line only) and
+`ui:sketch:slice-section-look` (the body sat behind the sketch plane). Of the seven open rows that sat in
+done batches, five are `verified` (superseded by verified keys, or seen) and `ui:canvas:select-other` and
+`ui:dialogs:combine-fields` are `match` with a note naming their superseding keys
+(`ui:canvas:select-other-popup`, `ui:dialogs:combine-rows`, both still `fixing-merged`).
+`ui:canvas:box-select-colors` was verified on the way. New wave-37 batches, both `ready` with no fixer:
+`ui-reverify-sketch-1` (6: one P1, `ui:sketch:window-delete-error`, plus three reopened and two new P2s)
+and `ui-reverify-sketch-2` (4 reopened P2s). `map-wave37.json` holds the keys.
 
-## Next prober: start here
+Remaining `fixing-merged` after this session: 271 (dialogs 56, chrome 26, mesh 20, surface 19, canvas 18,
+timeline 18, sheet 17, manip 11, browser 9, navbar 8, toolbar 8, render 7, inspect 6, manufacture 6,
+construct 5, animation 5, utilities 5, sketch 4, menus 4, workspaces 4, electronics 4, shortcuts 4,
+documents 3, manage 2, viewcube 1, plastic 1).
 
-1. Every area in `coverage.md` is done except the ASSEMBLY tab, which still needs two saved designs: ask the
-   owner whether a prober may save two small designs to the Default Project. Until then take the new last
-   line, "Re-verification sweep": 311 keys are `fixing-merged`. Go area by area in `coverage.md`'s order
-   (chrome, canvas, sketch, solid, ...), re-probe each key in FissionOxide (and Fusion where the row is
-   unclear), set `verified` or reopen into a new wave-36 batch. Mark the sweep `in progress (<date>,
-   <session>, up to <area>)` as you go so the next prober continues there.
-2. Recheck `ui:marking-menu:in-sketch-ring` in Fusion on a fresh sketch (this session saw the 3D ring once,
-   with Sketch2 open for edit) before a fixer changes FissionOxide's sketch ring.
-3. Rebuild before probing: the running binary is `main` at `379c2ae2`; kill `fissionoxide.exe` first,
-   `cargo build --release -p fissionoxide` took 2 m 47 s.
+## Next verifier: start here
 
-Where the documents stand: Fusion has four tabs, as before ("Untitled*" Part Design with Body1 and
-Sketch1..5, "Untitled*(1)" mesh/sheet-metal tab, "Untitled(2)" empty Assembly Design, "Untitled*(3)"
-sheet metal, active), DESIGN workspace; its Job Status icon shows a "1" badge (an update card waiting:
-do not press Update Now, it restarts Fusion and loses the owner's tabs). FissionOxide: two tabs ("Untitled*"
-mm Part Design with Sketch1, Body1 extruded 10 mm and Plane1 offset 10 mm from the top; "Untitled" Assembly
-Design), Data Panel closed. Fusion at screenshot x 0..908, y 80..730; FissionOxide x 0..908, y 0..785.
-Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
+1. Keep the sweep line `in progress` and take the dialogs area next (56 keys; list them with
+   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='dialogs' and r['status']=='fixing-merged']"`),
+   then chrome, canvas and the rest in `coverage.md`'s order. Most dialog keys are "open the dialog and
+   read its rows", so a body (one extrude) and a sketch cover most of them in one pass.
+2. Pick up the four sketch keys above when a body crosses a sketch plane (draw on XY, extrude, sketch on
+   XZ through the body for Intersect and Slice; Look At on XZ and YZ in both apps).
+3. Rebuild first (kill `fissionoxide.exe`, `cargo build --release -p fissionoxide`, about 3 min).
+4. Work from the rows' `fusion` text and look at Fusion only where the text is unclear; one sketch per
+   group of keys (this session: a rectangle with typed values and expressions, a line with typed angle,
+   circles, polygons, slots, then a clean second sketch for fillet / chamfer / offset / trim / constraints).
+
+Where the documents stand: Fusion untouched this session (four tabs as prober 20 left them).
+FissionOxide: one "Untitled*" mm Part Design with Sketch1 (hexagon extruded into Body1, the rest of the
+test shapes), Sketch2 (rectangle, circles, lines, a blend curve) and Sketch3 on a vertical origin plane
+(projected Body1 outline), open for edit; window at screenshot x 0..908, Data Panel closed.
 
 ## Traps
+- Synthetic clicks on FissionOxide's canvas right after a key press or a menu click are sometimes dropped
+  (the first corner of a rectangle, the first Mirror pick, a palette checkbox right after another click):
+  `mouse_move` to the target, wait 0.3 s, then click, and look before assuming the click landed.
+- A window box over a whole FissionOxide sketch then Delete fails ("no point Point(d2) in this sketch")
+  until `ui-reverify-sketch-1` lands; delete with a crossing box or start a new sketch instead.
+- After a Collinear constraint the second line shifts a few px; re-read positions before the next pick.
+- The Circular Pattern Center Point would not take the centre shared by two concentric circles; pick a
+  plain sketch point.
 - Fusion's Help > Check for Updates puts an "A new version of Fusion has landed" card with Update Now /
   Update Later in the Job Status panel; never press Update Now (Fusion restarts and the unsaved tabs go).
 - Fusion's window X with unsaved tabs opens the Save dialog for the active tab; Cancel at (635,500) keeps

@@ -110,7 +110,7 @@ pub mod dark {
 /// The desktop app's light theme, by the part of the window it paints.
 pub mod app {
   use crate::Rgb;
-  pub const APP_BAR: Rgb = Rgb(222, 222, 222);
+  pub const APP_BAR: Rgb = Rgb(217, 217, 217);
   pub const TOOLBAR: Rgb = Rgb(243, 243, 243);
   pub const CONTEXT_TAB: Rgb = Rgb(214, 233, 250);
   pub const PANEL: Rgb = Rgb(255, 255, 255);

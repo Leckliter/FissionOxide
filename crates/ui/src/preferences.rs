@@ -157,34 +157,6 @@ impl NavPreset {
     let held = (mods.shift, mods.ctrl || mods.command, mods.alt);
     self.mappings().iter().find(|(b, h, _)| *b == button && *h == held).map(|m| m.2)
   }
-
-  /// "Middle drag", "Shift+Middle drag" … for the action, as the Preferences page lists them.
-  pub fn describe(self, action: NavAction) -> String {
-    let list: Vec<String> = self
-      .mappings()
-      .iter()
-      .filter(|m| m.2 == action)
-      .map(|(b, (shift, ctrl, alt), _)| {
-        let mut s = String::new();
-        for (on, name) in [(*shift, "Shift+"), (*ctrl, "Ctrl+"), (*alt, "Alt+")] {
-          if on {
-            s.push_str(name);
-          }
-        }
-        s.push_str(match b {
-          PointerButton::Primary => "Left",
-          PointerButton::Secondary => "Right",
-          _ => "Middle",
-        });
-        s + " drag"
-      })
-      .collect();
-    let mut out = list.join(", ");
-    if action == NavAction::Zoom {
-      out = if out.is_empty() { "Wheel".into() } else { format!("Wheel, {out}") };
-    }
-    out
-  }
 }
 
 /// General → Theme.
@@ -1244,9 +1216,6 @@ mod tests {
     assert_eq!(al.action(Secondary, shift_alt), Some(Zoom));
     assert_eq!(al.action(Primary, none), None);
     assert_eq!(al.action(Middle, none), None);
-    assert_eq!(sw.describe(Pan), "Ctrl+Middle drag");
-    assert_eq!(al.describe(Zoom), "Wheel, Shift+Alt+Right drag");
-    assert_eq!(f.describe(Orbit), "Shift+Middle drag, Right drag");
     let pm = NavPreset::PowerMill;
     assert_eq!(pm.action(Middle, none), Some(Orbit));
     assert_eq!(pm.action(Middle, shift), Some(Pan));

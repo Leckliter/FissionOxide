@@ -34,6 +34,26 @@ pub const EDGE_HOVER_COLOR: [u8; 4] = [10, 10, 10, 255];
 /// A Mirror's or pattern's previewed copy: Fusion's see-through grey ghost with dark edges.
 pub const GHOST_COLOR: [u8; 4] = [150, 150, 150, 90];
 pub const GHOST_EDGE_COLOR: [u8; 4] = [60, 60, 60, 255];
+/// A hidden body that stays selected (Show/Hide on a selected body): Fusion's see-through
+/// selection blue, drawn without edges.
+pub const HIDDEN_SELECTED_ALPHA: u8 = 90;
+/// Display Component Colors: each component's colour, the root's first (Fusion's purple), then
+/// the rest by component number.
+pub const COMPONENT_COLORS: [[u8; 4]; 8] = [
+  [151, 112, 204, 255],
+  [232, 146, 70, 255],
+  [98, 178, 96, 255],
+  [72, 170, 190, 255],
+  [214, 92, 92, 255],
+  [222, 196, 72, 255],
+  [88, 128, 214, 255],
+  [212, 108, 174, 255],
+];
+
+/// The colour Display Component Colors gives the bodies of `component` (`None` = the root).
+pub fn component_color(component: Option<fox_model::ComponentId>) -> [u8; 4] {
+  COMPONENT_COLORS[component.map_or(0, |c| c.0 as usize) % COMPONENT_COLORS.len()]
+}
 /// A previewed new sheet metal body (Base Flange): Fusion's solid preview blue.
 pub const PREVIEW_COLOR: [u8; 4] = [104, 154, 222, 255];
 /// A visible sketch's closed profiles, seen from outside the sketch and in it alike: Fusion's
@@ -284,6 +304,8 @@ pub struct ViewOptions {
   pub flat: Option<crate::flat::FlatShow>,
   /// Faces drawn in a colour of their own (Unfold's bends previewed green).
   pub tint_faces: Vec<(BodyId, u32, [u8; 4])>,
+  /// INSPECT ▸ Display Component Colors: each body in its component's [`component_color`].
+  pub component_colors: bool,
 }
 
 /// What the Sketch Palette shows of the sketch being edited (every option on by default, as
@@ -401,9 +423,12 @@ impl SceneBuilder {
       if s.diff.is_some() || sim_bodies.contains(&body.id) || flat_body == Some(body.id) {
         continue;
       }
+      // a hidden body that is still selected draws as a see-through blue ghost
+      let hidden_selected =
+        opts.only_bodies.is_none() && !s.body_visible(body.id) && selected_bodies.contains(&body.id);
       let shown = match &opts.only_bodies {
         Some(only) => only.contains(&body.id),
-        None => s.body_visible(body.id),
+        None => s.body_visible(body.id) || hidden_selected,
       };
       if !shown {
         continue;
@@ -418,7 +443,12 @@ impl SceneBuilder {
         if editing { mix(c, [255, 255, 255, 255], 0.35) } else { c }
       };
       let ghost = opts.ghosts.contains(&body.id);
-      let base = tint(s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR));
+      let own = if opts.component_colors {
+        component_color(s.design.component_of(body.id).map(|c| c.id))
+      } else {
+        s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR)
+      };
+      let base = tint(own);
       let base = if ghost { GHOST_COLOR } else { base };
       let base = if opts.preview.contains(&body.id) { PREVIEW_COLOR } else { base };
       let tri_ids: Vec<u32> = m.tri_face.iter().map(|f| picks.id(Pick::Face { body: body.id, face: *f })).collect();
@@ -441,7 +471,7 @@ impl SceneBuilder {
         }
       }
       let peek_faces: Vec<u32> = opts.peek_faces.iter().filter(|(b, _)| *b == body.id).map(|(_, f)| *f).collect();
-      if !ghost && (!face_cols.is_empty() || !peek_faces.is_empty()) {
+      if !ghost && !opts.component_colors && (!face_cols.is_empty() || !peek_faces.is_empty()) {
         // faces with an appearance of their own (and selected or peeked faces) draw as meshes of
         // their colour
         let color_of = |t: usize, id: u32| {
@@ -468,7 +498,13 @@ impl SceneBuilder {
         scene.meshes.push(mesh_of(&a.0, a.1, base, hover));
         scene.meshes.push(mesh_of(&b.0, b.1, SELECT_COLOR, hover));
       }
-      let alpha = opts.opacity.iter().find(|o| o.0 == body.id).map(|o| o.1).or(ghost.then_some(GHOST_COLOR[3]));
+      let alpha = opts
+        .opacity
+        .iter()
+        .find(|o| o.0 == body.id)
+        .map(|o| o.1)
+        .or(ghost.then_some(GHOST_COLOR[3]))
+        .or(hidden_selected.then_some(HIDDEN_SELECTED_ALPHA));
       let unanalyzed = !opts.analysis_view.covers(body.id);
       for mesh in &mut scene.meshes[first..] {
         mesh.analyze = true;
@@ -516,7 +552,7 @@ impl SceneBuilder {
         }
       }
       // mesh bodies draw smooth, with no face edges to pick, as Fusion's
-      if !opts.hide_edges && !body.is_mesh() {
+      if !opts.hide_edges && !body.is_mesh() && !hidden_selected {
         let edges = self.edges.entry(body.id).or_insert_with(|| {
           let tol = (body.diagonal() * 0.001).clamp(0.002, 0.5);
           body.shape.edge_lines(tol).unwrap_or_default()

@@ -72,6 +72,9 @@ pub(crate) struct MenuState {
   pub(crate) flat_shaded: Vec<BodyId>,
   /// The Bodies folder's eye is off: no body is drawn, each keeping its own eye.
   pub(crate) bodies_hidden: bool,
+  /// INSPECT ▸ Display Component Colors (Shift+N): bodies and timeline icons take their
+  /// component's colour (a view state).
+  pub(crate) component_colors: bool,
 }
 
 #[derive(Clone)]
