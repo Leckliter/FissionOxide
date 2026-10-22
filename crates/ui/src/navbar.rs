@@ -120,8 +120,8 @@ pub const BUTTONS: [&str; 8] =
 pub const ZOOM_MENU: [(Icon, &str, Option<&str>); 2] =
   [(Icon::ZoomWindow, "Zoom Window", None), (Icon::Fit, "Fit", Some("F6"))];
 
-/// A navigation bar button's tooltip, as Fusion draws it: the button's name in white on a dark
-/// panel, nothing more.
+/// A navigation bar button's tooltip (and a sketch dimension's parameter), as Fusion draws it:
+/// the text in white on a dark panel, nothing more.
 pub(crate) fn dark_tip(resp: egui::Response, text: &str) -> egui::Response {
   let style = resp.ctx.global_style();
   let frame = egui::Frame::new()

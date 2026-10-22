@@ -1730,7 +1730,7 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
         let name = app.s.body_name(b);
         let sel = app.s.selection.contains(&Sel::Body { body: b });
         let brow = row.with(b.0);
-        let ev = tree_row(ui, brow, 3 + depth, None, None, Icon::Body, &name, sel, theme::TEXT);
+        let ev = tree_row(ui, brow, 3 + depth, None, None, body_icon(app, b), &name, sel, theme::TEXT);
         body_row_edits(app, ui, &ev, brow, 3 + depth, b, &name, sel);
         if ev.clicked {
           toggle_sel(&mut app.s, Sel::Body { body: b }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
@@ -1957,7 +1957,7 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
     let isolated = app.ctx_menu.isolate.as_ref().map(|only| only.contains(&bid));
     let color = if visible && isolated != Some(false) { theme::TEXT } else { theme::MUTED };
     let row = id.with(bid.0);
-    let ev = tree_row(ui, row, 2, None, Some(visible), Icon::Body, &name, selected, color);
+    let ev = tree_row(ui, row, 2, None, Some(visible), body_icon(app, bid), &name, selected, color);
     if isolated == Some(true)
       && let Some(r) = &ev.response
     {
@@ -1982,6 +1982,11 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
   }
 }
 
+/// A body row's icon: Fusion's orange sheet for a surface body, the grey block for a solid.
+pub(crate) fn body_icon(app: &App, bid: BodyId) -> Icon {
+  if app.s.body_is_surface(bid) { Icon::SurfaceBody } else { Icon::Body }
+}
+
 /// A body row's in-place rename (double-click or slow-click) and dragging it onto a component.
 #[allow(clippy::too_many_arguments)]
 fn body_row_edits(
@@ -2003,8 +2008,13 @@ fn body_row_edits(
   browser_edit::edit_box(app, ui, ev, row, depth);
 }
 
-/// A browser body's right-click menu, as in Fusion (less what FissionOxide can't do yet).
+/// A browser body's right-click menu, as in Fusion (less what FissionOxide can't do yet). A
+/// surface body has Fusion's own list ([`browser_rows::surface_body_menu`]).
 fn body_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name: &str, visible: bool) {
+  if app.s.body_is_surface(bid) {
+    browser_rows::surface_body_context_menu(app, ui, row, bid, name);
+    return;
+  }
   let only = vec![Sel::Body { body: bid }];
   let start = |app: &mut App, ui: &mut egui::Ui, kind: Kind| {
     ui.close();
@@ -2028,14 +2038,8 @@ fn body_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name:
     }
   }
   ui.separator();
-  // physical materials belong to components in FissionOxide
-  let in_component = app.s.design.component_of(bid).is_some();
-  if ui
-    .add_enabled_ui(in_component, |ui| menu_item(ui, Icon::PhysMaterial, "Physical Material", None))
-    .inner
-    .on_disabled_hover_text("Create a component from the body to give it a physical material")
-    .clicked()
-  {
+  // a body outside a component takes a material of its own
+  if menu_item(ui, Icon::PhysMaterial, "Physical Material", None).clicked() {
     start(app, ui, Kind::Material);
   }
   if menu_item(ui, Icon::Appearance, "Appearance", Some("A")).clicked() {
@@ -2165,6 +2169,11 @@ pub(crate) enum RowCmd {
   ConvertDesignType,
   /// A sketch row's Redefine Sketch Plane.
   RedefinePlane,
+  // a surface body row (see browser_rows)
+  MoveCopy,
+  Copy,
+  Remove,
+  Isolate,
 }
 
 /// One row of a browser context menu.
@@ -3248,14 +3257,14 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 1.0;
-        let features: Vec<(FeatureId, String, Icon, bool)> = app
+        let features: Vec<(FeatureId, String, Icon, icons::Tint, bool)> = app
           .s
           .design
           .features
           .iter()
           .enumerate()
           .filter(|(i, _)| !hidden.hides(*i))
-          .map(|(_, f)| (f.id, f.name.clone(), feature_icon(&f.kind), f.suppressed))
+          .map(|(_, f)| (f.id, f.name.clone(), feature_icon(&f.kind), feature_tint(&f.kind), f.suppressed))
           .collect();
         let mut rects = Vec::with_capacity(features.len());
         let marker_dragged = matches!(drag, Some(TimelineDrag::Marker { .. }));
@@ -3265,7 +3274,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
         let mut collapsed: Option<(Rect, usize)> = None;
         // expanded groups: (open folder, last feature) for the bracket under them
         let mut brackets: Vec<(Rect, usize)> = Vec::new();
-        for (i, (id, name, icon, suppressed)) in features.into_iter().enumerate() {
+        for (i, (id, name, icon, tint, suppressed)) in features.into_iter().enumerate() {
           if let Some((rect, last)) = collapsed {
             if i <= last {
               rects.push(rect);
@@ -3344,7 +3353,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
           if dim {
             icons::draw(p, ir, icon, Color32::from_gray(185));
           } else {
-            icons::draw_color(p, ir, icon);
+            icons::draw_tinted(p, ir, icon, tint);
           }
           if suppressed {
             p.line_segment(
@@ -3545,6 +3554,24 @@ fn paint_marker(p: &egui::Painter, x: f32, top: f32, bottom: f32, c: Color32) {
   ));
 }
 
+/// The colour family of a feature's timeline icon: orange for the surface features, as Fusion
+/// draws them (and as the SURFACE tab's menus do), otherwise the icon's own.
+pub(crate) fn feature_tint(k: &FeatureKind) -> icons::Tint {
+  match k {
+    FeatureKind::SurfaceExtrude { .. }
+    | FeatureKind::SurfaceRevolve { .. }
+    | FeatureKind::Patch { .. }
+    | FeatureKind::Ruled { .. }
+    | FeatureKind::SurfaceOffset { .. }
+    | FeatureKind::SurfaceExtend { .. }
+    | FeatureKind::Untrim { .. }
+    | FeatureKind::Stitch { .. }
+    | FeatureKind::Unstitch { .. }
+    | FeatureKind::ReverseNormal { .. } => icons::Tint::Orange,
+    _ => icons::Tint::Blue,
+  }
+}
+
 fn feature_icon(k: &FeatureKind) -> Icon {
   use fox_engine::model::Primitive;
   match k {
@@ -3727,6 +3754,29 @@ pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};
 #[cfg(test)]
 mod row_menu_tests {
   use super::*;
+
+  /// Surface features show orange icons in the timeline, as Fusion's (and the SURFACE tab's
+  /// menus) do; solid features keep their own colours.
+  #[test]
+  fn surface_features_have_orange_timeline_icons() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let sk = app.s.edit_sketch.expect("sketching");
+    app.run("surface.patch", json!({"sketch": sk.0}));
+    let f = app.s.design.features.last().unwrap();
+    assert_eq!(f.name, "SurfacePatch1", "Fusion's name for a Patch");
+    assert_eq!((feature_icon(&f.kind), feature_tint(&f.kind)), (Icon::Patch, icons::Tint::Orange));
+    app.run("extrude", json!({"sketch": sk.0, "distance": 5}));
+    let f = app.s.design.features.last().unwrap();
+    assert_eq!((feature_icon(&f.kind), feature_tint(&f.kind)), (Icon::Extrude, icons::Tint::Blue));
+    app.create_sketch(json!("xz"));
+    app.run("sketch.line", json!({"points": [[20, 0], [30, 0]]}));
+    app.run("surface.extrude", json!({"distance": 5}));
+    let f = app.s.design.features.last().unwrap();
+    assert_eq!(f.name, "SurfaceExtrude1");
+    assert_eq!((feature_icon(&f.kind), feature_tint(&f.kind)), (Icon::Extrude, icons::Tint::Orange));
+  }
 
   /// A sketch point's coordinate reads at the document precision with trailing zeros trimmed
   /// down to two decimals, as Fusion's status bar prints it.

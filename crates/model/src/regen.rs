@@ -58,6 +58,11 @@ impl Body {
     Body::named(id, name, shape, feature, None)
   }
 
+  /// A surface body: faces with no solid inside (a surface Extrude, a Patch, an open import).
+  pub fn is_surface(&self) -> bool {
+    self.shape.solid_count() == 0
+  }
+
   /// [`Body::new`]; faces the history can't name take the names of the faces of `before` they are.
   fn named(id: BodyId, name: String, mut shape: Shape, feature: FeatureId, before: Option<&Body>) -> Body {
     let names = naming::from_history(&shape, feature)

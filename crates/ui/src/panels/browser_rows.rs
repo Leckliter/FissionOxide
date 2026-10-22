@@ -5,11 +5,11 @@
 use fox_engine::model::BodyId;
 use serde_json::json;
 
-use super::{RowCmd, RowItem, browser_edit, menu_item, row_item, row_menu};
+use super::{RowCmd, RowItem, browser_edit, menu_item, row_item, row_key, row_menu};
 use crate::dialogs::Kind;
 use crate::icons::Icon;
 use crate::origin::{self, OriginItem};
-use crate::{App, marking, theme};
+use crate::{App, RenameTarget, marking, theme};
 
 // ---------------------------------------------------------------- labels
 
@@ -335,14 +335,7 @@ pub(crate) fn run_bodies_folder_cmd(app: &mut App, cmd: RowCmd) {
     RowCmd::ShowAll => show_all_bodies(app),
     RowCmd::Selectable => {
       let locked = !bodies.is_empty() && bodies.iter().all(|b| app.ctx_menu.unselectable.contains(b));
-      let m = &mut app.ctx_menu;
-      m.unselectable.retain(|b| !bodies.contains(b));
-      if !locked {
-        m.unselectable.extend(&bodies);
-        app.s.selection.retain(|s| {
-          !matches!(s, fox_engine::Sel::Body { body } | fox_engine::Sel::Face { body, .. } | fox_engine::Sel::Edge { body, .. } if bodies.contains(body))
-        });
-      }
+      toggle_selectable(app, &bodies, locked);
     }
     _ => {}
   }
@@ -352,6 +345,127 @@ pub(crate) fn run_bodies_folder_cmd(app: &mut App, cmd: RowCmd) {
 pub(crate) fn folder_context_menu(ui: &mut egui::Ui, items: &[Option<RowItem>], run: impl FnOnce(RowCmd)) {
   if let Some(cmd) = row_menu(ui, items) {
     run(cmd);
+  }
+}
+
+// ---------------------------------------------------------------- a surface body row
+
+/// A surface body row's menu, as Fusion's: no Create Components from Bodies, and Physical
+/// Material enabled. Move to Group, Create Selection Set, Texture Map Controls, Cut and Display
+/// Detail Control are listed greyed.
+pub(crate) fn surface_body_menu(app: &App, bid: BodyId) -> Vec<Option<RowItem>> {
+  let visible = app.s.body_visible(bid);
+  let locked = app.ctx_menu.unselectable.contains(&bid);
+  let isolated = app.ctx_menu.isolate.is_some();
+  vec![
+    row_key(Icon::Move, "Move/Copy", "M", RowCmd::MoveCopy),
+    row_item(Icon::Folder, "Move to Group", RowCmd::NotYet),
+    row_item(Icon::Select, "Create Selection Set", RowCmd::NotYet),
+    row_item(Icon::Configure, "Configure", RowCmd::Configure),
+    row_item(Icon::PhysMaterial, "Physical Material", RowCmd::PhysicalMaterial),
+    row_key(Icon::Appearance, "Appearance", "A", RowCmd::Appearance),
+    row_item(Icon::Decal, "Texture Map Controls", RowCmd::NotYet),
+    row_item(Icon::Properties, "Properties", RowCmd::Properties),
+    row_item(Icon::ConvertMesh, "Save As Mesh", RowCmd::SaveAsMesh),
+    None,
+    row_key(Icon::Duplicate, "Copy", "Ctrl+C", RowCmd::Copy),
+    row_key(Icon::SkTrim, "Cut", "Ctrl+X", RowCmd::NotYet),
+    row_key(Icon::Remove, "Delete", "Del", RowCmd::Delete),
+    row_item(Icon::RemoveBody, "Remove", RowCmd::Remove),
+    row_item(Icon::Params, "Rename", RowCmd::Rename),
+    None,
+    row_item(Icon::Display, "Display Detail Control", RowCmd::NotYet),
+    None,
+    row_key(if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", "V", RowCmd::ShowHide),
+    row_item(Icon::Select, if locked { "Selectable" } else { "Selectable/Unselectable" }, RowCmd::Selectable),
+    None,
+    row_item(Icon::Body, "Opacity Control", RowCmd::Opacity),
+    row_item(Icon::Body, if isolated { "Unisolate" } else { "Isolate" }, RowCmd::Isolate),
+    None,
+    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
+  ]
+}
+
+/// Draws a surface body row's menu ([`surface_body_menu`]), Opacity Control as its sub-menu,
+/// and runs what was clicked.
+pub(crate) fn surface_body_context_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name: &str) {
+  let items = surface_body_menu(app, bid);
+  let mut picked = None;
+  for it in &items {
+    let Some(it) = it else {
+      ui.separator();
+      continue;
+    };
+    match it.cmd {
+      RowCmd::NotYet => {
+        ui.add_enabled_ui(false, |ui| menu_item(ui, it.icon, &it.label, it.key))
+          .inner
+          .on_disabled_hover_text("Not in FissionOxide yet");
+      }
+      RowCmd::Opacity => {
+        let browser_edit::Dragged::Bodies(bodies) = browser_edit::dragged_bodies(app, bid) else { continue };
+        browser_edit::opacity_menu(app, ui, &bodies);
+      }
+      _ => {
+        if menu_item(ui, it.icon, &it.label, it.key).clicked() {
+          ui.close();
+          picked = Some(it.cmd);
+        }
+      }
+    }
+  }
+  match picked {
+    Some(RowCmd::Rename) => browser_edit::begin(ui, row, RenameTarget::Body(bid.0), name),
+    Some(cmd) => run_surface_body_cmd(app, ui.ctx(), bid, cmd),
+    None => {}
+  }
+}
+
+/// Runs a surface body row's menu command. Like Fusion's, Copy and Selectable/Unselectable act
+/// on every selected body when the row is one of them.
+pub(crate) fn run_surface_body_cmd(app: &mut App, ctx: &egui::Context, bid: BodyId, cmd: RowCmd) {
+  let only = vec![fox_engine::Sel::Body { body: bid }];
+  let browser_edit::Dragged::Bodies(bodies) = browser_edit::dragged_bodies(app, bid) else { return };
+  let mut start = |app: &mut App, kind: Kind| {
+    app.s.selection = only.clone();
+    app.start(kind);
+  };
+  match cmd {
+    RowCmd::MoveCopy => start(app, Kind::Move),
+    RowCmd::Configure => crate::config_ui::open_table(),
+    RowCmd::PhysicalMaterial => start(app, Kind::Material),
+    RowCmd::Appearance => start(app, Kind::Form(&crate::forms::APPEARANCE)),
+    RowCmd::Properties => start(app, Kind::Inspect),
+    RowCmd::SaveAsMesh => marking::save_as_mesh(app, bid),
+    RowCmd::Copy => {
+      app.s.selection = bodies.iter().map(|b| fox_engine::Sel::Body { body: *b }).collect();
+      crate::clipboard::copy(app, ctx);
+    }
+    RowCmd::Delete => {
+      app.s.selection = only;
+      app.delete_selection();
+    }
+    RowCmd::Remove => _ = app.run("body.remove", json!({"bodies": [bid.0]})),
+    RowCmd::ShowHide => marking::show_hide(app, &[bid]),
+    RowCmd::Selectable => toggle_selectable(app, &bodies, app.ctx_menu.unselectable.contains(&bid)),
+    RowCmd::Isolate => {
+      app.ctx_menu.isolate = if app.ctx_menu.isolate.is_some() { None } else { Some(vec![bid]) };
+    }
+    RowCmd::FindInWindow => marking::find_in_window(app, &[bid], None),
+    _ => {}
+  }
+}
+
+/// Makes `bodies` selectable again when `locked`, else unselectable (and drops them from the
+/// selection).
+fn toggle_selectable(app: &mut App, bodies: &[BodyId], locked: bool) {
+  let m = &mut app.ctx_menu;
+  m.unselectable.retain(|b| !bodies.contains(b));
+  if !locked {
+    m.unselectable.extend(bodies);
+    app.s.selection.retain(|s| {
+      !matches!(s, fox_engine::Sel::Body { body } | fox_engine::Sel::Face { body, .. } | fox_engine::Sel::Edge { body, .. } if bodies.contains(body))
+    });
   }
 }
 
@@ -661,6 +775,102 @@ mod tests {
     assert!(labels(&bodies_folder_menu(&app)).contains(&"Selectable".into()));
     run_bodies_folder_cmd(&mut app, RowCmd::Selectable);
     assert!(app.ctx_menu.unselectable.is_empty());
+  }
+
+  /// A flat surface body (a Patch of a sketch rectangle), with a box beside it.
+  fn patched() -> (App, BodyId, BodyId) {
+    let mut app = boxed();
+    let solid = app.s.model.bodies[0].id;
+    app.create_sketch(json!("xy"));
+    app.run("sketch.rect", json!({"corner1": [20, 0], "corner2": [30, 10]}));
+    let sk = app.s.edit_sketch.expect("sketching");
+    app.run("surface.patch", json!({"sketch": sk.0}));
+    let surface = app.s.model.bodies.last().unwrap().id;
+    assert_ne!(surface, solid, "the patch made a body");
+    (app, surface, solid)
+  }
+
+  #[test]
+  fn a_surface_body_row_has_fusions_icon_and_menu() {
+    let (mut app, surface, solid) = patched();
+    assert_eq!(super::super::body_icon(&app, surface), Icon::SurfaceBody);
+    assert_eq!(super::super::body_icon(&app, solid), Icon::Body);
+    let items = surface_body_menu(&app, surface);
+    assert_eq!(
+      labels(&items),
+      [
+        "Move/Copy",
+        "Move to Group",
+        "Create Selection Set",
+        "Configure",
+        "Physical Material",
+        "Appearance",
+        "Texture Map Controls",
+        "Properties",
+        "Save As Mesh",
+        "-",
+        "Copy",
+        "Cut",
+        "Delete",
+        "Remove",
+        "Rename",
+        "-",
+        "Display Detail Control",
+        "-",
+        "Show/Hide",
+        "Selectable/Unselectable",
+        "-",
+        "Opacity Control",
+        "Isolate",
+        "-",
+        "Find in Window",
+      ]
+    );
+    let keys: Vec<(&str, &str)> = items.iter().flatten().filter_map(|i| i.key.map(|k| (i.label.as_str(), k))).collect();
+    assert_eq!(
+      keys,
+      [
+        ("Move/Copy", "M"),
+        ("Appearance", "A"),
+        ("Copy", "Ctrl+C"),
+        ("Cut", "Ctrl+X"),
+        ("Delete", "Del"),
+        ("Show/Hide", "V")
+      ]
+    );
+    let greyed: Vec<&str> =
+      items.iter().flatten().filter(|i| i.cmd == RowCmd::NotYet).map(|i| i.label.as_str()).collect();
+    assert_eq!(
+      greyed,
+      ["Move to Group", "Create Selection Set", "Texture Map Controls", "Cut", "Display Detail Control"]
+    );
+
+    let ctx = egui::Context::default();
+    // Physical Material is enabled: the body outside a component takes its own
+    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::PhysicalMaterial);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::Material));
+    assert_eq!(app.s.selection, [Sel::Body { body: surface }]);
+    app.dialog = None;
+    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::MoveCopy);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::Move));
+    app.dialog = None;
+    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Copy);
+    assert_eq!(app.clipboard, Some(crate::clipboard::Clip::Bodies(vec![surface])));
+    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Isolate);
+    assert_eq!(app.ctx_menu.isolate, Some(vec![surface]));
+    assert!(labels(&surface_body_menu(&app, surface)).contains(&"Unisolate".into()));
+    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Isolate);
+    assert!(app.ctx_menu.isolate.is_none());
+    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Selectable);
+    assert_eq!(app.ctx_menu.unselectable, vec![surface]);
+    assert!(labels(&surface_body_menu(&app, surface)).contains(&"Selectable".into()));
+    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Selectable);
+    assert!(app.ctx_menu.unselectable.is_empty());
+    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::ShowHide);
+    assert!(!app.s.body_visible(surface));
+    run_surface_body_cmd(&mut app, &ctx, surface, RowCmd::Remove);
+    assert!(app.s.model.body(surface).is_none(), "removed");
+    assert!(app.s.model.body(solid).is_some());
   }
 
   #[test]

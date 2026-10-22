@@ -2933,9 +2933,12 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
         paint_dim(painter, s, if hot { DIM_INK_HOT } else { DIM_INK });
       }
       text.paint(painter, r.min + Vec2::new(4.0, 2.0), if hot { DIM_TEXT_HOT } else { DIM_TEXT });
-      // Fusion's tooltip under the text names the parameter with its full value
+      // Fusion's tooltip under the text names the parameter with its full value, light text on
+      // its dark tooltip panel
       let resp = match dim_param_name(app, c.id.0) {
-        Some(name) => resp.on_hover_text(dim_tooltip(&name, c.kind.is_angle(), dim.value, app.s.design.units)),
+        Some(name) => {
+          crate::navbar::dark_tip(resp, &dim_tooltip(&name, c.kind.is_angle(), dim.value, app.s.design.units))
+        }
         None => resp,
       };
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {

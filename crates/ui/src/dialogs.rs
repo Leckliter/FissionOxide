@@ -1418,9 +1418,12 @@ impl Dialog {
         }
         ("joint", p)
       }
-      Kind::Material => {
-        ("component.material", json!({"component": self.comps.iter().flatten().next()?, "material": self.name}))
-      }
+      // a body of a component gives the component its material; a body outside one keeps its own
+      Kind::Material => match self.comps.iter().flatten().next() {
+        Some(c) => ("component.material", json!({"component": c, "material": self.name})),
+        None if !self.bodies.is_empty() => ("body.material", json!({"bodies": self.bodies, "material": self.name})),
+        None => return None,
+      },
       Kind::SkFillet => ("sketch.fillet", json!({"curves": self.curves, "radius": self.radius})),
       Kind::SkChamfer => ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance})),
       Kind::SkChamfer2 => {
@@ -1782,7 +1785,7 @@ impl Dialog {
         let need = self.saved.iter().filter(|n| n.is_empty()).count();
         self.origins.len() >= need && (!self.saved[0].is_empty() || self.comps.first().is_some_and(Option::is_some))
       }
-      Kind::Material => self.comps.iter().any(Option::is_some),
+      Kind::Material => !self.bodies.is_empty(),
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
       Kind::SkCircPattern | Kind::SkScale => !self.curves.is_empty() && self.center.is_some(),
@@ -2450,13 +2453,12 @@ impl Dialog {
       Kind::Flange => "select a profile",
       Kind::Hem | Kind::Rip => "select edges",
       Kind::Project if self.choice != "bodies" => "select geometry to project",
-      Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
+      Kind::ConvertSheet | Kind::NewComponent | Kind::Project | Kind::Material => "select a body",
       Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
       Kind::AsBuiltJoint => {
         "select the moving component, then the one it's jointed to, then a face, edge or point for the joint"
       }
       Kind::ComponentProps => "pick a component in the browser",
-      Kind::Material => "select a body of a component",
       Kind::SkFillet => "select two lines or arcs that meet",
       Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "select two lines",
       Kind::SkMirror if self.curves.is_empty() => "select sketch objects to mirror",
@@ -3456,9 +3458,14 @@ impl Dialog {
         Self::check(ui, "Flip", &mut self.flip, dirty);
       }
       Kind::Material => {
-        ui.label("Component");
-        let n = self.comps.iter().flatten().count();
-        chip(ui, n.min(1), "component");
+        if self.comps.iter().any(Option::is_some) || self.bodies.is_empty() {
+          ui.label("Component");
+          let n = self.comps.iter().flatten().count();
+          chip(ui, n.min(1), "component");
+        } else {
+          ui.label("Body");
+          chip(ui, self.bodies.len(), "body");
+        }
         ui.end_row();
         ui.label("Material");
         let cur = self.name.clone();
@@ -6222,6 +6229,21 @@ mod tests {
     d.edges = vec![edge(&s, 0, |e| e.length > 18.0 && e.length < 20.5 && e.mid.z > 5.0)];
     d.distance = "0.5 mm".into();
     apply(&mut s, &mut d);
+  }
+
+  /// Physical Material on a body outside any component gives the body its own material.
+  #[test]
+  fn physical_material_on_a_root_body() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
+    let b = s.model.bodies[0].id;
+    let mut d = Dialog::blank(Kind::Material);
+    d.bodies = vec![b.0];
+    d.comps = vec![None];
+    d.name = "Aluminum".into();
+    assert_eq!(Dialog::blank(Kind::Material).missing_input(), "select a body");
+    apply(&mut s, &mut d);
+    assert_eq!(s.design.body_settings(b).and_then(|x| x.material.as_deref()), Some("Aluminum"));
   }
 
   #[test]

@@ -327,6 +327,9 @@ pub struct BodySettings {
   pub visible: bool,
   #[serde(default)]
   pub color: Option<[u8; 3]>,
+  /// The body's own physical material; it wins over its component's.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub material: Option<String>,
 }
 
 fn yes() -> bool {
@@ -2015,7 +2018,7 @@ impl FeatureKind {
       FeatureKind::Thicken { .. } => "Thicken",
       FeatureKind::SurfaceExtrude { .. } => "SurfaceExtrude",
       FeatureKind::SurfaceRevolve { .. } => "SurfaceRevolve",
-      FeatureKind::Patch { .. } => "Patch",
+      FeatureKind::Patch { .. } => "SurfacePatch",
       FeatureKind::Stitch { .. } => "Stitch",
       FeatureKind::Unstitch { .. } => "Unstitch",
       FeatureKind::ReverseNormal { .. } => "ReverseNormal",
@@ -2665,7 +2668,7 @@ impl Design {
     if let Some(i) = self.bodies.iter().position(|b| b.body == id) {
       &mut self.bodies[i]
     } else {
-      self.bodies.push(BodySettings { body: id, name: None, visible: true, color: None });
+      self.bodies.push(BodySettings { body: id, name: None, visible: true, color: None, material: None });
       let last = self.bodies.len() - 1;
       &mut self.bodies[last]
     }

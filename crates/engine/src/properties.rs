@@ -150,13 +150,22 @@ fn component_bodies(s: &Session, id: ComponentId) -> Vec<BodyId> {
   out
 }
 
-/// Grams per mm³ of a body's material, if its component names one.
+/// Grams per mm³ of a body's material: its own, else the one its component names.
 fn density(s: &Session, body: BodyId) -> Option<(String, f64)> {
   s.design
-    .components
-    .iter()
-    .find(|c| c.bodies.contains(&body) && !c.material.is_empty())
-    .map(|c| (c.material.clone(), fox_model::assembly::density(&c.material) / 1000.0))
+    .body_settings(body)
+    .and_then(|b| b.material.clone())
+    .or_else(|| {
+      s.design
+        .components
+        .iter()
+        .find(|c| c.bodies.contains(&body) && !c.material.is_empty())
+        .map(|c| c.material.clone())
+    })
+    .map(|m| {
+      let d = fox_model::assembly::density(&m) / 1000.0;
+      (m, d)
+    })
 }
 
 fn describe(s: &Session, item: &Item) -> CmdResult {
