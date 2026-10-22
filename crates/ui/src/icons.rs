@@ -418,6 +418,9 @@ pub enum Icon {
   OriginSimple,
   OriginBetween,
   OriginTwoEdge,
+  // Draft's Type row
+  DraftFixedPlane,
+  DraftPartingLine,
 }
 
 #[derive(Clone, Copy)]
@@ -2833,6 +2836,17 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.thick((0.12, 0.2), (0.88, 0.8), Ink, 1.2);
       k.thick((0.12, 0.8), (0.88, 0.2), Ink, 1.2);
       k.circle((0.5, 0.5), 0.08, Some(Blue), None);
+    }
+    Icon::DraftFixedPlane => {
+      // a block tapering down from the fixed plane across its top
+      k.solid(&[(0.26, 0.32), (0.74, 0.32), (0.9, 0.9), (0.1, 0.9)], Fill);
+      k.thick((0.04, 0.32), (0.96, 0.32), Blue, 1.4);
+    }
+    Icon::DraftPartingLine => {
+      // two tapers meeting at the parting line
+      k.solid(&[(0.22, 0.1), (0.78, 0.1), (0.92, 0.5), (0.08, 0.5)], Fill);
+      k.solid(&[(0.08, 0.5), (0.92, 0.5), (0.78, 0.9), (0.22, 0.9)], Fill);
+      k.thick((0.04, 0.5), (0.96, 0.5), Blue, 1.4);
     }
   }
 }

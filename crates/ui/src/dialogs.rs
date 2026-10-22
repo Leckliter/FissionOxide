@@ -22,6 +22,7 @@ mod inspect_tests;
 mod interference;
 mod live;
 mod manip;
+mod modify;
 mod move_copy;
 mod pieces;
 mod press_owner;
@@ -74,7 +75,11 @@ pub enum Kind {
   Sweep,
   Hole,
   PressPull,
+  /// Offset Face (MODIFY): faces moved along their normals by a distance.
+  OffsetFace,
   Draft,
+  /// Scale (MODIFY): bodies scaled about a point, uniformly or per axis.
+  Scale,
   SplitBody,
   // sheet metal
   Flange,
@@ -166,7 +171,9 @@ impl Kind {
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
       Kind::PressPull => "PRESS PULL",
+      Kind::OffsetFace => "OFFSET FACE",
       Kind::Draft => "DRAFT",
+      Kind::Scale => "SCALE",
       Kind::SplitBody => "SPLIT BODY",
       Kind::Flange => "FLANGE",
       Kind::Hem => "HEM",
@@ -239,7 +246,9 @@ impl Kind {
       Kind::Sweep => Icon::Sweep,
       Kind::Hole => Icon::Hole,
       Kind::PressPull => Icon::PressPull,
+      Kind::OffsetFace => Icon::OffsetFace,
       Kind::Draft => Icon::Draft,
+      Kind::Scale => Icon::Scale,
       Kind::SplitBody => Icon::SplitBody,
       Kind::Flange => Icon::Flange,
       Kind::Hem => Icon::Hem,
@@ -293,6 +302,8 @@ impl Kind {
       Kind::Hole => ("Hole", "Drill holes at a sketch's points (H)"),
       Kind::PressPull => ("Press Pull", "Push or pull faces along their normals (Q)"),
       Kind::Draft => ("Draft", "Taper faces about a pull direction"),
+      Kind::OffsetFace => ("Offset Face", "Offset faces, flat or curved, along their normals"),
+      Kind::Scale => ("Scale", "Scale bodies about a point"),
       Kind::SplitBody => ("Split Body", "Split bodies along a plane or planar face"),
       Kind::Flange => ("Flange", "Sheet metal from a profile, an open path or sheet edges"),
       Kind::Hem => ("Hem", "Fold sheet edges back on themselves"),
@@ -363,6 +374,7 @@ impl Kind {
         | Kind::Shell
         | Kind::Combine
         | Kind::PressPull
+        | Kind::OffsetFace
         | Kind::Draft
         | Kind::Hem
         | Kind::Rip
@@ -637,6 +649,8 @@ pub struct Dialog {
   /// Mirror's plane or Circular Pattern's axis as last picked from the selection: only a new
   /// pick replaces the one in the dialog (see [`copies`]).
   last_pick: Value,
+  /// Scale: the point it scales about (world mm), once picked or filled in from the first body.
+  point: Option<[f64; 3]>,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -769,6 +783,7 @@ impl Dialog {
       switch: None,
       ghosts: Vec::new(),
       last_pick: Value::Null,
+      point: None,
     }
   }
 
@@ -903,10 +918,34 @@ impl Dialog {
         d.distance = "2 mm".into();
         d.choice = "automatic";
       }
+      // Fusion: Fixed Plane, the Pull Direction row active and nothing for it yet, Tangent Chain
+      // on, One Side; the angle (0.0 until set) shows once the picks are made
       Kind::Draft => {
-        d.angle = "3 deg".into();
-        d.plane = json!("xy");
-        d.plane_label = "XY plane".into();
+        d.choice = "fixed_plane";
+        d.position = "one_side";
+        d.flag = true;
+        d.angle = "0.0 deg".into();
+        d.angle2 = "0.0 deg".into();
+        d.plane = Value::Null;
+        d.plane_label = String::new();
+        d.pick_row = 0;
+      }
+      // Fusion: Entities active and nothing picked (no all-bodies default), Uniform, factor 1.00
+      // once a body is picked
+      Kind::Scale => {
+        d.choice = "uniform";
+        d.a = "1.00".into();
+        d.b = "1.00".into();
+        d.c = "1.00".into();
+        d.bodies.clear();
+        for x in &s.selection {
+          if let Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } = x
+            && !d.bodies.contains(&body.0)
+          {
+            d.bodies.push(body.0);
+          }
+        }
+        d.point = d.bodies.first().and_then(|b| body_centre(s, *b));
       }
       Kind::SplitBody => d.bodies = sel_only_bodies(s),
       Kind::Interference => d.flag = true,
@@ -1117,6 +1156,10 @@ impl Dialog {
     if kind == Kind::PressPull {
       d.sync_press_owner(&app.s);
     }
+    // Fusion's Offset Face starts at 0.00 in the document unit
+    if kind == Kind::OffsetFace {
+      d.distance = d.unit.fixed(0.0, 2);
+    }
     d.dirty = !d.picks();
     d
   }
@@ -1284,6 +1327,11 @@ impl Dialog {
         let mut d = Dialog::blank(Kind::Move);
         d.unit = app.s.design.units;
         d.load_move(&app.s, kind);
+        d
+      }
+      kind @ FeatureKind::Draft { .. } => {
+        let mut d = Dialog::blank(Kind::Draft);
+        d.load_draft(kind);
         d
       }
       kind @ (FeatureKind::Emboss { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. }) => {
@@ -1466,8 +1514,16 @@ impl Dialog {
       ),
       Kind::Hole => ("hole", self.hole_params()?),
       Kind::PressPull => self.press_pull_command(),
-      Kind::Draft => {
-        ("draft", json!({"faces": self.faces, "plane": self.plane, "angle": self.angle, "flip": self.flip}))
+      Kind::OffsetFace => ("press_pull", json!({"faces": self.faces, "distance": self.distance})),
+      Kind::Draft => ("draft", self.draft_params()),
+      Kind::Scale => {
+        let mut p = json!({"bodies": self.bodies, "center": self.point?});
+        if self.choice == "non_uniform" {
+          p["factors"] = json!([self.a, self.b, self.c]);
+        } else {
+          p["factor"] = json!(self.a);
+        }
+        ("scale", p)
       }
       Kind::SplitBody if self.target.is_some() => {
         let tool = self.target?;
@@ -1841,6 +1897,7 @@ impl Dialog {
         json!({"count": self.count, "angle": self.angle, "symmetric": self.symmetric[0], "join": self.join})
       }
       Kind::Move => self.move_edit_set()?,
+      Kind::Draft => self.draft_edit_set(),
       Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
       Kind::Hole | Kind::Mirror | Kind::Combine | Kind::PressPull => self.more_edit_set()?,
       _ => return None,
@@ -1956,7 +2013,9 @@ impl Dialog {
       Kind::Hole => self.hole_ready(),
       Kind::Fold => self.sketch.is_some(),
       Kind::RectPattern => self.pattern_ready(),
-      Kind::PressPull | Kind::Draft => !self.faces.is_empty(),
+      Kind::PressPull | Kind::OffsetFace => !self.faces.is_empty(),
+      Kind::Draft => !self.plane.is_null() && !self.faces.is_empty(),
+      Kind::Scale => !self.bodies.is_empty() && self.point.is_some(),
       Kind::Flange => {
         if self.choice == "edge" {
           !self.edges.is_empty()
@@ -2008,6 +2067,12 @@ impl Dialog {
     }
     let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
     let mut out = Vec::new();
+    // Draft's pull face stays picked (and blue) with the faces to draft
+    if self.kind == Kind::Draft
+      && let (Some(b), Some(i)) = (get(&self.plane, "body"), get(&self.plane, "face"))
+    {
+      out.push(Sel::Face { body: BodyId(b), face: i });
+    }
     for e in &self.edges {
       if let (Some(b), Some(i)) = (get(e, "body"), get(e, "edge")) {
         out.push(Sel::Edge { body: BodyId(b), edge: i });
@@ -2222,7 +2287,7 @@ impl Dialog {
           self.edges = e;
         }
       }
-      Kind::PressPull | Kind::Draft if !self.applied => {
+      Kind::PressPull | Kind::OffsetFace if !self.applied => {
         let f = sel_faces(s);
         if f != self.faces {
           self.faces = f;
@@ -2231,6 +2296,8 @@ impl Dialog {
           }
         }
       }
+      Kind::Draft if !self.applied => self.sync_draft(s),
+      Kind::Scale => self.sync_scale(s),
       Kind::Refold if !self.applied => {
         let b = sel_bodies(s);
         if b != self.bodies {
@@ -2598,8 +2665,12 @@ impl Dialog {
         Kind::CircPattern => "Select axis".into(),
         Kind::Combine => "Select tool bodies".into(),
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
+        Kind::Draft if self.pick_row == 0 || self.plane.is_null() => "Select pull direction".into(),
         Kind::Draft => "Select faces to draft".into(),
         Kind::RedefinePlane => redefine::HINT.into(),
+        Kind::OffsetFace => "Select face(s) to offset".into(),
+        Kind::Scale if self.bodies.is_empty() => "Select bodies or sketches to scale".into(),
+        Kind::Scale => "Select point".into(),
         // one prompt for the whole pick, as Fusion words it
         Kind::SkScale => {
           "Select the sketch geometry to scale and the point from which to scale, then specify the scale factor".into()
@@ -2618,6 +2689,10 @@ impl Dialog {
     if self.kind == Kind::Mirror && self.editing.is_none() {
       return Some("Hold Ctrl to modify object selection or mirror plane".into());
     }
+    // so does Draft's, once its picks are made
+    if self.kind == Kind::Draft {
+      return Some("Specify draft angle".into());
+    }
     if hovering && self.selects() {
       return Some("Hold Ctrl to modify selection".into());
     }
@@ -2630,7 +2705,8 @@ impl Dialog {
       Kind::OffsetPlane => "Specify offset distance",
       Kind::Hole => "Specify hole diameter and depth",
       Kind::Draft => "Specify draft angle",
-      Kind::PressPull => "Specify distance",
+      Kind::PressPull | Kind::OffsetFace => "Specify distance",
+      Kind::Scale => "Specify scale factor",
       Kind::Loft | Kind::Sweep | Kind::Combine => "Specify operation",
       Kind::RectPattern | Kind::CircPattern => "Specify quantity and distance",
       Kind::Move => "Specify distance or angle",
@@ -2672,6 +2748,7 @@ impl Dialog {
           | Kind::SkCircPattern
           | Kind::SkRectPattern
           | Kind::SkScale
+          | Kind::Scale
       )
   }
 
@@ -2692,18 +2769,21 @@ impl Dialog {
   }
 
   /// Is the dialog's value still at 0.00 (or half typed), where Fusion previews nothing and OK
-  /// waits: Sketch Offset's distance, a new fillet's radius or shell's thickness.
+  /// waits: Sketch Offset's and Offset Face's distance, Draft's angle, a new fillet's radius or
+  /// shell's thickness.
   fn waits_for_value(&self) -> bool {
     match self.kind {
-      Kind::SkOffset => !self.offset_set(),
+      Kind::SkOffset | Kind::OffsetFace => !self.offset_set(),
+      Kind::Draft => !self.draft_angle_set(),
       Kind::Fillet if self.editing.is_none() && self.solid.fillet_type != "full_round" => !length_set(&self.radius),
       Kind::Shell if self.editing.is_none() => !length_set(&self.radius),
       _ => false,
     }
   }
 
-  /// Sketch Offset: has the distance left 0.00 (a value the arrow, the box or the row set)? A
-  /// distance naming a user parameter counts as set; a half-typed one (".", "-") doesn't.
+  /// Sketch Offset, Offset Face: has the distance left 0.00 (a value the arrow, the box or the
+  /// row set)? A distance naming a user parameter counts as set; a half-typed one (".", "-")
+  /// doesn't.
   fn offset_set(&self) -> bool {
     length_set(&self.distance)
   }
@@ -2724,7 +2804,11 @@ impl Dialog {
       Kind::Hole => "sketch points to drill (Point tool) are needed",
       Kind::RectPattern => self.pattern_missing(),
       Kind::Fold => "pick a sketch with a bend line",
-      Kind::PressPull | Kind::Draft => "select faces",
+      Kind::PressPull | Kind::OffsetFace => "select faces",
+      Kind::Draft if self.plane.is_null() => "select the pull direction",
+      Kind::Draft => "select faces to draft",
+      Kind::Scale if self.bodies.is_empty() => "select bodies to scale",
+      Kind::Scale => "select the point to scale about",
       Kind::Flange if self.choice == "edge" => "select sheet edges",
       Kind::Flange => "select a profile",
       Kind::Hem | Kind::Rip => "select edges",
@@ -3364,18 +3448,9 @@ impl Dialog {
         self.offset_type_row(ui);
         Self::field(ui, "Distance", &mut self.distance, dirty);
       }
-      Kind::Draft => {
-        ui.label("Faces");
-        chip(ui, self.faces.len(), "selected");
-        ui.end_row();
-        ui.label("Pull direction");
-        let before = self.plane_label.clone();
-        self.plane_choice(ui);
-        *dirty |= before != self.plane_label;
-        ui.end_row();
-        Self::field(ui, "Angle", &mut self.angle, dirty);
-        Self::check(ui, "Flip", &mut self.flip, dirty);
-      }
+      Kind::Draft => self.draft_rows(ui, dirty),
+      Kind::Scale => self.scale_rows(ui, dirty),
+      Kind::OffsetFace => self.offset_face_rows(ui, dirty),
       Kind::SplitBody => {
         ui.label("Bodies to split");
         sel_chip(ui, accent, &self.bodies_label(), !self.bodies.is_empty());
@@ -5359,6 +5434,12 @@ fn sel_curves(s: &Session) -> Vec<u32> {
   s.selection.iter().filter_map(|x| if let Sel::SketchCurve { curve, .. } = x { Some(curve.0) } else { None }).collect()
 }
 
+/// Scale's point when a body is picked first: the body's centre, as Fusion fills the Point row
+/// on the first pick.
+fn body_centre(s: &Session, body: u32) -> Option<[f64; 3]> {
+  manip::centre(s, &[body]).map(|c| [c.x, c.y, c.z].map(|v| (v * 1e4).round() / 1e4))
+}
+
 /// The command Press Pull (Q) runs for what is picked, as in Fusion: Extrude on a sketch
 /// profile, Fillet on an edge (with no face picked), else Offset Face.
 fn press_pull_kind(s: &Session) -> Kind {
@@ -5593,9 +5674,12 @@ impl Dialog {
   /// of Fillet and Chamfer, Sketch Scale's factor. None for dialogs without an arrow.
   pub fn value_box_field(&mut self) -> Option<&mut String> {
     match self.kind {
-      Kind::Extrude | Kind::OffsetPlane | Kind::PressPull | Kind::SkOffset | Kind::Section => Some(&mut self.distance),
+      Kind::Extrude | Kind::OffsetPlane | Kind::PressPull | Kind::OffsetFace | Kind::SkOffset | Kind::Section => {
+        Some(&mut self.distance)
+      }
       Kind::Fillet | Kind::Chamfer => Some(&mut self.radius),
       Kind::SkScale => Some(&mut self.a),
+      Kind::Scale if self.choice != "non_uniform" => Some(&mut self.a),
       _ => None,
     }
   }
@@ -6737,7 +6821,10 @@ mod tests {
     let mut d = form(&mut s, &PLANE_THREE_POINTS, vec![], &[("c", json!(["0", "0", "10"]))]);
     apply(&mut s, &mut d);
     d.applied = false;
-    let mut d = form(&mut s, &SCALE, vec![Sel::Body { body: b }], &[("factor", json!("0.5"))]);
+    let mut d = Dialog::blank(Kind::Scale);
+    d.bodies = vec![b.0];
+    d.point = Some([0.0; 3]);
+    d.a = "0.5".into();
     apply(&mut s, &mut d);
     assert!((s.model.bodies[0].shape.mass().unwrap().volume - 500.0).abs() < 1e-6);
     d.applied = false;

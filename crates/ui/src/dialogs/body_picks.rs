@@ -11,11 +11,7 @@ use super::{Dialog, Kind};
 impl Dialog {
   /// Does every viewport pick this dialog takes go to a body chip?
   pub(super) fn picks_bodies(&self) -> bool {
-    match self.kind {
-      Kind::Combine | Kind::SplitBody => true,
-      Kind::Form(f) => std::ptr::eq(f, &crate::forms::SCALE),
-      _ => false,
-    }
+    matches!(self.kind, Kind::Combine | Kind::SplitBody | Kind::Scale)
   }
 
   /// Picks whole bodies while a body chip is active (the selection priority is put back when the
@@ -60,7 +56,7 @@ mod tests {
   /// it. The selection priority is put back when the dialog closes.
   #[test]
   fn body_chips_pick_whole_bodies() {
-    for kind in [Kind::Combine, Kind::SplitBody, Kind::Form(&crate::forms::SCALE)] {
+    for kind in [Kind::Combine, Kind::SplitBody, Kind::Scale] {
       let mut app = two_boxes();
       let (b1, b2) = (app.s.model.bodies[0].id, app.s.model.bodies[1].id);
       let mut d = Dialog::open(&mut app, kind);
@@ -75,9 +71,7 @@ mod tests {
       assert_eq!(app.s.selection, vec![Sel::Body { body: b1 }], "{kind:?}");
       assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("Body1"));
       d.sync_selection(&app.s);
-      let taken =
-        if d.kind == Kind::Combine || d.kind == Kind::SplitBody { json!(d.bodies) } else { d.form.values[0].clone() };
-      assert_eq!(taken, json!([b1.0]), "{kind:?}: the dialog takes the body");
+      assert_eq!(d.bodies, vec![b1.0], "{kind:?}: the dialog takes the body");
       let p = a_face(&app, 1);
       crate::select::pick(&mut app, p, true);
       d.sync_selection(&app.s);
@@ -90,7 +84,7 @@ mod tests {
     }
     // a dialog that picks faces leaves the priority alone
     let mut app = two_boxes();
-    let mut d = Dialog::open(&mut app, Kind::Form(&crate::forms::OFFSET_FACE));
+    let mut d = Dialog::open(&mut app, Kind::OffsetFace);
     d.body_pick_priority(&mut app);
     assert_eq!(app.sel_priority, Priority::Face);
   }

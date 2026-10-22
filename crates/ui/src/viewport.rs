@@ -466,6 +466,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         Some(d) if d.wants_plane() => d.take_plane(plane),
         // Section Analysis's cut plane
         Some(d) if d.wants_cut_plane() => d.set_cut_plane(&app.s, plane),
+        // Draft's pull direction
+        Some(d) if d.wants_pull_plane() => d.pick_pull_plane(&mut app.s, plane),
         _ => {
           app.cancel_dialog();
           app.create_sketch(plane);
@@ -4800,10 +4802,11 @@ struct PlanePick {
 /// visible point, axes and planes are drawn and picked by [`crate::origin`], and the one under
 /// the cursor is noted here (`App::hover_origin`, winning over the face highlight too).
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
-  // Create Sketch, Box, Cylinder, Sphere, Torus and Coil before their base is drawn, Mirror, and
-  // Section Analysis waiting for its cut plane
+  // Create Sketch, Box, Cylinder, Sphere, Torus and Coil before their base is drawn, Mirror,
+  // Section Analysis waiting for its cut plane, and Draft's Pull Direction row
   let sketching = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane());
-  let picking = sketching || app.dialog.as_ref().is_some_and(|d| d.wants_plane() || d.wants_cut_plane());
+  let picking =
+    sketching || app.dialog.as_ref().is_some_and(|d| d.wants_plane() || d.wants_cut_plane() || d.wants_pull_plane());
   app.hover_origin = None;
   app.grid_preview = None;
   if !picking {

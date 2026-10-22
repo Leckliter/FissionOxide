@@ -1066,21 +1066,6 @@ pub static WEB: Form = Form {
   picks_model: false,
 };
 
-pub static SCALE: Form = Form {
-  title: "SCALE",
-  name: "Scale",
-  hint: "Scale bodies about a point",
-  icon: Icon::Scale,
-  cmd: "scale",
-  fixed: &[],
-  inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies (default all)", required: false },
-    Input::Vec3 { key: "center", label: "Point", default: ["0", "0", "0"] },
-    Input::Expr { key: "factor", label: "Scale factor", default: "2" },
-  ],
-  picks_model: false,
-};
-
 pub static SPLIT_FACE: Form = Form {
   title: "SPLIT FACE",
   name: "Split Face",
@@ -1103,20 +1088,6 @@ pub static REMOVE_FACES: Form = Form {
   cmd: "remove_faces",
   fixed: &[],
   inputs: &[Input::Faces { key: "faces", label: "Faces" }],
-  picks_model: true,
-};
-
-pub static OFFSET_FACE: Form = Form {
-  title: "OFFSET FACE",
-  name: "Offset Face",
-  hint: "Offset faces, flat or curved, along their normals",
-  icon: Icon::OffsetFace,
-  cmd: "press_pull",
-  fixed: &[],
-  inputs: &[
-    Input::Faces { key: "faces", label: "Faces" },
-    Input::Expr { key: "distance", label: "Distance", default: "1 mm" },
-  ],
   picks_model: true,
 };
 

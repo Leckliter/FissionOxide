@@ -1378,6 +1378,10 @@ fn dragging_drafts_arc_turns_the_angle_in_five_degree_steps() {
   let front = h.app.s.model.bodies[0].faces().iter().find(|f| f.normal.y < -0.9).unwrap().id;
   h.app.s.selection = vec![fox_engine::Sel::Face { body, face: front }];
   h.app.start(crate::dialogs::Kind::Draft);
+  // the face is the face to draft; the XY plane, picked in the viewport, the pull direction
+  if let Some(d) = h.app.dialog.as_mut() {
+    d.pick_pull_plane(&mut h.app.s, json!("xy"));
+  }
   h.app.fit_view_now();
   for _ in 0..3 {
     h.frame(vec![]);
@@ -1387,7 +1391,7 @@ fn dragging_drafts_arc_turns_the_angle_in_five_degree_steps() {
   let placed = crate::handles::placed_points(&h.app, &project);
   let (_, arc) = placed[0].clone().expect("the disc on its arc");
   // the arc's 33 points run a quarter turn either side of the pull direction: from 45° before
-  // it to about 17° before it is a 28° turn from 3°, 31° snapped to 30°
+  // it to about 17° before it is a 28° turn from 0.0°, snapped to 30°
   let (from, to) = (arc[8], arc[13]);
   h.drag(from, to);
   assert!(!matches!(h.app.drag, Some(crate::viewport::Drag::Box { .. })), "no window selection");
@@ -2259,7 +2263,7 @@ fn cancel_leaves_nothing_selected() {
   let b = &h.app.s.model.bodies[0];
   let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
   h.app.s.selection = vec![Sel::Face { body: b.id, face: top }];
-  h.app.start(Kind::Form(&crate::forms::OFFSET_FACE));
+  h.app.start(Kind::OffsetFace);
   for _ in 0..3 {
     h.frame(vec![]);
   }

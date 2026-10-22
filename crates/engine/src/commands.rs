@@ -130,7 +130,7 @@ cmds! {
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), rail2?: sketch id | {sketch, curves?} (second guide rail: sections anchored on rail, reaching rail2), guide_surface?: face (the profile keeps its angle to the surface normal), profile_scaling?: scale|stretch|none (with rails; stretch, the two-rail default, only across them), twist?: angle, taper?: angle (outward per path length), orientation?: perpendicular|parallel, operation?, targets?: [body] (bodies join/cut may change)}";
   "hole" => "Holes at sketch points (into the face the sketch is on), or one hole on a face (Fusion's single hole) held at offsets from its edges", "{sketch?, points?: [id] | face: {body, face}, at?: [x,y,z], offsets?: [{edge, distance}], diameter, depth? | through_all? | to?: plane, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, drill_point?: angle|flat, tap?: simple|clearance|tapped (tapped: a cosmetic thread on the walls), pitch? (tapped; default ISO coarse), flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
-  "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?}";
+  "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?, tangent_chain?: bool (adds the faces joined to them across smooth edges)}";
   "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius; distance2 makes it asymmetric (radius, or distance, along each edge's first face: the one whose outward normal sorts first by x, y, z; flipped swaps them); full_round replaces each centre face with a round tangent to it and its side faces", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius | distance, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?, distance2?, flipped?: bool} | {full_round: [{center: face, side_one: [face], side_two: [face]}]} (a face is {body, face} or {point, normal?})";
   "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle (as in Fusion, distance and the angle are measured on an extrusion's cap; flipped swaps the faces); faces chamfer all their edges; tangent_chain adds the edges that continue them smoothly", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], distance, distance2? | angle?, flipped?: bool, tangent_chain?: bool}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
@@ -1070,8 +1070,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       add_feature(s, FeatureKind::SplitBody { bodies: body_sel(p), plane })
     }
     "draft" => {
+      let mut picked = p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))?.clone();
+      if p.get("tangent_chain").and_then(Value::as_bool).unwrap_or(false) {
+        picked = crate::solid::tangent_faces(s, picked);
+      }
       let mut faces = Vec::new();
-      for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
+      for f in &picked {
         faces.push(face_ref(s, f)?);
       }
       let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;

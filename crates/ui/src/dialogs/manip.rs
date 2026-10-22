@@ -33,6 +33,8 @@ pub(super) struct Cache {
   /// Draft: the angle handle has been dragged, so its floating value box shows (Fusion opens it
   /// with the drag, not before).
   draft_box: bool,
+  /// Draft: the pull direction it was found for, a point on its face or plane and the normal.
+  pull: Option<(Value, DVec3, DVec3)>,
 }
 
 /// Draft's angle handle turns in 5° steps, as Fusion's does.
@@ -140,7 +142,8 @@ impl Dialog {
   /// on the first face) or face (Press Pull), or the offset curves (Sketch Offset).
   fn anchor_key(&self) -> Value {
     match self.kind {
-      Kind::PressPull | Kind::Shell | Kind::Draft => json!(self.faces.first()),
+      Kind::PressPull | Kind::OffsetFace | Kind::Shell | Kind::Draft => json!(self.faces.first()),
+      Kind::Scale => json!([self.bodies, self.point]),
       Kind::SkOffset => json!({"offset": self.curves}),
       Kind::Fillet => json!(self.edges.first().or(self.faces.first())),
       _ => json!(self.edges.first()),
@@ -154,10 +157,22 @@ impl Dialog {
       return;
     }
     match self.kind {
-      Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::Shell | Kind::Draft if !self.applied => {
+      Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::OffsetFace | Kind::Shell | Kind::Draft
+        if !self.applied =>
+      {
         let key = self.anchor_key();
         if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
           self.manip.anchor = anchor(s, &key).map(|(o, d)| (key, o, d));
+        }
+        if self.kind == Kind::Draft && self.manip.pull.as_ref().is_none_or(|p| p.0 != self.plane) {
+          self.manip.pull = pull_anchor(s, &self.plane).map(|(o, n)| (self.plane.clone(), o, n));
+        }
+      }
+      // the bodies' reach from the point, measured before the preview scales them
+      Kind::Scale if !self.applied => {
+        let key = self.anchor_key();
+        if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
+          self.manip.anchor = self.body_scale_anchor(s).map(|(o, d)| (key, o, d));
         }
       }
       // the offset curves stay as they are under the preview
@@ -178,6 +193,33 @@ impl Dialog {
       Kind::SkScale => self.manip.anchor = self.scale_anchor(s).map(|(o, d)| (Value::Null, o, d)),
       _ => {}
     }
+  }
+
+  /// Scale: the arrow's foot (the point) and the world X axis as long as the bodies reach from
+  /// the point (the arrow is that long at a factor of 1).
+  fn body_scale_anchor(&self, s: &Session) -> Option<(DVec3, DVec3)> {
+    let at = DVec3::from(self.point?);
+    let mut reach: f64 = 0.0;
+    for b in &self.bodies {
+      let Some(m) = s.model.body(BodyId(*b)).and_then(|b| b.mesh()) else { continue };
+      for p in &m.positions {
+        reach = reach.max((DVec3::from(p.map(f64::from)) - at).length());
+      }
+    }
+    if reach < 1e-6 {
+      reach = 10.0;
+    }
+    Some((at, DVec3::X * reach))
+  }
+
+  /// Draft: the pull direction once it is picked, as it was before the preview: a point on its
+  /// face or plane and the way it points (flipped with Flip Pull Direction).
+  pub fn draft_pull(&self) -> Option<(DVec3, DVec3)> {
+    if self.kind != Kind::Draft || self.editing.is_some() {
+      return None;
+    }
+    let (key, o, n) = self.manip.pull.as_ref()?;
+    (*key == self.plane).then_some((*o, if self.flip { -*n } else { *n }))
   }
 
   /// Sketch Scale's factor as a number.
@@ -220,6 +262,16 @@ impl Dialog {
   /// feature stored (see [`Dialog::load_edit_anchor`]); Press Pull's picks name the body before
   /// it, so it has none while editing.
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
+    // Scale (uniform): the arrow from the point, the factor times the bodies' reach long
+    if self.kind == Kind::Scale {
+      let (key, origin, reach) = self.manip.anchor.as_ref().filter(|_| self.choice != "non_uniform")?;
+      if *key != self.anchor_key() {
+        return None;
+      }
+      let r = reach.length();
+      let f = fox_engine::expr::eval(&self.a, fox_engine::expr::Kind::Unitless, &s.model.params).ok()?;
+      return Some(Manipulator { origin: *origin, dir: *reach / r, value: f * r });
+    }
     // Sketch Scale: the arrow from the point, the factor times the entities' reach long
     if self.kind == Kind::SkScale {
       let (_, origin, reach) =
@@ -227,7 +279,7 @@ impl Dialog {
       let r = reach.length();
       return Some(Manipulator { origin: *origin, dir: *reach / r, value: self.scale_factor(s)? * r });
     }
-    if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset)
+    if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::OffsetFace | Kind::SkOffset)
       || (self.editing.is_some() && !matches!(self.kind, Kind::Fillet | Kind::Chamfer))
     {
       return None;
@@ -236,7 +288,11 @@ impl Dialog {
     if *key != self.anchor_key() {
       return None;
     }
-    let field = if matches!(self.kind, Kind::PressPull | Kind::SkOffset) { &self.distance } else { &self.radius };
+    let field = if matches!(self.kind, Kind::PressPull | Kind::OffsetFace | Kind::SkOffset) {
+      &self.distance
+    } else {
+      &self.radius
+    };
     let value = match self.len(s, field) {
       Some(v) => v,
       // Sketch Offset's arrow stays on its curve (and its value box stays put) while the distance
@@ -492,9 +548,9 @@ impl Dialog {
   /// tilts the face in 5° steps; and the pull direction as a hollow arrow from the hinge.
   fn draft_handles(&self, s: &Session) -> Option<Vec<Handle>> {
     let (c, n) = self.face_anchor()?;
-    let pl = super::plane_of(s, &self.plane)?;
-    let pull = if self.flip { -pl.normal() } else { pl.normal() };
-    let (zero, axis, hinge) = draft_dial(c, n, pl.origin, pull)?;
+    // (the pull plane as picked: a pull face may change under the preview)
+    let (origin, pull) = self.draft_pull()?;
+    let (zero, axis, hinge) = draft_dial(c, n, origin, pull)?;
     let a = self.ang(s, &self.angle)?;
     Some(vec![Handle::dial(hinge, axis, zero, None, a, deg(a)).disc(DRAFT_STEP), Handle::pull(hinge, pull)])
   }
@@ -542,11 +598,16 @@ impl Dialog {
     match self.kind {
       // a radius or distance can't reach zero: the smallest step is as far as it goes
       Kind::Fillet | Kind::Chamfer => self.radius = mm(self.unit, v.max(step.max(1e-3))),
-      Kind::PressPull => self.distance = mm(self.unit, v),
+      Kind::PressPull | Kind::OffsetFace => self.distance = mm(self.unit, v),
       // an offset is never zero: it keeps to the side it is on
       Kind::SkOffset => {
         self.distance = mm(self.unit, nonzero(v, step));
         self.follow = false;
+      }
+      // the factor to two decimals, never zero or negative (as Fusion's box shows it)
+      Kind::Scale => {
+        let Some(r) = self.manip.anchor.as_ref().map(|a| a.2.length()).filter(|r| *r > 1e-9) else { return false };
+        self.a = format!("{:.2}", (v / r).max(0.01));
       }
       // the factor to two decimals, never zero or negative
       Kind::SkScale => {
@@ -754,6 +815,19 @@ pub(super) fn axis_line(s: &Session, key: &str) -> Option<(DVec3, DVec3)> {
       (o, d.try_normalize()?)
     }
   })
+}
+
+/// A point on Draft's pull direction and its normal: a picked face's centre and normal, else the
+/// plane's origin and normal.
+fn pull_anchor(s: &Session, plane: &Value) -> Option<(DVec3, DVec3)> {
+  if plane.is_null() {
+    return None;
+  }
+  if plane.get("face").is_some() {
+    return anchor(s, plane);
+  }
+  let pl = super::plane_of(s, plane)?;
+  Some((pl.origin, pl.normal()))
 }
 
 /// Draft's dial for a face through `c` with outward normal `n`, the neutral plane through
