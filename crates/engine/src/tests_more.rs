@@ -226,6 +226,38 @@ fn rib_grows_to_the_floor() {
 }
 
 #[test]
+fn rib_thickness_on_one_side_and_a_web_that_misses() {
+  let mut s = Session::default();
+  block(&mut s, 40.0, 20.0, 4.0);
+  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 10}));
+  let pl = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
+  run(&mut s, "sketch.line", json!({"points": [[4, -20], [36, -20]]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let v0 = volume(&s);
+  let centre_y = |s: &Session| s.model.bodies[0].shape.mass().unwrap().center_of_mass.y;
+  run(&mut s, "rib", json!({"thickness": 2}));
+  let (sym_v, sym_y) = (volume(&s) - v0, centre_y(&s));
+  run(&mut s, "undo", json!({}));
+  // all 2 mm on one side of the line: the same rib, moved over by half its thickness
+  run(&mut s, "rib", json!({"thickness": 2, "one_side": true}));
+  let (one_v, one_y) = (volume(&s) - v0, centre_y(&s));
+  assert!((one_v - sym_v).abs() < 1e-6, "{one_v} {sym_v}");
+  let shift = (one_y - sym_y).abs() * volume(&s) / one_v;
+  assert!((shift - 1.0).abs() < 1e-3, "rib moved {shift}");
+  // a web on a line that runs past the block names itself in its error
+  run(&mut s, "undo", json!({}));
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 30}));
+  let high = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": high}}));
+  run(&mut s, "sketch.line", json!({"points": [[60, 60], [80, 60]]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let _ = s.execute("web", &json!({"thickness": 2}));
+  let errors = s.model.errors().join("; ");
+  assert!(errors.contains("the web doesn't meet the body"), "{errors}");
+}
+
+#[test]
 fn scale_remove_faces_and_curved_press_pull() {
   let mut s = Session::default();
   block(&mut s, 10.0, 10.0, 10.0);

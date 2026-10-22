@@ -89,9 +89,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         let (r, _) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::hover());
         logo::paint(ui.painter(), r.shrink(2.0));
         ui.add_space(4.0);
-        if bar_icon(ui, Icon::DataPanel, if app.data.open { "Hide Data Panel" } else { "Show Data Panel" }, true)
-          .clicked()
-        {
+        if bar_icon(ui, Icon::DataPanel, crate::data_panel::BUTTON_TIP, true).clicked() {
           app.data.toggle();
         }
         ui.add_space(6.0);
@@ -260,54 +258,29 @@ pub(crate) const FILE_MENU: [(&str, &str, bool); 15] = [
   ("View", "", true),
 ];
 
-/// Why a greyed File menu entry is greyed.
-const CLOUD_ONLY: &str = "Needs a design saved to a Fusion Team cloud project; FissionOxide keeps designs locally";
+/// The File menu entries Fusion draws a separator above: Save, Create Version, 3D Print and View
+/// Details on Web.
+pub(crate) const FILE_MENU_BREAKS: [usize; 4] = [5, 9, 10, 13];
 
 fn file_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(240.0);
-  let item = |ui: &mut egui::Ui, label: &str, key: &str, enabled: bool| -> bool {
-    let mut b = egui::Button::new(label).min_size(vec2(220.0, 0.0));
-    if !key.is_empty() {
-      b = b.shortcut_text(key);
-    }
-    let r = ui.add_enabled(enabled, b);
-    if enabled { r.clicked() } else { r.on_disabled_hover_text(CLOUD_ONLY).clicked() }
-  };
   for (i, (label, key, enabled)) in FILE_MENU.iter().enumerate() {
-    // the groups Fusion separates
-    if matches!(i, 2 | 5 | 8 | 12 | 14) {
+    if FILE_MENU_BREAKS.contains(&i) {
       ui.separator();
     }
-    match *label {
-      "Export..." => {
-        ui.menu_button("Export...", |ui| {
-          for f in fox_engine::exchange::FORMATS.iter().filter(|f| f.export) {
-            let label = format!("{} (*.{})", f.name, f.extensions.join(", *."));
-            if ui.button(label).on_hover_text(f.note).clicked() {
-              ui.close();
-              app.export(f.id);
-            }
-          }
-        });
-        continue;
-      }
-      "View" => {
-        ui.menu_button("View", |ui| {
-          ui.checkbox(&mut app.browser_open, "Show Browser");
-          ui.checkbox(&mut app.show_comments, "Show Comments");
-          ui.checkbox(&mut app.show_navbar, "Show Navigation Bar");
-          ui.checkbox(&mut app.show_viewcube, "Show ViewCube");
-          crate::explode_ui::view_menu(app, ui);
-        });
-        continue;
-      }
-      _ => {}
-    }
-    if !item(ui, label, key, *enabled) {
+    if *label == "View" {
+      ui.menu_button("View", |ui| crate::file_menu::view_menu(app, ui));
       continue;
     }
-    ui.close();
-    file_menu_action(app, label);
+    let enabled = crate::file_menu::enabled(app, label, *enabled);
+    let mut b = egui::Button::new(*label).min_size(vec2(220.0, 0.0));
+    if !key.is_empty() {
+      b = b.shortcut_text(*key);
+    }
+    if crate::file_menu::tip(ui.add_enabled(enabled, b), label).clicked() {
+      ui.close();
+      file_menu_action(app, label);
+    }
   }
 }
 
@@ -319,6 +292,7 @@ pub(crate) fn file_menu_action(app: &mut App, label: &str) {
     "Upload..." => crate::data_panel::upload_dialog(app),
     "Save" => app.save(false),
     "Save As" => app.save(true),
+    "Export..." => crate::file_dialogs::open_export(app),
     "3D Print" => crate::capture::open_print(app),
     "Capture Image..." => crate::capture::open_image(app),
     _ => {}
@@ -1399,7 +1373,8 @@ pub fn browser(app: &mut App, ctx: &egui::Context) {
         return;
       }
       // the rows sit directly on the canvas, without a panel behind them
-      let max_h = (canvas.height() - 90.0).max(120.0);
+      // the expanded COMMENTS panel below takes its room from the browser, as in Fusion
+      let max_h = browser_max_height(app);
       egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
         ui.add_space(4.0);
         browser_tree(app, ui);
@@ -1408,6 +1383,11 @@ pub fn browser(app: &mut App, ctx: &egui::Context) {
       });
     },
   );
+}
+
+/// The browser tree's greatest height: the canvas less the room of the COMMENTS panel below it.
+pub(crate) fn browser_max_height(app: &App) -> f32 {
+  (app.canvas.height() - 90.0 - crate::comments::extra_height(app)).max(120.0)
 }
 
 fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
@@ -1455,23 +1435,37 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     marking::peek(app, Vec::new(), "Document Settings".into());
   }
   if is_open(ui, ds, true) {
-    let label = format!("Units: {}", app.s.design.units.symbol());
-    let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, false, theme::TEXT);
+    // while Change Active Units is open the row is highlighted with its pencil, as in Fusion;
+    // hovering it shows no pencil
+    let label = crate::units::row_label(app.s.design.units);
+    let units_open = crate::doc_dialogs::units_open(app);
+    let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, units_open, theme::TEXT);
     if let Some(r) = &ev.response {
-      crate::units::settings_row(app, ui, r, 2);
+      let id = egui::Id::new("units-pencil");
+      crate::doc_dialogs::row_pencil(ui, r, 2, &label, id, false, units_open, "Change Active Units");
       if r.hovered() {
         marking::peek(app, Vec::new(), label.clone());
       }
       r.context_menu(|ui| {
-        let ctx = ui.ctx().clone();
-        browser_rows::folder_context_menu(ui, &browser_rows::units_menu(), |cmd| {
-          browser_rows::run_units_cmd(&ctx, cmd)
-        });
+        browser_rows::folder_context_menu(ui, &browser_rows::units_menu(), |cmd| browser_rows::run_units_cmd(app, cmd));
       });
     }
-    let ev = tree_row(ui, ds.with(2), 2, None, None, Icon::Component, "Part Design", false, theme::TEXT);
-    if ev.response.is_some_and(|r| r.hovered()) {
-      marking::peek(app, Vec::new(), "Part Design".into());
+    // Part Design: a pencil on hover and a right-click menu, both Convert Design Type
+    let convert_open = crate::doc_dialogs::convert_open(app);
+    let ev = tree_row(ui, ds.with(2), 2, None, None, Icon::Component, "Part Design", convert_open, theme::TEXT);
+    if let Some(r) = &ev.response {
+      let id = egui::Id::new("design-type-pencil");
+      if crate::doc_dialogs::row_pencil(ui, r, 2, "Part Design", id, true, convert_open, "Convert Design Type") {
+        crate::doc_dialogs::open_convert(app);
+      }
+      if r.hovered() {
+        marking::peek(app, Vec::new(), "Part Design".into());
+      }
+      r.context_menu(|ui| {
+        browser_rows::folder_context_menu(ui, &browser_rows::design_type_menu(), |cmd| {
+          browser_rows::run_design_type_cmd(app, cmd)
+        });
+      });
     }
   }
   // Named Views
@@ -1484,9 +1478,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     r.context_menu(|ui| {
       if menu_item(ui, Icon::Views, "New Named View", None).clicked() {
         ui.close();
-        if app.save_named_view().is_some() {
-          ui.data_mut(|d| d.insert_temp(nv.with("open"), true));
-        }
+        new_named_view(app, ui.ctx());
       }
     });
   }
@@ -1497,7 +1489,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       ("RIGHT", StandardView::Right),
       ("HOME", StandardView::Home),
     ] {
-      let ev = tree_row(ui, nv.with(label), 2, None, None, Icon::Views, label, false, theme::TEXT);
+      let ev = tree_row(ui, nv.with(label), 2, None, None, Icon::NamedView, label, false, theme::TEXT);
       if ev.clicked || ev.double_clicked {
         app.fly_standard_view(v);
       }
@@ -1505,7 +1497,9 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     // the user's views, saved in the design
     let names: Vec<String> = app.s.design.named_views.iter().map(|v| v.name.clone()).collect();
     for name in names {
-      let ev = tree_row(ui, nv.with(("user", &name)), 2, None, None, Icon::Views, &name, false, theme::TEXT);
+      let row = named_view_row(&name);
+      let ev = tree_row(ui, row, 2, None, None, Icon::NamedView, &name, false, theme::TEXT);
+      browser_edit::edit_box(app, ui, &ev, row, 2);
       if ev.double_clicked {
         app.restore_named_view(&name);
       }
@@ -1589,6 +1583,21 @@ pub fn isolate_banner(app: &mut App, ctx: &egui::Context) {
     });
   if unisolate {
     app.ctx_menu.isolate = None;
+  }
+}
+
+/// A user named view's browser row.
+fn named_view_row(name: &str) -> egui::Id {
+  egui::Id::new("tree-views").with(("user", name))
+}
+
+/// Named Views > New Named View, as Fusion's: saves the view as "NamedView", opens the folder
+/// and puts the new row's name in an inline editor, selected, ready to retype (Escape keeps it).
+pub(crate) fn new_named_view(app: &mut App, ctx: &egui::Context) {
+  let Some(name) = app.save_named_view() else { return };
+  ctx.data_mut(|d| d.insert_temp(egui::Id::new("tree-views").with("open"), true));
+  if let Some(i) = app.s.design.named_views.iter().position(|v| v.name == name) {
+    browser_edit::begin_in(ctx, named_view_row(&name), RenameTarget::NamedView(i as u32), &name);
   }
 }
 
@@ -2147,6 +2156,15 @@ pub(crate) enum RowCmd {
   ShowHidePlanes,
   ShowHideAxes,
   ChangeUnits,
+  // the sketch rows and the Sketches folder (see sketch_rows)
+  Extrude,
+  SelectSketchPlane,
+  ProjectedVisibility,
+  ConstructionVisibility,
+  FindInTimeline,
+  ConvertDesignType,
+  /// A sketch row's Redefine Sketch Plane.
+  RedefinePlane,
 }
 
 /// One row of a browser context menu.
@@ -2154,33 +2172,17 @@ pub(crate) struct RowItem {
   pub icon: Icon,
   pub label: String,
   pub cmd: RowCmd,
+  /// The shortcut hint at the right of the row ("E", "Del", "V").
+  pub key: Option<&'static str>,
 }
 
 fn row_item(icon: Icon, label: &str, cmd: RowCmd) -> Option<RowItem> {
-  Some(RowItem { icon, label: label.into(), cmd })
+  Some(RowItem { icon, label: label.into(), cmd, key: None })
 }
 
-/// A sketch row's menu, as Fusion's (`None` is a separator).
-pub(crate) fn sketch_menu(app: &App, fid: FeatureId) -> Vec<Option<RowItem>> {
-  let profiles = !app.hidden_profiles.contains(&fid);
-  let dims = app.shown_dims.contains(&fid);
-  let visible = fox_engine::scene::sketch_visible(&app.s, fid);
-  vec![
-    row_item(Icon::Sketch, "Edit Sketch", RowCmd::EditSketch),
-    row_item(Icon::Plane, "Redefine Sketch Plane", RowCmd::NotYet),
-    row_item(Icon::Section, "Slice Sketch", RowCmd::NotYet),
-    None,
-    row_item(Icon::SketchSmall, if profiles { "Hide Profile" } else { "Show Profile" }, RowCmd::ProfileVisibility),
-    row_item(Icon::Dimension, if dims { "Hide Dimensions" } else { "Show Dimensions" }, RowCmd::DimensionVisibility),
-    row_item(Icon::LookAt, "Look At", RowCmd::LookAt),
-    row_item(Icon::ExportDxf, "Save As DXF", RowCmd::SaveAsDxf),
-    None,
-    row_item(Icon::Params, "Rename", RowCmd::Rename),
-    row_item(Icon::Remove, "Delete", RowCmd::Delete),
-    None,
-    row_item(if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", RowCmd::ShowHide),
-    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
-  ]
+/// A menu row with a shortcut hint, as Fusion's "Extrude  E".
+fn row_key(icon: Icon, label: &str, key: &'static str, cmd: RowCmd) -> Option<RowItem> {
+  Some(RowItem { icon, label: label.into(), cmd, key: Some(key) })
 }
 
 /// An origin plane row's menu ("xy", "xz" or "yz"), as Fusion's.
@@ -2205,55 +2207,15 @@ fn row_menu(ui: &mut egui::Ui, items: &[Option<RowItem>]) -> Option<RowCmd> {
       continue;
     };
     if it.cmd == RowCmd::NotYet {
-      ui.add_enabled_ui(false, |ui| menu_item(ui, it.icon, &it.label, None))
+      ui.add_enabled_ui(false, |ui| menu_item(ui, it.icon, &it.label, it.key))
         .inner
         .on_disabled_hover_text("Not in FissionOxide yet");
-    } else if menu_item(ui, it.icon, &it.label, None).clicked() {
+    } else if menu_item(ui, it.icon, &it.label, it.key).clicked() {
       ui.close();
       picked = Some(it.cmd);
     }
   }
   picked
-}
-
-/// Runs a sketch row's menu command.
-pub(crate) fn run_sketch_cmd(app: &mut App, fid: FeatureId, name: &str, cmd: RowCmd) {
-  let toggle = |v: &mut Vec<FeatureId>| {
-    if let Some(i) = v.iter().position(|f| *f == fid) {
-      v.remove(i);
-    } else {
-      v.push(fid);
-    }
-  };
-  match cmd {
-    RowCmd::EditSketch => app.edit_sketch(fid),
-    RowCmd::ProfileVisibility => toggle(&mut app.hidden_profiles),
-    RowCmd::DimensionVisibility => toggle(&mut app.shown_dims),
-    RowCmd::LookAt => {
-      if let Some(plane) = app.s.model.sketches.get(&fid).map(|r| r.plane) {
-        app.look_at_plane(&plane);
-      }
-    }
-    RowCmd::SaveAsDxf => {
-      let Some(p) = rfd::FileDialog::new().add_filter("DXF", &["dxf"]).set_file_name(format!("{name}.dxf")).save_file()
-      else {
-        return;
-      };
-      if app.run("export", json!({"path": p, "sketch": fid.0})).is_some() {
-        app.status = Some((format!("Saved {name} as {}", p.display()), false));
-      }
-    }
-    RowCmd::FindInWindow => marking::find_in_window(app, &[], Some(fid)),
-    RowCmd::ShowHide => {
-      let visible = fox_engine::scene::sketch_visible(&app.s, fid);
-      app.run("sketch.visible", json!({"sketch": fid.0, "visible": !visible}));
-    }
-    RowCmd::Rename => app.rename = Some((RenameTarget::Feature(fid.0), name.to_string())),
-    RowCmd::Delete => {
-      app.run("feature.delete", json!({"feature": fid.0}));
-    }
-    _ => {}
-  }
 }
 
 /// Runs an origin plane row's menu command.
@@ -2287,72 +2249,7 @@ pub(crate) fn run_origin_plane_cmd(app: &mut App, plane: &str, cmd: RowCmd) {
 }
 
 fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
-  // a sketch made to place a single hole isn't a sketch of the user's: Fusion shows none
-  let placed = crate::dialogs::placement_sketches(&app.s);
-  let sketches: Vec<(FeatureId, String)> = app
-    .s
-    .design
-    .features
-    .iter()
-    .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && !placed.contains(&f.id))
-    .map(|f| (f.id, f.name.clone()))
-    .collect();
-  if sketches.is_empty() {
-    return;
-  }
-  let id = egui::Id::new("tree-sketches");
-  // the folder starts collapsed, opens on the sketch being edited and closes on Finish Sketch
-  if let Some(open) = app.browser_sketches.take() {
-    ui.data_mut(|d| d.insert_temp(id.with("open"), open));
-  }
-  let ev = tree_row(ui, id, 1, Some(false), None, Icon::Folder, "Sketches", false, theme::TEXT);
-  if ev.response.is_some_and(|r| r.hovered()) {
-    marking::peek(app, Vec::new(), "Sketches".into());
-  }
-  if !is_open(ui, id, false) {
-    return;
-  }
-  for (fid, name) in sketches {
-    let editing = app.s.edit_sketch == Some(fid);
-    let selected = editing || app.s.selection.contains(&Sel::Feature { feature: fid });
-    let st = app.s.model.status(fid).cloned().unwrap_or_default();
-    let color = if st.error.is_some() {
-      theme::ERROR
-    } else if st.warning.is_some() {
-      theme::WARNING
-    } else if st.rolled_back {
-      theme::MUTED
-    } else {
-      theme::TEXT
-    };
-    let row = id.with(fid.0);
-    let ev = tree_row(ui, row, 2, None, None, Icon::SketchSmall, &name, selected, color);
-    // double-click edits the sketch, as in Fusion; a slow click renames it
-    let target = RenameTarget::Feature(fid.0);
-    browser_edit::slow_click(ui, &ev, row, target, &name, selected && !editing);
-    if ev.double_clicked {
-      app.edit_sketch(fid);
-    } else if ev.clicked {
-      app.s.selection = vec![Sel::Feature { feature: fid }];
-    }
-    browser_edit::slow_click_due(ui, row, app.s.selection.contains(&Sel::Feature { feature: fid }));
-    browser_edit::edit_box(app, ui, &ev, row, 2);
-    if let Some(r) = ev.response {
-      reveal_row(app, Sel::Feature { feature: fid }, &r);
-      if r.hovered() {
-        marking::peek(app, Vec::new(), name.clone());
-      }
-      r.on_hover_text("Double-click to edit").context_menu(|ui| {
-        let items = sketch_menu(app, fid);
-        match row_menu(ui, &items) {
-          // renamed in place in the browser row
-          Some(RowCmd::Rename) => browser_edit::begin(ui, row, target, &name),
-          Some(cmd) => run_sketch_cmd(app, fid, &name, cmd),
-          None => {}
-        }
-      });
-    }
-  }
+  sketch_rows::sketches_section(app, ui);
 }
 
 fn planes_section(app: &mut App, ui: &mut egui::Ui) {
@@ -2443,55 +2340,36 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
       // Fusion draws the navigation bar as bare icons on the canvas
       ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
+        let [orbit, look_at, pan, zoom, zoom_window, display, grid, viewports] = crate::navbar::BUTTONS;
+        let tip = crate::navbar::dark_tip;
         let mode_btn = |ui: &mut egui::Ui, app: &mut App, icon, hint, mode| {
-          if icons::icon_button(ui, icon, 28.0, hint, app.nav_mode == Some(mode), None).clicked() {
+          if tip(icons::icon_button(ui, icon, 28.0, "", app.nav_mode == Some(mode), None), hint).clicked() {
             app.nav_mode = if app.nav_mode == Some(mode) { None } else { Some(mode) };
           }
         };
-        let orbit_hint = if app.free_orbit {
-          "Free Orbit: left-drag to orbit and roll (Esc to stop)"
-        } else {
-          "Constrained Orbit: left-drag to orbit (Esc to stop)"
-        };
-        mode_btn(ui, app, Icon::Orbit, orbit_hint, NavMode::Orbit);
+        mode_btn(ui, app, Icon::Orbit, orbit, NavMode::Orbit);
         let c = nav_caret(ui, "Orbit type");
         egui::Popup::menu(&c).show(|ui| crate::navbar::orbit_menu(app, ui));
-        if icons::icon_button(
-          ui,
-          Icon::LookAt,
-          28.0,
-          "Look At: the sketch plane or a selected planar face",
-          false,
-          None,
-        )
-        .clicked()
-        {
+        if tip(icons::icon_button(ui, Icon::LookAt, 28.0, "", false, None), look_at).clicked() {
           app.look_at_selection();
         }
-        mode_btn(ui, app, Icon::Pan, "Pan: left-drag to pan (Esc to stop)", NavMode::Pan);
-        mode_btn(ui, app, Icon::Zoom, "Zoom: left-drag to zoom (Esc to stop)", NavMode::Zoom);
-        let window = app.nav_mode == Some(NavMode::ZoomWindow);
-        let hint = if window { "Zoom Window: drag a box to zoom into (Esc to stop)" } else { "Fit (F6)" };
-        if icons::icon_button(ui, Icon::Fit, 28.0, hint, window, None).clicked() {
-          if window {
-            app.nav_mode = None;
-          } else {
-            app.fit_view();
-          }
-        }
-        let c = nav_caret(ui, "Fit and Zoom Window");
-        egui::Popup::menu(&c).show(|ui| crate::navbar::fit_menu(app, ui));
+        mode_btn(ui, app, Icon::Pan, pan, NavMode::Pan);
+        mode_btn(ui, app, Icon::Zoom, zoom, NavMode::Zoom);
+        // Fusion's fifth button is Zoom Window; Fit is in its fly-out (and on F6)
+        mode_btn(ui, app, Icon::ZoomWindow, zoom_window, NavMode::ZoomWindow);
+        let c = nav_caret(ui, "Zoom Window and Fit");
+        egui::Popup::menu(&c).show(|ui| crate::navbar::zoom_menu(app, ui));
         nav_sep(ui);
-        let d = icons::icon_button(ui, Icon::Display, 28.0, "Display Settings", false, None);
+        let d = tip(icons::icon_button(ui, Icon::Display, 28.0, "", false, None), display);
         let c = nav_caret(ui, "Display Settings");
         egui::Popup::menu(&d).show(|ui| crate::navbar::display_menu(app, ui));
         egui::Popup::menu(&c).show(|ui| crate::navbar::display_menu(app, ui));
-        let g = icons::icon_button(ui, Icon::Grid, 28.0, "Grid and Snaps", false, None);
+        let g = tip(icons::icon_button(ui, Icon::Grid, 28.0, "", false, None), grid);
         let c = nav_caret(ui, "Grid and Snaps");
         let adaptive = fox_engine::scene::grid_step(&app.s);
         egui::Popup::menu(&g).show(|ui| crate::navbar::grid_menu(app, ui, adaptive));
         egui::Popup::menu(&c).show(|ui| crate::navbar::grid_menu(app, ui, adaptive));
-        let v = icons::icon_button(ui, Icon::Viewports, 28.0, "Viewports", false, None);
+        let v = tip(icons::icon_button(ui, Icon::Viewports, 28.0, "", false, None), viewports);
         let c = nav_caret(ui, "Viewports");
         egui::Popup::menu(&v).show(|ui| {
           let _ = ui.selectable_label(true, "Single View");
@@ -2956,9 +2834,10 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
 /// items of different kinds each counted with the least distance between them
 /// (`1 Face 1 Edge | Min Distance : 0.10 in`), `Multiple selections | 9` from three or more, a
 /// body's or feature's name. Only what is selected reads out: hovering a face, an edge or a
-/// browser or timeline row prints nothing, as in Fusion.
+/// browser or timeline row prints nothing, as in Fusion, except while a command dialog is
+/// picking, when the item under the pointer reads out as a click would pick it.
 pub(crate) fn selection_text(app: &App) -> Option<String> {
-  let picked;
+  let (hovered, picked);
   let sel = match app.s.selection.as_slice() {
     // a curve-picking sketch tool's picks read out like a selection ("2 Sketch Curves | ...")
     [] => {
@@ -2968,7 +2847,16 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
       }
       picked = crate::viewport::picked_curves(app);
       if picked.is_empty() {
-        return None;
+        // a hovered item reads out only while a command is picking (PROJECT's Bodies filter reads
+        // "Body1" over the body); with no command running hovering prints nothing, as in Fusion
+        app.dialog.as_ref()?;
+        // what a click would pick: under the Bodies priority the body ("Body1"), not its face
+        let h = app.hover?;
+        let t = crate::select::targets(&app.s, h, app.sel_priority);
+        hovered = if t.len() == 1 { t } else { vec![h.to_sel()] };
+        &hovered[..]
+      } else {
+        &picked[..]
       }
       &picked[..]
     }
@@ -3240,9 +3128,12 @@ fn sketch_coord(u: fox_engine::model::LengthUnit, mm: f64) -> String {
 
 /// Status message and sketch hint at the bottom-left of the canvas, above COMMENTS.
 pub fn canvas_status(app: &mut App, ctx: &egui::Context) {
-  let Some((msg, err)) = app.status.clone() else { return };
+  // the Zoom Window tool names itself there while it waits for its box, as in Fusion
+  let tool = (app.nav_mode == Some(NavMode::ZoomWindow)).then(|| (crate::navbar::BUTTONS[4].to_string(), false));
+  let is_tool = app.status.is_none() && tool.is_some();
+  let Some((msg, err)) = app.status.clone().or(tool) else { return };
   // Preferences → General → Show command prompt
-  if !err && !app.preferences.values.show_prompt && app.hint.as_deref() == Some(msg.as_str()) {
+  if !err && !app.preferences.values.show_prompt && (is_tool || app.hint.as_deref() == Some(msg.as_str())) {
     return;
   }
   let canvas = app.canvas;
@@ -3909,6 +3800,11 @@ fn rename_popup(app: &mut App, ctx: &egui::Context) {
             RenameTarget::Group(g) => {
               app.run("timeline.group_rename", json!({"group": g, "name": text}));
             }
+            RenameTarget::NamedView(i) => {
+              if let Some(old) = app.s.design.named_views.get(i as usize).map(|v| v.name.clone()) {
+                app.run("view.named.rename", json!({"name": old, "to": text}));
+              }
+            }
           }
           keep = false;
         }
@@ -3939,9 +3835,13 @@ mod browser_canvas;
 mod browser_config;
 mod browser_edit;
 mod browser_rows;
+mod sketch_rows;
 mod timeline_groups;
 
-pub(crate) use browser_rows::{doc_name, window_title};
+pub(crate) use browser_rows::{doc_name, unsaved as is_unsaved, window_title};
+#[cfg(test)]
+pub(crate) use sketch_rows::run_sketch_cmd;
+pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};
 
 #[cfg(test)]
 mod row_menu_tests {
@@ -4053,47 +3953,6 @@ mod row_menu_tests {
     app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 5]}));
     app.finish_sketch();
     (app, sk)
-  }
-
-  #[test]
-  fn sketch_row_menu_is_fusions() {
-    let (mut app, sk) = sketched();
-    let l = labels(&sketch_menu(&app, sk));
-    assert_eq!(
-      l,
-      [
-        "Edit Sketch",
-        "Redefine Sketch Plane",
-        "Slice Sketch",
-        "-",
-        "Hide Profile",
-        "Show Dimensions",
-        "Look At",
-        "Save As DXF",
-        "-",
-        "Rename",
-        "Delete",
-        "-",
-        "Show/Hide",
-        "Find in Window",
-      ]
-    );
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ProfileVisibility);
-    assert_eq!(app.hidden_profiles, vec![sk]);
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::DimensionVisibility);
-    assert_eq!(app.shown_dims, vec![sk]);
-    let l = labels(&sketch_menu(&app, sk));
-    assert!(l.contains(&"Show Profile".into()) && l.contains(&"Hide Dimensions".into()), "{l:?}");
-    assert!(fox_engine::scene::sketch_visible(&app.s, sk));
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ShowHide);
-    assert!(!fox_engine::scene::sketch_visible(&app.s, sk));
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ShowHide);
-    assert!(fox_engine::scene::sketch_visible(&app.s, sk));
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::FindInWindow);
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::LookAt);
-    assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "{:?}", app.status);
-    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::EditSketch);
-    assert_eq!(app.s.edit_sketch, Some(sk));
   }
 
   #[test]

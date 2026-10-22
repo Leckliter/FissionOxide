@@ -128,10 +128,17 @@ pub(crate) fn toggle_eye(app: &mut App, item: OriginItem) {
   set_eye(app, item, !on);
 }
 
-/// Shown in the canvas: Object Visibility ▸ Origins on, the folder's eye on and the item's own
-/// (Fusion's folder-and-child rule), and no sketch being edited.
+/// Shown in the canvas: its Object Visibility row on (Origin Planes, Origin Axes or Origin
+/// Points), the folder's eye on and the item's own (Fusion's folder-and-child rule), and no sketch
+/// being edited.
 pub(crate) fn visible(app: &App, item: OriginItem) -> bool {
-  app.objects.origins && app.origin_shown && eye(app, item) && app.s.edit_sketch.is_none()
+  let o = &app.objects;
+  let row = match item {
+    OriginItem::Point => o.origin_points,
+    OriginItem::X | OriginItem::Y | OriginItem::Z => o.origin_axes,
+    OriginItem::Xy | OriginItem::Xz | OriginItem::Yz => o.origin_planes,
+  };
+  row && app.origin_shown && eye(app, item) && app.s.edit_sketch.is_none()
 }
 
 /// All three plane eyes are on (the folder's Show/Hide Planes).
@@ -417,10 +424,14 @@ mod tests {
     set_planes(&mut app, true);
     set_axes(&mut app, true);
     assert!(planes_shown(&app) && axes_shown(&app));
-    // Object Visibility ▸ Origins hides them all; so does an open sketch
-    app.objects.origins = false;
+    // Object Visibility's Origin Planes, Origin Axes and Origin Points rows hide their items; so
+    // does an open sketch
+    app.objects.origin_planes = false;
+    assert!(!visible(&app, OriginItem::Xy) && visible(&app, OriginItem::X) && visible(&app, OriginItem::Point));
+    app.objects.origin_axes = false;
+    app.objects.origin_points = false;
     assert!(OriginItem::ALL.iter().all(|i| !visible(&app, *i)));
-    app.objects.origins = true;
+    app.objects.show_origin();
     app.create_sketch(json!("xy"));
     assert!(!visible(&app, OriginItem::Xy));
   }

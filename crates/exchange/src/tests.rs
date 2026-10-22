@@ -975,3 +975,28 @@ fn dxf_reads_foreign_splines_and_mirrored_ellipses() {
   let bz = d.entities[3].0.beziers();
   assert!((bz[0][0][1] + 1.0).abs() < 1e-9, "starts at the bottom of the minor axis: {:?}", bz[0][0]);
 }
+
+#[test]
+fn dxf_written_in_each_export_unit_reads_back_in_mm() {
+  use crate::dxf::{DXF_UNITS, write_dxf_in};
+  let ents = vec![
+    (Entity::Line { a: [0.0, 0.0], b: [25.4, 0.0] }, false),
+    (Entity::Circle { center: [5.0, 5.0], radius: 2.0 }, true),
+    (Entity::Point { at: [1.0, 2.0] }, false),
+  ];
+  for (key, _, mm, code) in DXF_UNITS {
+    let text = write_dxf_in(&ents, key).unwrap();
+    assert!(text.contains(&format!("$INSUNITS\n 70\n{code}\n")), "{key}");
+    let d = read_dxf(text.as_bytes()).unwrap();
+    assert_eq!(d.entities.len(), 3, "{key}");
+    match d.entities[0].0 {
+      Entity::Line { b, .. } => assert!((b[0] - 25.4).abs() < 1e-6 * mm.max(1.0), "{key}: {b:?}"),
+      ref e => panic!("{e:?}"),
+    }
+    assert!(d.entities[1].1, "construction stays on its layer");
+  }
+  // an inch file holds inches
+  let text = write_dxf_in(&ents, "in").unwrap();
+  assert!(text.contains("\n 11\n1\n") && text.contains("(in)"), "{text}");
+  assert!(write_dxf_in(&ents, "furlong").is_none());
+}

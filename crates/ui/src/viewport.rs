@@ -431,7 +431,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |=
     crate::library_ui::place_clicks(app, &resp, &painter, &|p| view.to_screen(&cam, p), &|p| view.ray(&cam, p));
   if app.s.edit_sketch.is_some() {
-    if grid_shown(app) {
+    if grid_shown(app) && app.grid.reference_numbers {
       grid_labels(app, &painter, &view);
     }
     consumed |= sketch_overlay(app, ui, &painter, &view);
@@ -454,8 +454,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if !consumed && let Some(plane) = hot_plane {
     consumed = true;
     if resp.clicked() {
-      app.cancel_dialog();
-      app.create_sketch(plane);
+      match app.dialog.as_mut() {
+        // a primitive's base is drawn on the plane
+        Some(d) if d.picks_plane() => d.place_on(&app.s, plane),
+        _ => {
+          app.cancel_dialog();
+          app.create_sketch(plane);
+        }
+      }
     }
   }
   // a click on a visible origin plane, axis or point selects it (again: clears it), as in Fusion
@@ -467,11 +473,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
   let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
+  consumed |= !consumed && crate::dialogs::place_overlay(app, &resp, &painter, &project, &ray, step);
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= crate::form_ui::overlay(app, &resp, &painter, &ctx, &project, &ray);
   consumed |= crate::handles::show(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
-  if app.objects.joints {
+  if app.objects.joints || app.objects.joint_origins {
     consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   }
   dim_editor(app, &ctx);
@@ -756,28 +763,35 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     }
   };
   let vis = app.objects;
+  // under the Bodies priority the body under the pointer lights as a whole, not its face
+  let hover_bodies = crate::select::hover_bodies(app);
+  let mut peek = app.ctx_menu.peek.clone();
+  peek.extend(hover_bodies.iter().filter(|b| !app.ctx_menu.peek.contains(b)));
   ViewOptions {
-    hover: app.hover,
+    hover: if hover_bodies.is_empty() { app.hover } else { None },
     hide_edges: !app.visual_style.edges(),
     hide_grid: !grid_shown(app),
     // the origin axes (dashed, each with its own eye under the Origin folder's) are drawn over
     // the image by `crate::origin`, so the scene draws none of its own
     hide_origin: true,
     origin_axis_len: Some(origin_plane_half_size(app) * ORIGIN_AXIS_REACH),
-    hide_sketches: !vis.sketches || analysis.hide_sketches,
-    hide_construction: !vis.construction,
+    // the Sketches folder's eye off draws no sketch but the one being edited
+    hide_sketches: !vis.sketches || analysis.hide_sketches || app.sketch_rows.folder_hidden,
+    hide_construction_planes: !vis.construction_planes,
+    hide_construction_axes: !vis.construction_axes,
+    hide_construction_points: !vis.construction_points,
     grid_step: app.grid.step(),
+    // the Layout Grid carries Fusion's red X and green Y axis lines across it
+    grid_axes: app.s.edit_sketch.is_none() && vis.origin_axes,
     show_profiles_of: profiles_of,
     hide_profiles_of: app.hidden_profiles.clone(),
-    show_vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none() && vis.bodies,
-    peek: app.ctx_menu.peek.clone(),
+    hide_projected_of: app.sketch_rows.hidden_projected.clone(),
+    hide_construction_of: app.sketch_rows.hidden_construction.clone(),
+    show_vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
+    peek,
     peek_faces: app.ctx_menu.peek_faces.clone(),
     peek_sketches: app.ctx_menu.peek_sketches.clone(),
-    only_bodies: if vis.bodies {
-      app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone())
-    } else {
-      Some(Vec::new())
-    },
+    only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
     opacity: app.ctx_menu.opacity.clone(),
     // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
     hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
@@ -816,9 +830,10 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of,
     hidden_profiles: app.hidden_profiles.clone(),
+    sketch_rows: app.sketch_rows.clone(),
     view: view_params(app),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
-    peek: app.ctx_menu.peek.iter().map(|b| b.0).collect(),
+    peek: app.ctx_menu.peek.iter().chain(&crate::select::hover_bodies(app)).map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
     opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
     peek_faces: app.ctx_menu.peek_faces.iter().map(|(b, f)| (b.0, *f)).collect(),
@@ -866,10 +881,14 @@ pub(crate) fn slice_params(app: &App) -> Option<serde_json::Value> {
   Some(json!({"sketch": sk.0, "flip": flip}))
 }
 
-/// Whether the sketch grid is drawn: the palette's Sketch Grid, except while 3D Sketch is on and
-/// a tool with a 3D form runs, when Fusion hides it under the tool's 3D manipulator.
+/// Whether the grid is drawn. Outside a sketch it is Grid and Snaps ▸ Layout Grid (off by
+/// default, as in Fusion). In a sketch it is the palette's Sketch Grid, except while 3D Sketch is
+/// on and a tool with a 3D form runs, when Fusion hides it under the tool's 3D manipulator.
 pub(crate) fn grid_shown(app: &App) -> bool {
-  let tool_3d = app.s.edit_sketch.is_some() && app.tool != Tool::Select && sketch_3d_enabled(app);
+  if app.s.edit_sketch.is_none() {
+    return app.layout_grid;
+  }
+  let tool_3d = app.tool != Tool::Select && sketch_3d_enabled(app);
   app.show_grid && !(app.palette.sketch_3d && tool_3d)
 }
 
@@ -2333,7 +2352,11 @@ fn point_line_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 fn select_click(app: &mut App, add: bool) {
   crate::origin::clear(app);
   match app.hover {
-    Some(p) if app.s.edit_sketch.is_some() => crate::panels::toggle_sel(&mut app.s, p.to_sel(), add),
+    // in a sketch, sketch geometry picks as itself; the model under it follows the selection
+    // priority (Project's Bodies filter picks the whole body, as in Fusion)
+    Some(p) if app.s.edit_sketch.is_some() && crate::select::pick_body(&p).is_none() => {
+      crate::panels::toggle_sel(&mut app.s, p.to_sel(), add)
+    }
     Some(p) => crate::select::pick(app, p, add),
     None if !add => app.s.selection.clear(),
     None => {}
@@ -2838,7 +2861,7 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
   let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
   let font = egui::FontId::proportional(12.0);
   for sk in &app.shown_dims {
-    if app.s.edit_sketch == Some(*sk) || !fox_engine::scene::sketch_visible(&app.s, *sk) {
+    if app.s.edit_sketch == Some(*sk) || !crate::panels::sketch_drawn(app, *sk) {
       continue;
     }
     let Some(r) = app.s.model.sketches.get(sk) else { continue };
@@ -4696,7 +4719,8 @@ struct PlanePick {
 /// visible point, axes and planes are drawn and picked by [`crate::origin`], and the one under
 /// the cursor is noted here (`App::hover_origin`, winning over the face highlight too).
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
-  let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane);
+  // Create Sketch, and Box, Cylinder, Sphere, Torus and Coil before their base is drawn
+  let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane || d.picks_plane());
   app.hover_origin = None;
   if !picking {
     if app.dialog.is_none()
@@ -4845,9 +4869,15 @@ fn arrow_dir(drawn: Vec2, along: Option<Vec2>) -> Vec2 {
   }
 }
 
-/// The open dialog's drag arrow: drawn from its base along its direction to the current value,
-/// with the floating value box at its head (see [`crate::value_box`]); dragging the head changes
-/// the value (snapped to a tenth of the grid). Returns true while the arrow has the pointer.
+/// The longest Fillet's radius arrow is drawn on screen (points): a large radius keeps the arrow
+/// and its box near the edge, as in Fusion, rather than reaching off the canvas.
+const RADIUS_ARROW_REACH: f32 = 90.0;
+
+/// The open dialog's drag arrow: drawn from its base along its direction to the current value
+/// (Fillet's no longer than [`RADIUS_ARROW_REACH`]), with the floating value box below and to the
+/// right of its head, clear of the arrow and inside the canvas (see [`crate::value_box`]);
+/// dragging the head changes the value by the pointer's travel along the arrow (snapped to a
+/// tenth of the grid). Returns true while the arrow has the pointer.
 fn manipulator(
   app: &mut App,
   resp: &egui::Response,
@@ -4867,6 +4897,8 @@ fn manipulator(
     app.manip.value_box.hide();
     return false;
   };
+  let reach = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::Fillet).then_some(RADIUS_ARROW_REACH);
+  let b = capped(a, b, reach);
   let hot = resp.hover_pos().is_some_and(|p| (p - b).length() < 12.0);
   let active = matches!(app.drag, Some(Drag::Manip));
   let col = if hot || active { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
@@ -4878,7 +4910,7 @@ fn manipulator(
   let head = [b + dir2 * 12.0, b + side * 6.0, b - side * 6.0];
   painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
   // the value box beside the head edits the dialog's field; a dialog without one gets a label
-  let head_at = b + side * 14.0 + dir2 * 4.0;
+  let head_at = crate::handles::box_beside(a, b, dir2, view.rect);
   // Sketch Offset's box sits by the pointer while the offset is still on its curve, as Fusion
   // puts it, and moves to the arrow's head once the arrow is dragged or a distance typed
   let label_at = if app.dialog.as_ref().is_some_and(|d| d.box_by_pointer(&app.s)) {
@@ -4909,15 +4941,23 @@ fn manipulator(
     );
   }
   // a drag starts only once the pointer has moved: test where the press began
-  let pressed_on_head = ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| (p - b).length() < 14.0);
+  let press = ctx.input(|i| i.pointer.press_origin());
+  let pressed_on_head = press.is_some_and(|p| (p - b).length() < 14.0);
   if pressed_on_head && resp.drag_started_by(egui::PointerButton::Primary) {
     app.drag = Some(Drag::Manip);
+    // the value moves by the pointer's travel from where it grabbed the head (a capped arrow's
+    // head is short of its value)
+    app.manip.arrow_grab = press.and_then(|p| {
+      let (o, d) = view.ray(&app.cam, p);
+      Some((m.value, axis_param(m.origin, m.dir, o, d)?))
+    });
   }
   if matches!(app.drag, Some(Drag::Manip)) {
     if let Some(p) = resp.interact_pointer_pos() {
       let (o, d) = view.ray(&app.cam, p);
       // closest point on the arrow's axis to the pointer ray
       if let Some(t) = axis_param(m.origin, m.dir, o, d) {
+        let t = app.manip.arrow_grab.map_or(t, |(start, grab)| start + t - grab);
         let step = app.increments.linear_step(grid_step(app, view) / 10.0);
         if let Some(dlg) = app.dialog.as_mut() {
           dlg.set_manipulator(t, step);
@@ -4927,7 +4967,24 @@ fn manipulator(
     ctx.request_repaint();
     return true;
   }
+  app.manip.arrow_grab = None;
   hot || pressed_on_head && ctx.input(|i| i.pointer.primary_down())
+}
+
+/// The screen point of world `p` in the canvas the last frame drew (tests drive handles by it).
+#[cfg(test)]
+pub(crate) fn screen_of(app: &App, p: DVec3) -> Option<Pos2> {
+  let (rect, [w, h]) = (app.canvas, app.canvas_px);
+  View { rect, ppp: w as f32 / rect.width(), w, h }.to_screen(&app.cam, p)
+}
+
+/// An arrow's head at `b` (from `a`), brought back along the arrow to at most `reach` points
+/// from `a`.
+fn capped(a: Pos2, b: Pos2, reach: Option<f32>) -> Pos2 {
+  match reach {
+    Some(r) if (b - a).length() > r => a + (b - a).normalized() * r,
+    _ => b,
+  }
 }
 
 /// Draws a manipulator arrow from `a` to its head at `b` (orange while `hot`, else Fusion's
@@ -4991,6 +5048,15 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
 
 #[cfg(test)]
 mod tests {
+  /// `ui:manip:arrow-length-offscreen`: a long arrow is drawn no further than its reach.
+  #[test]
+  fn a_capped_arrow_stops_at_its_reach() {
+    let a = Pos2::new(10.0, 10.0);
+    assert_eq!(super::capped(a, Pos2::new(310.0, 10.0), Some(90.0)), Pos2::new(100.0, 10.0));
+    assert_eq!(super::capped(a, Pos2::new(50.0, 10.0), Some(90.0)), Pos2::new(50.0, 10.0));
+    assert_eq!(super::capped(a, Pos2::new(310.0, 10.0), None), Pos2::new(310.0, 10.0));
+  }
+
   /// The palette's Slice sections the model at the sketch plane, cutting away the camera's side.
   #[test]
   fn slice_sections_the_model_at_the_sketch_plane_towards_the_camera() {
@@ -5531,6 +5597,33 @@ mod tests {
   }
 
   /// An app editing a new sketch on XY with `tool` active.
+  /// PROJECT's Bodies filter in a sketch: the body under the pointer lights as a whole (no face
+  /// highlight), the status names it ("Body1") and a click picks the body, not the face.
+  #[test]
+  fn bodies_priority_in_a_sketch_hovers_and_picks_the_whole_body() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 20, "depth": 20, "height": 10})).unwrap();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let body = app.s.model.bodies[0].id;
+    let face = app.s.model.bodies[0].faces()[0].id;
+    app.hover = Some(Pick::Face { body, face });
+    // with no command running the hover reads nothing (ui-status-readouts); PROJECT's picking does
+    assert_eq!(crate::panels::selection_text(&app), None);
+    app.start(crate::dialogs::Kind::Project);
+    app.hover = Some(Pick::Face { body, face });
+    app.sel_priority = crate::select::Priority::Face;
+    // faces and edges (the default priority): the face lights and reads out
+    assert!(crate::panels::selection_text(&app).unwrap().starts_with("1 Face"));
+    let o = scene_options(&mut app);
+    assert!(o.hover == app.hover && o.peek.is_empty());
+    app.sel_priority = crate::select::Priority::Body;
+    assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("Body1"));
+    let o = scene_options(&mut app);
+    assert!(o.hover.is_none() && o.peek == [body], "{:?} {:?}", o.hover, o.peek);
+    select_click(&mut app, true);
+    assert_eq!(app.s.selection, [Sel::Body { body }]);
+  }
+
   fn sketching(tool: Tool) -> (App, FeatureId) {
     let mut app = App::with_session(Session::default());
     app.run("sketch.create", json!({"plane": "xy"})).unwrap();

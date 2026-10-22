@@ -88,6 +88,28 @@ impl Entity {
     }
   }
 
+  /// The entity scaled by `k` about the origin (angles, ratios and knots are unchanged).
+  pub fn scaled(&self, k: f64) -> Entity {
+    let p = |a: [f64; 2]| [a[0] * k, a[1] * k];
+    match self {
+      Entity::Line { a, b } => Entity::Line { a: p(*a), b: p(*b) },
+      Entity::Circle { center, radius } => Entity::Circle { center: p(*center), radius: radius * k },
+      Entity::Arc { center, radius, start, end } => {
+        Entity::Arc { center: p(*center), radius: radius * k, start: *start, end: *end }
+      }
+      Entity::Point { at } => Entity::Point { at: p(*at) },
+      Entity::Bezier { p: b } => Entity::Bezier { p: b.map(p) },
+      Entity::Spline(sp) => Entity::Spline(Spline {
+        control: sp.control.iter().map(|c| p(*c)).collect(),
+        fit: sp.fit.iter().map(|c| p(*c)).collect(),
+        ..sp.clone()
+      }),
+      Entity::Ellipse { center, major, ratio, start, end } => {
+        Entity::Ellipse { center: p(*center), major: p(*major), ratio: *ratio, start: *start, end: *end }
+      }
+    }
+  }
+
   /// A whole ellipse rather than an elliptical arc.
   pub fn is_full_ellipse(&self) -> bool {
     match *self {
@@ -121,6 +143,8 @@ fn unit_scale(code: i64) -> f64 {
     12 => 1e-6,
     13 => 1e-3,
     14 => 100.0,
+    15 => 10_000.0,
+    16 => 100_000.0,
     // 0 unitless, 4 millimetres
     _ => 1.0,
   }
@@ -742,4 +766,35 @@ pub fn write_dxf2000_layered(layers: &[Layer], entities: &[(Entity, &str)], text
   head.pair(5, &format!("{:X}", o.next));
   head.pairs(&[(9, "$INSUNITS"), (70, "4"), (9, "$MEASUREMENT"), (70, "1"), (0, "ENDSEC")]);
   head.s + &o.s
+}
+
+/// The units a sketch DXF can be written in, in the order Fusion's Export DXF lists them: the
+/// key the `export` command takes, the name, millimetres per unit and the `$INSUNITS` code.
+pub const DXF_UNITS: [(&str, &str, f64, u32); 10] = [
+  ("cm", "Centimeter", 10.0, 5),
+  ("mm", "Millimeter", 1.0, 4),
+  ("m", "Meter", 1000.0, 6),
+  ("in", "Inch", 25.4, 1),
+  ("ft", "Foot", 304.8, 2),
+  ("yd", "Yard", 914.4, 10),
+  ("um", "Micron", 0.001, 13),
+  ("hm", "Hectometer", 100_000.0, 16),
+  ("mi", "Mile", 1_609_344.0, 3),
+  ("mil", "Mil", 0.0254, 9),
+];
+
+/// Writes entities (millimetres) as a DXF in `unit` (a [`DXF_UNITS`] key): the coordinates are
+/// converted and `$INSUNITS` names the unit. None for an unknown unit.
+pub fn write_dxf_in(entities: &[(Entity, bool)], unit: &str) -> Option<String> {
+  let &(key, _, mm, code) = DXF_UNITS.iter().find(|u| u.0 == unit)?;
+  if key == "mm" {
+    return Some(write_dxf(entities));
+  }
+  let scaled: Vec<(Entity, bool)> = entities.iter().map(|(e, c)| (e.scaled(1.0 / mm), *c)).collect();
+  // both writers put the same two header pairs first: the comment and `$INSUNITS` = 4 (mm)
+  Some(
+    write_dxf(&scaled)
+      .replacen("FissionOxide DXF export (mm)", &format!("FissionOxide DXF export ({key})"), 1)
+      .replacen("  9\n$INSUNITS\n 70\n4\n", &format!("  9\n$INSUNITS\n 70\n{code}\n"), 1),
+  )
 }

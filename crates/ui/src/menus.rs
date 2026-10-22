@@ -1240,55 +1240,9 @@ pub(crate) fn key_of<'a>(prefs: &'a Prefs, scope: Scope, label: &str) -> &'a str
   prefs.keys.key(&id, default)
 }
 
-/// Resting this long on a command expands its tooltip.
-const EXPAND_SECS: f64 = 2.0;
-
-/// A command's tooltip, as in Fusion: its name, a line on what it does and its shortcut; after
-/// resting on it for [`EXPAND_SECS`], a fuller explanation beside a large icon.
+/// A command's tooltip, as in Fusion: see [`crate::ribbon_tip`].
 fn rich_tip(resp: egui::Response, scope: Scope, it: &Item, key: &str) -> egui::Response {
-  let tip = tips::tip(scope, it.label);
-  let ctx = resp.ctx.clone();
-  let now = ctx.input(|i| i.time);
-  // (hovered since, last seen hovered): a gap means the pointer left and came back
-  let id = resp.id.with("tip-rest");
-  let since = if resp.hovered() {
-    ctx.data_mut(|d| {
-      let (since, last) = d.get_temp::<(f64, f64)>(id).unwrap_or((now, now));
-      let since = if now - last > 0.25 { now } else { since };
-      d.insert_temp(id, (since, now));
-      since
-    })
-  } else {
-    now
-  };
-  let rested = now - since;
-  resp.on_hover_ui(|ui| {
-    let expanded = tip.is_some() && rested >= EXPAND_SECS;
-    ui.set_max_width(if expanded { 380.0 } else { 300.0 });
-    ui.label(RichText::new(it.label).strong());
-    if let Some(t) = tip {
-      ui.label(t.line);
-    }
-    if it.cmd.is_none() {
-      ui.label(RichText::new("Not in FissionOxide yet").color(theme::MUTED));
-    }
-    if !key.is_empty() {
-      ui.label(RichText::new(format!("Shortcut: {key}")).color(theme::MUTED));
-    }
-    match tip {
-      Some(t) if expanded => {
-        ui.separator();
-        ui.horizontal_top(|ui| {
-          let (r, _) = ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
-          ui.painter().rect_filled(r, 3.0, Color32::from_gray(242));
-          icons::draw_tinted(ui.painter(), r.shrink(8.0), it.icon, it.tint);
-          ui.add(egui::Label::new(t.more).wrap());
-        });
-      }
-      Some(_) => ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(EXPAND_SECS - rested)),
-      None => {}
-    }
-  })
+  crate::ribbon_tip::show(resp, scope, it.label, it.icon, it.tint, it.cmd.is_none(), key)
 }
 
 /// The ribbon's tooltip on a sketch tool's toggle elsewhere (the Sketch Palette's Feature
@@ -1724,7 +1678,11 @@ mod tests {
       }
       for l in all {
         match tips::tip(Scope::of(tab), l) {
-          Some(t) if !t.line.is_empty() && !t.more.is_empty() && t.more != t.line => {}
+          // Fusion's Press Pull and Display Configuration Table have a description only
+          Some(t)
+            if !t.line.is_empty()
+              && t.more != t.line
+              && (!t.more.is_empty() || matches!(l, "Press Pull" | "Display Configuration Table")) => {}
           _ => missing.push((tab, l)),
         }
       }
@@ -1990,6 +1948,11 @@ mod tests {
     assert!(!after.contains(&"Extrude"));
     // PLASTIC shares the menu but not the pins
     assert!(!quick_items(&prefs, Tab::Plastic, &PLASTIC[0]).iter().any(|i| i.label == "Torus"));
+    // a default icon pinned again comes back at the group's end, not in its old slot (Fusion)
+    prefs.pinned.push(customize::pin_id(Tab::Solid, "CREATE", "Extrude"));
+    let again: Vec<&str> = quick_items(&prefs, Tab::Solid, create).iter().map(|i| i.label).collect();
+    assert_eq!(again.last(), Some(&"Extrude"));
+    assert_ne!(again.first(), Some(&"Extrude"));
   }
 
   /// Fusion's SKETCH tab at full width: CREATE 7, MODIFY 5 and all twelve constraints.
