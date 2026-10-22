@@ -45,7 +45,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [todo] ASSEMBLY tab of an Assembly Design: joints (every type), As-Built Joint, Joint Origin, Rigid Group, constraints, Drive Joints, Motion Link, Motion Study, contact sets, Insert Component (needs two saved designs)
 - [done (2026-10-22); dialogs as they open, Fusion's after the first pick, Patch and surface Extrude results; not exercised: completing Revolve, Ruled, Offset, Extend, Stitch, Unstitch, Reverse Normal, Untrim or a cutting Trim, their timeline icons and menus, Edit Feature of surface features, the Analysis tabs, Create Form, Derive; Thicken, Boundary Fill, Pattern and Mirror share the SOLID dialogs] SURFACE tab: every create/modify command and dialog
 - [done (2026-10-22); dropdowns, Insert Mesh, every MESH dialog as it opens with a mesh selected (Plane Cut, Generate Face Groups and Convert Mesh completed in Fusion; Reduce, Smooth, Plane Cut, Convert Mesh, Reverse Normal in FissionOxide); not exercised: Fusion's Reverse Normal dialog, completing Remesh/Reduce/Smooth/Shell/Combine/Separate/Scale Mesh/Repair, 3D Print on a mesh, the Direct Mesh Editing commands, face-group colours, OBJ/3MF inserts, the INSERT MESH triad drags] MESH tab: every command
-- [todo] SHEET METAL tab: rules, flange, bend, unfold, flat pattern
+- [in progress (2026-10-22, Parity prober 15)] SHEET METAL tab: rules, flange, bend, unfold, flat pattern
 - [todo] PLASTIC tab
 - [todo] MANAGE (BOM) and UTILITIES tabs (make, add-ins, scripts, inspect)
 - [todo] Timeline: every item type icon, groups, suppress, rollback, play, context menus, drag, errors
