@@ -1,46 +1,60 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 13:55, session "Parity prober 19"
+## Last stop: 2026-10-22, 15:40, session "Parity prober 20"
 
-Finished this session: "Keyboard shortcuts" (done, with a not-exercised list in `coverage.md`). Report
-`parity/reports/2026-10-22-keyboard-shortcuts.md`, `map-wave34.json`, batches `ui-shortcut-sketch-scope`
-(4, three P1: sketch keys from 3D, a sketch key on a selected face, X construction mode, 3D commands that
-keep the sketch open), `ui-shortcut-extra-keys` (7, P2: J in a Part Design, Home, V details, Shift+S,
-Shift+N, Help menu) and `ui-documents-tabs-close` (3, P2: tab star, tab numbering, close-unsaved Save
-dialog), all `ready` in `index.jsonl` with no fixer yet. `ui-shortcut-sketch-scope` and
-`ui-shortcut-extra-keys` both edit `crates/ui/src/lib.rs` (different functions): start one first or tell
-the second to rebase. The wave-33 batches are as `index.jsonl` says.
-Verified: `ui:chrome:new-tab-replaces-design`, `ui:sketch:move-copy-shortcut`,
-`ui:toolbar:shortcuts-toolbox-style`. Still `fixing-merged` and not re-checked: the seven `ui:manip:*` keys
-(a sketch profile works: Extrude with a typed value worked this session), `ui:inspect:measure-two-picks`,
-the `ui-origin-display` and `ui-construction-display` keys (`ui:canvas:visibility-v-key` needs a
-construction plane), the other three `ui-insert-new-design` keys, `ui:timeline:*` error keys,
-`ui:browser:convert-design-type`, `ui:browser:new-named-view-inline-name`.
+Finished this session: "Startup, new design, multiple documents, closing with unsaved changes, recovery,
+update flow", the rest of "Preferences dialog" (every page other than General) and the rest of "Marking
+menus" (body, vertex, sketch point, construction plane, timeline item, in-sketch). All three `done` in
+`coverage.md`. Report `parity/reports/2026-10-22-startup-preferences-marking.md`, `map-wave35.json`, batches
+`ui-documents-window-tabs` (5, one P1: the window close quits without asking), `ui-appbar-home-updates`
+(4 + reopened `ui:insert:file-chooser`, one P1: the Bodies folder eye does not hide bodies),
+`ui-preferences-pages` (8 + reopened `ui:chrome:preferences-general-settings`) and `ui-marking-menu-targets`
+(7 + reopened `ui:context-menus:face-list-contents`, one P1: the ring's slots are one position off), all
+`ready` in `index.jsonl` with no fixer yet. `ui-documents-window-tabs` edits `crates/ui/src/documents.rs`
+like the wave-34 `ui-documents-tabs-close` (still `ready`): start that one first or give both to one fixer.
+`ui-appbar-home-updates` and `ui-marking-menu-targets` both touch `crates/ui/src/panels.rs` (different
+functions) and `viewport.rs`.
+Verified: `ui:assemble:assembly-design-document`, `ui:assemble:assembly-new-component`,
+`ui:marking-menu:ring-at-cursor`, `ui:chrome:preferences-layout`.
 
 ## Next prober: start here
 
-1. Take the next `todo` in `coverage.md`: "Startup, new design, multiple documents, closing with unsaved
-   changes, recovery, update flow". Already seen: Ctrl+N opens a Part Design tab in both apps; Fusion
-   closes a never-saved changed tab through its Save dialog (batch `ui-documents-tabs-close`). Still to do:
-   the start-up screen of each app (quit and relaunch FissionOxide; do not quit Fusion, it holds four
-   unsaved tabs), switching tabs, the tab overflow "v" menu, tab right-click menus, File > New Design
-   variants, closing the last tab, the window's own close with unsaved tabs (Cancel), Open Recovered
-   Documents, Check for Updates.
-2. Re-verify the `fixing-merged` keys above that this area touches (`ui-insert-new-design`'s
-   `ui:assemble:*`, `ui:insert:file-chooser`), then `ui:manip:*` on a sketch profile if context allows.
-3. Rebuild before probing: the running binary is `main` at `c3d74430`; kill `fissionoxide.exe` first,
-   `cargo build --release -p fissionoxide` took 2 m 38 s.
-4. The ASSEMBLY row still needs two saved designs; leave it unless the owner allows saving to the
-   Default Project.
+1. Every area in `coverage.md` is done except the ASSEMBLY tab, which still needs two saved designs: ask the
+   owner whether a prober may save two small designs to the Default Project. Until then take the new last
+   line, "Re-verification sweep": 311 keys are `fixing-merged`. Go area by area in `coverage.md`'s order
+   (chrome, canvas, sketch, solid, ...), re-probe each key in FissionOxide (and Fusion where the row is
+   unclear), set `verified` or reopen into a new wave-36 batch. Mark the sweep `in progress (<date>,
+   <session>, up to <area>)` as you go so the next prober continues there.
+2. Recheck `ui:marking-menu:in-sketch-ring` in Fusion on a fresh sketch (this session saw the 3D ring once,
+   with Sketch2 open for edit) before a fixer changes FissionOxide's sketch ring.
+3. Rebuild before probing: the running binary is `main` at `379c2ae2`; kill `fissionoxide.exe` first,
+   `cargo build --release -p fissionoxide` took 2 m 47 s.
 
-Where the documents stand: Fusion has four tabs ("Untitled*": Part Design, inches, Body1, Sketch1..5 with
-the new empty Sketch5 on the body's end face; "Untitled*(1)" mesh, active when this session ended;
-"Untitled(2)" empty Assembly Design; "Untitled*(3)" sheet metal), DESIGN workspace. FissionOxide: one tab,
-a mm design with Sketch1 (a rectangle) and Body1 (extruded 20 mm), Data Panel closed. Both windows sit at
-screenshot x 0..908: Fusion at y 80..730, FissionOxide at y 0..785. Fusion's taskbar button at (497,803),
-FissionOxide's at (572,803).
+Where the documents stand: Fusion has four tabs, as before ("Untitled*" Part Design with Body1 and
+Sketch1..5, "Untitled*(1)" mesh/sheet-metal tab, "Untitled(2)" empty Assembly Design, "Untitled*(3)"
+sheet metal, active), DESIGN workspace; its Job Status icon shows a "1" badge (an update card waiting:
+do not press Update Now, it restarts Fusion and loses the owner's tabs). FissionOxide: two tabs ("Untitled*"
+mm Part Design with Sketch1, Body1 extruded 10 mm and Plane1 offset 10 mm from the top; "Untitled" Assembly
+Design), Data Panel closed. Fusion at screenshot x 0..908, y 80..730; FissionOxide x 0..908, y 0..785.
+Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
 
 ## Traps
+- Fusion's Help > Check for Updates puts an "A new version of Fusion has landed" card with Update Now /
+  Update Later in the Job Status panel; never press Update Now (Fusion restarts and the unsaved tabs go).
+- Fusion's window X with unsaved tabs opens the Save dialog for the active tab; Cancel at (635,500) keeps
+  Fusion open with every tab.
+- Fusion's house icon (16,114) opens the Home page and shows the Text Commands panel; click a document tab to
+  go back.
+- Fusion's Preferences reopens on the page last shown; its tree scrolls once Design, Manufacture and Graphics
+  are expanded, so take a zoom of the tree before clicking a lower node. Cancel at (787,605).
+- FissionOxide's window X quits at once even with unsaved changes (until `ui-documents-window-tabs` lands).
+- A relaunched FissionOxide opens at screenshot (105..1196, 100..800) with the Data Panel open: close the
+  panel (x at its top right), click the canvas, Win+Left, click the canvas again to dismiss snap assist, then
+  drag the right edge from x 727 to 907 with `left_mouse_down` / `mouse_move` / `left_mouse_up` at y 600.
+  Dragging the title bar upward is refused once the pointer passes over the desktop.
+- Body corners in Fusion's "Untitled*" carry sketch points (the sketches sit on the body), so a right-click
+  there is a sketch point; use the sheet metal flange in "Untitled*(3)" for a vertex.
+- Bash heredocs with apostrophes fail; write notes with the Write / Edit tools.
 - Closing a Fusion tab with changes opens the Save dialog (Name, Location, Don't Save / Cancel / Save);
   Cancel at (632,500). Do not press Don't Save on the owner's tabs.
 - Until `ui-shortcut-sketch-scope` lands, A, E, F, H and Q in a FissionOxide sketch finish the sketch;

@@ -112,3 +112,7 @@
 {"name": "ui-documents-tabs-close", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_ea3bdedb (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-shortcut-extra-keys", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_add32e58 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-shortcut-sketch-scope", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_3bc6cfa5 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-appbar-home-updates", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-documents-window-tabs", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-marking-menu-targets", "items": 8, "status": "ready", "pr": null}
+{"name": "ui-preferences-pages", "items": 9, "status": "ready", "pr": null}

@@ -598,3 +598,14 @@ the sketch for the second. FissionOxide also binds J in a Part Design and Home, 
 and X's construction mode. Closing a never-saved tab and the tab names differ too. 14 rows in three
 batches (`parity/batches/map-wave34.json`), six match rows, three fixing-merged keys verified. The area is
 done; Startup and documents is next.
+
+## 2026-10-22, prober 20: start-up and documents, Preferences pages, marking menus
+
+Tabs, the tab overflow list, File > New..., closing tabs and the window, recovery, Check for Updates and
+Fusion's Home page; every Preferences page other than General; the marking menu on a body, a vertex, a
+sketch point, a construction plane, a timeline item and inside a sketch (report
+`parity/reports/2026-10-22-startup-preferences-marking.md`). Three P1s: FissionOxide's window close quits
+without asking to save, its ring puts every slot after Repeat one position clockwise of Fusion's, and its
+Bodies folder eye does not hide the bodies. Preferences has content on four of Fusion's thirty pages. 24
+rows in four batches (`parity/batches/map-wave35.json`), five match rows, four keys verified and three
+reopened. The three areas are done; the ASSEMBLY tab still waits for the owner's decision on saving.
