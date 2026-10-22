@@ -187,8 +187,10 @@ mod tests {
     let d = app.dialog.as_ref().unwrap();
     assert_eq!(d.kind, Kind::Form(&forms::MIDPLANE));
     assert_eq!(d.kind.title(), TITLE);
-    assert!(app.s.model.planes.is_empty());
-    assert!(app.s.design.features.is_empty(), "the offset plane was withdrawn");
+    // (the Midplane form previews from its default planes; the offset plane is gone)
+    let offset =
+      |f: &fox_engine::model::Feature| matches!(f.kind, fox_engine::model::FeatureKind::ConstructionPlane { .. });
+    assert!(!app.s.design.features.iter().any(offset), "the offset plane was withdrawn");
   }
 
   #[test]
