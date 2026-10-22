@@ -29,6 +29,8 @@ pub(crate) struct Item {
   disabled: bool,
   /// Greyed out while the design is unsaved.
   needs_saved: bool,
+  /// Its menu row has no icon.
+  bare: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -41,12 +43,12 @@ pub(crate) enum E {
 
 /// A command FissionOxide runs.
 const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false, needs_saved: false })
+  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false, needs_saved: false, bare: false })
 }
 
 /// A Fusion command FissionOxide doesn't have yet.
 const fn x(label: &'static str, icon: Icon) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false, needs_saved: false })
+  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false, needs_saved: false, bare: false })
 }
 
 impl E {
@@ -88,6 +90,17 @@ impl E {
     match self {
       E::I(mut i) => {
         i.needs_saved = true;
+        E::I(i)
+      }
+      other => other,
+    }
+  }
+
+  /// No icon in the menu (Fusion's Design and Make Marketplace).
+  const fn bare(self) -> E {
+    match self {
+      E::I(mut i) => {
+        i.bare = true;
         E::I(i)
       }
       other => other,
@@ -997,8 +1010,10 @@ const TURNING: [Group; 3] = [
 const MANAGE: [Group; 1] =
   [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[c("Bill of Materials", Icon::Bom, D(Kind::Bom))] }];
 
-const ADD_INS: &[E] =
-  &[c("Scripts and Add-Ins...", Icon::Scripts, Cmd::Plugins), x("Design and Make Marketplace", Icon::Marketplace)];
+const ADD_INS: &[E] = &[
+  c("Scripts and Add-Ins...", Icon::Scripts, Cmd::Plugins).k("Shift+S"),
+  x("Design and Make Marketplace", Icon::Marketplace).bare(),
+];
 
 const UTILITY: &[E] = &[
   c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
@@ -1035,7 +1050,7 @@ const UTIL_INSPECT: &[E] = &[
 
 const UTILITIES: [Group; 5] = [
   Group { label: "MAKE", quick: &["3D Print"], menu: EXPORT },
-  Group { label: "ADD-INS", quick: &["Scripts and Add-Ins...", "Design and Make Marketplace"], menu: ADD_INS },
+  Group { label: "ADD-INS", quick: &["Scripts and Add-Ins..."], menu: ADD_INS },
   Group { label: "UTILITY", quick: &["Compute All", "Manage Materials"], menu: UTILITY },
   Group {
     label: "INSPECT",
@@ -1281,6 +1296,7 @@ pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -
     cmd: Some(Cmd::SketchTool(tool)),
     disabled: false,
     needs_saved: false,
+    bare: false,
   };
   let key = key_of(prefs, Scope::Sketch, label);
   rich_tip(resp, Scope::Sketch, &it, key)
@@ -1633,7 +1649,9 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
   }
   if let Some(i) = it {
     let ir = Rect::from_center_size(rect.left_center() + vec2(14.0, 0.0), Vec2::splat(17.0));
-    if disabled {
+    if i.bare {
+      // a row without an icon
+    } else if disabled {
       icons::draw(p, ir, i.icon, Color32::from_gray(185));
     } else {
       icons::draw_tinted(p, ir, i.icon, i.tint);
@@ -1875,6 +1893,10 @@ mod tests {
     }
     assert_eq!(cmd_of(Tab::Mesh, "EXPORT", "3D Print"), Some(Cmd::Print3d));
     assert_eq!(cmd_of(Tab::Utilities, "MAKE", "3D Print"), Some(Cmd::Print3d));
+    // both open File > 3D Print's docked dialog, not a Save As
+    let mut app = App::with_session(fox_engine::Session::default());
+    Cmd::Print3d.run(&mut app);
+    assert!(app.capture.print.is_some(), "3D Print opens the 3D PRINT dialog");
     // ASSEMBLE keeps its Part Design place, between INSERT and SELECT
     let (own, shared) = groups(Tab::Solid);
     let order: Vec<&str> = own.iter().chain(shared.iter()).map(|g| g.label).collect();

@@ -180,8 +180,8 @@ pub(crate) fn modal_open(app: &App) -> bool {
   app.data.save.is_some() || app.files.open.is_some() || app.files.export.is_some() || app.export_dxf.is_some()
 }
 
-/// Escape closes the docked 3D PRINT dialog, the Image Options window and the data panel's
-/// prompts (one per press, the prompt first), as in Fusion. An open drop-down closes first (egui
+/// Escape closes the docked 3D PRINT dialog, the Image Options window, the Scripts and Add-Ins
+/// window and the data panel's prompts (one per press, the prompt first), as in Fusion. An open drop-down closes first (egui
 /// does that), and the modal Save, Open and Export windows close only with Cancel or their X.
 /// Returns whether the key was taken.
 pub(crate) fn escape(app: &mut App, ctx: &egui::Context) -> bool {
@@ -194,7 +194,7 @@ pub(crate) fn escape(app: &mut App, ctx: &egui::Context) -> bool {
     app.data.close_prompt();
     true
   } else {
-    app.capture.image.take().is_some() || app.capture.print.take().is_some()
+    app.capture.image.take().is_some() || app.capture.print.take().is_some() || std::mem::take(&mut app.plugins.open)
   };
   if closed {
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));

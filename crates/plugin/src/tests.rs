@@ -692,7 +692,7 @@ fn bundled_add_ins_can_start_off_and_ship_a_library() {
   std::fs::write(addin.join("plugin.wasm"), Wat::default().module("(i64.const 0)")).unwrap();
   std::fs::write(addin.join("library/Pack/disc.dxf"), "0\nEOF\n").unwrap();
   let lib = addin.join("library");
-  let mut p = Plugins::open(&dir.join("plugins"), vec![bundled]);
+  let mut p = Plugins::open(&dir.join("plugins"), vec![bundled.clone()]);
   let a = p.get("com.test.addin").unwrap();
   assert!(a.bundled && !a.record.enabled, "starts off");
   assert!(p.commands().is_empty());
@@ -704,6 +704,17 @@ fn bundled_add_ins_can_start_off_and_ship_a_library() {
   assert!(p.get("com.test.addin").unwrap().record.enabled, "remembered");
   p.set_enabled("com.test.addin", false).unwrap();
   assert!(p.libraries.is_empty());
+  // Run starts it for this session only; Run on Startup is remembered and leaves it as it runs
+  p.set_running("com.test.addin", true).unwrap();
+  let a = p.get("com.test.addin").unwrap();
+  assert!(a.record.enabled && !a.startup && !p.commands().is_empty());
+  p.set_run_on_startup("com.test.addin", true).unwrap();
+  p.set_running("com.test.addin", false).unwrap();
+  let a = p.get("com.test.addin").unwrap();
+  assert!(!a.record.enabled && a.startup && p.commands().is_empty());
+  let fresh = Plugins::open(&dir.join("plugins"), vec![bundled.clone()]);
+  let a = fresh.get("com.test.addin").unwrap();
+  assert!(a.record.enabled && a.startup, "it starts with the app next time");
   assert!(Manifest::parse(&text.replace("library = \"library\"", "library = \"../up\"")).is_err());
 }
 

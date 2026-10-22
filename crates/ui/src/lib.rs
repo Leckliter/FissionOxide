@@ -1108,8 +1108,10 @@ impl App {
     if pressed(Key::Escape, Modifiers::NONE) {
       self.escape();
     }
-    // the S toolbox, at the pointer over the canvas (in a sketch and on a drawing sheet too)
+    // the S toolbox, at the pointer over the canvas (in a sketch and on a drawing sheet too);
+    // Shift+S is Scripts and Add-Ins'
     if let Some(p) = ctx.pointer_hover_pos().filter(|p| self.canvas.contains(*p))
+      && !ctx.input(|i| i.modifiers.shift)
       && pressed(Key::S, Modifiers::NONE)
     {
       // the S itself mustn't land in the search field

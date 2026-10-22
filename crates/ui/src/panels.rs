@@ -758,7 +758,7 @@ impl Cmd {
         }
       }
       Cmd::Delete => app.delete_selection(),
-      Cmd::Print3d => app.export("stl"),
+      Cmd::Print3d => crate::capture::open_print(app),
       Cmd::RemoveBodies => {
         let bodies: Vec<u32> =
           app.s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(body.0) } else { None }).collect();

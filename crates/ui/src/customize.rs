@@ -195,7 +195,8 @@ impl KeyMap {
       if on.is_none_or(|s| s == scope)
         && let Some((rm, rk)) = parse_combo(r)
         && rk == key
-        && if rm.command { m == rm } else { m.matches_logically(rm) }
+        // the S toolbox leaves Shift+S to Scripts and Add-Ins, as in Fusion
+        && if rm.command { m == rm } else { m.matches_logically(rm) && !(rk == Key::S && m.shift) }
       {
         return Some(Conflict::Reserved(what));
       }
@@ -617,7 +618,9 @@ mod tests {
     assert_eq!(k.conflict("design.Extrude", Scope::Design, "Ctrl+Z", &all), Some(Conflict::Reserved("Undo")));
     assert_eq!(k.conflict("design.Extrude", Scope::Design, "Ctrl+Shift+S", &all), Some(Conflict::Reserved("Save As")));
     assert_eq!(k.conflict("design.Extrude", Scope::Design, "Ctrl+Alt+S", &all), None);
-    assert_eq!(k.conflict("design.Extrude", Scope::Design, "Shift+S", &all), Some(Conflict::Reserved("the S toolbox")));
+    assert_eq!(k.conflict("design.Extrude", Scope::Design, "Alt+S", &all), Some(Conflict::Reserved("the S toolbox")));
+    // Shift+S is Scripts and Add-Ins' key, not the S toolbox's
+    assert_eq!(k.conflict("design.Extrude", Scope::Design, "Shift+S", &all), None);
     assert_eq!(k.conflict("sketch.Line", Scope::Sketch, "X", &all), Some(Conflict::Reserved("Construction")));
     assert_eq!(k.conflict("design.Extrude", Scope::Design, "X", &all), None);
     // changed keys count, not the defaults

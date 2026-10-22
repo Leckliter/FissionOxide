@@ -706,6 +706,44 @@ fn the_s_toolbox_is_titled_design_shortcuts_centred_with_a_search_field() {
 }
 
 #[test]
+fn shift_s_opens_scripts_and_add_ins_and_close_or_escape_shuts_it() {
+  let mut h = Harness::new();
+  let mid = h.app.canvas.center();
+  h.frame(vec![Event::PointerMoved(mid)]);
+  h.mods = egui::Modifiers::SHIFT;
+  let shift_s = Event::Key {
+    key: egui::Key::S,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::SHIFT,
+  };
+  h.frame(vec![shift_s, Event::Text("S".into())]);
+  h.mods = egui::Modifiers::NONE;
+  assert!(h.app.plugins.open, "Shift+S opens Scripts and Add-Ins");
+  assert!(h.app.toolbox.is_none(), "not the S toolbox");
+  h.frame(vec![]);
+  let w = h.ctx.memory(|m| m.area_rect(crate::file_dialogs::floating_id("scripts-addins"))).expect("the window shows");
+  assert!((w.width() - 800.0).abs() < 4.0 && (w.height() - 510.0).abs() < 8.0, "about 800 x 510, as Fusion's: {w:?}");
+  // the blue Close at the lower right
+  use crate::file_dialogs::{BUTTON, MARGIN};
+  h.move_then_click(w.right_bottom() - vec2(MARGIN + BUTTON.x / 2.0, MARGIN + BUTTON.y / 2.0));
+  assert!(!h.app.plugins.open, "Close shuts it");
+  // opened from the ribbon, Escape shuts it
+  crate::panels::Cmd::Plugins.run(&mut h.app);
+  h.frame(vec![]);
+  let esc = Event::Key {
+    key: egui::Key::Escape,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::NONE,
+  };
+  h.frame(vec![esc]);
+  assert!(!h.app.plugins.open, "Escape shuts it");
+}
+
+#[test]
 fn ctrl_s_in_a_test_saves_to_a_scratch_hub() {
   let mut h = Harness::new();
   let root = h.app.hub_root();
