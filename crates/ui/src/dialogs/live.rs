@@ -23,11 +23,20 @@ pub(super) struct Live {
   picked: Vec<Was>,
   /// The features before the preview: the ones it adds stay out of the timeline until OK.
   before_features: Vec<FeatureId>,
+  /// The browser's body rows before the preview (id, name): it keeps them until OK.
+  before_rows: Vec<(BodyId, String)>,
 }
 
 impl Default for Live {
   fn default() -> Live {
-    Live { on: true, tried: None, before: Vec::new(), picked: Vec::new(), before_features: Vec::new() }
+    Live {
+      on: true,
+      tried: None,
+      before: Vec::new(),
+      picked: Vec::new(),
+      before_features: Vec::new(),
+      before_rows: Vec::new(),
+    }
   }
 }
 
@@ -95,13 +104,13 @@ fn find_now(s: &Session, was: Was) -> Option<Pick> {
 
 /// The dialogs whose picked faces and edges stay selected on their preview.
 fn keeps_picks(kind: Kind) -> bool {
-  matches!(kind, Kind::Fillet | Kind::Chamfer | Kind::Shell | Kind::PressPull | Kind::Draft)
+  matches!(kind, Kind::Fillet | Kind::Chamfer | Kind::Shell | Kind::PressPull | Kind::OffsetFace | Kind::Draft)
 }
 
 impl Dialog {
   /// Asks for a preview when live preview is on and the command changed since the last one.
   pub(super) fn live_check(&mut self) {
-    if !self.live.on || !self.picks() || self.editing.is_some() || self.dirty || !self.ready() {
+    if !self.live.on || !self.picks() || self.picks_fixed() || self.dirty || !self.ready() || self.waits_for_value() {
       return;
     }
     let cmd = self.command().map(|(c, p)| json!([c, p]));
@@ -116,10 +125,13 @@ impl Dialog {
     self.refresh_manip(s);
     self.live.tried = Some(json!([cmd, params]));
     self.live.before = s.model.bodies.iter().map(|b| b.id).collect();
+    self.live.before_rows = s.model.bodies.iter().map(|b| (b.id, s.body_name(b.id))).collect();
     self.live.picked.clear();
-    if keeps_picks(self.kind) && self.editing.is_none() {
+    if keeps_picks(self.kind) && !self.picks_fixed() {
       let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
-      for f in &self.faces {
+      // (Draft's pull face stays picked too)
+      let pull = (self.kind == Kind::Draft).then_some(&self.plane);
+      for f in self.faces.iter().chain(pull) {
         if let (Some(b), Some(id)) = (get(f, "body"), get(f, "face"))
           && let Some(x) = s.model.body(BodyId(b)).and_then(|x| x.faces().iter().find(|x| x.id == id))
         {
@@ -141,7 +153,7 @@ impl Dialog {
   /// previewed body, so only they draw in the selection colour and the body keeps its own
   /// appearance, as in Fusion. (The session drops picks on a body a feature changed.)
   pub(super) fn reselect_picks(&self, s: &mut Session) {
-    if !keeps_picks(self.kind) || self.editing.is_some() {
+    if !keeps_picks(self.kind) || self.picks_fixed() {
       return;
     }
     s.selection = self
@@ -157,10 +169,12 @@ impl Dialog {
       .collect();
   }
 
-  /// The Preview checkbox of a model-picking dialog. Fillet has none: it always previews, as in
-  /// Fusion.
+  /// The Preview checkbox of a model-picking dialog. Fillet, Draft, Offset Face, Thread, Emboss,
+  /// Thicken and Boundary Fill have none: they always preview, as in Fusion.
   pub(super) fn live_checkbox(&mut self, ui: &mut egui::Ui, s: &mut Session) {
-    if self.kind == Kind::Fillet {
+    if matches!(self.kind, Kind::Fillet | Kind::Draft | Kind::OffsetFace)
+      || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f))
+    {
       return;
     }
     if ui.checkbox(&mut self.live.on, "Preview").changed() {
@@ -178,6 +192,17 @@ impl Dialog {
       return Vec::new();
     }
     s.model.bodies.iter().map(|b| b.id).filter(|b| !self.live.before.contains(b)).collect()
+  }
+
+  /// The browser's body rows while a preview shows: the bodies as they were before it, so a body
+  /// the preview consumes (Combine's tools) keeps its row and one it adds has none until OK, as
+  /// in Fusion. None when no preview shows.
+  pub fn browser_bodies(&self, s: &Session) -> Option<Vec<(BodyId, String)>> {
+    if !self.applied || self.editing.is_some() {
+      return None;
+    }
+    let name = |id: BodyId, was: &str| if s.model.body(id).is_some() { s.body_name(id) } else { was.to_string() };
+    Some(self.live.before_rows.iter().map(|(id, was)| (*id, name(*id, was))).collect())
   }
 
   /// Features the showing preview added, in timeline order (the timeline leaves them out until

@@ -20,7 +20,10 @@ mod data_panel;
 mod dialogs;
 mod doc_dialogs;
 mod ecad_ui;
+mod error_dialog;
 mod explode_ui;
+#[cfg(test)]
+mod failed_items_tests;
 mod file_dialogs;
 #[cfg(test)]
 mod file_dialogs_tests;
@@ -38,9 +41,13 @@ mod icons;
 mod input_tests;
 mod library_ui;
 mod logo;
+mod manip_arrow;
 mod manipulators;
 mod marking;
+mod material_ui;
 mod menus;
+#[cfg(test)]
+mod mesh_body_tests;
 mod navbar;
 mod notifications;
 mod origin;
@@ -61,6 +68,7 @@ mod sheet;
 mod sim_ui;
 mod sketch_modify;
 mod theme;
+mod thread_form;
 mod tips;
 mod toolbox;
 mod trace;
@@ -110,6 +118,8 @@ pub struct App {
   /// Trim, Break): shown at the canvas's lower right, with a warning icon at the right end of the
   /// status readout until the next command.
   pub(crate) warning_toast: Option<panels::WarningToast>,
+  /// The error toast and status-bar badge for failed features (see [`panels::error_toast`]).
+  pub(crate) error_toast: panels::ErrorToast,
   /// The red message of the last command [`App::run`] refused: it goes when the next command
   /// succeeds (Fusion leaves nothing behind a refused command).
   run_error: Option<String>,
@@ -208,6 +218,14 @@ pub struct App {
   pub(crate) picked_origin: Option<origin::OriginItem>,
   /// The origin item under the pointer in the canvas this frame.
   pub(crate) hover_origin: Option<origin::OriginItem>,
+  /// The status readout's last least distance (mm) between two selected items, kept until the
+  /// model or the pair changes so the kernel isn't asked every frame.
+  pub(crate) readout_distance: std::cell::Cell<Option<panels::PairDistance>>,
+  /// The origin or construction row under the pointer in the browser, lit in the canvas too.
+  pub(crate) row_hover: Option<origin::RowHover>,
+  /// The plane whose sketch grid Create Sketch previews: the one under the pointer while it
+  /// waits for a plane.
+  pub(crate) grid_preview: Option<fox_engine::kernel::Plane>,
   /// The Origin folder's children's own eyes (O, X, Y, Z, XY, XZ, YZ), on by default; a child
   /// shows only when the folder's eye is on too.
   pub(crate) origin_eyes: [bool; 7],
@@ -300,6 +318,8 @@ pub struct App {
   pub(crate) clipboard: Option<clipboard::Clip>,
   /// Installed plugins: the Plugins window, their toolbar tabs and command dialogs.
   pub(crate) plugins: plugins_ui::PluginsUi,
+  /// Manage Materials' Material Browser, while open.
+  pub(crate) material_browser: Option<material_ui::Browser>,
   /// Insert > Sketch Library: the part picker and placing parts with clicks.
   pub(crate) library_ui: library_ui::LibraryUi,
   /// View ▸ Render Components….
@@ -316,6 +336,13 @@ pub struct App {
   pub files: file_dialogs::Files,
   /// Change Active Units or Convert Design Type, docked at the right (see `doc_dialogs`).
   pub(crate) doc_dialog: Option<doc_dialogs::DocDialog>,
+  /// Create Base Feature's mode: the ribbon shows BASE FEATURE SOLID / SURFACE and a green
+  /// FINISH BASE FEATURE button until it is finished (see [`config_ui::start_base`]).
+  pub base_mode: bool,
+  /// The Section Analyses OK kept, in the browser's Analysis folder.
+  pub(crate) sections: Vec<dialogs::KeptSection>,
+  /// The Analysis folder's eye is off: no kept analysis shows.
+  pub(crate) analysis_hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -356,6 +383,8 @@ struct RenderKey {
   peek: Vec<u32>,
   isolate: Option<Vec<u32>>,
   opacity: Vec<(u32, u8)>,
+  /// A Mirror's or pattern's previewed copies, drawn as ghosts.
+  ghosts: Vec<u32>,
   /// Faces and sketches highlighted from the timeline.
   peek_faces: Vec<(u32, u32)>,
   peek_sketches: Vec<u32>,
@@ -363,6 +392,11 @@ struct RenderKey {
   glyph_hover: Vec<Pick>,
   /// The Sketch Palette's display options (Slice, Profile, Points, ...).
   palette: palette::SketchPalette,
+  /// The plane Create Sketch previews the grid on.
+  grid_plane: Option<fox_engine::kernel::Plane>,
+  /// The see-through squares drawn over the scene (the origin planes): on the GPU they are
+  /// handed over apart from the scene, so the GPU's scene key leaves them out.
+  quads: Vec<fox_engine::render::Quad>,
 }
 
 impl App {
@@ -452,6 +486,7 @@ impl App {
       status: None,
       hint: None,
       warning_toast: None,
+      error_toast: panels::ErrorToast::default(),
       run_error: None,
       show_params: false,
       params_ui: params_ui::Panel::default(),
@@ -460,7 +495,7 @@ impl App {
       sheet_view: (1.0, egui::Vec2::ZERO),
       visual_style: Default::default(),
       objects: Default::default(),
-      effects: Default::default(),
+      effects: navbar::default_effects(),
       show_grid: true,
       grid: Default::default(),
       increments: Default::default(),
@@ -507,6 +542,9 @@ impl App {
       export_dxf: None,
       picked_origin: None,
       hover_origin: None,
+      readout_distance: std::cell::Cell::new(None),
+      row_hover: None,
+      grid_preview: None,
       origin_eyes: [true; 7],
       origin_shown: false,
       browser_sketches: None,
@@ -548,6 +586,7 @@ impl App {
       close_menus: false,
       clipboard: None,
       plugins: plugins_ui::PluginsUi::default(),
+      material_browser: None,
       library_ui: library_ui::LibraryUi::default(),
       render_components: explode_ui::RenderComponents::default(),
       render: render_ui::RenderUi::default(),
@@ -556,6 +595,9 @@ impl App {
       show_perf: false,
       files: file_dialogs::Files::default(),
       doc_dialog: None,
+      base_mode: false,
+      sections: Vec::new(),
+      analysis_hidden: false,
     }
   }
 
@@ -577,14 +619,13 @@ impl App {
   /// Takes a finished background regeneration back. Returns whether one is still running.
   fn poll_rebuild(&mut self) -> bool {
     if self.rebuild.as_ref().is_some_and(|(job, _)| job.is_finished())
-      && let Some((job, start)) = self.rebuild.take()
+      && let Some((job, _)) = self.rebuild.take()
     {
       self.s.finish_rebuild(job);
-      let errors = self.s.model.errors();
-      self.status = Some(match errors.first() {
-        Some(e) => (e.clone(), true),
-        None => (format!("Computed in {:.1} s", now() - start), false),
-      });
+      // as Fusion, a clean recompute says nothing; only a failure leaves a message
+      if let Some(e) = self.s.model.errors().first() {
+        self.status = Some((e.clone(), true));
+      }
     }
     self.rebuild.is_some()
   }
@@ -705,6 +746,9 @@ impl App {
     self.data.save = None;
     // the Export window was for the old design
     self.files.export = None;
+    // and the kept analyses
+    self.sections.clear();
+    self.analysis_hidden = false;
   }
 
   /// Opens a design (latest or a given version) from the data panel.
@@ -1054,6 +1098,8 @@ impl App {
     if pressed(Key::F, Modifiers::COMMAND | Modifiers::SHIFT) {
       navbar::toggle_full_screen(ctx);
     }
+    // Display Settings ▸ Visual Style: Ctrl+4 to Ctrl+9
+    navbar::visual_style_keys(self, ctx);
     if pressed(Key::S, Modifiers::COMMAND) {
       self.save(false);
     }
@@ -1294,7 +1340,10 @@ impl App {
   /// Escape over the canvas: ends whatever is open, innermost first (a pop-up list, a tool's
   /// unfinished shape, the tool, the dialog, the selection).
   pub(crate) fn escape(&mut self) {
-    if self.doc_dialog.is_some() {
+    if self.display.ground_offset_form.is_some() {
+      // the GROUND PLANE OFFSET dialog closes, changing nothing
+      self.display.ground_offset_form = None;
+    } else if self.doc_dialog.is_some() {
       // Change Active Units or Convert Design Type closes, changing nothing
       doc_dialogs::close(self);
     } else if self.other.is_some() {
@@ -1334,9 +1383,11 @@ impl App {
       self.cancel_dialog();
       self.s.selection.clear();
     } else {
-      // a picked origin plane, axis or point clears too; the item stays visible
+      // a picked origin plane, axis or point clears too; the item stays visible; the timeline or
+      // browser row still under the pointer stops lighting its feature's body
       self.s.selection.clear();
       origin::clear(self);
+      marking::hold_peek(self);
     }
     self.dim_edit = None;
   }
@@ -1375,6 +1426,10 @@ impl App {
 
   pub fn start(&mut self, kind: dialogs::Kind) {
     self.end_hint();
+    // the last command's lower-left message makes way for this one's, as in Fusion
+    if self.status.as_ref().is_some_and(|(_, err)| !err) {
+      self.status = None;
+    }
     self.note_cmd(panels::Cmd::Dialog(kind));
     self.cancel_dialog();
     self.tool = Tool::Select;
@@ -1814,8 +1869,11 @@ impl App {
     toolbox::show(self, &ctx);
     panels::canvas_status(self, &ctx);
     panels::unsaved_banner(self, &ctx);
+    panels::error_toast(self, &ctx);
     panels::selection_info(self, &ctx);
     panels::warning_toast(self, &ctx);
+    error_dialog::badge(self, &ctx);
+    error_dialog::window(self, &ctx);
     notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
     doc_dialogs::show(self, &ctx);
@@ -1848,6 +1906,7 @@ impl App {
     library_ui::window(self, &ctx);
     help::window(self, &ctx);
     plugins_ui::window(self, &ctx);
+    material_ui::browser_window(self, &ctx);
     explode_ui::window(self, &ctx);
     service_ui::window(self, &ctx);
     if std::mem::take(&mut self.close_menus) {
@@ -2313,6 +2372,13 @@ mod tests {
     }
     let v = app.s.model.bodies[0].shape.mass().unwrap().volume;
     assert!((v - 3000.0).abs() < 1e-6, "{v}");
+    // `ui:dialogs:compute-all-message`: like Fusion, Compute All leaves no message when it succeeds
+    app.status = None;
+    app.run_background("compute_all", json!({}));
+    while app.poll_rebuild() {
+      std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(app.status, None);
     app.run_background("param.set", json!({"name": "h", "expr": "1 +"}));
     assert!(app.rebuild.is_none() && app.status.as_ref().is_some_and(|s| s.1));
   }

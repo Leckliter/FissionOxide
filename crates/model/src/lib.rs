@@ -977,7 +977,7 @@ pub enum FeatureKind {
     keep_tools: bool,
   },
   /// Bodies imported from a file: exact geometry (STEP, IGES, BRep) stored losslessly as OCCT
-  /// BRep text, and/or triangle meshes (STL, OBJ, 3MF, PLY) that become faceted bodies.
+  /// BRep text, and/or triangle meshes (STL, OBJ, 3MF, PLY) that stay mesh bodies named after the file.
   Import {
     file_name: String,
     #[serde(default)]
@@ -1342,6 +1342,10 @@ pub enum FeatureKind {
     /// A web (in-plane thickness, grows along the sketch normal) instead of a rib.
     #[serde(default)]
     web: bool,
+    /// The whole thickness on one side of the lines (Fusion's one-side Thickness Direction)
+    /// instead of half on each.
+    #[serde(default)]
+    one_side: bool,
   },
   /// Scales bodies about a point, uniformly or per axis.
   Scale {

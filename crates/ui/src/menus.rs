@@ -27,6 +27,8 @@ pub(crate) struct Item {
   cmd: Option<Cmd>,
   /// Greyed out, as Fusion shows commands unavailable in the current context.
   disabled: bool,
+  /// Greyed out while the design is unsaved.
+  needs_saved: bool,
   /// The SURFACE tab's own command of a SOLID label (Fusion's surface Extrude and Sweep): its
   /// own tooltip, and no shortcut shown.
   surface: bool,
@@ -49,12 +51,21 @@ impl Item {
 
 /// A command FissionOxide runs.
 const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false, surface: false })
+  E::I(Item {
+    label,
+    icon,
+    tint: Tint::Blue,
+    key: "",
+    cmd: Some(cmd),
+    disabled: false,
+    needs_saved: false,
+    surface: false,
+  })
 }
 
 /// A Fusion command FissionOxide doesn't have yet.
 const fn x(label: &'static str, icon: Icon) -> E {
-  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false, surface: false })
+  E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false, needs_saved: false, surface: false })
 }
 
 impl E {
@@ -85,6 +96,17 @@ impl E {
     match self {
       E::I(mut i) => {
         i.tint = Tint::Gold;
+        E::I(i)
+      }
+      other => other,
+    }
+  }
+
+  /// Greyed out while the design is unsaved.
+  const fn saved(self) -> E {
+    match self {
+      E::I(mut i) => {
+        i.needs_saved = true;
         E::I(i)
       }
       other => other,
@@ -137,9 +159,9 @@ const PATTERN: &[E] = &[
 ];
 
 const SIMPLIFY: &[E] = &[
-  c("Remove Faces", Icon::RemoveBody, D(Kind::Form(&forms::REMOVE_FACES))),
-  c("Remove Features", Icon::RemoveBody, D(Kind::Form(&forms::REMOVE_FACES))),
-  x("Replace with Primitives", Icon::Box),
+  c("Remove Features", Icon::RemoveFeatures, D(Kind::Form(&forms::REMOVE_FACES))),
+  c("Remove Faces", Icon::RemoveFaces, D(Kind::Form(&forms::REMOVE_FACES))),
+  x("Replace with Primitives", Icon::ReplacePrimitives),
 ];
 
 const CREATE_PCB: &[E] = &[x("Associative PCB", Icon::InsertComponent), x("Create 3D PCB", Icon::InsertComponent)];
@@ -173,53 +195,61 @@ const SOLID_CREATE: &[E] = &[
   c("Thicken", Icon::Thicken, D(Kind::Form(&forms::THICKEN))),
   c("Boundary Fill", Icon::BoundaryFill, D(Kind::Form(&forms::BOUNDARY_FILL))),
   E::Sep,
-  c("Create Base Feature", Icon::BaseFeature, D(Kind::Form(&config_ui::BASE_START))),
+  c("Create Base Feature", Icon::BaseFeature, Cmd::BaseFeature(true)),
   E::Sub("Create PCB", CREATE_PCB),
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
 
-const SOLID_MODIFY: &[E] = &[
-  c("Press Pull", Icon::PressPull, D(Kind::PressPull)).k("Q"),
-  E::Sep,
-  c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
-  c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
-  E::Sep,
-  c("Shell", Icon::Shell, D(Kind::Shell)),
-  c("Draft", Icon::Draft, D(Kind::Draft)),
-  c("Scale", Icon::Scale, D(Kind::Form(&forms::SCALE))),
-  c("Combine", Icon::Combine, D(Kind::Combine)),
-  c("Offset Face", Icon::OffsetFace, D(Kind::Form(&forms::OFFSET_FACE))),
-  c("Replace Face", Icon::ReplaceFace, D(Kind::Form(&forms::REPLACE_FACE))),
-  c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
-  c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
-  x("Silhouette Split", Icon::SilhouetteSplit),
-  E::Sep,
-  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
-  c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
-  c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
-  c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
-  E::Sep,
-  E::Sub("Simplify", SIMPLIFY),
-  E::Sep,
-  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
-  c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
-  x("Manage Materials", Icon::ManageMaterials),
-  E::Sep,
-  c("Change Parameters", Icon::Params, Cmd::Params),
-  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
-  E::Sep,
-  c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
-  E::Sep,
-  E::Sub("Direct Edit", DIRECT_EDIT),
-];
+/// SOLID > MODIFY, as Fusion lists it with design history on; `$extra` ends the menu.
+macro_rules! solid_modify {
+  ($($extra:expr),*) => {
+    &[
+      c("Press Pull", Icon::PressPull, D(Kind::PressPull)).k("Q"),
+      c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
+      c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
+      E::Sep,
+      c("Shell", Icon::Shell, D(Kind::Shell)),
+      c("Draft", Icon::Draft, D(Kind::Draft)),
+      c("Scale", Icon::Scale, D(Kind::Scale)),
+      c("Combine", Icon::Combine, D(Kind::Combine)),
+      c("Offset Face", Icon::OffsetFace, D(Kind::OffsetFace)),
+      c("Replace Face", Icon::ReplaceFace, D(Kind::Form(&forms::REPLACE_FACE))),
+      c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
+      c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
+      x("Silhouette Split", Icon::SilhouetteSplit),
+      E::Sep,
+      c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
+      c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
+      c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
+      c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
+      E::Sub("Simplify", SIMPLIFY),
+      E::Sep,
+      c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
+      c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
+      c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
+      E::Sep,
+      c("Change Parameters", Icon::Params, Cmd::Params),
+      c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
+      E::Sep,
+      c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
+      $($extra),*
+    ]
+  };
+}
+
+const SOLID_MODIFY: &[E] = solid_modify!();
+
+/// With design history off Fusion edits faces directly; FissionOxide's direct edits then join the
+/// menu (Fusion has no such entry while history is on).
+const SOLID_MODIFY_DIRECT: &[E] = solid_modify!(E::Sep, E::Sub("Direct Edit", DIRECT_EDIT));
 
 const DIRECT_EDIT: &[E] = &[
   c("Move Face", Icon::Move, D(Kind::Form(&config_ui::DIRECT_MOVE_FACE))),
   c("Press Pull", Icon::PressPull, D(Kind::Form(&config_ui::DIRECT_PRESS_PULL))),
   c("Delete Face", Icon::RemoveBody, D(Kind::Form(&config_ui::DIRECT_DELETE_FACE))),
   E::Sep,
-  c("Create Base Feature", Icon::Box, D(Kind::Form(&config_ui::BASE_START))),
-  c("Finish Base Feature", Icon::Box, D(Kind::Form(&config_ui::BASE_FINISH))),
+  c("Create Base Feature", Icon::Box, Cmd::BaseFeature(true)),
+  c("Finish Base Feature", Icon::Box, Cmd::BaseFeature(false)),
   c("Capture Design History", Icon::Box, Cmd::CaptureHistory),
 ];
 
@@ -233,26 +263,26 @@ const CONSTRUCT: &[E] = &[
   x("User Coordinate System (UCS)", Icon::Ucs),
   E::Sep,
   c("Offset Plane", Icon::Plane, D(Kind::OffsetPlane)),
-  c("Plane at Angle", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_ANGLE))),
-  c("Tangent Plane", Icon::PlaneAlt, D(Kind::Form(&forms::TANGENT_PLANE))),
-  c("Midplane", Icon::Plane, D(Kind::Form(&forms::MIDPLANE))),
-  c("Perpendicular Plane", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
-  c("Plane Through Two Edges", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_TWO_EDGES))),
-  c("Plane Through Three Points", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_THREE_POINTS))),
-  c("Plane Along Path", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
+  c("Plane at Angle", Icon::PlaneAngle, D(Kind::Form(&forms::PLANE_ANGLE))),
+  c("Tangent Plane", Icon::PlaneTangent, D(Kind::Form(&forms::TANGENT_PLANE))),
+  c("Midplane", Icon::Midplane, D(Kind::Form(&forms::MIDPLANE))),
+  c("Perpendicular Plane", Icon::PlanePerpendicular, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
+  c("Plane Through Two Edges", Icon::PlaneTwoEdges, D(Kind::Form(&forms::PLANE_TWO_EDGES))),
+  c("Plane Through Three Points", Icon::PlaneThreePoints, D(Kind::Form(&forms::PLANE_THREE_POINTS))),
+  c("Plane Along Path", Icon::PlaneAlongPath, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
   E::Sep,
-  c("Axis Through Cylinder/Cone/Torus", Icon::Axis, D(Kind::Form(&forms::AXIS_FACE))),
-  c("Axis Perpendicular To Face", Icon::Axis, D(Kind::Form(&forms::AXIS_NORMAL))),
-  c("Axis Through Two Planes", Icon::Axis, D(Kind::Form(&forms::AXIS_TWO_PLANES))),
-  c("Axis Through Two Points", Icon::Axis, D(Kind::Form(&forms::AXIS_TWO_POINTS))),
-  c("Axis Through Edge", Icon::Axis, D(Kind::Form(&forms::AXIS_EDGE))),
+  c("Axis Through Cylinder/Cone/Torus", Icon::AxisCylinder, D(Kind::Form(&forms::AXIS_FACE))),
+  c("Axis Perpendicular To Face", Icon::AxisNormal, D(Kind::Form(&forms::AXIS_NORMAL))),
+  c("Axis Through Two Planes", Icon::AxisTwoPlanes, D(Kind::Form(&forms::AXIS_TWO_PLANES))),
+  c("Axis Through Two Points", Icon::AxisTwoPoints, D(Kind::Form(&forms::AXIS_TWO_POINTS))),
+  c("Axis Through Edge", Icon::AxisEdge, D(Kind::Form(&forms::AXIS_EDGE))),
   E::Sep,
-  c("Point At Vertex", Icon::CPoint, D(Kind::Form(&forms::POINT_VERTEX))),
-  c("Point Through Two Edges", Icon::CPoint, D(Kind::Form(&forms::POINT_TWO_EDGES))),
-  c("Point Through Three Planes", Icon::CPoint, D(Kind::Form(&forms::POINT_THREE_PLANES))),
-  c("Point At Center Of Circle/Sphere/Torus", Icon::CPoint, D(Kind::Form(&forms::POINT_CENTER))),
-  c("Point At Edge And Plane", Icon::CPoint, D(Kind::Form(&forms::POINT_EDGE_PLANE))),
-  c("Point Along Path", Icon::CPoint, D(Kind::Form(&forms::POINT_ALONG_PATH))),
+  c("Point At Vertex", Icon::PointVertex, D(Kind::Form(&forms::POINT_VERTEX))),
+  c("Point Through Two Edges", Icon::PointTwoEdges, D(Kind::Form(&forms::POINT_TWO_EDGES))),
+  c("Point Through Three Planes", Icon::PointThreePlanes, D(Kind::Form(&forms::POINT_THREE_PLANES))),
+  c("Point At Center Of Circle/Sphere/Torus", Icon::PointCenter, D(Kind::Form(&forms::POINT_CENTER))),
+  c("Point At Edge And Plane", Icon::PointEdgePlane, D(Kind::Form(&forms::POINT_EDGE_PLANE))),
+  c("Point Along Path", Icon::PointAlongPath, D(Kind::Form(&forms::POINT_ALONG_PATH))),
 ];
 
 const INSPECT: &[E] = &[
@@ -278,8 +308,6 @@ const INSPECT: &[E] = &[
   E::Sep,
   x("History", Icon::History),
   x("Sustainability Insights", Icon::Sustainability),
-  E::Sep,
-  c("Properties", Icon::Properties, Cmd::Properties),
 ];
 
 const INSERT: &[E] = &[
@@ -288,34 +316,34 @@ const INSERT: &[E] = &[
   c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
-  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
+  // greyed until the design is saved, as Fusion's
+  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent).saved(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
   x("Insert Derive", Icon::Derive),
   x("Insert McMaster-Carr Component", Icon::McMaster).off(),
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
-  E::Sep,
-  // not in Fusion's menu: FissionOxide's STEP import
-  c("Insert STEP", Icon::Import, Cmd::InsertStep),
 ];
 
-const ASSEMBLE: &[E] = &[
-  x("Add To Assembly", Icon::AddToAssembly),
-  E::Sep,
-  // not in Fusion's menu: FissionOxide's component and joint commands
+// a Part Design document's ASSEMBLE holds only Add To Assembly, as Fusion's (FissionOxide makes
+// part designs only)
+const ASSEMBLE: &[E] = &[x("Add To Assembly", Icon::AddToAssembly)];
+
+/// FissionOxide's component and joint commands, which Fusion's ASSEMBLE lists only in an
+/// assembly design: not in a Part Design's dropdown, still found by the S toolbox and the
+/// keyboard shortcuts (J, Shift+J).
+const ASSEMBLE_MORE: &[E] = &[
   c("New Component", Icon::Component, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
   c("As-built Joint", Icon::JointOrigin, D(Kind::AsBuiltJoint)).k("Shift+J"),
   c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
   c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
   c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),
-  E::Sep,
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
   c("Rigid Group", Icon::Component, D(Kind::Form(&assembly_forms::RIGID_GROUP))),
   c("Motion Link", Icon::DriveJoint, D(Kind::Form(&assembly_forms::MOTION_LINK))),
   c("Contact Set", Icon::Interference, D(Kind::Form(&assembly_forms::CONTACT_SET))),
-  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
   c("Cam Follower", Icon::DriveJoint, D(Kind::Form(&assembly_forms::CAM_FOLLOWER))),
 ];
 
@@ -418,7 +446,7 @@ const SURFACE_MODIFY: &[E] = &[
   c("Stitch", Icon::Stitch, D(Kind::Form(&forms::STITCH))).o(),
   c("Unstitch", Icon::Unstitch, D(Kind::Form(&forms::UNSTITCH))).o(),
   c("Reverse Normal", Icon::ReverseNormal, D(Kind::Form(&forms::REVERSE_NORMAL))).o(),
-  c("Scale", Icon::Scale, D(Kind::Form(&forms::SCALE))),
+  c("Scale", Icon::Scale, D(Kind::Scale)),
   c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
   c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
   E::Sep,
@@ -429,7 +457,7 @@ const SURFACE_MODIFY: &[E] = &[
   E::Sep,
   c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
   c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
-  x("Manage Materials", Icon::ManageMaterials),
+  c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
@@ -498,7 +526,7 @@ const SHEET_MODIFY: &[E] = &[
   E::Sep,
   c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
   c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
-  x("Manage Materials", Icon::ManageMaterials),
+  c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
@@ -558,17 +586,14 @@ const SHARED: [Group; 6] = shared_groups!();
 // as in Fusion, only MESH has an EXPORT panel (elsewhere 3D Print is under UTILITIES > MAKE)
 const MESH_SHARED: [Group; 7] = shared_groups!(Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT });
 
+// Fusion's SOLID ribbon: CREATE 5 icons, MODIFY 4; the rest stay in the panel menus
 const SOLID: [Group; 2] = [
   Group {
     label: "CREATE",
-    quick: &["Create Sketch", "Extrude", "Revolve", "Hole", "Rectangular Pattern", "Create Form"],
+    quick: &["Create Sketch", "Extrude", "Revolve", "Hole", "Rectangular Pattern"],
     menu: SOLID_CREATE,
   },
-  Group {
-    label: "MODIFY",
-    quick: &["Press Pull", "Fillet", "Shell", "Combine", "Split Body", "Move/Copy", "Bill of Materials"],
-    menu: SOLID_MODIFY,
-  },
+  Group { label: "MODIFY", quick: &["Press Pull", "Fillet", "Shell", "Combine"], menu: SOLID_MODIFY },
 ];
 
 const SURFACE: [Group; 2] = [
@@ -682,10 +707,12 @@ const SKETCH_MODIFY_MORE: &[E] = &[
   c("Clean Up", Icon::SkCleanup, D(Kind::Form(&forms::SK_CLEANUP))),
 ];
 
-/// A tab's commands that its dropdowns don't show (see [`SKETCH_MODIFY_MORE`]).
-fn extra_commands(tab: Tab) -> &'static [E] {
+/// A tab's commands that its dropdowns don't show (see [`SKETCH_MODIFY_MORE`] and
+/// [`ASSEMBLE_MORE`]).
+fn extra_commands(tab: Tab) -> &'static [&'static [E]] {
   match tab {
-    Tab::Sketch => SKETCH_MODIFY_MORE,
+    Tab::Sketch => &[SKETCH_MODIFY_MORE, ASSEMBLE_MORE],
+    Tab::Solid | Tab::Surface | Tab::Mesh | Tab::SheetMetal | Tab::Plastic => &[ASSEMBLE_MORE],
     _ => &[],
   }
 }
@@ -992,7 +1019,7 @@ const ADD_INS: &[E] =
   &[c("Scripts and Add-Ins...", Icon::Scripts, Cmd::Plugins), x("Design and Make Marketplace", Icon::Marketplace)];
 
 const UTILITY: &[E] = &[
-  x("Manage Materials", Icon::ManageMaterials),
+  c("Manage Materials", Icon::ManageMaterials, Cmd::ManageMaterials),
   x("Manage Threads Library", Icon::Configure),
   c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
 ];
@@ -1093,6 +1120,12 @@ const FORM_UTILITIES: &[E] = &[
 ];
 
 const FORM_FINISH: &[E] = &[c("Finish Form", Icon::Finish, Cmd::Form(FormAct::Finish))];
+
+const BASE_FINISH: &[E] = &[c("Finish Base Feature", Icon::Finish, Cmd::BaseFeature(false))];
+
+/// The green group closing the BASE FEATURE SOLID / SURFACE tabs while a base feature is open.
+const BASE_FEATURE_FINISH: Group =
+  Group { label: "FINISH BASE FEATURE", quick: &["Finish Base Feature"], menu: BASE_FINISH };
 
 /// The Form workspace's contextual tab.
 const FORM: [Group; 5] = [
@@ -1258,8 +1291,16 @@ fn rich_tip(resp: egui::Response, scope: Scope, it: &Item, key: &str) -> egui::R
 /// Options): its name, description line and shortcut, expanding like a ribbon button's.
 pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -> egui::Response {
   let (icon, label, _) = Cmd::SketchTool(tool).info();
-  let it =
-    Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(Cmd::SketchTool(tool)), disabled: false, surface: false };
+  let it = Item {
+    label,
+    icon,
+    tint: Tint::Blue,
+    key: "",
+    cmd: Some(Cmd::SketchTool(tool)),
+    disabled: false,
+    needs_saved: false,
+    surface: false,
+  };
   let key = key_of(prefs, Scope::Sketch, label);
   rich_tip(resp, Scope::Sketch, &it, key)
 }
@@ -1285,7 +1326,9 @@ pub(crate) fn commands(tabs: &[Tab]) -> Vec<Entry> {
     for g in own.iter().chain(shared.iter()) {
       walk(g.menu, tab, &mut out);
     }
-    walk(extra_commands(tab), tab, &mut out);
+    for more in extra_commands(tab) {
+      walk(more, tab, &mut out);
+    }
   }
   out
 }
@@ -1304,7 +1347,10 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bo
   let (own, shared) = groups(tab);
   let mut pick: Option<Item> = None;
   let mut act: Option<Action> = None;
-  let all: Vec<&Group> = own.iter().chain(shared.iter()).collect();
+  let mut all: Vec<&Group> = own.iter().chain(shared.iter()).collect();
+  if app.base_mode && matches!(tab, Tab::Solid | Tab::Surface) {
+    all.push(&BASE_FEATURE_FINISH);
+  }
   let items: Vec<Vec<Item>> = all.iter().map(|g| quick_items(&app.prefs, tab, g)).collect();
   let font = egui::FontId::proportional(12.0);
   let panels: Vec<PanelSize> = all
@@ -1316,6 +1362,8 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bo
     })
     .collect();
   let counts = fit_counts(&panels, width);
+  let shown: Vec<(&'static str, usize)> = all.iter().zip(&counts).map(|(g, n)| (g.label, *n)).collect();
+  ui.ctx().data_mut(|d| d.insert_temp(fit_id(tab), shown));
   for ((g, its), n) in all.iter().zip(items).zip(counts) {
     show_group(app, ui, tab, g, &its[..n], &mut pick, &mut act);
   }
@@ -1331,6 +1379,11 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bo
   true
 }
 
+/// Where [`tab_toolbar`] keeps how many icons each panel of `tab` showed in the last frame.
+pub(crate) fn fit_id(tab: Tab) -> egui::Id {
+  egui::Id::new(("toolbar-fit", tab))
+}
+
 /// Where a menu is: what its rows' options and tooltips need.
 struct At<'a> {
   prefs: &'a Prefs,
@@ -1338,11 +1391,18 @@ struct At<'a> {
   group: &'static str,
   /// The group's default toolbar icons.
   quick: &'static [&'static str],
+  /// The design has never been saved (commands that need a saved design grey out).
+  unsaved: bool,
 }
 
 impl At<'_> {
   fn scope(&self) -> Scope {
     Scope::of(self.tab)
+  }
+
+  /// `it` as the menu shows it here: greyed if it needs a saved design and this one isn't.
+  fn shown(&self, it: &Item) -> Item {
+    Item { disabled: it.disabled || it.needs_saved && self.unsaved, ..*it }
   }
 
   fn key(&self, it: &Item) -> &str {
@@ -1444,12 +1504,12 @@ fn show_group(
   pick: &mut Option<Item>,
   act: &mut Option<Action>,
 ) {
-  let at = At { prefs: &app.prefs, tab, group: g.label, quick: g.quick };
+  let at = At { prefs: &app.prefs, tab, group: g.label, quick: g.quick, unsaved: panels::is_unsaved(app) };
   let popup_id = egui::Id::new(("toolbar-menu", tab, g.label));
   let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
   // FINISH SKETCH sits on light blue, like the contextual SKETCH tab
   let bg = ui.painter().add(egui::Shape::Noop);
-  let finish = matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING");
+  let finish = matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING" | "FINISH BASE FEATURE");
   let inner = ui.vertical(|ui| {
     ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
     ui.add_space(2.0);
@@ -1469,7 +1529,7 @@ fn show_group(
         if it.cmd.is_some() {
           resp.context_menu(|ui| at.options(ui, it, act));
         }
-        if resp.clicked() {
+        if resp.clicked() && !at.shown(it).disabled {
           *pick = Some(*it);
         }
       }
@@ -1479,14 +1539,26 @@ fn show_group(
     panels::group_label(ui, g.label, w, open)
   });
   // toggles (selection priority and filters) show a check mark while on
+  let menu = menu_of(app, tab, g);
   let on: Vec<&'static str> =
-    toggles(g.menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
-  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, &at, g.menu, pick, act, &on));
+    toggles(menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
+  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, &at, menu, pick, act, &on));
   if finish {
-    ui.painter()
-      .set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
+    // FINISH BASE FEATURE is Fusion's green
+    let fill = if g.label == "FINISH BASE FEATURE" { theme::BASE_FEATURE } else { theme::CONTEXT_TAB };
+    ui.painter().set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, fill));
   }
   panels::separator(ui);
+}
+
+/// The menu a group's name opens: SOLID's MODIFY (on SOLID and PLASTIC) gains the direct edits
+/// while design history is off.
+fn menu_of(app: &App, tab: Tab, g: &Group) -> &'static [E] {
+  if app.s.design.history_off && g.label == "MODIFY" && matches!(tab, Tab::Solid | Tab::Plastic) {
+    SOLID_MODIFY_DIRECT
+  } else {
+    g.menu
+  }
 }
 
 /// The toggle commands in a menu (and its submenus): the selection filters get a check mark
@@ -1530,6 +1602,7 @@ fn entries(
   for e in menu {
     match e {
       E::I(it) => {
+        let it = &at.shown(it);
         let r = row(ui, width, Some(it), at.key(it), it.label, false);
         if it.cmd.is_some() {
           // Fusion's ⋮ on the hovered row: its options open beside it
@@ -1624,7 +1697,8 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
 pub(crate) fn icon_of_label(label: &str) -> Option<Icon> {
   ALL_TABS.iter().find_map(|tab| {
     let (own, shared) = groups(*tab);
-    own.iter().chain(shared).find_map(|g| find(g.menu, label)).map(|i| i.icon)
+    let menus = own.iter().chain(shared).map(|g| g.menu).chain(extra_commands(*tab).iter().copied());
+    menus.into_iter().find_map(|m| find(m, label)).map(|i| i.icon)
   })
 }
 
@@ -1807,7 +1881,7 @@ mod tests {
       (Tab::Solid, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
       (Tab::Surface, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
       (Tab::SheetMetal, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
-      (Tab::Solid, "CREATE", "Create Base Feature", D(Kind::Form(&config_ui::BASE_START))),
+      (Tab::Solid, "CREATE", "Create Base Feature", Cmd::BaseFeature(true)),
       (Tab::Solid, "SELECT", "Construction Geometry", Cmd::Filter("construction")),
     ];
     for (tab, group, label, cmd) in wired {
@@ -2013,10 +2087,61 @@ mod tests {
     assert_eq!(fit_counts(&named, 200.0 + SEPARATOR_W + two_icons), vec![3, 2]);
   }
 
+  /// `ui:toolbar:solid-modify-menu-list`: Fusion's SOLID > MODIFY, separators included, with no
+  /// Direct Edit entry while design history is on; Simplify in Fusion's order with an icon each.
+  #[test]
+  fn the_solid_modify_list_is_fusions() {
+    let rows: Vec<&str> = SOLID_MODIFY
+      .iter()
+      .map(|e| match e {
+        E::I(i) => i.label,
+        E::Sep => "|",
+        E::Sub(l, _) => l,
+      })
+      .collect();
+    assert_eq!(
+      rows.join(", "),
+      "Press Pull, Fillet, Chamfer, |, Shell, Draft, Scale, Combine, Offset Face, Replace Face, Split Face, \
+       Split Body, Silhouette Split, |, Move/Copy, Align, Delete, Remove, Simplify, |, Physical Material, \
+       Appearance, Manage Materials, |, Change Parameters, Compute All, |, Bill of Materials"
+    );
+    let mut simplify = Vec::new();
+    labels(SIMPLIFY, &mut simplify);
+    assert_eq!(simplify, ["Remove Features", "Remove Faces", "Replace with Primitives"]);
+    let icons: Vec<Icon> = SIMPLIFY.iter().filter_map(|e| if let E::I(i) = e { Some(i.icon) } else { None }).collect();
+    assert!(icons[0] != icons[1] && icons[1] != icons[2] && icons[0] != icons[2], "{icons:?}");
+    // the direct edits come back with design history off
+    let mut app = App::with_session(fox_engine::Session::default());
+    let g = &SOLID[1];
+    assert_eq!(menu_of(&app, Tab::Solid, g).len(), SOLID_MODIFY.len());
+    app.s.design.history_off = true;
+    assert!(matches!(menu_of(&app, Tab::Solid, g).last(), Some(E::Sub("Direct Edit", _))));
+    assert_eq!(menu_of(&app, Tab::Surface, &SURFACE[1]).len(), SURFACE_MODIFY.len());
+  }
+
+  /// `ui:toolbar:solid-modify-menu-tooltips`: Draft and Compute All carry Fusion's paragraphs.
+  #[test]
+  fn draft_and_compute_all_tooltips_are_fusions() {
+    let draft = tips::tip(Scope::Design, "Draft").unwrap();
+    assert_eq!(draft.line, "Applies a fixed or parting line draft angle to planar faces.");
+    assert_eq!(
+      draft.more,
+      "Select a pull direction, parting tool, and faces to draft, then specify the draft angle.\n\nPress Ctrl+/ \
+       for more help."
+    );
+    let all = tips::tip(Scope::Design, "Compute All").unwrap();
+    assert_eq!(all.line, "Computes all of the parameters, features, and assembly relationships in a design.");
+    assert_eq!(
+      all.more,
+      "Use at major milestones in the design process and after making significant changes to features in the \
+       Timeline, to ensure all assembly relationships are calculated properly.\n\nPress Ctrl+/ for more help."
+    );
+  }
+
   /// A menu's rows as `label` / `label (key)`, `|` for a separator and `name >` for a submenu.
   fn menu_rows(tab: Tab, menu: &[E]) -> Vec<String> {
     let prefs = Prefs::default();
-    let at = At { prefs: &prefs, tab, group: "", quick: &[] };
+    let at = At { prefs: &prefs, tab, group: "", quick: &[], unsaved: false };
     menu
       .iter()
       .map(|e| match e {
@@ -2110,6 +2235,70 @@ mod tests {
       let more: Vec<&str> = t.more.split("\n\n").collect();
       assert_eq!(1 + more.len(), paragraphs, "{label}: {more:?}");
       assert_eq!(more.last() == Some(&help), has_help, "{label}: {more:?}");
+    }
+  }
+
+  /// A Part Design document's ASSEMBLE, INSPECT and INSERT list what Fusion's do; the joint and
+  /// component commands stay on the S toolbox and their keys.
+  #[test]
+  fn assemble_inspect_and_insert_are_fusions_part_design_lists() {
+    let shared = |tab: Tab, group: &str| {
+      let (own, shared) = groups(tab);
+      own.iter().chain(shared.iter()).find(|g| g.label == group).unwrap().menu
+    };
+    for tab in [Tab::Solid, Tab::Surface, Tab::Mesh, Tab::SheetMetal, Tab::Plastic, Tab::Sketch] {
+      assert_eq!(rows(shared(tab, "ASSEMBLE")), [("Add To Assembly", "")], "{tab:?}");
+      for cmd in [D(Kind::Joint), D(Kind::AsBuiltJoint), D(Kind::NewComponent), D(Kind::MotionStudy)] {
+        assert!(offers(tab, cmd), "{tab:?} still runs {cmd:?}");
+      }
+    }
+    let prefs = Prefs::default();
+    assert_eq!(key_of(&prefs, Scope::Design, "Joint"), "J");
+    assert_eq!(key_of(&prefs, Scope::Design, "As-built Joint"), "Shift+J");
+    assert_eq!(icon_of_label("Joint"), Some(Icon::JointOrigin), "the Undo list still finds its icon");
+
+    let inspect: Vec<&str> = rows(INSPECT).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(inspect[inspect.len() - 2..], ["History", "Sustainability Insights"]);
+    assert!(!matches!(INSPECT.last(), Some(E::Sep)));
+
+    let insert: Vec<&str> = rows(INSERT).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(
+      insert,
+      [
+        "Decal",
+        "Canvas",
+        "Insert SVG",
+        "Insert DXF",
+        "Insert Mesh",
+        "Insert Component",
+        "Insert Fastener",
+        "Duplicate With Joints",
+        "Insert Derive",
+        "Insert McMaster-Carr Component",
+        "Insert a manufacturer part",
+        "Insert TraceParts Supplier Components",
+      ]
+    );
+    assert!(!INSERT.iter().any(|e| matches!(e, E::Sep)));
+    // Insert Component greys out until the design is saved
+    let component = find(INSERT, "Insert Component").unwrap();
+    let at = |unsaved| At { prefs: &prefs, tab: Tab::Solid, group: "INSERT", quick: &[], unsaved };
+    assert!(at(true).shown(&component).disabled);
+    assert!(!at(false).shown(&component).disabled);
+    let mut app = App::with_session(fox_engine::Session::default());
+    assert!(panels::is_unsaved(&app));
+    app.s.path = Some("plate.fox".into());
+    assert!(!panels::is_unsaved(&app));
+    assert!(offers(Tab::Solid, Cmd::InsertComponent));
+  }
+
+  /// Every CONSTRUCT entry draws its own icon, as Fusion's do.
+  #[test]
+  fn construct_entries_each_have_their_own_icon() {
+    let icons: Vec<(&str, Icon)> =
+      CONSTRUCT.iter().filter_map(|e| if let E::I(i) = e { Some((i.label, i.icon)) } else { None }).collect();
+    for (i, (label, icon)) in icons.iter().enumerate() {
+      assert!(!icons[i + 1..].iter().any(|(_, o)| o == icon), "{label}'s {icon:?} is shared");
     }
   }
 }

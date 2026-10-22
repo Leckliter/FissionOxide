@@ -45,6 +45,10 @@ fn measure_between_faces_and_selection_tools() {
   assert!((r["angle_deg"].as_f64().unwrap() - 180.0).abs() < 1e-6, "{r}");
   let one = run(&mut s, "measure", json!({"a": {"body": b}}));
   assert!((one["volume_mm3"].as_f64().unwrap() - 8000.0).abs() < 1e-6);
+  // a face's Loop Length is its boundary: the 40 x 20 top face's four edges
+  let top = s.model.bodies[0].faces().iter().find(|f| (f.area - 800.0).abs() < 1e-6 && f.center.z > 5.0).unwrap().id;
+  let face = run(&mut s, "measure", json!({"a": {"body": b, "face": top}}));
+  assert!((face["loop_length"].as_f64().unwrap() - 120.0).abs() < 1e-6, "{face}");
   let side = run(
     &mut s,
     "measure",
@@ -223,6 +227,38 @@ fn rib_grows_to_the_floor() {
   run(&mut s, "rib", json!({"thickness": 2}));
   let added = volume(&s) - v0;
   assert!((added - 32.0 * 16.0 * 2.0).abs() < 1.0, "rib added {added}");
+}
+
+#[test]
+fn rib_thickness_on_one_side_and_a_web_that_misses() {
+  let mut s = Session::default();
+  block(&mut s, 40.0, 20.0, 4.0);
+  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 10}));
+  let pl = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
+  run(&mut s, "sketch.line", json!({"points": [[4, -20], [36, -20]]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let v0 = volume(&s);
+  let centre_y = |s: &Session| s.model.bodies[0].shape.mass().unwrap().center_of_mass.y;
+  run(&mut s, "rib", json!({"thickness": 2}));
+  let (sym_v, sym_y) = (volume(&s) - v0, centre_y(&s));
+  run(&mut s, "undo", json!({}));
+  // all 2 mm on one side of the line: the same rib, moved over by half its thickness
+  run(&mut s, "rib", json!({"thickness": 2, "one_side": true}));
+  let (one_v, one_y) = (volume(&s) - v0, centre_y(&s));
+  assert!((one_v - sym_v).abs() < 1e-6, "{one_v} {sym_v}");
+  let shift = (one_y - sym_y).abs() * volume(&s) / one_v;
+  assert!((shift - 1.0).abs() < 1e-3, "rib moved {shift}");
+  // a web on a line that runs past the block names itself in its error
+  run(&mut s, "undo", json!({}));
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 30}));
+  let high = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": high}}));
+  run(&mut s, "sketch.line", json!({"points": [[60, 60], [80, 60]]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let _ = s.execute("web", &json!({"thickness": 2}));
+  let errors = s.model.errors().join("; ");
+  assert!(errors.contains("the web doesn't meet the body"), "{errors}");
 }
 
 #[test]
@@ -914,4 +950,39 @@ fn selection_tools_pick_by_name_size_and_boundary() {
   s.selection = vec![Sel::Face { body: b, face: side }];
   run(&mut s, "select.seed_boundary", json!({"edges": rim}));
   assert_eq!(s.selection.len(), 5, "the selected face seeds the outside of the rim");
+}
+
+/// Measure reads a face's loop length; Interference with `coincident` also lists bodies that only
+/// touch; a section's angles turn its plane and `hatch` and `color` reach the view options.
+#[test]
+fn loop_length_coincident_interference_and_tilted_sections() {
+  let mut s = Session::default();
+  for at in [[0, 0], [5, 0], [-10, 0]] {
+    run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10, "at": at, "operation": "new_body"}));
+  }
+  let ids: Vec<u32> = s.model.bodies.iter().map(|b| b.id.0).collect();
+  assert_eq!(ids.len(), 3);
+  let b = s.model.body(fox_model::BodyId(ids[0])).unwrap();
+  let face = b.faces()[0].id;
+  let m = run(&mut s, "measure", json!({"a": {"body": ids[0], "face": face}}));
+  assert!((m["loop_length"].as_f64().unwrap() - 40.0).abs() < 1e-6, "{m}");
+
+  let plain = run(&mut s, "assembly.interference", json!({"bodies": ids}));
+  assert_eq!(plain.as_array().unwrap().len(), 1, "{plain}");
+  let touching = run(&mut s, "assembly.interference", json!({"bodies": ids, "coincident": true}));
+  let rows = touching.as_array().unwrap();
+  assert_eq!(rows.len(), 2, "{touching}");
+  assert!(rows.iter().any(|r| r["coincident"] == json!(true) && r["volume_mm3"] == json!(0.0)));
+
+  let flat = crate::scene::view_options(&s, &json!({"section": {"plane": "xy", "offset": 5.0}})).unwrap();
+  assert!(!flat.section_hatch && flat.section_color.is_none());
+  let o = crate::scene::view_options(
+    &s,
+    &json!({"section": {"plane": "xy", "offset": 5.0, "angle1": 90.0, "hatch": true, "color": "single", "center": [3, 0, 0]}}),
+  )
+  .unwrap();
+  let pl = o.section.unwrap();
+  assert!(pl.normal().dot(fox_kernel::glam::DVec3::Z).abs() < 1e-9, "turned a quarter about x");
+  assert!((pl.origin - fox_kernel::glam::DVec3::new(3.0, 0.0, 5.0)).length() < 1e-9, "about the centre on the plane");
+  assert!(o.section_hatch && o.section_color.is_some());
 }

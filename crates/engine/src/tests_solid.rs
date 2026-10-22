@@ -225,6 +225,30 @@ fn shell_directions_whole_bodies_and_tangent_chain() {
   assert!(volume(&s) < v0 * 0.5, "{} of {v0}", volume(&s));
 }
 
+/// Draft's Tangent Chain: a picked face brings the faces joined to it across smooth edges (the
+/// rounds at the +x end and the long sides they run into), as Fusion's does.
+#[test]
+fn draft_tangent_chain() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 40, "depth": 20, "height": 10}));
+  let b = &s.model.bodies[0];
+  let edges: Vec<Value> = b
+    .edges()
+    .iter()
+    .filter(|e| (e.mid.x - 20.0).abs() < 1e-6 && (e.mid.y.abs() - 10.0).abs() < 1e-6)
+    .map(|e| json!({"body": b.id.0, "edge": e.id}))
+    .collect();
+  run(&mut s, "fillet", json!({"edges": edges, "radius": 5}));
+  let b = &s.model.bodies[0];
+  let end = b.faces().iter().find(|f| f.normal.x > 0.9).unwrap().id;
+  let pick = json!({"body": b.id.0, "face": end});
+  let v0 = volume(&s);
+  run(&mut s, "draft", json!({"faces": [pick], "plane": "xy", "angle": "3 deg", "tangent_chain": true}));
+  let f = s.design.features.last().unwrap();
+  assert!(matches!(&f.kind, fox_model::FeatureKind::Draft { faces, .. } if faces.len() == 5), "{:?}", f.kind);
+  assert!(volume(&s) < v0, "{} of {v0}", volume(&s));
+}
+
 #[test]
 fn bounding_solid_box_cylinder_and_frame() {
   let mut s = Session::default();

@@ -148,10 +148,23 @@ namespace fox {
 
 namespace {
 
+// A message worded for the user as Fusion words it: `rethrow` passes it on without the
+// operation's name in front.
+struct UserError : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
+// Fusion's message when a fillet or chamfer can't be built at its size.
+const char *const FILLET_SIZE_ERROR =
+    "The fillet/chamfer could not be created at the requested size. Try adjusting the size, deselecting some of "
+    "the edges (try disabling Tangent Chain), or using multiple separate operations.";
+
 // Converts any exception into std::runtime_error (which cxx maps to Err).
 [[noreturn]] void rethrow(const char *what) {
   try {
     throw;
+  } catch (const UserError &e) {
+    throw std::runtime_error(e.what());
   } catch (const Standard_Failure &e) {
     const char *msg = e.GetMessageString();
     std::string m = std::string(what) + ": " + (msg && *msg ? msg : e.DynamicType()->Name());
@@ -723,7 +736,7 @@ std::unique_ptr<Shape> fillet(const Shape &s, rust::Slice<const uint32_t> edges,
   }
   if (added == 0) throw std::runtime_error("no edges to fillet");
   mk.Build();
-  if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
+  if (!mk.IsDone()) throw UserError(FILLET_SIZE_ERROR);
   Track t({&s});
   t.step(s.s, mk);
   return wrap(checked(mk.Shape(), "fillet", &t), t);
@@ -744,7 +757,7 @@ std::unique_ptr<Shape> chamfer(const Shape &s, rust::Slice<const uint32_t> edges
   }
   if (added == 0) throw std::runtime_error("no edges to chamfer");
   mk.Build();
-  if (!mk.IsDone()) throw std::runtime_error("the chamfer could not be computed (distance too large?)");
+  if (!mk.IsDone()) throw UserError(FILLET_SIZE_ERROR);
   Track t({&s});
   t.step(s.s, mk);
   return wrap(checked(mk.Shape(), "chamfer", &t), t);
@@ -1950,7 +1963,7 @@ std::unique_ptr<Shape> fillet_radii(const Shape &s, rust::Slice<const uint32_t> 
   }
   if (added == 0) throw std::runtime_error("no edges to fillet");
   mk.Build();
-  if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
+  if (!mk.IsDone()) throw UserError(FILLET_SIZE_ERROR);
   Track t({&s});
   t.step(s.s, mk);
   return wrap(checked(mk.Shape(), "fillet", &t), t);
@@ -2243,7 +2256,7 @@ std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edge
   }
   if (added == 0) throw std::runtime_error("no edges to chamfer");
   mk.Build();
-  if (!mk.IsDone()) throw std::runtime_error("the chamfer could not be computed (too large?)");
+  if (!mk.IsDone()) throw UserError(FILLET_SIZE_ERROR);
   Track t({&s});
   t.step(s.s, mk);
   return wrap(checked(mk.Shape(), "chamfer", &t), t);
@@ -2265,7 +2278,7 @@ std::unique_ptr<Shape> fillet_var(const Shape &s, rust::Slice<const uint32_t> ed
   }
   if (added == 0) throw std::runtime_error("no edges to fillet");
   mk.Build();
-  if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
+  if (!mk.IsDone()) throw UserError(FILLET_SIZE_ERROR);
   Track t({&s});
   t.step(s.s, mk);
   return wrap(checked(mk.Shape(), "fillet", &t), t);

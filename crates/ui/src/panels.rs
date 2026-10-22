@@ -449,6 +449,8 @@ pub(crate) enum Cmd {
   Canvas,
   /// UTILITIES > ADD-INS: the Plugins window.
   Plugins,
+  /// MODIFY > Manage Materials: the Material Browser window.
+  ManageMaterials,
   /// INSPECT > Properties: show or hide the docked Properties panel.
   Properties,
   /// A Form workspace command (see [`crate::form_ui`]).
@@ -465,6 +467,8 @@ pub(crate) enum Cmd {
   /// SELECT > Selection Tools: Select By Name, Select By Boundary, Select By Size, Seed And
   /// Boundary (each opens a small dialog).
   SelTool(crate::select::SelTool),
+  /// Create Base Feature (true), a mode rather than a dialog, and Finish Base Feature (false).
+  BaseFeature(bool),
 }
 
 impl Cmd {
@@ -655,6 +659,9 @@ impl Cmd {
         (Icon::Canvas, "Canvas", "Place an image on a plane to model over; right-click it to Calibrate its size")
       }
       Cmd::Plugins => (Icon::Scripts, "Scripts and Add-Ins", "Install, update and manage plugins (.foxplugin)"),
+      Cmd::ManageMaterials => {
+        (Icon::ManageMaterials, "Manage Materials", "Browse the physical material and appearance libraries")
+      }
       Cmd::Properties => (
         Icon::Properties,
         "Properties",
@@ -678,6 +685,14 @@ impl Cmd {
           SelTool::SeedAndBoundary => "Select the faces connected to a seed face, up to boundary edges",
         };
         (Icon::Select, t.name(), hint)
+      }
+      Cmd::BaseFeature(true) => (
+        Icon::BaseFeature,
+        "Create Base Feature",
+        "Start a base feature: direct edits collect in it until you finish it",
+      ),
+      Cmd::BaseFeature(false) => {
+        (Icon::Finish, "Finish Base Feature", "Finish editing the base feature and go back to the parametric tabs")
       }
     }
   }
@@ -806,11 +821,13 @@ impl Cmd {
       Cmd::Gen(w) => app.gen_command(w),
       Cmd::Canvas => crate::canvas_ui::start_insert(app),
       Cmd::Plugins => crate::plugins_ui::open_window(app),
+      Cmd::ManageMaterials => crate::material_ui::open_browser(app),
       Cmd::Properties => crate::props_ui::toggle(),
       Cmd::SketchLibrary => crate::library_ui::open(app),
       Cmd::Render(r) => r.run(app),
       Cmd::CutCheck => crate::service_ui::open(app),
       Cmd::SelTool(t) => crate::select::open_tool(app, t),
+      Cmd::BaseFeature(start) => crate::config_ui::base_mode(app, start),
     }
   }
 }
@@ -865,6 +882,7 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
   if !app.form.active && app.tab == Tab::Form {
     app.tab = Tab::Solid;
   }
+  crate::config_ui::check_base_mode(app);
   egui::Panel::top("toolbar")
     .exact_size(96.0)
     .frame(egui::Frame::NONE.fill(theme::TOOLBAR).inner_margin(egui::Margin { left: 6, right: 6, top: 0, bottom: 0 }))
@@ -1173,6 +1191,13 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     if app.form.active {
       tabs.push(Tab::Form);
     }
+    if app.base_mode {
+      // Fusion: BASE FEATURE SOLID and BASE FEATURE SURFACE replace the modelling tabs
+      tabs.retain(|t| matches!(t, Tab::Solid | Tab::Surface | Tab::Sketch));
+      if !matches!(app.tab, Tab::Solid | Tab::Surface | Tab::Sketch) {
+        app.tab = Tab::Solid;
+      }
+    }
     for t in tabs {
       let font = egui::FontId::proportional(12.5);
       let active = app.tab == t;
@@ -1181,6 +1206,7 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       let color = if active { theme::TAB_ACTIVE } else { Color32::from_gray(45) };
       let label = match t {
         Tab::Plugin(i) => crate::plugins_ui::tab_label(app, i),
+        Tab::Solid | Tab::Surface if app.base_mode => format!("BASE FEATURE {}", t.label()),
         _ => t.label().to_string(),
       };
       let tw = ui.painter().layout_no_wrap(label.clone(), font.clone(), color).size().x;
@@ -1361,6 +1387,16 @@ fn is_open(ui: &egui::Ui, id: egui::Id, default: bool) -> bool {
 
 pub fn browser(app: &mut App, ctx: &egui::Context) {
   let canvas = app.canvas;
+  // the rows set it again while the pointer is on one; the canvas, drawn before the browser,
+  // shows it next frame
+  let row_hover = app.row_hover.take();
+  browser_area(app, ctx, canvas);
+  if app.row_hover != row_hover {
+    ctx.request_repaint();
+  }
+}
+
+fn browser_area(app: &mut App, ctx: &egui::Context, canvas: egui::Rect) {
   egui::Area::new(egui::Id::new("browser")).fixed_pos(canvas.min + vec2(6.0, 6.0)).order(egui::Order::Middle).show(
     ctx,
     |ui| {
@@ -1532,6 +1568,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   if is_open(ui, og, false) {
     browser_rows::origin_children(app, ui, og);
   }
+  browser_analysis::section(app, ui);
   components_section(app, ui);
   bodies_section(app, ui);
   browser_canvas::section(app, ui);
@@ -1731,7 +1768,7 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
         let name = app.s.body_name(b);
         let sel = app.s.selection.contains(&Sel::Body { body: b });
         let brow = row.with(b.0);
-        let ev = tree_row(ui, brow, 3 + depth, None, None, Icon::Body, &name, sel, theme::TEXT);
+        let ev = tree_row(ui, brow, 3 + depth, None, None, body_icon(app, b), &name, sel, theme::TEXT);
         body_row_edits(app, ui, &ev, brow, 3 + depth, b, &name, sel);
         if ev.clicked {
           toggle_sel(&mut app.s, Sel::Body { body: b }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
@@ -1919,16 +1956,15 @@ fn drawings_section(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
-  // bodies a dialog's preview added appear on OK
-  let previewed = app.dialog.as_ref().map(|d| d.preview_bodies(&app.s)).unwrap_or_default();
-  let bodies: Vec<(BodyId, String, bool)> = app
-    .s
-    .model
-    .bodies
-    .iter()
-    .filter(|b| !previewed.contains(&b.id))
-    .map(|b| (b.id, app.s.body_name(b.id), app.s.body_visible(b.id)))
-    .collect();
+  // a dialog's preview leaves the rows alone: bodies it adds appear, and bodies it consumes go,
+  // on OK
+  let rows = app
+    .dialog
+    .as_ref()
+    .and_then(|d| d.browser_bodies(&app.s))
+    .unwrap_or_else(|| app.s.model.bodies.iter().map(|b| (b.id, app.s.body_name(b.id))).collect());
+  let bodies: Vec<(BodyId, String, bool)> =
+    rows.into_iter().map(|(id, name)| (id, name, app.s.body_visible(id))).collect();
   if bodies.is_empty() {
     return;
   }
@@ -1958,7 +1994,7 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
     let isolated = app.ctx_menu.isolate.as_ref().map(|only| only.contains(&bid));
     let color = if visible && isolated != Some(false) { theme::TEXT } else { theme::MUTED };
     let row = id.with(bid.0);
-    let ev = tree_row(ui, row, 2, None, Some(visible), Icon::Body, &name, selected, color);
+    let ev = tree_row(ui, row, 2, None, Some(visible), body_icon(app, bid), &name, selected, color);
     if isolated == Some(true)
       && let Some(r) = &ev.response
     {
@@ -1981,6 +2017,12 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
       r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
     }
   }
+}
+
+/// A body row's icon: Fusion's yellow triangulated block for a mesh body, the grey block for a
+/// B-rep one.
+pub(crate) fn body_icon(app: &App, body: BodyId) -> Icon {
+  if crate::select::is_mesh(&app.s, body) { Icon::MeshBody } else { Icon::Body }
 }
 
 /// A body row's in-place rename (double-click or slow-click) and dragging it onto a component.
@@ -2289,6 +2331,9 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
     browser_edit::slow_click_due(ui, row, app.picked_plane.as_ref() == Some(&plane));
     browser_edit::edit_box(app, ui, &ev, row, 2);
     if let Some(r) = ev.response {
+      if r.hovered() {
+        app.row_hover = Some(crate::origin::RowHover::Plane(fid));
+      }
       reveal_row(app, Sel::Feature { feature: fid }, &r);
       r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
         if ui.button("Create Sketch").clicked() {
@@ -2310,11 +2355,14 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
 }
 
 /// A click on a plane in the browser: while Create Sketch waits for a plane it starts the sketch
-/// there, else it selects the plane (Create Sketch then starts on it).
+/// there, with Mirror open it is the mirror plane, else it selects the plane (Create Sketch then
+/// starts on it).
 pub(super) fn pick_plane(app: &mut App, plane: Value) {
   if app.dialog.as_ref().is_some_and(|d| d.kind == Kind::PickPlane) {
     app.cancel_dialog();
     app.create_sketch(plane);
+  } else if let Some(d) = app.dialog.as_mut().filter(|d| d.wants_plane()) {
+    d.take_plane(plane);
   } else {
     let again = app.picked_plane.as_ref() == Some(&plane);
     app.s.selection.clear();
@@ -2805,9 +2853,9 @@ pub fn unsaved_banner(app: &mut App, ctx: &egui::Context) {
     });
 }
 
-/// What is selected (or hovered), at the canvas's bottom-right corner, as Fusion shows it.
+/// What is selected, at the canvas's bottom-right corner, as Fusion shows it.
 pub fn selection_info(app: &mut App, ctx: &egui::Context) {
-  // an extrude's picked profiles read "1 Profile | Area: …"; otherwise what's selected or hovered
+  // an extrude's picked profiles read "1 Profile | Area: …"; otherwise what's selected
   let text = match app.dialog.as_ref().and_then(|d| d.profile_status(&app.s)) {
     Some(p) => p,
     None => {
@@ -2819,8 +2867,9 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
     app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
   let at = readout_anchor(app.canvas, palette);
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("selection-info")));
-  // the readout moves left of the warning icon at the status bar's right end
-  let shift = if app.warning_toast.is_some() { WARNING_ICON + 6.0 } else { 0.0 };
+  // the readout moves left of the warning and error icons at the status bar's right end
+  let icons = usize::from(app.warning_toast.is_some()) + usize::from(!app.error_toast.failed.is_empty());
+  let shift = icons as f32 * (WARNING_ICON + 6.0);
   painter.text(
     at - vec2(shift, 0.0),
     egui::Align2::RIGHT_BOTTOM,
@@ -2830,24 +2879,27 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
   );
 }
 
-/// The selection readout, as Fusion's: `1 Face | Area : 100.00 mm^2` (one face's area, two faces
-/// just `2 Faces`), `2 Edges | Length : 20.00 mm`, `Multiple selections | 9` from three items or
-/// mixed kinds, a body's or feature's name; the browser or timeline row under the pointer names
-/// itself instead.
+/// The selection readout, as Fusion's: `1 Face | Area : 100.00 mm^2`, two planar faces their angle
+/// (`2 Faces | Angle : 90.0 deg`) or, parallel, their distance, `2 Edges | Length : 20.00 mm`, two
+/// items of different kinds each counted with the least distance between them
+/// (`1 Face 1 Edge | Min Distance : 0.10 in`), `Multiple selections | 9` from three or more, a
+/// body's or feature's name. Only what is selected reads out: hovering a face, an edge or a
+/// browser or timeline row prints nothing, as in Fusion, except while a command dialog is
+/// picking, when the item under the pointer reads out as a click would pick it.
 pub(crate) fn selection_text(app: &App) -> Option<String> {
-  if let Some(l) = &app.ctx_menu.peek_label {
-    return Some(l.clone());
-  }
   let (hovered, picked);
   let sel = match app.s.selection.as_slice() {
     // a curve-picking sketch tool's picks read out like a selection ("2 Sketch Curves | ...")
     [] => {
-      // a picked or hovered origin plane, axis or point: "XY Plane", "Y Axis", "Origin Point | X: …"
+      // a picked origin plane, axis or point: "XY Plane", "Y Axis", "Origin Point | X: …"
       if let Some(t) = crate::origin::status(app) {
         return Some(t);
       }
       picked = crate::viewport::picked_curves(app);
       if picked.is_empty() {
+        // a hovered item reads out only while a command is picking (PROJECT's Bodies filter reads
+        // "Body1" over the body); with no command running hovering prints nothing, as in Fusion
+        app.dialog.as_ref()?;
         // what a click would pick: under the Bodies priority the body ("Body1"), not its face
         let h = app.hover?;
         let t = crate::select::targets(&app.s, h, app.sel_priority);
@@ -2874,6 +2926,13 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   };
   let first = noun(&sel[0]);
   let n = sel.len();
+  // two items of different kinds: "1 Face 1 Edge | Min Distance : 0.10 in" (two sketch curves of
+  // different kinds stay "Multiple selections | 2")
+  if let [a, b] = sel
+    && std::mem::discriminant(a) != std::mem::discriminant(b)
+  {
+    return Some(mixed_pair_text(app, *a, *b, noun(a).0, noun(b).0));
+  }
   if n >= 3 || !sel.iter().all(|s| noun(s) == first) {
     return Some(format!("Multiple selections | {n}"));
   }
@@ -2889,11 +2948,12 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   let sum = |f: &dyn Fn(&Sel) -> Option<f64>| sel.iter().map(f).sum::<Option<f64>>();
   let u = app.s.design.units;
   let readout = match sel[0] {
-    // one face reads its area; two read only the count
+    // one face reads its area; two planar ones their angle, or their distance when parallel
     Sel::Face { body, face } if n == 1 => model
       .body(body)
       .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.area))
       .map(|a| format!("Area : {}", u.area(a, 2))),
+    Sel::Face { .. } if n == 2 => two_faces_readout(app, sel[0], sel[1]),
     Sel::Edge { .. } => sum(&|s| match s {
       Sel::Edge { body, edge } => model.body(*body)?.edges().iter().find(|e| e.id == *edge).map(|e| e.length),
       _ => None,
@@ -2945,6 +3005,113 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
     Some(r) => format!("{count} | {r}"),
     None => count,
   })
+}
+
+/// Where a kind comes in a mixed readout: Fusion lists a face before an edge
+/// ("1 Face 1 Edge") and a sketch point before a sketch line, whichever was picked first.
+fn kind_rank(s: &Sel) -> u8 {
+  match s {
+    Sel::Body { .. } => 0,
+    Sel::Face { .. } => 1,
+    Sel::Edge { .. } => 2,
+    Sel::Vertex { .. } => 3,
+    Sel::SketchPoint { .. } => 4,
+    Sel::SketchCurve { .. } => 5,
+    Sel::Profile { .. } => 6,
+    Sel::SketchConstraint { .. } => 7,
+    Sel::Feature { .. } => 8,
+  }
+}
+
+/// Two items of different kinds: each counted, then how close they come where that can be
+/// measured ("1 Face 1 Edge | Min Distance : 0.10 in", "1 Sketch Point 1 Sketch Line | Min
+/// Distance : 1.196 in"); sketch geometry reads at the document precision, a body's at two decimals.
+fn mixed_pair_text(app: &App, a: Sel, b: Sel, na: &str, nb: &str) -> String {
+  let ((a, na), (b, nb)) = if kind_rank(&b) < kind_rank(&a) { ((b, nb), (a, na)) } else { ((a, na), (b, nb)) };
+  let count = format!("1 {na} 1 {nb}");
+  let u = app.s.design.units;
+  let sketchy = |s: &Sel| matches!(s, Sel::SketchPoint { .. } | Sel::SketchCurve { .. });
+  let decimals = if sketchy(&a) || sketchy(&b) { crate::viewport::display_decimals(u) } else { 2 };
+  match pair_distance(app, a, b) {
+    Some(d) => format!("{count} | Min Distance : {}", u.fixed(d, decimals)),
+    None => count,
+  }
+}
+
+/// Two faces: planar ones read the angle between their normals ("Angle : 90.0 deg"), or, when
+/// parallel, how far apart they are; any other pair reads only the count.
+fn two_faces_readout(app: &App, a: Sel, b: Sel) -> Option<String> {
+  use fox_engine::kernel::SurfaceKind;
+  let normal = |s: Sel| match s {
+    Sel::Face { body, face } => app
+      .s
+      .model
+      .body(body)?
+      .faces()
+      .iter()
+      .find(|f| f.id == face && f.kind == SurfaceKind::Plane)
+      .map(|f| f.normal.normalize()),
+    _ => None,
+  };
+  let cos = normal(a)?.dot(normal(b)?).clamp(-1.0, 1.0);
+  let u = app.s.design.units;
+  if cos.abs() > 1.0 - 1e-9 {
+    return pair_distance(app, a, b).map(|d| format!("Min Distance : {}", u.fixed(d, 2)));
+  }
+  Some(format!("Angle : {:.1} deg", cos.acos().to_degrees()))
+}
+
+/// A least distance the readout measured: the model revision and the pair it was measured for.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct PairDistance {
+  revision: u64,
+  pair: (Sel, Sel),
+  mm: Option<f64>,
+}
+
+/// The least distance (mm) between two selected items, measured once per model revision.
+fn pair_distance(app: &App, a: Sel, b: Sel) -> Option<f64> {
+  let revision = app.s.revision;
+  if let Some(p) = app.readout_distance.get()
+    && p.revision == revision
+    && p.pair == (a, b)
+  {
+    return p.mm;
+  }
+  let mm = measure_pair(app, a, b);
+  app.readout_distance.set(Some(PairDistance { revision, pair: (a, b), mm }));
+  mm
+}
+
+/// The least distance between two items: a sketch point and a curve of its sketch in the sketch's
+/// plane, faces, edges, vertices and sketch points by the kernel.
+fn measure_pair(app: &App, a: Sel, b: Sel) -> Option<f64> {
+  for (p, c) in [(a, b), (b, a)] {
+    if let (Sel::SketchPoint { sketch, point }, Sel::SketchCurve { sketch: other, curve }) = (p, c)
+      && sketch == other
+    {
+      let s = app.s.design.sketch(sketch).ok()?;
+      return s.distance_to_curve(curve, s.pos(point)?);
+    }
+  }
+  let (sa, sb) = (sel_shape(app, a)?, sel_shape(app, b)?);
+  sa.distance_to(&sb).ok().map(|(d, ..)| d)
+}
+
+/// A selected face, edge, vertex or sketch point as a kernel shape to measure from.
+fn sel_shape(app: &App, s: Sel) -> Option<fox_engine::kernel::Shape> {
+  use fox_engine::kernel::Shape;
+  let model = &app.s.model;
+  match s {
+    Sel::Face { body, face } => model.body(body)?.shape.face_shape(face).ok(),
+    Sel::Edge { body, edge } => model.body(body)?.shape.edge_shape(edge).ok(),
+    Sel::Vertex { body, edge, end } => Shape::vertex(fox_engine::scene::vertex_pos(&app.s, body, edge, end)?).ok(),
+    Sel::SketchPoint { sketch, point } => {
+      let r = model.sketches.get(&sketch)?;
+      Shape::vertex(r.plane.to_world(r.sketch.pos(point)?)).ok()
+    }
+    _ => None,
+  }
 }
 
 /// Fusion's name for one sketch curve by its kind ("Sketch Line", "Sketch Circle"); several read
@@ -3014,6 +3181,23 @@ pub fn canvas_status(app: &mut App, ctx: &egui::Context) {
   let tool = (app.nav_mode == Some(NavMode::ZoomWindow)).then(|| (crate::navbar::BUTTONS[4].to_string(), false));
   let is_tool = app.status.is_none() && tool.is_some();
   let Some((msg, err)) = app.status.clone().or(tool) else { return };
+  // a message that is not a running tool's prompt or a red error is transient, as Fusion's
+  let now = ctx.input(|i| i.time);
+  let key = egui::Id::new("canvas-status-since");
+  let since = ctx.data_mut(|d| {
+    let seen = d.get_temp_mut_or_insert_with(key, || (msg.clone(), now));
+    if seen.0 != msg {
+      *seen = (msg.clone(), now);
+    }
+    seen.1
+  });
+  if !is_tool && status_expired(&msg, err, app.hint.as_deref(), now - since) {
+    app.status = None;
+    return;
+  }
+  if !is_tool && !err && app.hint.as_deref() != Some(msg.as_str()) {
+    ctx.request_repaint_after(std::time::Duration::from_millis(500));
+  }
   // Preferences → General → Show command prompt
   if !err && !app.preferences.values.show_prompt && (is_tool || app.hint.as_deref() == Some(msg.as_str())) {
     return;
@@ -3027,6 +3211,16 @@ pub fn canvas_status(app: &mut App, ctx: &egui::Context) {
   let bg = Rect::from_min_size(at - vec2(5.0, 3.0), galley.size() + vec2(10.0, 6.0));
   painter.rect_filled(bg, 2.0, Color32::from_white_alpha(200));
   painter.galley(at, galley, color);
+}
+
+/// How long a lower-left message that is not a prompt or an error stays.
+pub(crate) const STATUS_SECS: f64 = 6.0;
+
+/// Whether a lower-left message shown for `age` seconds goes: a running tool's prompt (`hint`)
+/// stays while the tool runs and a red error until the next command succeeds; anything else
+/// ("This feature has no editable properties yet", "Computed in 0.3 s") after [`STATUS_SECS`].
+pub(crate) fn status_expired(msg: &str, err: bool, hint: Option<&str>, age: f64) -> bool {
+  !err && hint != Some(msg) && age > STATUS_SECS
 }
 
 /// Fusion's warning toast after a command that dropped constraints or dimensions: its messages
@@ -3107,6 +3301,115 @@ pub fn warning_toast(app: &mut App, ctx: &egui::Context) {
     });
 }
 
+/// Fusion's error toast: the failed features it has shown (it comes up again when another one
+/// fails) and when it last came up (egui time).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ErrorToast {
+  pub failed: Vec<FeatureId>,
+  pub since: Option<f64>,
+}
+
+/// The features whose error shows (failed, not rolled back or suppressed), each with its line
+/// in the error toast: the message for the feature the open dialog previews (a fillet too big
+/// for its edges), the name for the others (a later feature an edit broke), as Fusion's toast
+/// reads them.
+pub(crate) fn failed_features(app: &App) -> Vec<(FeatureId, String)> {
+  let own = app.dialog.as_ref().and_then(|d| d.own_feature());
+  let preview = app.dialog.as_ref().map(|d| d.preview_features(&app.s)).unwrap_or_default();
+  app
+    .s
+    .design
+    .features
+    .iter()
+    .filter(|f| !f.suppressed)
+    .filter_map(|f| {
+      let st = app.s.model.status(f.id)?;
+      let e = st.error.as_ref().filter(|_| !st.rolled_back)?;
+      let own = own == Some(f.id) || preview.contains(&f.id);
+      Some((f.id, if own { e.clone() } else { f.name.clone() }))
+    })
+    .collect()
+}
+
+/// The error toast's title: `1 error(s)`, as Fusion counts them.
+pub(crate) fn error_title(n: usize) -> String {
+  format!("{n} error(s)")
+}
+
+/// Brings the error toast up again when a feature fails that it hasn't shown yet.
+pub(crate) fn note_failures(toast: &mut ErrorToast, failed: &[(FeatureId, String)], now: f64) {
+  let ids: Vec<FeatureId> = failed.iter().map(|(id, _)| *id).collect();
+  if ids.iter().any(|id| !toast.failed.contains(id)) {
+    toast.since = Some(now);
+  }
+  toast.failed = ids;
+}
+
+/// Fusion's error glyph: a red disc with a white X.
+fn error_glyph(p: &egui::Painter, rect: Rect) {
+  let c = rect.center();
+  let r = rect.width().min(rect.height()) / 2.0;
+  p.circle_filled(c, r, theme::ERROR);
+  let d = r * 0.42;
+  let stroke = Stroke::new(1.6, Color32::WHITE);
+  p.line_segment([c - vec2(d, d), c + vec2(d, d)], stroke);
+  p.line_segment([c + vec2(-d, d), c + vec2(d, -d)], stroke);
+}
+
+/// Fusion's error toast at the canvas's lower right (a red circled X, bold "1 error(s)", a line
+/// per failed feature and More Info) for a few seconds after a feature fails, and the red X at
+/// the right end of the status readout while any feature's error shows: a dialog's failing
+/// preview, or a later feature an edit broke.
+pub fn error_toast(app: &mut App, ctx: &egui::Context) {
+  let failed = failed_features(app);
+  let now = ctx.input(|i| i.time);
+  note_failures(&mut app.error_toast, &failed, now);
+  if failed.is_empty() {
+    return;
+  }
+  let palette =
+    app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
+  // the red X at the status readout's end is `error_dialog::badge`, which opens the Error window
+  let since = app.error_toast.since.unwrap_or(now);
+  if now - since > TOAST_SECS {
+    return;
+  }
+  ctx.request_repaint_after(std::time::Duration::from_millis(250));
+  let mut more = false;
+  egui::Area::new(egui::Id::new("error-toast"))
+    .fixed_pos(readout_anchor(app.canvas, palette) - vec2(0.0, 28.0))
+    .pivot(egui::Align2::RIGHT_BOTTOM)
+    .order(egui::Order::Middle)
+    .show(ctx, |ui| {
+      egui::Frame::new()
+        .fill(theme::PANEL)
+        .stroke(Stroke::new(1.0, theme::BORDER))
+        .corner_radius(3.0)
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .shadow(egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(40) })
+        .show(ui, |ui| {
+          ui.set_max_width(320.0);
+          ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(WARNING_ICON + 2.0), egui::Sense::hover());
+            error_glyph(ui.painter(), r.shrink(1.0));
+            ui.vertical(|ui| {
+              ui.spacing_mut().item_spacing.y = 3.0;
+              ui.label(RichText::new(error_title(failed.len())).strong().color(theme::TEXT));
+              for (_, line) in &failed {
+                ui.label(RichText::new(line).color(theme::TEXT));
+              }
+              more = ui.link("More Info").clicked();
+            });
+          });
+        });
+    });
+  if more {
+    // More Info closes the toast, as Fusion's does (the badge stays and opens the Error window)
+    app.error_toast.since = Some(now - TOAST_SECS - 1.0);
+  }
+}
+
 // ---------------------------------------------------------------- timeline
 
 pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
@@ -3176,8 +3479,8 @@ pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
           });
           ui.add_space(6.0);
           ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            let hidden = hidden_preview(app, active);
-            timeline_items(app, ui, hidden.shown(n), hidden.shown(active), hidden);
+            let hidden = hidden_items(app, active);
+            timeline_items(app, ui, hidden.shown(n), hidden.shown(active), &hidden);
           });
         });
       });
@@ -3193,17 +3496,19 @@ enum TimelineDrag {
   Feature { id: FeatureId, from: usize, gap: usize },
 }
 
-/// Features a dialog's preview added, left out of the timeline until OK as in Fusion: the run
-/// of `len` features at `from`, just before the marker, where a command inserts. Timeline items
-/// are numbered without them (`shown`); the design's own numbering is `real`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Features the timeline leaves out: those a dialog's preview added, until OK as in Fusion (the
+/// run just before the marker, where a command inserts), and the sketch a single hole placed on
+/// a face made for itself (Fusion's hole adds only Hole1). Timeline items are numbered without
+/// them (`shown`); the design's own numbering is `real`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Hidden {
-  from: usize,
-  len: usize,
+  /// Design indices, ascending, each with whether a slot at it falls after it (a preview's
+  /// features) rather than before it (a hole's sketch, which goes with the hole after it).
+  at: Vec<(usize, bool)>,
 }
 
 impl Hidden {
-  const NONE: Hidden = Hidden { from: usize::MAX, len: 0 };
+  pub(crate) const NONE: Hidden = Hidden { at: Vec::new() };
 
   /// The run of features at `active - ids.len() .. active` when those are exactly `ids`; a
   /// preview that landed anywhere else stays shown rather than mis-numbering the timeline.
@@ -3214,22 +3519,63 @@ impl Hidden {
     }
     let from = active - len;
     let run = &features[from..active];
-    if run.iter().all(|f| ids.contains(f)) { Hidden { from, len } } else { Hidden::NONE }
+    if run.iter().all(|f| ids.contains(f)) {
+      Hidden { at: (from..active).map(|i| (i, true)).collect() }
+    } else {
+      Hidden::NONE
+    }
+  }
+
+  /// Also leaves out the features at `owned`, each belonging to the item after it.
+  pub(crate) fn with_owned(mut self, owned: impl IntoIterator<Item = usize>) -> Hidden {
+    for i in owned {
+      if !self.hides(i) {
+        self.at.push((i, false));
+      }
+    }
+    self.at.sort_unstable();
+    self
   }
 
   fn hides(&self, real: usize) -> bool {
-    real >= self.from && real < self.from + self.len
+    self.at.iter().any(|(h, _)| *h == real)
   }
 
   /// A design index or count as the timeline numbers it.
   pub(crate) fn shown(&self, real: usize) -> usize {
-    if real >= self.from + self.len { real - self.len } else { real.min(self.from) }
+    real - self.at.iter().filter(|(h, _)| *h < real).count()
   }
 
-  /// A timeline index or slot as the design numbers it (a slot at the hidden run is after it).
+  /// A timeline slot as the design numbers it (a slot at a preview's run is after it, one
+  /// before a hole is before its sketch).
   pub(crate) fn real(&self, shown: usize) -> usize {
-    if shown >= self.from { shown + self.len } else { shown }
+    let mut r = shown;
+    for &(h, after) in &self.at {
+      if h < r || (after && h == r) {
+        r += 1;
+      }
+    }
+    r
   }
+
+  /// A timeline item's design index.
+  pub(crate) fn item(&self, shown: usize) -> usize {
+    let mut r = shown;
+    for &(h, _) in &self.at {
+      if h <= r {
+        r += 1;
+      }
+    }
+    r
+  }
+}
+
+/// What the timeline leaves out (see [`Hidden`]).
+pub(crate) fn hidden_items(app: &App, active: usize) -> Hidden {
+  let d = &app.s.design;
+  let placed = crate::dialogs::placement_sketches(&app.s);
+  let owned = d.features.iter().enumerate().filter(|(_, f)| placed.contains(&f.id)).map(|(i, _)| i);
+  hidden_preview(app, active).with_owned(owned)
 }
 
 fn hidden_preview(app: &App, active: usize) -> Hidden {
@@ -3239,7 +3585,7 @@ fn hidden_preview(app: &App, active: usize) -> Hidden {
   Hidden::of(&features, &ids, active)
 }
 
-fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hidden: Hidden) {
+fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hidden: &Hidden) {
   let key = egui::Id::new("timeline_drag");
   let mut drag: Option<TimelineDrag> = ui.data(|d| d.get_temp(key));
   egui::ScrollArea::horizontal()
@@ -3342,16 +3688,14 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
             p.rect(rect, 2.0, theme::HOVER, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
           }
           let ir = Rect::from_center_size(rect.center(), Vec2::splat(20.0));
+          if suppressed {
+            // Fusion's suppressed item: the faded icon on a pink square
+            p.rect_filled(ir.expand(1.0), 1.0, SUPPRESSED_FILL);
+          }
           if dim {
             icons::draw(p, ir, icon, Color32::from_gray(185));
           } else {
             icons::draw_color(p, ir, icon);
-          }
-          if suppressed {
-            p.line_segment(
-              [rect.left_bottom() + vec2(3.0, -3.0), rect.right_top() + vec2(-3.0, 3.0)],
-              Stroke::new(1.0, theme::ERROR),
-            );
           }
           if r.drag_started() {
             app.s.selection = vec![Sel::Feature { feature: id }];
@@ -3370,7 +3714,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
           if r.hovered() && drag.is_none() {
             marking::peek_feature(app, id, name.clone());
           }
-          r.context_menu(|ui| timeline_menu(app, ui, hidden.real(i), id, &name, icon, suppressed));
+          r.context_menu(|ui| timeline_menu(app, ui, hidden.item(i), id, &name, icon, suppressed));
         }
         for (open, last) in brackets {
           if let Some(end) = rects.get(last) {
@@ -3395,6 +3739,9 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
   });
 }
 
+/// The pink square behind a suppressed timeline item's faded icon.
+pub(crate) const SUPPRESSED_FILL: Color32 = Color32::from_rgb(250, 214, 214);
+
 /// Where a feature dragged from `from` and dropped in slot `gap` ends up.
 fn moved_to(from: usize, gap: usize) -> usize {
   if gap > from { gap - 1 } else { gap }
@@ -3402,7 +3749,7 @@ fn moved_to(from: usize, gap: usize) -> usize {
 
 /// Follows the pointer during a timeline drag: snaps to the slot between icons and draws the
 /// marker there, or the insertion line (red where the feature can't go).
-fn timeline_drag(app: &App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Rect], active: usize, hidden: Hidden) {
+fn timeline_drag(app: &App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Rect], active: usize, hidden: &Hidden) {
   let (Some(first), Some(last)) = (rects.first(), rects.last()) else { return };
   if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
     let gap = rects.iter().filter(|r| r.center().x < pos.x).count();
@@ -3437,7 +3784,7 @@ fn timeline_drag(app: &App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Rect],
 }
 
 /// Finishes a timeline drag: rolls the marker or moves the feature.
-fn timeline_drop(app: &mut App, d: TimelineDrag, n: usize, active: usize, hidden: Hidden) {
+fn timeline_drop(app: &mut App, d: TimelineDrag, n: usize, active: usize, hidden: &Hidden) {
   match d {
     TimelineDrag::Marker { gap } if gap != active => {
       let at = if gap >= n { Value::Null } else { json!(hidden.real(gap)) };
@@ -3456,65 +3803,176 @@ fn timeline_drop(app: &mut App, d: TimelineDrag, n: usize, active: usize, hidden
   }
 }
 
-/// A timeline item's right-click menu, as in Fusion (less what FissionOxide can't do yet).
+/// An entry of a timeline item's right-click menu (see [`timeline_entries`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TimelineEntry {
+  /// Greyed: FissionOxide has no selection sets.
+  SelectionSet,
+  EditFeature,
+  EditProfileSketch(FeatureId),
+  /// Greyed until the design has a configuration table.
+  Configure,
+  Delete,
+  Rename,
+  RollHere,
+  /// Greyed: FissionOxide has no direct-modeling features to convert to.
+  ConvertToDm,
+  Suppress,
+  /// A failed or warned feature: opens the Error window.
+  ReviewWarning,
+  /// Create Group and Move to Group.
+  Groups,
+  FindInBrowser,
+  FindInWindow,
+}
+
+impl TimelineEntry {
+  pub(crate) fn label(self, suppressed: bool) -> &'static str {
+    match self {
+      TimelineEntry::SelectionSet => "Create Selection Set",
+      TimelineEntry::EditFeature => "Edit Feature",
+      TimelineEntry::EditProfileSketch(_) => "Edit Profile Sketch",
+      TimelineEntry::Configure => "Configure",
+      TimelineEntry::Delete => "Delete",
+      TimelineEntry::Rename => "Rename",
+      TimelineEntry::RollHere => "Roll Timeline Marker Here",
+      TimelineEntry::ConvertToDm => "Convert to DM Feature",
+      TimelineEntry::Suppress if suppressed => "Unsuppress Features",
+      TimelineEntry::Suppress => "Suppress Features",
+      TimelineEntry::ReviewWarning => "Review warning",
+      TimelineEntry::Groups => "Create Group",
+      TimelineEntry::FindInBrowser => "Find in Browser",
+      TimelineEntry::FindInWindow => "Find in Window",
+    }
+  }
+}
+
+/// A timeline item's right-click menu in Fusion's order (`None`: a separator): Create Selection
+/// Set, Edit Feature, Configure | Delete, Rename | Roll Timeline Marker Here, Convert to DM
+/// Feature, Suppress Features, Review warning (a failed or warned item) | Find in Browser, Find
+/// in Window. A suppressed item has no Edit Feature and no Review warning.
+pub(crate) fn timeline_entries(app: &App, id: FeatureId, suppressed: bool) -> Vec<Option<TimelineEntry>> {
+  use TimelineEntry as E;
+  let mut v = vec![Some(E::SelectionSet)];
+  if !suppressed {
+    v.push(Some(E::EditFeature));
+  }
+  if let Some(sk) = marking::profile_sketch(app, id) {
+    v.push(Some(E::EditProfileSketch(sk)));
+  }
+  v.extend([Some(E::Configure), None, Some(E::Delete), Some(E::Rename), None, Some(E::RollHere)]);
+  if app.s.design.feature(id).is_some_and(|f| !matches!(f.kind, FeatureKind::Sketch { .. })) {
+    v.push(Some(E::ConvertToDm));
+  }
+  v.push(Some(E::Suppress));
+  if !suppressed && crate::error_dialog::reviewable(app, id) {
+    v.push(Some(E::ReviewWarning));
+  }
+  v.extend([Some(E::Groups), None, Some(E::FindInBrowser), Some(E::FindInWindow)]);
+  v
+}
+
+/// A timeline item's right-click menu, as in Fusion (see [`timeline_entries`]).
 fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name: &str, icon: Icon, suppressed: bool) {
-  if menu_item(ui, icon, "Edit Feature", None).clicked() {
-    ui.close();
-    edit_feature(app, id);
-  }
-  if let Some(sk) = marking::profile_sketch(app, id)
-    && menu_item(ui, Icon::Sketch, "Edit Profile Sketch", None).clicked()
-  {
-    ui.close();
-    app.edit_sketch(sk);
-  }
-  // Configure: the feature's suppression becomes a column of the configuration table
-  if let Some(first) = app.s.design.configurations.list.first().map(|c| c.name.clone())
-    && menu_item(ui, Icon::ConfigTable, "Configure", None)
-      .on_hover_text("Add this feature's suppression to the configuration table")
-      .clicked()
-  {
-    ui.close();
-    app.run("config.set", json!({"configuration": first, "feature": id.0, "suppressed": suppressed}));
-    crate::config_ui::open_table();
-  }
-  ui.separator();
-  if menu_item(ui, Icon::Remove, "Delete", Some("Del")).clicked() {
-    ui.close();
-    app.run("feature.delete", json!({"feature": id.0}));
-  }
-  if menu_item(ui, Icon::Params, "Rename", None).clicked() {
-    ui.close();
-    app.rename = Some((RenameTarget::Feature(id.0), name.to_string()));
-  }
-  if menu_item(ui, Icon::History, "Roll Timeline Marker Here", None).clicked() {
-    ui.close();
-    app.run("timeline.marker", json!({"at": i + 1}));
-  }
-  let label = if suppressed { "Unsuppress Features" } else { "Suppress Features" };
-  if menu_item(ui, Icon::EyeOff, label, None).clicked() {
-    ui.close();
-    app.run("feature.suppress", json!({"feature": id.0}));
-  }
-  timeline_groups::feature_menu_items(app, ui, i, id);
-  ui.separator();
-  // features without a browser node of their own are found by the bodies they made
-  let sel = Sel::Feature { feature: id };
-  let node = if marking::in_browser(app, &sel) {
-    Some(sel)
-  } else {
-    marking::feature_bodies(app, id).first().map(|b| Sel::Body { body: *b })
-  };
-  if ui.add_enabled_ui(node.is_some(), |ui| menu_item(ui, Icon::Folder, "Find in Browser", None)).inner.clicked()
-    && let Some(node) = node
-  {
-    ui.close();
-    marking::find_in_browser(app, node);
-  }
-  if menu_item(ui, Icon::Fit, "Find in Window", None).clicked() {
-    ui.close();
-    let bodies = marking::feature_bodies(app, id);
-    marking::find_in_window(app, &bodies, Some(id));
+  use TimelineEntry as E;
+  for entry in timeline_entries(app, id, suppressed) {
+    let Some(entry) = entry else {
+      ui.separator();
+      continue;
+    };
+    let label = entry.label(suppressed);
+    match entry {
+      E::SelectionSet | E::ConvertToDm => {
+        let icon = if entry == E::SelectionSet { Icon::Select } else { Icon::DirectEdit };
+        ui.add_enabled_ui(false, |ui| menu_item(ui, icon, label, None));
+      }
+      E::EditFeature => {
+        if menu_item(ui, icon, label, None).clicked() {
+          ui.close();
+          edit_feature(app, id);
+        }
+      }
+      E::EditProfileSketch(sk) => {
+        if menu_item(ui, Icon::Sketch, label, None).clicked() {
+          ui.close();
+          app.edit_sketch(sk);
+        }
+      }
+      // Configure: the feature's suppression becomes a column of the configuration table
+      E::Configure => {
+        let first = app.s.design.configurations.list.first().map(|c| c.name.clone());
+        let r = ui.add_enabled_ui(first.is_some(), |ui| menu_item(ui, Icon::ConfigTable, label, None)).inner;
+        let r = if first.is_some() {
+          r.on_hover_text("Add this feature's suppression to the configuration table")
+        } else {
+          r.on_disabled_hover_text("The design has no configuration table")
+        };
+        if r.clicked()
+          && let Some(first) = first
+        {
+          ui.close();
+          app.run("config.set", json!({"configuration": first, "feature": id.0, "suppressed": suppressed}));
+          crate::config_ui::open_table();
+        }
+      }
+      E::Delete => {
+        if menu_item(ui, Icon::Remove, label, Some("Del")).clicked() {
+          ui.close();
+          app.run("feature.delete", json!({"feature": id.0}));
+        }
+      }
+      E::Rename => {
+        if menu_item(ui, Icon::Params, label, None).clicked() {
+          ui.close();
+          app.rename = Some((RenameTarget::Feature(id.0), name.to_string()));
+        }
+      }
+      E::RollHere => {
+        if menu_item(ui, Icon::History, label, None).clicked() {
+          ui.close();
+          app.run("timeline.marker", json!({"at": i + 1}));
+        }
+      }
+      E::Suppress => {
+        if menu_item(ui, Icon::EyeOff, label, None).clicked() {
+          ui.close();
+          app.run("feature.suppress", json!({"feature": id.0}));
+        }
+      }
+      E::ReviewWarning => {
+        // menu_item's row with Fusion's red X in the icon slot
+        let r = ui.add(egui::Button::new(format!("       {label}")).min_size(vec2(170.0, 0.0)));
+        let g = Rect::from_center_size(r.rect.left_center() + vec2(13.0, 0.0), Vec2::splat(13.0));
+        crate::error_dialog::error_glyph(ui.painter(), g);
+        if r.clicked() {
+          ui.close();
+          crate::error_dialog::open(ui.ctx());
+        }
+      }
+      E::Groups => timeline_groups::feature_menu_items(app, ui, i, id),
+      // features without a browser node of their own are found by the bodies they made
+      E::FindInBrowser => {
+        let sel = Sel::Feature { feature: id };
+        let node = if marking::in_browser(app, &sel) {
+          Some(sel)
+        } else {
+          marking::feature_bodies(app, id).first().map(|b| Sel::Body { body: *b })
+        };
+        if ui.add_enabled_ui(node.is_some(), |ui| menu_item(ui, Icon::Folder, label, None)).inner.clicked()
+          && let Some(node) = node
+        {
+          ui.close();
+          marking::find_in_browser(app, node);
+        }
+      }
+      E::FindInWindow => {
+        if menu_item(ui, Icon::Fit, label, None).clicked() {
+          ui.close();
+          let bodies = marking::feature_bodies(app, id);
+          marking::find_in_window(app, &bodies, Some(id));
+        }
+      }
+    }
   }
 }
 
@@ -3546,7 +4004,7 @@ fn paint_marker(p: &egui::Painter, x: f32, top: f32, bottom: f32, c: Color32) {
   ));
 }
 
-fn feature_icon(k: &FeatureKind) -> Icon {
+pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
   use fox_engine::model::Primitive;
   match k {
     FeatureKind::Sketch { .. } => Icon::Sketch,
@@ -3649,8 +4107,15 @@ pub fn edit_feature(app: &mut App, id: FeatureId) {
     _ => {
       app.cancel_dialog();
       app.dialog = crate::dialogs::Dialog::edit(app, id);
+      if let Some(d) = app.dialog.as_mut() {
+        d.begin_edit(&mut app.s);
+      }
       if app.dialog.is_none() {
         app.status = Some(("This feature has no editable properties yet".into(), false));
+      }
+      // the bodies the edit acts on are drawn selected, as in Fusion
+      if let Some(sel) = app.dialog.as_ref().and_then(|d| d.edit_selection(&app.s)) {
+        app.s.selection = sel;
       }
     }
   }
@@ -3712,6 +4177,7 @@ pub fn toggle_sel(s: &mut Session, item: Sel, add: bool) {
   }
 }
 
+mod browser_analysis;
 mod browser_assembly;
 mod browser_canvas;
 mod browser_config;
@@ -3720,7 +4186,7 @@ mod browser_rows;
 mod sketch_rows;
 mod timeline_groups;
 
-pub(crate) use browser_rows::{doc_name, unsaved as is_unsaved, window_title};
+pub(crate) use browser_rows::{doc_name, root_label, unsaved as is_unsaved, window_title};
 #[cfg(test)]
 pub(crate) use sketch_rows::run_sketch_cmd;
 pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};
@@ -3951,7 +4417,7 @@ mod timeline_preview_tests {
     let f: Vec<FeatureId> = (1..=5).map(FeatureId).collect();
     // the preview added feature 4 (at index 3), the marker sits after it
     let h = Hidden::of(&f, &[FeatureId(4)], 4);
-    assert_eq!(h, Hidden { from: 3, len: 1 });
+    assert_eq!(h, Hidden { at: vec![(3, true)] });
     assert_eq!((0..=5).map(|i| h.shown(i)).collect::<Vec<_>>(), vec![0, 1, 2, 3, 3, 4]);
     assert_eq!((0..=4).map(|i| h.real(i)).collect::<Vec<_>>(), vec![0, 1, 2, 4, 5]);
     // nothing previewed, or a preview that didn't land just before the marker: all shown
@@ -3962,5 +4428,19 @@ mod timeline_preview_tests {
     // two features added at the end
     let h = Hidden::of(&f, &[FeatureId(4), FeatureId(5)], 5);
     assert_eq!((h.shown(5), h.shown(3), h.real(3)), (3, 3, 5));
+  }
+
+  #[test]
+  fn a_holes_own_sketch_is_left_out_and_goes_with_the_hole() {
+    // Box, Sketch (the hole's, at 1), Hole, Fillet: the timeline shows Box, Hole, Fillet
+    let h = Hidden::NONE.with_owned([1]);
+    assert_eq!((0..=4).map(|i| h.shown(i)).collect::<Vec<_>>(), vec![0, 1, 1, 2, 3]);
+    // the items map to Box, Hole, Fillet; the slot before Hole is before its sketch
+    assert_eq!((0..3).map(|i| h.item(i)).collect::<Vec<_>>(), vec![0, 2, 3]);
+    assert_eq!((0..=3).map(|i| h.real(i)).collect::<Vec<_>>(), vec![0, 1, 3, 4]);
+    // with a preview at the end as well
+    let f: Vec<FeatureId> = (1..=5).map(FeatureId).collect();
+    let h = Hidden::of(&f, &[FeatureId(5)], 5).with_owned([1]);
+    assert_eq!((h.shown(5), h.item(2), h.real(3)), (3, 3, 5));
   }
 }
