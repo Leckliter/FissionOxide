@@ -384,3 +384,13 @@ Upload is a window with Select Files and Drag and Drop. FissionOxide has a proje
 Files / Recent / Activity / Trash tabs Fusion lacks, text buttons, floating prompts that ignore
 Escape, a 6-entry card menu and a native upload dialog. 8 rows in one batch
 (`parity/batches/map-wave15.json`), four match rows.
+
+## 2026-10-21, prober 7 (continued): File menu dialogs
+
+Save, Open, Export, 3D Print, Capture Image and the View submenu opened from the File menu in both
+apps (report `parity/reports/2026-10-21-file-dialogs.md`). Fusion opens its own Open window (project
+tree, Samples, "Open from my computer"), an Export window with a 14-format Type dropdown and a
+wide Save modal; FissionOxide goes to the Windows dialogs for Open and each Export format, its Save
+window carries Description and Milestone rows, its 3D Print and Capture Image windows are large and
+sparse, and none of its floating windows close on Escape. 7 new rows plus the reopened
+`file-menu-items` in one batch (`parity/batches/map-wave16.json`), three match rows.
