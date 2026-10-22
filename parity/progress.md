@@ -1,37 +1,44 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 09:55, session "Parity prober 9"
+## Last stop: 2026-10-22, 10:20, session "Parity prober 10"
 
-Finished this session: "Modify: Draft, Scale, Combine, ..." (Design workspace: solid; report
-`parity/reports/2026-10-22-solid-modify.md`, `map-wave24.json`, batches
-`ui-modify-menu-tooltips`, `ui-draft-scale-dialogs`, `ui-combine-split-dialogs`,
-`ui-align-remove-simplify`, `ui-material-appearance`, `ui-dialog-selection-state`). All six are
-`ready` in `index.jsonl` with no fixer yet. Prober 8's six wave-22/23 batches have fixers. Not
-started: "Manipulators for every feature".
+Finished this session: "Manipulators for every feature" (done, with a not-exercised list) and the
+first part of "Edit Feature for every feature; feature errors and warnings in the timeline" (in
+progress). Report `parity/reports/2026-10-22-manipulators.md`, `map-wave25.json`, batches
+`ui-extrude-manipulator`, `ui-feature-handles`, `ui-edit-feature-errors`, all `ready` in
+`index.jsonl` with no fixer yet. Prober 9's six wave-24 batches were also `ready` with no fixer when
+this session started.
 
 ## Next prober: start here
 
-1. Next `todo` in `coverage.md`, from the top: "Manipulators for every feature: arrows, rings,
-   floating value boxes, drag behaviour, snapping" (Design workspace: solid). Mark it
-   `in progress`, commit, probe. Fusion shows a manipulator and a focused floating box once a
-   dialog's picks are complete (Extrude, Draft's arrow plus angle ring, Scale's arrow, Offset
-   Face's arrow, the primitives); FissionOxide has few. Drag each, type into the box, Tab, and
-   compare snapping and the value readout. Then "Edit Feature for every feature".
-2. Re-verify in the app the `fixing-merged` keys of your area. Still not re-checked from the
-   older list: `ui:sketch:horizontal-conflict`, `ui:sketch:dimension-label-and-hover` (hover
-   part), `ui:sketch:tangent-arc-snap-marker`, `ui:canvas:vertex-marker-style` (use a
-   native-resolution crop; `zoom` is too small). Fixers of waves 22-24 will add more.
-3. Rebuild before probing: the running binary is `main` at `ffa348e2`; kill `fissionoxide.exe`
+1. Continue "Edit Feature for every feature; feature errors and warnings in the timeline"
+   (Design workspace: solid). Done so far: Edit on Extrude, Fillet (both apps) and Box (Fusion),
+   a failing fillet value in the edit dialog and an upstream failure (`ui-edit-feature-errors`).
+   Next: double-click every other feature type (Revolve, Chamfer, Shell, Press Pull / Offset Face,
+   Draft, Scale, Combine, Move, Hole, patterns, Mirror, sketches) and compare the edit dialog,
+   its handles and the rollback; then a yellow warning (Fusion's warning toast and icon), the
+   error toast's More Info, and Suppress / Roll to here on a failed item. Then the next `todo` in
+   `coverage.md` (Configure, Construct, Inspect, Insert, Assemble, Select menu).
+2. Re-verify in the app the `fixing-merged` keys of your area, plus the older ones still not
+   re-checked: `ui:sketch:horizontal-conflict`, `ui:sketch:dimension-label-and-hover` (hover part),
+   `ui:sketch:tangent-arc-snap-marker`, `ui:canvas:vertex-marker-style` (native-resolution crop).
+3. Rebuild before probing: the running binary is `main` at `2a6b280b`; kill `fissionoxide.exe`
    first, `cargo build --release -p fissionoxide` takes about 2 minutes.
 
-Where the documents stand: Fusion "Untitled(1)*" (active) as prober 8 left it plus a Draft (5 deg
-on the box's +X face) at the end of the timeline; window at screenshot x 0..907, y 82..733.
-FissionOxide (built `ffa348e2`) is in a new design: Body1 (20 mm box at the origin), Body2 (20 mm
-box at X 40), Draft1 (3 deg on Body1's +X face), Data Panel closed, window at screenshot
-x 8..915, y 82..785 (narrowed to Fusion's width for the ribbon re-check). Both are left of the
-overlay.
+Where the documents stand: Fusion "Untitled(1)*" (active): the box is 0.05 in high with a
+0.01 in Fillet1 at the end of the timeline; window at screenshot x 0..907, y 82..733. FissionOxide
+(built `2a6b280b`) is in a new design: Sketch1, Extrude1 (25 mm, -3 deg taper), Fillet1 failed at
+100 mm radius (red in the timeline); Data Panel closed, window at x 8..915, y 80..782. Both are left
+of the overlay; FissionOxide's taskbar button is at (571,804), Fusion's at (497,804).
 
 ## Traps
+- A `mouse_move` in one call and `left_mouse_down` in the next pressed in Fusion (it came to the
+  front over FissionOxide and started a window selection). Keep move and press in one batch.
+- Scratchpad PowerShell scripts need `powershell -NoProfile -ExecutionPolicy Bypass -File ...`.
+- FissionOxide's window narrows only from its invisible resize border, 2 px right of the last
+  window pixel (x 1100 when the window ended at 1098).
+- A Bash heredoc holding many apostrophes and backticks failed to parse once; write batch files
+  with the Write tool.
 - FissionOxide's taskbar button moves: this session it was at (572,804) on first launch
   and (535,804) afterwards, next to Fusion's (497,804). A click on the wrong one brought another
   app forward; take a screenshot after each switch.

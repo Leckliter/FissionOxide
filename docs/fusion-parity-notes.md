@@ -472,3 +472,15 @@ and non-zero values, enables OK early, picks faces where Fusion picks bodies, ke
 selected after Cancel, cannot edit a Draft, and has no Silhouette Split, Replace with Primitives
 or Manage Materials. 24 rows in six batches (`parity/batches/map-wave24.json`), including the
 reopened `ui:toolbar:responsive-collapse` (MODIFY keeps 6 icons at 907 px against 4); one match row.
+
+## 2026-10-22, prober 10: feature manipulators, Edit Feature, feature errors
+
+Extrude, Fillet, Shell, Offset Face and Draft manipulators in both apps, read from
+native-resolution crops while hovering, dragging and tabbing, then Edit Feature on Extrude,
+Fillet and Box and a failing fillet (report `parity/reports/2026-10-22-manipulators.md`). The
+floating value box, live preview while typing, Enter as OK and the failed timeline icon match.
+Fusion draws 3D blue arrows with a dashed drag track, a separate disc-on-arc taper and draft handle,
+a grey dimension in the preview, moves the box with Tab, keeps the box clear of its arrow, rolls the
+timeline back while editing, greys OK on a failing value and shows a "1 error(s)" toast with a
+status-bar badge. 16 rows in three batches (`parity/batches/map-wave25.json`), four match rows,
+five keys verified.

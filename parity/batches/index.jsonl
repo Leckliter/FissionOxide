@@ -75,3 +75,6 @@
 {"name": "ui-align-remove-simplify", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_10b85414 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-material-appearance", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_4e643365 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-dialog-selection-state", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_7ce0d07b (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-edit-feature-errors", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-extrude-manipulator", "items": 7, "status": "ready", "pr": null}
+{"name": "ui-feature-handles", "items": 4, "status": "ready", "pr": null}
