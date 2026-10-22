@@ -2858,7 +2858,6 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
       } else {
         &picked[..]
       }
-      &picked[..]
     }
     s => s,
   };
