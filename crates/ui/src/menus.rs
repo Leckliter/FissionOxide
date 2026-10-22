@@ -1990,6 +1990,11 @@ mod tests {
     assert!(!after.contains(&"Extrude"));
     // PLASTIC shares the menu but not the pins
     assert!(!quick_items(&prefs, Tab::Plastic, &PLASTIC[0]).iter().any(|i| i.label == "Torus"));
+    // a default icon pinned again comes back at the group's end, not in its old slot (Fusion)
+    prefs.pinned.push(customize::pin_id(Tab::Solid, "CREATE", "Extrude"));
+    let again: Vec<&str> = quick_items(&prefs, Tab::Solid, create).iter().map(|i| i.label).collect();
+    assert_eq!(again.last(), Some(&"Extrude"));
+    assert_ne!(again.first(), Some(&"Extrude"));
   }
 
   /// Fusion's SKETCH tab at full width: CREATE 7, MODIFY 5 and all twelve constraints.

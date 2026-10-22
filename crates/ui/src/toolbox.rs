@@ -1,5 +1,5 @@
 //! The S toolbox ("Design Shortcuts"), as in Fusion: S over the canvas opens a small box at the
-//! pointer with the commands added to it (Add to Shortcuts), the recently used ones and a search
+//! pointer with the commands pinned to it (Pin to Shortcuts), the recently used ones and a search
 //! field. Typing lists every command of
 //! the workspace whose name matches; arrows and Enter, or a click, run one.
 
@@ -126,13 +126,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   tb.sel = tb.sel.min(rows.saturating_sub(1));
   let mut run: Option<Cmd> = if enter { hits.get(tb.sel).map(|e| e.cmd) } else { None };
 
-  let title = if app.drawing.is_some() {
-    "DRAWING SHORTCUTS"
-  } else if app.manufacture {
-    "MANUFACTURE SHORTCUTS"
-  } else {
-    "DESIGN SHORTCUTS"
-  };
+  let title = title(app);
   let query_before = tb.query.clone();
   let area = egui::Area::new(egui::Id::new("s-toolbox"))
     .order(egui::Order::Foreground)
@@ -142,7 +136,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
       egui::Frame::popup(ui.style()).fill(Color32::WHITE).inner_margin(6.0).show(ui, |ui| {
         ui.set_width(WIDTH);
         ui.spacing_mut().item_spacing = vec2(2.0, 4.0);
-        ui.label(egui::RichText::new(title).size(11.0).color(theme::GROUP_LABEL));
+        // Fusion's title: title case, centred over the box
+        ui.vertical_centered(|ui| ui.label(egui::RichText::new(title).size(12.0).color(theme::TEXT)));
         if !recent.is_empty() {
           ui.horizontal(|ui| {
             for e in &recent {
@@ -157,8 +152,17 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             }
           });
         }
-        let field =
-          ui.add(egui::TextEdit::singleline(&mut tb.query).hint_text("Search commands").desired_width(f32::INFINITY));
+        // a "Search" field with a thin border, as Fusion's
+        let field = ui.scope(|ui| {
+          let v = &mut ui.visuals_mut().widgets;
+          for w in [&mut v.inactive, &mut v.hovered, &mut v.active] {
+            w.bg_stroke = Stroke::new(1.0, theme::BORDER);
+          }
+          v.inactive.bg_fill = Color32::WHITE;
+          ui.visuals_mut().selection.stroke = Stroke::new(1.0, theme::ACCENT);
+          ui.add(egui::TextEdit::singleline(&mut tb.query).hint_text("Search").desired_width(f32::INFINITY))
+        });
+        let field = field.inner;
         field.request_focus();
         if tb.query.trim().is_empty() {
           return;
@@ -194,9 +198,21 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   }
 }
 
-/// The box's icon row: the commands the user added to it, then the recent ones.
+/// The box's title, as Fusion's: "Design Shortcuts" in the Design workspace.
+pub(crate) fn title(app: &App) -> &'static str {
+  if app.drawing.is_some() {
+    "Drawing Shortcuts"
+  } else if app.manufacture {
+    "Manufacture Shortcuts"
+  } else {
+    "Design Shortcuts"
+  }
+}
+
+/// The box's icon row: the commands pinned to it, then the recent ones.
 fn shortcut_row(app: &App, entries: &[Entry]) -> Vec<Entry> {
-  let added = app.prefs.shortcuts.iter().filter_map(|id| entries.iter().find(|e| e.id() == *id));
+  let pinned = app.prefs.shortcut_ids();
+  let added = pinned.iter().filter_map(|id| entries.iter().find(|e| e.id() == *id));
   let recent = app.recent.iter().filter_map(|c| entries.iter().find(|e| e.cmd == *c));
   let mut out: Vec<Entry> = Vec::new();
   for e in added.chain(recent) {
@@ -204,7 +220,7 @@ fn shortcut_row(app: &App, entries: &[Entry]) -> Vec<Entry> {
       out.push(*e);
     }
   }
-  out.truncate(RECENT.max(app.prefs.shortcuts.len()));
+  out.truncate(RECENT.max(pinned.len()));
   out
 }
 
@@ -290,6 +306,21 @@ mod tests {
     app.toolbox = Some(Toolbox::at(pos2(200.0, 200.0)));
     frame(&mut app, &ctx, vec![key(Key::Escape)]);
     assert!(app.toolbox.is_none());
+  }
+
+  #[test]
+  fn extrude_is_pinned_to_the_box_until_unpinned() {
+    let mut app = App::with_session(Session::default());
+    let entries = menus::commands(&workspace_tabs(&app));
+    assert_eq!(shortcut_row(&app, &entries).first().map(|e| e.label), Some("Extrude"));
+    assert_eq!(title(&app), "Design Shortcuts");
+    crate::customize::apply(&mut app, crate::customize::Action::Shortcut("design.Fillet".into(), true));
+    assert_eq!(labels(&shortcut_row(&app, &entries)), ["Extrude", "Fillet"]);
+    crate::customize::apply(&mut app, crate::customize::Action::Shortcut("design.Extrude".into(), false));
+    assert_eq!(labels(&shortcut_row(&app, &entries)), ["Fillet"]);
+    assert_eq!(app.prefs.unshortcuts, ["design.Extrude"]);
+    crate::customize::apply(&mut app, crate::customize::Action::Shortcut("design.Extrude".into(), true));
+    assert!(app.prefs.unshortcuts.is_empty() && app.prefs.in_shortcuts("design.Extrude"));
   }
 
   #[test]

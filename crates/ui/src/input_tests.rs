@@ -454,19 +454,44 @@ fn row_options(h: &mut Harness, row: &str, option: &str) -> Pos2 {
 }
 
 #[test]
-fn pin_to_toolbar_and_add_to_shortcuts_from_a_menu_row() {
+fn pin_to_toolbar_and_pin_to_shortcuts_are_checkboxes_on_a_menu_row() {
   let mut h = Harness::new();
+  // Fusion's options: two checkboxes and Change Keyboard Shortcut, nothing else
+  row_options(&mut h, "Torus", "Pin to Toolbar");
+  let shown: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|t| t.1).collect();
+  for gone in ["Pin to Panel", "Add to Shortcuts", "Remove from Shortcuts", "Unpin from Toolbar"] {
+    assert!(!shown.iter().any(|t| t == gone), "no {gone}: {shown:?}");
+  }
+  assert!(shown.iter().any(|t| t == "Pin to Shortcuts") && shown.iter().any(|t| t == "Change Keyboard Shortcut..."));
+  h.frame(vec![Event::Key {
+    key: egui::Key::Escape,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::NONE,
+  }]);
+  h.frame(vec![]);
   let at = row_options(&mut h, "Torus", "Pin to Toolbar");
   h.move_then_click(at);
   assert_eq!(h.app.prefs.pinned, ["SOLID/CREATE/Torus"]);
-  let at = row_options(&mut h, "Torus", "Add to Shortcuts");
+  let at = row_options(&mut h, "Torus", "Pin to Shortcuts");
   h.move_then_click(at);
   assert_eq!(h.app.prefs.shortcuts, ["design.Torus"]);
-  // and now it offers to undo both
-  let at = row_options(&mut h, "Torus", "Unpin from Toolbar");
+  // the same checkboxes clear both
+  let at = row_options(&mut h, "Torus", "Pin to Toolbar");
   h.move_then_click(at);
   assert!(h.app.prefs.pinned.is_empty());
-  row_options(&mut h, "Torus", "Remove from Shortcuts");
+  let at = row_options(&mut h, "Torus", "Pin to Shortcuts");
+  h.move_then_click(at);
+  assert!(h.app.prefs.shortcuts.is_empty());
+  // Extrude starts with both checked: unchecking them unpins it from the toolbar and the box
+  assert!(h.app.prefs.in_shortcuts("design.Extrude"));
+  let at = row_options(&mut h, "Extrude", "Pin to Shortcuts");
+  h.move_then_click(at);
+  assert!(!h.app.prefs.in_shortcuts("design.Extrude"));
+  let at = row_options(&mut h, "Extrude", "Pin to Toolbar");
+  h.move_then_click(at);
+  assert!(!h.app.prefs.shows(crate::panels::Tab::Solid, "CREATE", "Extrude", true));
 }
 
 #[test]
@@ -486,6 +511,82 @@ fn change_keyboard_shortcut_captures_a_key_and_warns_on_a_clash() {
   assert!(h.app.key_capture.is_none());
   assert_eq!(crate::menus::key_of(&h.app.prefs, crate::tips::Scope::Design, "Torus"), "Shift+T");
   assert_eq!(crate::menus::key_of(&h.app.prefs, crate::tips::Scope::Design, "Extrude"), "E");
+}
+
+#[test]
+fn change_keyboard_shortcut_is_fusions_modal() {
+  let mut h = Harness::new();
+  let at = row_options(&mut h, "Extrude", "Change Keyboard Shortcut...");
+  h.move_then_click(at);
+  let shown = h.frame_texts(1.0 / 60.0, vec![]);
+  let at = |text: &str| shown.iter().find(|(_, t)| t == text).map(|(r, _)| *r);
+  for text in [
+    "Change Keyboard Shortcut",
+    "Assign a new shortcut key for Extrude:",
+    "Hints:",
+    "You can combine modifiers like Shift, Control, Alt/Option, and Command with an alphanumeric key.",
+    "Leave blank to remove the shortcut.",
+  ] {
+    assert!(at(text).is_some(), "{text:?} shown: {shown:?}");
+  }
+  // the field holds the current key in lower case
+  let field = at("e").unwrap_or_else(|| panic!("the key in the field: {shown:?}"));
+  let prompt = at("Assign a new shortcut key for Extrude:").unwrap();
+  assert!(field.top() > prompt.bottom() - 1.0, "under the prompt");
+  for old in ["Press the new key, with Ctrl, Shift or Alt if you like.", "No Shortcut", "Default", "E"] {
+    assert!(at(old).is_none(), "no {old:?}: {shown:?}");
+  }
+  // Reset to default at the left, then Cancel and OK at the right
+  let (reset, cancel, ok) = (at("Reset to default").unwrap(), at("Cancel").unwrap(), at("OK").unwrap());
+  assert!(reset.right() < cancel.left() && cancel.right() < ok.left(), "{reset:?} {cancel:?} {ok:?}");
+  assert!((reset.center().y - ok.center().y).abs() < 2.0, "one row");
+  // OK is grey until the key changes
+  h.move_then_click(ok.center());
+  assert!(h.app.key_capture.is_some(), "OK does nothing before the key changes");
+  // Backspace leaves it blank, and OK then removes the shortcut
+  let back = Event::Key {
+    key: egui::Key::Backspace,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::NONE,
+  };
+  h.frame(vec![back]);
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  assert!(h.app.key_capture.is_none());
+  assert_eq!(crate::menus::key_of(&h.app.prefs, crate::tips::Scope::Design, "Extrude"), "");
+  // Reset to default brings E back
+  let at = row_options(&mut h, "Extrude", "Change Keyboard Shortcut...");
+  h.move_then_click(at);
+  let reset = h.find(vec![], "Reset to default").unwrap();
+  h.move_then_click(reset.center());
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  assert_eq!(crate::menus::key_of(&h.app.prefs, crate::tips::Scope::Design, "Extrude"), "E");
+}
+
+#[test]
+fn the_s_toolbox_is_titled_design_shortcuts_centred_with_a_search_field() {
+  let mut h = Harness::new();
+  let mid = h.app.canvas.center();
+  h.frame(vec![Event::PointerMoved(mid)]);
+  let s = Event::Key {
+    key: egui::Key::S,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::NONE,
+  };
+  h.frame(vec![s, Event::Text("s".into())]);
+  assert!(h.app.toolbox.is_some(), "S opens the box");
+  let shown = h.frame_texts(1.0 / 60.0, vec![]);
+  let at = |text: &str| shown.iter().find(|(_, t)| t == text).map(|(r, _)| *r);
+  let title = at("Design Shortcuts").unwrap_or_else(|| panic!("the title: {shown:?}"));
+  assert!(at("DESIGN SHORTCUTS").is_none() && at("Search commands").is_none(), "{shown:?}");
+  assert!(at("Search").is_some(), "the field's hint: {shown:?}");
+  let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("s-toolbox"))).expect("the box is shown");
+  assert!((title.center().x - area.center().x).abs() < 3.0, "centred: {title:?} in {area:?}");
 }
 
 #[test]

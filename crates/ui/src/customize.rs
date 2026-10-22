@@ -1,4 +1,4 @@
-//! Toolbar customisation, as in Fusion: a command's ⋮ options (Pin to Toolbar, Add to Shortcuts,
+//! Toolbar customisation, as in Fusion: a command's ⋮ options (Pin to Toolbar, Pin to Shortcuts,
 //! Change Keyboard Shortcut) and the user's keyboard shortcuts, kept in `settings.ini`.
 //!
 //! A command is known by its toolbar scope and label (`design.Extrude`, `sketch.Trim`); a pin by
@@ -12,7 +12,7 @@ use fox_desktop::settings::Settings;
 
 use crate::panels::Tab;
 use crate::tips::Scope;
-use crate::{App, theme};
+use crate::{App, logo, theme};
 
 impl Scope {
   pub(crate) fn key(self) -> &'static str {
@@ -216,8 +216,10 @@ pub(crate) struct Prefs {
   pub pinned: Vec<String>,
   /// Default toolbar icons the user unpinned.
   pub unpinned: Vec<String>,
-  /// Commands added to the S toolbox's shortcuts ([`cmd_id`]s).
+  /// Commands the user pinned to the S toolbox's shortcuts ([`cmd_id`]s), newest first.
   pub shortcuts: Vec<String>,
+  /// [`DEFAULT_SHORTCUTS`] the user unpinned from the S toolbox.
+  pub unshortcuts: Vec<String>,
   pub keys: KeyMap,
   /// Where they are saved; None keeps them in memory (tests).
   file: Option<PathBuf>,
@@ -225,6 +227,10 @@ pub(crate) struct Prefs {
 
 const TOOLBAR: &str = "Toolbar";
 const KEYS: &str = "Keys";
+
+/// The commands pinned to the S toolbox's shortcuts until the user unpins them, as in Fusion's
+/// Design Shortcuts (Extrude is observed there; the rest of Fusion's default row is not yet).
+pub(crate) const DEFAULT_SHORTCUTS: &[&str] = &["design.Extrude"];
 
 fn list(s: &str) -> Vec<String> {
   s.split('|').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
@@ -243,6 +249,7 @@ impl Prefs {
         "pinned" => p.pinned = list(&v),
         "unpinned" => p.unpinned = list(&v),
         "shortcuts" => p.shortcuts = list(&v),
+        "unshortcuts" => p.unshortcuts = list(&v),
         _ => {}
       }
     }
@@ -252,7 +259,12 @@ impl Prefs {
 
   /// Writes the toolbar and key sections into `s`, leaving the rest of it.
   pub(crate) fn write(&self, s: &mut Settings) {
-    let toolbar = [("Pinned", &self.pinned), ("Unpinned", &self.unpinned), ("Shortcuts", &self.shortcuts)];
+    let toolbar = [
+      ("Pinned", &self.pinned),
+      ("Unpinned", &self.unpinned),
+      ("Shortcuts", &self.shortcuts),
+      ("Unshortcuts", &self.unshortcuts),
+    ];
     s.set_section(TOOLBAR, &toolbar.map(|(k, v)| (k.to_string(), v.join("|"))));
     s.set_section(KEYS, &self.keys.entries());
   }
@@ -270,6 +282,31 @@ impl Prefs {
     let id = pin_id(tab, group, label);
     if default { !self.unpinned.contains(&id) } else { self.pinned.contains(&id) }
   }
+
+  /// Whether `label`'s Pin to Toolbar is checked: shown in its default slot, or pinned again
+  /// after being unpinned (it then sits at the group's end, as in Fusion).
+  pub(crate) fn on_toolbar(&self, tab: Tab, group: &str, label: &str, default: bool) -> bool {
+    self.shows(tab, group, label, default) || (default && self.pinned.contains(&pin_id(tab, group, label)))
+  }
+
+  /// Whether command `id` is pinned to the S toolbox's shortcuts: a default one the user didn't
+  /// unpin, or one they pinned.
+  pub(crate) fn in_shortcuts(&self, id: &str) -> bool {
+    if DEFAULT_SHORTCUTS.contains(&id) {
+      !self.unshortcuts.iter().any(|x| x == id)
+    } else {
+      self.shortcuts.iter().any(|x| x == id)
+    }
+  }
+
+  /// The commands pinned to the S toolbox's shortcuts: the defaults still pinned, then the
+  /// user's, newest first.
+  pub(crate) fn shortcut_ids(&self) -> Vec<String> {
+    let mut out: Vec<String> =
+      DEFAULT_SHORTCUTS.iter().filter(|id| self.in_shortcuts(id)).map(|id| id.to_string()).collect();
+    out.extend(self.shortcuts.iter().filter(|id| !out.contains(id)).cloned());
+    out
+  }
 }
 
 /// A change picked from a command's options.
@@ -277,13 +314,14 @@ impl Prefs {
 pub(crate) enum Action {
   /// Pin (true) or unpin a command's icon in a toolbar group: (tab, group, label, a default icon).
   Pin(Tab, &'static str, &'static str, bool, bool),
-  /// Add (true) or remove a command from the S toolbox's shortcuts.
+  /// Pin (true) or unpin a command in the S toolbox's shortcuts.
   Shortcut(String, bool),
   /// Open Change Keyboard Shortcut.
   ChangeKey(Binding),
 }
 
-/// A command's options, under its ⋮ button or right-click.
+/// A command's options, under its ⋮ button or right-click, as Fusion's: two checkboxes, Pin to
+/// Toolbar and Pin to Shortcuts, then Change Keyboard Shortcut.
 pub(crate) fn options_menu(
   ui: &mut egui::Ui,
   prefs: &Prefs,
@@ -292,15 +330,14 @@ pub(crate) fn options_menu(
   act: &mut Option<Action>,
 ) {
   let (tab, group, label, default) = pin;
-  let shown = prefs.shows(tab, group, label, default);
-  if ui.button(if shown { "Unpin from Toolbar" } else { "Pin to Toolbar" }).clicked() {
-    *act = Some(Action::Pin(tab, group, label, default, !shown));
+  let mut shown = prefs.on_toolbar(tab, group, label, default);
+  if ui.checkbox(&mut shown, "Pin to Toolbar").changed() {
+    *act = Some(Action::Pin(tab, group, label, default, shown));
     ui.close();
   }
-  ui.add_enabled(false, egui::Button::new("Pin to Panel")).on_disabled_hover_text("Not in FissionOxide yet");
-  let added = prefs.shortcuts.contains(&binding.id);
-  if ui.button(if added { "Remove from Shortcuts" } else { "Add to Shortcuts" }).clicked() {
-    *act = Some(Action::Shortcut(binding.id.clone(), !added));
+  let mut pinned = prefs.in_shortcuts(&binding.id);
+  if ui.checkbox(&mut pinned, "Pin to Shortcuts").changed() {
+    *act = Some(Action::Shortcut(binding.id.clone(), pinned));
     ui.close();
   }
   if ui.button("Change Keyboard Shortcut...").clicked() {
@@ -315,22 +352,39 @@ pub(crate) fn apply(app: &mut App, act: Action) {
   match act {
     Action::Pin(tab, group, label, default, on) => {
       let id = pin_id(tab, group, label);
-      let (add, remove) = if default { (&mut p.unpinned, &mut p.pinned) } else { (&mut p.pinned, &mut p.unpinned) };
-      remove.retain(|x| *x != id);
-      add.retain(|x| *x != id);
-      // a default icon is shown unless listed as unpinned; any other only when listed as pinned
-      if on != default {
-        add.push(id);
+      p.pinned.retain(|x| *x != id);
+      if !default {
+        // shown only when listed as pinned
+        p.unpinned.retain(|x| *x != id);
+        if on {
+          p.pinned.push(id);
+        }
+      } else if !on {
+        // a default icon is shown in its slot unless listed as unpinned
+        if !p.unpinned.contains(&id) {
+          p.unpinned.push(id);
+        }
+      } else if p.unpinned.contains(&id) {
+        // pinned again, as in Fusion it joins the group's end rather than its old slot, so at
+        // a narrow window the command that took its place keeps it
+        p.pinned.push(id);
       }
     }
     Action::Shortcut(id, on) => {
       p.shortcuts.retain(|x| *x != id);
-      if on {
+      p.unshortcuts.retain(|x| *x != id);
+      // a default is pinned unless listed as unpinned; any other only when listed as pinned
+      if DEFAULT_SHORTCUTS.contains(&id.as_str()) {
+        if !on {
+          p.unshortcuts.push(id);
+        }
+      } else if on {
         p.shortcuts.insert(0, id);
       }
     }
     Action::ChangeKey(b) => {
-      app.key_capture = Some(KeyCapture { combo: app.prefs.keys.key(&b.id, b.default).to_string(), binding: b });
+      let current = normalize(app.prefs.keys.key(&b.id, b.default));
+      app.key_capture = Some(KeyCapture { combo: current.clone(), current, binding: b });
       return;
     }
   }
@@ -343,7 +397,9 @@ pub(crate) fn apply(app: &mut App, act: Action) {
 #[derive(Clone, Debug)]
 pub(crate) struct KeyCapture {
   binding: Binding,
-  /// The key shown: the current one, then what was pressed.
+  /// The command's key when the window opened; OK stays grey until the field differs from it.
+  current: String,
+  /// The key in the field: the current one, then what was pressed ("" once cleared).
   combo: String,
 }
 
@@ -351,63 +407,115 @@ pub(crate) struct KeyCapture {
 impl KeyCapture {
   pub(crate) fn for_test() -> KeyCapture {
     let binding = Binding { id: "design.Extrude".into(), scope: Scope::Design, label: "Extrude", default: "E" };
-    KeyCapture { binding, combo: String::new() }
+    KeyCapture { binding, current: "E".into(), combo: String::new() }
   }
 }
 
-/// The key pressed this frame, if any (modifier keys alone don't count).
-fn captured(ctx: &egui::Context) -> Option<(Modifiers, Key)> {
+/// What a key press in the field does.
+enum Typed {
+  /// A shortcut key, with its modifiers.
+  Combo(Modifiers, Key),
+  /// Backspace or Delete: the field is left blank.
+  Clear,
+  /// Enter: OK.
+  Accept,
+}
+
+/// The key pressed this frame, if any (modifier keys alone don't count; Escape is the window's).
+fn captured(ctx: &egui::Context) -> Option<Typed> {
   ctx.input(|i| {
     i.events.iter().find_map(|e| match e {
-      egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } if *key != Key::Escape => {
-        Some((*modifiers, *key))
-      }
+      egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } => match key {
+        Key::Escape | Key::Tab => None,
+        Key::Backspace | Key::Delete => Some(Typed::Clear),
+        Key::Enter => Some(Typed::Accept),
+        k => Some(Typed::Combo(*modifiers, *k)),
+      },
       _ => None,
     })
   })
 }
 
-/// Change Keyboard Shortcut: press a key, see what it clashes with, OK to keep it.
+/// The combo as the field shows it, in lower case as Fusion's ("e", "ctrl+shift+e").
+fn field_text(combo: &str) -> String {
+  combo.to_lowercase()
+}
+
+/// The window's egui id, for tests.
+pub(crate) const MODAL_ID: &str = "change-shortcut-modal";
+const WIDTH: f32 = 380.0;
+
+/// Change Keyboard Shortcut, as Fusion's modal: the prompt, a field holding the key (press a
+/// new one, or clear it for none), the hints, Reset to default at the left and Cancel / OK at
+/// the right, OK grey until the key changes.
 pub fn key_window(app: &mut App, ctx: &egui::Context) {
   let Some(mut kc) = app.key_capture.take() else { return };
-  if let Some((m, k)) = captured(ctx) {
-    kc.combo = format_combo(m, k);
+  let mut accept = false;
+  match captured(ctx) {
+    Some(Typed::Combo(m, k)) => kc.combo = format_combo(m, k),
+    Some(Typed::Clear) => kc.combo.clear(),
+    Some(Typed::Accept) => accept = true,
+    None => {}
   }
   let all = crate::menus::bindings();
   let b = &kc.binding;
   let conflict = app.prefs.keys.conflict(&b.id, b.scope, &kc.combo, all);
+  let ok = kc.combo != kc.current && !matches!(conflict, Some(Conflict::Reserved(_)));
   let mut done: Option<Option<String>> = None;
-  egui::Window::new("Change Keyboard Shortcut")
-    .collapsible(false)
-    .resizable(false)
-    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-    .show(ctx, |ui| {
-      ui.set_width(300.0);
-      ui.label(RichText::new(b.label).strong());
-      ui.label(RichText::new("Press the new key, with Ctrl, Shift or Alt if you like.").color(theme::MUTED));
-      ui.add_space(6.0);
-      let shown = if kc.combo.is_empty() { "None".to_string() } else { kc.combo.clone() };
-      ui.label(RichText::new(shown).size(18.0).strong());
+  let frame = egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::same(10));
+  egui::Modal::new(egui::Id::new(MODAL_ID)).frame(frame).backdrop_color(egui::Color32::from_black_alpha(60)).show(
+    ctx,
+    |ui| {
+      ui.set_width(WIDTH);
+      ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(16.0), egui::Sense::hover());
+        logo::paint(ui.painter(), r);
+        ui.label(RichText::new("Change Keyboard Shortcut").strong());
+      });
+      ui.add_space(8.0);
+      ui.label(format!("Assign a new shortcut key for {}:", b.label));
+      ui.add_space(2.0);
+      // the field shows the key; what's typed into it is read as a key press above, not as text
+      let mut text = field_text(&kc.combo);
+      let field = ui.add(
+        egui::TextEdit::singleline(&mut text)
+          .frame(false)
+          .desired_width(f32::INFINITY)
+          .margin(egui::Margin::symmetric(4, 3)),
+      );
+      field.request_focus();
+      ui.painter().hline(field.rect.x_range(), field.rect.bottom(), egui::Stroke::new(2.0, theme::ACCENT));
       if let Some(c) = &conflict {
         ui.label(RichText::new(c.message()).color(theme::WARNING));
       }
-      ui.add_space(6.0);
+      ui.add_space(8.0);
+      ui.label(RichText::new("Hints:").color(theme::MUTED));
+      ui.label(
+        RichText::new(
+          "You can combine modifiers like Shift, Control, Alt/Option, and Command with an alphanumeric key.",
+        )
+        .color(theme::MUTED),
+      );
+      ui.label(RichText::new("Leave blank to remove the shortcut.").color(theme::MUTED));
+      ui.add_space(10.0);
       ui.horizontal(|ui| {
-        let ok = !matches!(conflict, Some(Conflict::Reserved(_)));
-        if ui.add_enabled(ok, egui::Button::new("OK")).clicked() {
-          done = Some(Some(kc.combo.clone()));
-        }
-        if ui.button("No Shortcut").clicked() {
-          kc.combo.clear();
-        }
-        if !b.default.is_empty() && ui.button("Default").clicked() {
+        if ui.button("Reset to default").clicked() {
           kc.combo = normalize(b.default);
         }
-        if ui.button("Cancel").clicked() {
-          done = Some(None);
-        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+          if ui.add_enabled(ok, egui::Button::new("OK")).clicked() {
+            done = Some(Some(kc.combo.clone()));
+          }
+          if ui.button("Cancel").clicked() {
+            done = Some(None);
+          }
+        });
       });
-    });
+    },
+  );
+  if accept && ok && done.is_none() {
+    done = Some(Some(kc.combo.clone()));
+  }
   if ctx.input(|i| i.key_pressed(Key::Escape)) {
     done = Some(None);
   }
@@ -464,6 +572,7 @@ mod tests {
     p.keys.set("design.Extrude", "E", "E");
     p.pinned = vec!["SOLID/CREATE/Shell".into()];
     p.shortcuts = vec!["design.Fillet".into(), "sketch.Line".into()];
+    p.unshortcuts = vec!["design.Extrude".into()];
     p.write(&mut s);
     let text = s.to_text();
     assert!(text.contains("[Keys]\ndesign.Fillet=Ctrl+F\nsketch.Line=\n"), "{text}");
@@ -471,6 +580,8 @@ mod tests {
     let back = Prefs::from_settings(&Settings::parse(&text));
     assert_eq!(back.keys, p.keys);
     assert_eq!((back.pinned, back.shortcuts), (p.pinned.clone(), p.shortcuts.clone()));
+    assert_eq!(back.unshortcuts, p.unshortcuts);
+    assert!(!back.in_shortcuts("design.Extrude") && back.in_shortcuts("design.Fillet"));
     assert!(back.unpinned.is_empty());
     // through the file
     let dir = std::env::temp_dir().join(format!("fox-keys-{}", std::process::id()));
@@ -524,9 +635,19 @@ mod tests {
     assert!(!app.prefs.shows(Tab::Solid, "CREATE", "Extrude", true));
     // only on that tab
     assert!(!app.prefs.shows(Tab::Plastic, "CREATE", "Shell", false));
+    assert!(!app.prefs.on_toolbar(Tab::Solid, "CREATE", "Extrude", true));
+    // pinned again it joins the end of the group, its old slot staying with the next command
     apply(&mut app, Action::Pin(Tab::Solid, "CREATE", "Extrude", true, true));
-    assert!(app.prefs.shows(Tab::Solid, "CREATE", "Extrude", true));
-    assert!(app.prefs.unpinned.is_empty());
+    assert!(!app.prefs.shows(Tab::Solid, "CREATE", "Extrude", true));
+    assert!(app.prefs.on_toolbar(Tab::Solid, "CREATE", "Extrude", true));
+    assert_eq!(app.prefs.pinned, ["SOLID/CREATE/Shell", "SOLID/CREATE/Extrude"]);
+    apply(&mut app, Action::Pin(Tab::Solid, "CREATE", "Extrude", true, false));
+    assert!(!app.prefs.on_toolbar(Tab::Solid, "CREATE", "Extrude", true));
+    assert_eq!(app.prefs.unpinned, ["SOLID/CREATE/Extrude"]);
+    // a default icon never unpinned stays in its slot
+    apply(&mut app, Action::Pin(Tab::Solid, "CREATE", "Revolve", true, true));
+    assert!(app.prefs.shows(Tab::Solid, "CREATE", "Revolve", true));
+    assert!(!app.prefs.pinned.iter().any(|x| x.ends_with("Revolve")));
     apply(&mut app, Action::Shortcut("design.Fillet".into(), true));
     apply(&mut app, Action::Shortcut("design.Shell".into(), true));
     assert_eq!(app.prefs.shortcuts, ["design.Shell", "design.Fillet"]);
