@@ -218,8 +218,7 @@ pub(crate) fn csv(app: &App, b: &Bom) -> String {
   out.push('\n');
   for r in &b.rows {
     let name = r.get("name").and_then(Value::as_str).unwrap_or("");
-    let line: Vec<String> =
-      std::iter::once(field(name)).chain(cols.iter().map(|c| field(&cell(app, r, c)))).collect();
+    let line: Vec<String> = std::iter::once(field(name)).chain(cols.iter().map(|c| field(&cell(app, r, c)))).collect();
     out.push_str(&line.join(","));
     out.push('\n');
   }
@@ -231,9 +230,10 @@ pub(crate) fn dock(canvas: Rect) -> Pos2 {
   canvas.right_bottom() + vec2(-10.0, -10.0)
 }
 
-/// The tab the palette tucks into: at the canvas's right edge, below the Sketch Palette's.
+/// The tab the palette tucks into: at the canvas's right edge, below the Sketch Palette's while
+/// there is room, else above the canvas's bottom.
 pub(crate) fn tab_rect(canvas: Rect) -> Rect {
-  let top = crate::palette::tab_rect(canvas).bottom() + 8.0;
+  let top = (crate::palette::tab_rect(canvas).bottom() + 8.0).min(canvas.bottom() - 8.0 - 196.0);
   Rect::from_min_max(pos2(canvas.right() - 26.0, top), pos2(canvas.right() - 2.0, top + 196.0))
 }
 
@@ -320,8 +320,7 @@ fn palette(app: &mut App, b: &mut Bom, ctx: &egui::Context) -> bool {
 /// The header: the "-" that folds the palette (a "+" while folded), the title, and ">>".
 fn header(ui: &mut egui::Ui, b: &mut Bom) {
   let (rect, _) = ui.allocate_exact_size(vec2(WIDTH, HEADER), Sense::hover());
-  let corners =
-    if b.folded { egui::CornerRadius::same(2) } else { egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 } };
+  let corners = if b.folded { egui::CornerRadius::same(2) } else { egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 } };
   ui.painter().rect_filled(rect, corners, theme::DIALOG_HEADER);
   if !b.folded {
     ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, theme::SEPARATOR));
@@ -340,7 +339,13 @@ fn header(ui: &mut egui::Ui, b: &mut Bom) {
   if r.clicked() {
     b.folded = !b.folded;
   }
-  p.text(rect.left_center() + vec2(32.0, 0.0), egui::Align2::LEFT_CENTER, "BILL OF MATERIALS", FontId::proportional(12.5), ink);
+  p.text(
+    rect.left_center() + vec2(32.0, 0.0),
+    egui::Align2::LEFT_CENTER,
+    "BILL OF MATERIALS",
+    FontId::proportional(12.5),
+    ink,
+  );
   let tuck = Rect::from_min_max(pos2(rect.right() - 24.0, rect.top() + 4.0), rect.right_bottom() - vec2(2.0, 4.0));
   let r = ui.interact(tuck, ui.id().with("bom-tuck"), Sense::click());
   if r.hovered() {
@@ -440,7 +445,13 @@ fn column_settings(app: &mut App, ui: &mut egui::Ui, b: &mut Bom) {
       vec![t + vec2(-4.0, -2.0), t + vec2(4.0, -2.0), t + vec2(0.0, 3.0)]
     };
     p.add(egui::Shape::convex_polygon(tri, theme::GROUP_LABEL, Stroke::NONE));
-    p.text(r.left_center() + vec2(18.0, 0.0), egui::Align2::LEFT_CENTER, title, FontId::proportional(11.5), theme::GROUP_LABEL);
+    p.text(
+      r.left_center() + vec2(18.0, 0.0),
+      egui::Align2::LEFT_CENTER,
+      title,
+      FontId::proportional(11.5),
+      theme::GROUP_LABEL,
+    );
     if resp.clicked() {
       *folded = !*folded;
     }
@@ -469,7 +480,10 @@ fn empty_state(ui: &mut egui::Ui, rect: Rect, app: &App, b: &Bom) {
       "Design must be saved at least once for BOM data to be available.".to_string(),
     )
   } else {
-    ("No components to list.", b.error.clone().unwrap_or_else(|| "Create components to build the bill of materials.".into()))
+    (
+      "No components to list.",
+      b.error.clone().unwrap_or_else(|| "Create components to build the bill of materials.".into()),
+    )
   };
   let p = ui.painter();
   p.text(c + vec2(0.0, 56.0), egui::Align2::CENTER_CENTER, title, FontId::proportional(13.0), theme::TEXT);
@@ -525,13 +539,14 @@ fn table(app: &mut App, ui: &mut egui::Ui, b: &mut Bom) {
       if resp.drag_started() {
         b.dragging = Some(c.to_string());
       }
-      if b.dragging.as_deref().is_some_and(|d| d != *c)
-        && ui.ctx().pointer_hover_pos().is_some_and(|p| r.contains(p))
-      {
+      if b.dragging.as_deref().is_some_and(|d| d != *c) && ui.ctx().pointer_hover_pos().is_some_and(|p| r.contains(p)) {
         ui.painter().line_segment([r.left_top(), r.left_bottom()], Stroke::new(2.0, theme::ACCENT));
         drop_on = Some(*c);
       }
-      ui.painter().line_segment([r.left_top() + vec2(0.0, 5.0), r.left_bottom() - vec2(0.0, 5.0)], Stroke::new(1.0, theme::SEPARATOR));
+      ui.painter().line_segment(
+        [r.left_top() + vec2(0.0, 5.0), r.left_bottom() - vec2(0.0, 5.0)],
+        Stroke::new(1.0, theme::SEPARATOR),
+      );
       match *c {
         "Thumbnail" => {}
         "Revision/Version" => version_glyph(ui.painter(), r.center()),
@@ -601,7 +616,13 @@ fn head_text(ui: &egui::Ui, at: Pos2, text: &str) {
 fn version_glyph(p: &egui::Painter, c: Pos2) {
   let ink = theme::GROUP_LABEL;
   let r = Rect::from_center_size(c, vec2(10.0, 13.0));
-  let pts = vec![r.left_top(), r.right_top() - vec2(3.0, 0.0), r.right_top() + vec2(0.0, 3.0), r.right_bottom(), r.left_bottom()];
+  let pts = vec![
+    r.left_top(),
+    r.right_top() - vec2(3.0, 0.0),
+    r.right_top() + vec2(0.0, 3.0),
+    r.right_bottom(),
+    r.left_bottom(),
+  ];
   p.add(egui::Shape::closed_line(pts, Stroke::new(1.2, ink)));
   for k in 0..2 {
     let y = r.top() + 6.0 + k as f32 * 3.0;
@@ -610,7 +631,7 @@ fn version_glyph(p: &egui::Painter, c: Pos2) {
 }
 
 /// A table check box drawn at `c`; returns its response.
-fn check_box(ui: &mut egui::Ui, c: Pos2, on: bool, id: impl std::hash::Hash) -> egui::Response {
+fn check_box(ui: &mut egui::Ui, c: Pos2, on: bool, id: impl std::hash::Hash + std::fmt::Debug) -> egui::Response {
   let r = Rect::from_center_size(c, Vec2::splat(14.0));
   let resp = ui.interact(r, ui.id().with(id), Sense::click());
   let p = ui.painter();
@@ -635,7 +656,13 @@ fn dropdown_field(ui: &mut egui::Ui, value: &str, width: f32) -> egui::Response 
   let p = ui.painter();
   let border = if resp.hovered() { theme::ACCENT } else { theme::BORDER };
   p.rect(rect, 2.0, Color32::WHITE, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-  p.text(rect.left_center() + vec2(8.0, 0.0), egui::Align2::LEFT_CENTER, value, FontId::proportional(12.5), theme::TEXT);
+  p.text(
+    rect.left_center() + vec2(8.0, 0.0),
+    egui::Align2::LEFT_CENTER,
+    value,
+    FontId::proportional(12.5),
+    theme::TEXT,
+  );
   icons::chevron(p, rect.right_center() - vec2(11.0, 0.0), theme::GROUP_LABEL);
   resp
 }
@@ -710,7 +737,10 @@ fn draw_glyph(p: &egui::Painter, r: Rect, g: Glyph, ink: Color32) {
     Glyph::Download => {
       p.line_segment([c - vec2(0.0, 6.0), c + vec2(0.0, 2.0)], s);
       p.add(egui::Shape::line(vec![c + vec2(-3.5, -1.5), c + vec2(0.0, 2.0), c + vec2(3.5, -1.5)], s));
-      p.add(egui::Shape::line(vec![c + vec2(-6.0, 2.0), c + vec2(-6.0, 6.0), c + vec2(6.0, 6.0), c + vec2(6.0, 2.0)], s));
+      p.add(egui::Shape::line(
+        vec![c + vec2(-6.0, 2.0), c + vec2(-6.0, 6.0), c + vec2(6.0, 6.0), c + vec2(6.0, 2.0)],
+        s,
+      ));
     }
     Glyph::Gear => icons::draw(p, r, Icon::Gear, ink),
     Glyph::Kebab => {
@@ -719,13 +749,15 @@ fn draw_glyph(p: &egui::Painter, r: Rect, g: Glyph, ink: Color32) {
       }
     }
     Glyph::Refresh => {
-      let pts: Vec<Pos2> = (0..=12)
-        .map(|i| 0.5 + i as f32 / 12.0 * 4.6)
-        .map(|a| c + vec2(a.cos(), a.sin()) * 5.0)
-        .collect();
+      let pts: Vec<Pos2> =
+        (0..=12).map(|i| 0.5 + i as f32 / 12.0 * 4.6).map(|a| c + vec2(a.cos(), a.sin()) * 5.0).collect();
       let end = *pts.last().unwrap_or(&c);
       p.add(egui::Shape::line(pts, s));
-      p.add(egui::Shape::convex_polygon(vec![end + vec2(-3.0, -1.0), end + vec2(2.5, -3.0), end + vec2(1.5, 2.5)], ink, Stroke::NONE));
+      p.add(egui::Shape::convex_polygon(
+        vec![end + vec2(-3.0, -1.0), end + vec2(2.5, -3.0), end + vec2(1.5, 2.5)],
+        ink,
+        Stroke::NONE,
+      ));
     }
   }
 }

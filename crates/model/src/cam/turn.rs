@@ -305,7 +305,17 @@ impl Ctx {
     };
     let bar = l.bar_diameter / 2.0;
     let chuck_r = if l.chuck_diameter > 0.0 { l.chuck_diameter / 2.0 } else { bar + 20.0 };
-    Ok(Ctx { front_view: prof.from_front(), frame, prof, z0, stock_front, chuck, bar_end: chuck - l.grip, bar, chuck_r })
+    Ok(Ctx {
+      front_view: prof.from_front(),
+      frame,
+      prof,
+      z0,
+      stock_front,
+      chuck,
+      bar_end: chuck - l.grip,
+      bar,
+      chuck_r,
+    })
   }
 
   /// The tool nose centre's lowest radius at each cell centre: the front view offset by `rr`,
@@ -394,7 +404,14 @@ pub fn toolpaths(l: &Lathe, setup: &Setup, model: &Model) -> Result<Vec<Toolpath
         feed: if m.pitch > 0.0 { m.pitch * op.tool.rpm } else { m.feed * op.tool.rpm_at(m.x) },
       })
       .collect();
-    out.push(Toolpath { name: op.name.clone(), tool: op.tool.clone(), moves: world, drill: None, axes: Vec::new(), turn: moves });
+    out.push(Toolpath {
+      name: op.name.clone(),
+      tool: op.tool.clone(),
+      moves: world,
+      drill: None,
+      axes: Vec::new(),
+      turn: moves,
+    });
   }
   Ok(out)
 }
@@ -645,7 +662,9 @@ pub fn world_origin(l: &Lathe, setup: &Setup, model: &Model) -> Result<DVec3, St
 pub fn stock_box(l: &Lathe, setup: &Setup, model: &Model) -> Result<(DVec3, DVec3), String> {
   let ctx = Ctx::new(l, setup, model)?;
   let d = ctx.frame.d;
-  let reach = DVec3::new((1.0 - d.x * d.x).max(0.0).sqrt(), (1.0 - d.y * d.y).max(0.0).sqrt(), (1.0 - d.z * d.z).max(0.0).sqrt()) * ctx.bar;
+  let reach =
+    DVec3::new((1.0 - d.x * d.x).max(0.0).sqrt(), (1.0 - d.y * d.y).max(0.0).sqrt(), (1.0 - d.z * d.z).max(0.0).sqrt())
+      * ctx.bar;
   let (a, b) = (ctx.frame.world(ctx.bar_end, 0.0), ctx.frame.world(ctx.stock_front, 0.0));
   Ok((a.min(b) - reach, a.max(b) + reach))
 }
@@ -927,7 +946,8 @@ impl LOut {
 /// A lathe program for a setup's toolpaths: X as a diameter, feeds per revolution, constant
 /// surface speed where the tool has one, threads as spindle-synchronised moves.
 pub fn write(post: &LathePost, imperial: bool, title: &str, paths: &[Toolpath]) -> String {
-  let mut o = LOut { dialect: post.dialect, scale: if imperial { 1.0 / 25.4 } else { 1.0 }, imperial, g: String::new() };
+  let mut o =
+    LOut { dialect: post.dialect, scale: if imperial { 1.0 / 25.4 } else { 1.0 }, imperial, g: String::new() };
   let comment = super::post::comment;
   let units = if imperial { "G20" } else { "G21" };
   if post.dialect != Dialect::LinuxCnc {
@@ -1066,7 +1086,9 @@ pub fn read(g: &str) -> Result<Vec<LatheMove>, String> {
     if skip {
       continue;
     }
-    if motion != 320 && let Some(f) = get('F') {
+    if motion != 320
+      && let Some(f) = get('F')
+    {
       feed = f * scale;
     }
     let (gx, gz) = (get('X'), get('Z'));
@@ -1084,7 +1106,19 @@ pub fn read(g: &str) -> Result<Vec<LatheMove>, String> {
       330 => get('K').ok_or(format!("line {}: G33 without a lead", n + 1))? * scale,
       _ => 0.0,
     };
-    out.push(LatheMove { rapid: motion == 0, z, x, feed: if pitch > 0.0 { pitch } else if motion == 0 { 0.0 } else { feed }, pitch });
+    out.push(LatheMove {
+      rapid: motion == 0,
+      z,
+      x,
+      feed: if pitch > 0.0 {
+        pitch
+      } else if motion == 0 {
+        0.0
+      } else {
+        feed
+      },
+      pitch,
+    });
   }
   Ok(out)
 }

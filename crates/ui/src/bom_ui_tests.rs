@@ -121,8 +121,10 @@ fn bill_of_materials_opens_a_docked_palette_not_a_dialog() {
   let r = h.palette();
   h.click(r.right_top() + vec2(-12.0, 16.0));
   assert!(h.app.bom.as_ref().unwrap().tucked);
+  h.frame(vec![]);
   let tab = h.area("bom-palette-tab").expect("the tab is drawn");
-  assert!((tab.right() - h.app.canvas.right()).abs() < 4.0, "{tab:?}");
+  assert_eq!(tab, bom_ui::tab_rect(h.app.canvas));
+  assert!((tab.right() - h.app.canvas.right()).abs() < 4.0 && tab.bottom() <= h.app.canvas.bottom(), "{tab:?}");
   h.click(tab.center());
   assert!(!h.app.bom.as_ref().unwrap().tucked);
   h.frame(vec![]);
