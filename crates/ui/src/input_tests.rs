@@ -12,8 +12,10 @@ struct Harness {
   time: f64,
   /// The window width (1440 unless a test narrows it).
   width: f32,
-  /// The modifier keys held during each frame (Ctrl for a Ctrl+click).
+  /// The modifier keys held during each frame (Ctrl for a Ctrl+click), and the ones last told
+  /// to egui (a change is sent as the frame's first event).
   mods: egui::Modifiers,
+  sent_mods: egui::Modifiers,
 }
 
 impl Harness {
@@ -24,8 +26,14 @@ impl Harness {
   fn with_width(width: f32) -> Harness {
     let ctx = egui::Context::default();
     crate::theme::apply(&ctx);
-    let mut h =
-      Harness { ctx, app: App::with_session(Session::default()), time: 0.0, width, mods: egui::Modifiers::NONE };
+    let mut h = Harness {
+      ctx,
+      app: App::with_session(Session::default()),
+      time: 0.0,
+      width,
+      mods: egui::Modifiers::NONE,
+      sent_mods: egui::Modifiers::NONE,
+    };
     for _ in 0..3 {
       h.frame(vec![]);
     }
@@ -39,7 +47,10 @@ impl Harness {
   /// A frame in a window of `size` (the window was resized or maximised).
   fn frame_in(&mut self, size: egui::Vec2, mut events: Vec<Event>) {
     self.time += 1.0 / 60.0;
-    events.insert(0, Event::ModifiersChanged(self.mods));
+    if self.mods != self.sent_mods {
+      events.insert(0, Event::ModifiersChanged(self.mods));
+      self.sent_mods = self.mods;
+    }
     let input = RawInput {
       screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
       time: Some(self.time),
