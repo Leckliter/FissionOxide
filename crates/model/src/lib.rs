@@ -1805,6 +1805,9 @@ pub enum FeatureKind {
     /// Flush: normals point the same way instead of facing. Concentric: reverse the axis.
     #[serde(default)]
     flip: bool,
+    /// Fusion's Object "Bodies": these bodies move instead of `moving` (then unused).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bodies: Vec<BodyId>,
   },
   /// Assembly constraint (Center): moves a component the least it can so its plane lands on a
   /// plane of another component, `offset` apart along the fixed plane's normal. Each side is one

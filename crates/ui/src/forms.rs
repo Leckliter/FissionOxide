@@ -628,6 +628,10 @@ impl State {
           _ => self.text_framed(form),
         }
       }
+      // Fusion's Align shows Object, From and To until both are picked
+      "align.form" if matches!(key, "relation" | "offset" | "flip") => {
+        ["moving", "fixed"].iter().all(|k| get(k).is_some_and(|v| !v.is_null()))
+      }
       "sketch.project_to_surface" if key == "direction" => get("type").and_then(Value::as_str) == Some("along_vector"),
       // Coil's Type names the two values it asks for
       "coil.form" => {
@@ -884,15 +888,20 @@ impl State {
         });
       }
     }
+    self.first_missing(form).map(|(_, label)| label)
+  }
+
+  /// The first input still waiting for a pick: its key and label.
+  pub fn first_missing(&self, form: &Form) -> Option<(&'static str, &'static str)> {
     // Pattern on Path: the path is picked, not every curve of a sketch
     if form.cmd == "pattern.path" {
       let at = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
       let empty = |k: &str| at(k).and_then(Value::as_array).is_none_or(Vec::is_empty);
       if empty("bodies") {
-        return Some("Objects");
+        return Some(("bodies", "Objects"));
       }
       if empty("path_curves") {
-        return Some("Path");
+        return Some(("path_curves", "Path"));
       }
     }
     for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
@@ -902,23 +911,25 @@ impl State {
         continue;
       }
       match input {
-        Input::Faces { label, .. }
-        | Input::Edges { label, .. }
-        | Input::Face { label, .. }
-        | Input::Edge { label, .. }
+        Input::Faces { key, label }
+        | Input::Edges { key, label }
+        | Input::Face { key, label, .. }
+        | Input::Edge { key, label }
           if empty =>
         {
-          return Some(label);
+          return Some((key, label));
         }
-        Input::Bodies { label, required: true, .. } | Input::Sketch { label, .. } if empty => return Some(label),
+        Input::Bodies { key, label, required: true } | Input::Sketch { key, label } if empty => {
+          return Some((key, label));
+        }
         // Rib's and Web's Profile, Emboss's Sketch Profiles: OK waits for a pick, as in Fusion
         Input::Curves { label, key } | Input::Profiles { label, key } if empty && required(form, key) => {
-          return Some(label);
+          return Some((key, label));
         }
-        Input::Pick { prompt, .. } if empty => return Some(prompt),
-        Input::DrawingView { label, .. } | Input::Component { label, .. } if empty => return Some(label),
+        Input::Pick { key, prompt, .. } if empty => return Some((key, prompt)),
+        Input::DrawingView { key, label } | Input::Component { key, label } if empty => return Some((key, label)),
         // picking pieces: nothing to preview until one is clicked
-        Input::Pieces { label, .. } if self.picking_pieces && empty => return Some(label),
+        Input::Pieces { key, label } if self.picking_pieces && empty => return Some((key, label)),
         _ => {}
       }
     }
@@ -1951,12 +1962,18 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
     "align.form" => {
       let face = |k: &str| json!({"face": p.get(k).cloned().unwrap_or(Value::Null)});
       let mut q = json!({"moving_geometry": face("moving"), "fixed_geometry": face("fixed")});
-      for k in ["relation", "offset", "flip"] {
+      for k in ["objects", "relation", "offset", "flip"] {
         if let Some(v) = p.get(k) {
           q[k] = v.clone();
         }
       }
       ("align", q)
+    }
+    // the ticked types of the Features group
+    "remove_features.form" => {
+      let types: Vec<&str> =
+        REMOVE_FEATURE_TYPES.iter().copied().filter(|t| p.get(*t).and_then(Value::as_bool).unwrap_or(false)).collect();
+      ("remove_features", json!({"bodies": p.get("bodies").cloned().unwrap_or(json!([])), "types": types}))
     }
     "sketch.scale_to.form" => crate::scale_to_ui::params(&p),
     "sketch.remove_duplicates.form" => {
@@ -3337,6 +3354,9 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
     ("pipe.form", "distance2") => Some("A pipe runs from its path's start in FissionOxide"),
     ("split_face", "split_type") => Some("FissionOxide splits faces with the surface only"),
     ("split_face", "extend") => Some("A splitting plane always extends across the faces in FissionOxide"),
+    ("remove_features.form", "chamfer" | "extrude" | "revolve" | "other") => {
+      Some("Recognising these features isn't in FissionOxide yet: it finds fillets and holes")
+    }
     ("sketch.isoparametric_curve", "curve" | "associative") => {
       Some("Isoparametric curves aren't in FissionOxide yet: the kernel can't evaluate a face's iso-curves")
     }
@@ -3347,22 +3367,103 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
 const ALIGN_RELATIONS: &[(&str, &str)] =
   &[("auto", "Automatic"), ("flush", "Flush"), ("coincident", "Coincident"), ("concentric", "Concentric")];
 
+/// What Align moves: the From geometry's body or its component (Fusion's Object drop-down).
+const ALIGN_OBJECTS: &[(&str, &str)] = &[("bodies", "Bodies"), ("components", "Components")];
+
+/// Fusion's ALIGN: Object, From and To; the relation rows follow once both are picked.
 pub static ALIGN: Form = Form {
   title: "ALIGN",
   name: "Align",
-  hint: "Move a component so its face lines up with another (on another component, or a root body)",
+  hint: "Move a body or component so its geometry lines up with another",
   icon: Icon::Align,
   cmd: "align.form",
   fixed: &[],
   inputs: &[
-    Input::Face { key: "moving", label: "Objects to move", near: None },
-    Input::Face { key: "fixed", label: "Align to", near: None },
+    Input::Choice { key: "objects", label: "Object", options: ALIGN_OBJECTS },
+    Input::Face { key: "moving", label: "From", near: None },
+    Input::Face { key: "fixed", label: "To", near: None },
     Input::Choice { key: "relation", label: "Relation", options: ALIGN_RELATIONS },
     Input::Expr { key: "offset", label: "Offset", default: "0 mm" },
     Input::Check { key: "flip", label: "Flip" },
   ],
   picks_model: true,
 };
+
+/// Fusion's REMOVE with nothing selected: one Objects row; OK removes them (a timeline feature).
+pub static REMOVE: Form = Form {
+  title: "REMOVE",
+  name: "Remove",
+  hint: "Remove bodies or components (as a timeline feature)",
+  icon: Icon::RemoveBody,
+  cmd: "body.remove",
+  fixed: &[],
+  inputs: &[Input::Bodies { key: "bodies", label: "Objects", required: true }],
+  picks_model: true,
+};
+
+/// Fusion's REMOVE FEATURES (Simplify): Bodies, then a Features group of types to look for; the
+/// found features are removed from the dialog, which has only a Close button.
+pub static REMOVE_FEATURES: Form = Form {
+  title: "REMOVE FEATURES",
+  name: "Remove Features",
+  hint: "Find fillets, holes and other features on bodies and remove them",
+  icon: Icon::RemoveFeatures,
+  cmd: "remove_features.form",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Bodies", required: true },
+    Input::CheckOn { key: "all", label: "Select All" },
+    Input::CheckOn { key: "fillet", label: "Fillet" },
+    Input::CheckOn { key: "hole", label: "Hole" },
+    Input::CheckOn { key: "chamfer", label: "Chamfer" },
+    Input::CheckOn { key: "extrude", label: "Extrude" },
+    Input::CheckOn { key: "revolve", label: "Revolve" },
+    Input::CheckOn { key: "other", label: "Other" },
+  ],
+  picks_model: false,
+};
+
+/// The feature types of [`REMOVE_FEATURES`]'s Features group, in its order.
+pub const REMOVE_FEATURE_TYPES: [&str; 6] = ["fillet", "hole", "chamfer", "extrude", "revolve", "other"];
+
+const PRIMITIVES: &[(&str, &str)] = &[("box", "Box"), ("cylinder", "Cylinder")];
+
+/// Replace with Primitives (Simplify): each body swapped for a box or cylinder around it.
+pub static REPLACE_PRIMITIVES: Form = Form {
+  title: "REPLACE WITH PRIMITIVES",
+  name: "Replace with Primitives",
+  hint: "Replace bodies with a box or cylinder that encloses each",
+  icon: Icon::ReplacePrimitives,
+  cmd: "replace_with_primitives",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Bodies", required: true },
+    Input::Choice { key: "shape", label: "Primitive Type", options: PRIMITIVES },
+  ],
+  picks_model: true,
+};
+
+/// Fusion's cursor prompt while a form's input `key` is the one missing, where it isn't the
+/// row's label ("Select ...").
+pub fn prompt(form: &Form, key: &str) -> Option<&'static str> {
+  match (form.cmd, key) {
+    ("align.form", "moving" | "fixed") => Some("Select geometry or snap point on alignable object"),
+    ("body.remove", "bodies") => Some("Select bodies or components to remove"),
+    ("remove_features.form" | "replace_with_primitives", "bodies") => Some("Select solid bodies"),
+    _ => None,
+  }
+}
+
+/// Does a form's dialog show the Preview box? Fusion's Align and Remove show their result
+/// without one.
+pub fn preview_box(form: &Form) -> bool {
+  !matches!(form.cmd, "align.form" | "body.remove")
+}
+
+/// Forms whose dialog has only a Close button: what they do is applied from the dialog itself.
+pub fn close_only(form: &Form) -> bool {
+  form.cmd == "remove_features.form"
+}
 
 pub static SK_SCALE_TO: Form = Form {
   title: "SCALE TO SIZE",

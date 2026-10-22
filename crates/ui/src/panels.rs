@@ -739,7 +739,8 @@ impl Cmd {
         let bodies: Vec<u32> =
           app.s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(body.0) } else { None }).collect();
         if bodies.is_empty() {
-          app.hint("Remove: select bodies first");
+          // Fusion opens REMOVE to pick them
+          app.start(Kind::Form(&crate::forms::REMOVE));
         } else {
           app.run("body.remove", json!({"bodies": bodies}));
           app.s.selection.clear();

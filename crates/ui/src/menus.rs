@@ -185,9 +185,9 @@ const PATTERN: &[E] = &[
 ];
 
 const SIMPLIFY: &[E] = &[
-  c("Remove Features", Icon::RemoveFeatures, D(Kind::Form(&forms::REMOVE_FACES))),
+  c("Remove Features", Icon::RemoveFeatures, D(Kind::Form(&forms::REMOVE_FEATURES))),
   c("Remove Faces", Icon::RemoveFaces, D(Kind::Form(&forms::REMOVE_FACES))),
-  x("Replace with Primitives", Icon::ReplacePrimitives),
+  c("Replace with Primitives", Icon::ReplacePrimitives, D(Kind::Form(&forms::REPLACE_PRIMITIVES))),
 ];
 
 const CREATE_PCB: &[E] = &[x("Associative PCB", Icon::InsertComponent), x("Create 3D PCB", Icon::InsertComponent)];

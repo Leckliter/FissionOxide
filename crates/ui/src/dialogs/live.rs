@@ -185,7 +185,9 @@ impl Dialog {
   /// open with their one selection row).
   pub(super) fn live_checkbox(&mut self, ui: &mut egui::Ui, s: &mut Session) {
     if matches!(self.kind, Kind::Fillet | Kind::Draft | Kind::OffsetFace | Kind::Hem)
-      || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f) || crate::mesh_ui::is_mesh_form(f))
+      || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f)
+        || crate::mesh_ui::is_mesh_form(f)
+        || !crate::forms::preview_box(f))
     {
       return;
     }

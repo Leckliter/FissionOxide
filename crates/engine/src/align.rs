@@ -2,7 +2,7 @@
 //! or coincident with one on a fixed component, moving it only as far as that takes.
 
 use fox_model::assembly::{AlignRelation, JointGeometry};
-use fox_model::{ComponentId, FeatureKind};
+use fox_model::{BodyId, ComponentId, FeatureKind};
 use serde_json::Value;
 
 use crate::commands::{opt_expr, opt_str};
@@ -38,12 +38,31 @@ fn align(s: &mut Session, p: &Value) -> CmdResult {
   let geometry = |k: &str| crate::assembly::geometry(s, p.get(k).ok_or(CmdError::new(format!("missing '{k}'")))?);
   let moving_geometry = geometry("moving_geometry")?;
   let fixed_geometry = geometry("fixed_geometry")?;
-  let moving = component_for(s, p, "moving", &moving_geometry)?
-    .ok_or(CmdError::new("missing 'moving' (the moving geometry isn't on a component)"))?;
-  let fixed = component_for(s, p, "fixed", &fixed_geometry)?;
-  if fixed == Some(moving) {
-    return Err(CmdError::new("both geometries are on the same component"));
+  // Fusion's Object "Bodies": the moving geometry's body moves, not its component
+  let bodies: Vec<BodyId> = match p.get("bodies") {
+    Some(Value::Array(a)) => a.iter().filter_map(Value::as_u64).map(|b| BodyId(b as u32)).collect(),
+    _ if opt_str(p, "objects") == Some("bodies") => {
+      vec![moving_geometry.body().ok_or(CmdError::new("the moving geometry isn't on a body"))?]
+    }
+    _ => Vec::new(),
+  };
+  for b in &bodies {
+    s.model.body(*b).ok_or(CmdError::new(format!("no body {}", b.0)))?;
+    if fixed_geometry.body() == Some(*b) {
+      return Err(CmdError::new("both geometries are on the same body"));
+    }
   }
+  let (moving, fixed) = if bodies.is_empty() {
+    let moving = component_for(s, p, "moving", &moving_geometry)?
+      .ok_or(CmdError::new("missing 'moving' (the moving geometry isn't on a component)"))?;
+    let fixed = component_for(s, p, "fixed", &fixed_geometry)?;
+    if fixed == Some(moving) {
+      return Err(CmdError::new("both geometries are on the same component"));
+    }
+    (moving, fixed)
+  } else {
+    (ComponentId(0), None)
+  };
   let relation = match opt_str(p, "relation") {
     None => AlignRelation::Auto,
     Some(r) => AlignRelation::parse(r)
@@ -57,6 +76,7 @@ fn align(s: &mut Session, p: &Value) -> CmdResult {
     relation,
     offset: opt_expr(p, "offset").unwrap_or_else(|| "0".into()),
     flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+    bodies,
   };
   let id = s.edit(|d| Ok(d.add_feature(kind)?))?;
   rename(s, id, p)?;

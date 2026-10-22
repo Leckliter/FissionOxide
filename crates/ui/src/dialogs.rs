@@ -29,6 +29,7 @@ mod move_copy;
 mod pieces;
 mod press_owner;
 mod rows;
+mod simplify;
 pub(crate) use analysis::center_of_mass;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
@@ -1968,6 +1969,9 @@ impl Dialog {
       self.refresh_report(s);
       return;
     }
+    if matches!(self.kind, Kind::Form(f) if crate::forms::close_only(f)) {
+      return;
+    }
     let Some((cmd, params)) = self.command() else {
       return;
     };
@@ -2541,7 +2545,8 @@ impl Dialog {
               egui::FontId::proportional(11.0),
               theme::GROUP_LABEL,
             );
-            if !self.kind.reports() {
+            let close_only = matches!(self.kind, Kind::Form(f) if crate::forms::close_only(f));
+            if !self.kind.reports() && !close_only {
               if self.picks() && !self.picks_fixed() {
                 self.live_checkbox(ui, &mut app.s);
               }
@@ -2699,6 +2704,13 @@ impl Dialog {
       return Some(section::CUT_PLANE_HINT.into());
     }
     if !self.ready() {
+      // a form's own wording for the row waiting for a pick
+      if let Kind::Form(f) = self.kind
+        && f.cmd != "sketch.text.form"
+        && let Some(p) = self.form.first_missing(f).and_then(|(key, _)| crate::forms::prompt(f, key))
+      {
+        return Some(p.into());
+      }
       return Some(match self.kind {
         Kind::Extrude => "Select sketch profiles or planar faces to extrude".into(),
         Kind::Revolve if self.sketch.is_some() => "Select the axis to revolve the profile around".into(),
@@ -2835,6 +2847,8 @@ impl Dialog {
       // OK waits for Compute, and Section Analysis for its cut plane
       Kind::Interference => self.report.is_some(),
       Kind::Section => !self.plane.is_null(),
+      // Remove Features applies from its own Remove button
+      Kind::Form(f) if crate::forms::close_only(f) => false,
       // an offset of 0.00 sits on its curve, a fillet or shell of 0.00 has no size: OK waits
       // for a value
       _ => self.ready() && !self.waits_for_value(),
@@ -3098,6 +3112,10 @@ impl Dialog {
       .position(|x| x.key() == "faces")
       .and_then(|j| self.form.values[j].as_array().map(Vec::len))
       .unwrap_or(0);
+    if std::ptr::eq(f, &crate::forms::REMOVE_FEATURES) {
+      self.remove_features_fields(app, ui);
+      return;
+    }
     let text_form = f.cmd == "sketch.text.form";
     let params = if text_form { crate::value_box::params_of(&app.s) } else { Vec::new() };
     for (i, input) in f.inputs.iter().enumerate() {
@@ -6840,11 +6858,113 @@ mod tests {
     let bottom = s.model.bodies[1].faces().iter().find(|f| f.normal.z < -0.9).unwrap().id;
     let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
     let picks = vec![Sel::Face { body: block, face: bottom }, Sel::Face { body: plate, face: top }];
-    let mut d = form(&mut s, &ALIGN, picks, &[]);
+    let mut d = form(&mut s, &ALIGN, picks, &[("objects", json!("components"))]);
     assert_eq!(d.command().unwrap().0, "align");
     apply(&mut s, &mut d);
     let m = s.model.body(block).unwrap().shape.mass().unwrap();
     assert!((m.bbox_min.z - 10.0).abs() < 1e-6 && (m.bbox_min.x - 50.0).abs() < 1e-6, "{:?}", m.bbox_min);
+  }
+
+  #[test]
+  fn align_remove_and_simplify_dialogs_as_fusion() {
+    use crate::forms::*;
+    let shown = |d: &Dialog, f: &'static Form| -> Vec<&str> {
+      (0..f.inputs.len()).filter(|i| d.form.shown(f, *i)).map(|i| f.inputs[i].key()).collect()
+    };
+    // ALIGN: Object (Bodies), From and To; OK greyed and Fusion's prompt until both are picked
+    let mut s = Session::default();
+    s.execute("box", &json!({"width": 40, "depth": 30, "height": 10, "at": [20, 15]})).unwrap();
+    s.execute("box", &json!({"width": 10, "depth": 10, "height": 10, "at": [55, 5]})).unwrap();
+    let (plate, block) = (s.model.bodies[0].id, s.model.bodies[1].id);
+    let mut d = form(&mut s, &ALIGN, vec![], &[]);
+    assert_eq!(shown(&d, &ALIGN), ["objects", "moving", "fixed"]);
+    assert_eq!(d.form.values[0], json!("bodies"));
+    assert!(!d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select geometry or snap point on alignable object"));
+    let bottom = s.model.bodies[1].faces().iter().find(|f| f.normal.z < -0.9).unwrap().id;
+    let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    d = form(&mut s, &ALIGN, vec![Sel::Face { body: block, face: bottom }], &[]);
+    assert_eq!(d.prompt(false).as_deref(), Some("Select geometry or snap point on alignable object"));
+    let picks = vec![Sel::Face { body: block, face: bottom }, Sel::Face { body: plate, face: top }];
+    let mut d = form(&mut s, &ALIGN, picks, &[]);
+    assert_eq!(shown(&d, &ALIGN), ["objects", "moving", "fixed", "relation", "offset", "flip"]);
+    assert!(d.ok_enabled());
+    // root bodies: the From body moves onto the plate
+    apply(&mut s, &mut d);
+    let m = s.model.body(block).unwrap().shape.mass().unwrap();
+    assert!((m.bbox_min.z - 10.0).abs() < 1e-6 && (m.bbox_min.x - 50.0).abs() < 1e-6, "{:?}", m.bbox_min);
+    assert!(!crate::forms::preview_box(&ALIGN));
+
+    // Remove with nothing selected opens REMOVE: Objects, OK greyed, Fusion's prompt
+    let mut app = App::with_session(Session::default());
+    app.s.execute("box", &json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    let b = app.s.model.bodies[0].id;
+    crate::panels::Cmd::RemoveBodies.run(&mut app);
+    let d = app.dialog.as_mut().expect("REMOVE opens");
+    assert_eq!(d.kind, Kind::Form(&REMOVE));
+    assert_eq!(REMOVE.title, "REMOVE");
+    assert!(matches!(REMOVE.inputs, [Input::Bodies { label: "Objects", required: true, .. }]));
+    assert!(!d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select bodies or components to remove"));
+    app.s.selection = vec![Sel::Body { body: b }];
+    d.form.sync(&REMOVE, &app.s, None);
+    assert!(d.ok_enabled());
+    apply(&mut app.s, d);
+    assert!(app.s.model.bodies.is_empty());
+    // with bodies selected it removes them at once, as before
+    let mut app = App::with_session(Session::default());
+    app.s.execute("box", &json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    app.s.selection = vec![Sel::Body { body: app.s.model.bodies[0].id }];
+    crate::panels::Cmd::RemoveBodies.run(&mut app);
+    assert!(app.dialog.is_none() && app.s.model.bodies.is_empty());
+
+    // REMOVE FEATURES: Bodies, the Features group all ticked, only Close
+    let mut s = Session::default();
+    s.execute("box", &json!({"width": 40, "depth": 30, "height": 10, "at": [20, 15]})).unwrap();
+    s.execute("cylinder", &json!({"radius": 5, "height": 10, "at": [12, 15], "operation": "cut"})).unwrap();
+    let mut d = form(&mut s, &REMOVE_FEATURES, vec![], &[]);
+    assert!(close_only(&REMOVE_FEATURES) && !d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select solid bodies"));
+    let keys: Vec<&str> = REMOVE_FEATURES.inputs.iter().map(Input::key).collect();
+    assert_eq!(keys, ["bodies", "all", "fillet", "hole", "chamfer", "extrude", "revolve", "other"]);
+    assert_eq!(d.rf_types(), REMOVE_FEATURE_TYPES);
+    assert!(d.form.values[1..].iter().all(|v| *v == json!(true)));
+    d.rf_tick("fillet", false);
+    assert_eq!(d.form.values[1], json!(false));
+    assert_eq!(d.rf_types(), ["hole", "chamfer", "extrude", "revolve", "other"]);
+    d.rf_tick("all", true);
+    assert_eq!(d.rf_types(), REMOVE_FEATURE_TYPES);
+    assert!(greyed(&REMOVE_FEATURES, "chamfer").is_some() && greyed(&REMOVE_FEATURES, "hole").is_none());
+    let body = s.model.bodies[0].id;
+    let mut d = form(&mut s, &REMOVE_FEATURES, vec![Sel::Body { body }], &[]);
+    // picking the body applies nothing; the hole is found and Remove takes it off
+    let before = s.model.bodies[0].shape.mass().unwrap().volume;
+    d.preview(&mut s);
+    assert!(!d.applied);
+    let found = d.rf_found(&mut s);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0]["type"], "hole");
+    d.rf_remove(&mut s);
+    assert!(d.error.is_none(), "{:?}", d.error);
+    let after = s.model.bodies[0].shape.mass().unwrap().volume;
+    assert!((after - before - std::f64::consts::PI * 250.0).abs() < 1e-3, "{before} {after}");
+    assert!(d.rf_found(&mut s).is_empty());
+    // closing keeps the removal
+    d.cancel(&mut s);
+    assert!((s.model.bodies[0].shape.mass().unwrap().volume - after).abs() < 1e-9);
+
+    // Replace with Primitives: Bodies and the primitive; OK swaps the body for a box
+    let mut s = Session::default();
+    s.execute("cylinder", &json!({"radius": 5, "height": 20})).unwrap();
+    let body = s.model.bodies[0].id;
+    let d = form(&mut s, &REPLACE_PRIMITIVES, vec![], &[]);
+    assert!(!d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select solid bodies"));
+    let mut d = form(&mut s, &REPLACE_PRIMITIVES, vec![Sel::Body { body }], &[]);
+    assert_eq!(d.command().unwrap().0, "replace_with_primitives");
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), 1);
+    assert!((s.model.bodies[0].shape.mass().unwrap().volume - 2000.0).abs() < 1e-6);
   }
 
   #[test]

@@ -44,6 +44,7 @@ pub mod scene;
 mod sheet2;
 mod silhouette;
 pub mod sim;
+mod simplify;
 mod solid;
 mod step;
 mod subassembly;

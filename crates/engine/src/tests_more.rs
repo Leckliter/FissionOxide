@@ -986,3 +986,59 @@ fn loop_length_coincident_interference_and_tilted_sections() {
   assert!((pl.origin - fox_kernel::glam::DVec3::new(3.0, 0.0, 5.0)).length() < 1e-9, "about the centre on the plane");
   assert!(o.section_hatch && o.section_color.is_some());
 }
+
+#[test]
+fn remove_features_finds_fillets_and_holes_and_removes_them() {
+  let mut s = Session::default();
+  block(&mut s, 40.0, 30.0, 10.0);
+  let plain = volume(&s);
+  // a through hole d10 and a 3 mm round on the edge along x at y 0, z 10
+  run(&mut s, "sketch.create", json!({"plane": {"point": [0, 0, 10], "normal": [0, 0, 1]}}));
+  run(&mut s, "sketch.circle", json!({"center": [12, 15], "radius": 5}));
+  run(&mut s, "extrude", json!({"extent": "through_all", "flip": true, "operation": "cut"}));
+  run(&mut s, "fillet", json!({"edges": [{"point": [30, 0, 10]}], "radius": 3}));
+  let b = s.model.bodies[0].id.0;
+  let found = run(&mut s, "remove_features", json!({"bodies": [b], "dry_run": true}))["features"].clone();
+  let of = |t: &str| found.as_array().unwrap().iter().filter(|f| f["type"] == t).cloned().collect::<Vec<_>>();
+  assert_eq!(of("fillet").len(), 1, "{found}");
+  assert!((of("fillet")[0]["size"].as_f64().unwrap() - 3.0).abs() < 1e-6, "{found}");
+  assert_eq!(of("hole").len(), 1, "{found}");
+  assert!((of("hole")[0]["size"].as_f64().unwrap() - 10.0).abs() < 1e-6, "{found}");
+  // only the ticked types: the hole goes, the round stays
+  let before = volume(&s);
+  run(&mut s, "remove_features", json!({"bodies": [b], "types": ["hole"]}));
+  let hole = std::f64::consts::PI * 25.0 * 10.0;
+  assert!((volume(&s) - (before + hole)).abs() < 1e-3, "{} {}", volume(&s), before + hole);
+  let left = run(&mut s, "remove_features", json!({"bodies": [b], "dry_run": true}))["features"].clone();
+  assert_eq!(left.as_array().unwrap().len(), 1, "{left}");
+  // then the round: the block is whole again
+  run(&mut s, "remove_features", json!({"bodies": [b], "types": ["fillet"]}));
+  assert!((volume(&s) - plain).abs() < 1e-3, "{} {plain}", volume(&s));
+  // nothing left to find
+  assert!(s.execute("remove_features", &json!({"bodies": [b]})).is_err());
+  assert!(s.execute("remove_features", &json!({"bodies": [b], "types": ["slot"]})).is_err());
+}
+
+#[test]
+fn replace_with_primitives_swaps_each_body_for_a_box_or_cylinder() {
+  let mut s = Session::default();
+  rod(&mut s, 5.0, 20.0);
+  let b = s.model.bodies[0].id.0;
+  run(&mut s, "replace_with_primitives", json!({"bodies": [b]}));
+  assert_eq!(s.model.bodies.len(), 1);
+  assert!(s.model.bodies[0].id.0 != b);
+  assert!((volume(&s) - 10.0 * 10.0 * 20.0).abs() < 1e-6, "{}", volume(&s));
+  // one undo brings the rod back
+  s.undo();
+  assert_eq!(s.model.bodies.len(), 1);
+  assert!((volume(&s) - std::f64::consts::PI * 25.0 * 20.0).abs() < 1e-3, "{}", volume(&s));
+  // a block as a cylinder: around its corners, along Z
+  let mut s = Session::default();
+  block(&mut s, 10.0, 10.0, 4.0);
+  let b = s.model.bodies[0].id.0;
+  run(&mut s, "replace_with_primitives", json!({"bodies": [b], "shape": "cylinder"}));
+  let r2 = 50.0;
+  assert!((volume(&s) - std::f64::consts::PI * r2 * 4.0).abs() < 1e-3, "{}", volume(&s));
+  assert!(s.execute("replace_with_primitives", &json!({"bodies": []})).is_err());
+  assert!(s.execute("replace_with_primitives", &json!({"bodies": [s.model.bodies[0].id.0], "shape": "cone"})).is_err());
+}
