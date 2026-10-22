@@ -3238,9 +3238,9 @@ fn glyph_nudge(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], [f64; 2])> {
 
 /// For a Tangent between a line and a circle or arc: the point of the line's segment nearest the
 /// circle's centre (the touch point when the segment reaches it, otherwise the nearer end).
-fn tangent_touch(s: &Sketch, a: CurveId, b: CurveId) -> Option<[f64; 2]> {
+fn tangent_touch(s: &Sketch, a: fox_engine::sketch::CurveId, b: fox_engine::sketch::CurveId) -> Option<[f64; 2]> {
   use fox_engine::sketch::CurveKind;
-  let kind = |id: CurveId| s.curve(id).map(|c| &c.kind);
+  let kind = |id: fox_engine::sketch::CurveId| s.curve(id).map(|c| &c.kind);
   let (line, round) = match (kind(a)?, kind(b)?) {
     (CurveKind::Line { .. }, CurveKind::Circle { .. } | CurveKind::Arc { .. }) => (a, b),
     (CurveKind::Circle { .. } | CurveKind::Arc { .. }, CurveKind::Line { .. }) => (b, a),
