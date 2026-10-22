@@ -830,8 +830,13 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     peek,
     peek_faces: app.ctx_menu.peek_faces.clone(),
     peek_sketches: app.ctx_menu.peek_sketches.clone(),
-    only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
-    opacity: app.ctx_menu.opacity.clone(),
+    // the Bodies folder's eye off draws none
+    only_bodies: if app.ctx_menu.bodies_hidden {
+      Some(Vec::new())
+    } else {
+      app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone())
+    },
+    opacity: app.ctx_menu.opacity.iter().copied().chain(crate::mesh_ui::ghosted(app)).collect(),
     flat_meshes: app.ctx_menu.flat_shaded.clone(),
     // Offset Plane's preview is filled over the image (see `offset_plane_overlay`), and so are
     // the construction planes (see `crate::construction`)
@@ -841,6 +846,8 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     preview_curves: app.dialog.as_ref().map(|d| d.preview_curves().to_vec()).unwrap_or_default(),
     sketch_show: app.palette.show(),
     ghosts: app.dialog.as_ref().map(|d| d.ghost_bodies()).unwrap_or_default(),
+    // a base flange's previewed sheet is Fusion's solid preview blue
+    preview: app.dialog.as_ref().map(|d| d.sheet_preview_bodies(&app.s)).unwrap_or_default(),
     // the palette's Slice reaches the scene as the `slice` render parameter (see `slice_params`)
     ..analysis
   }
@@ -878,7 +885,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().chain(&crate::select::hover_bodies(app)).map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
-    opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
+    opacity: app.ctx_menu.opacity.iter().copied().chain(crate::mesh_ui::ghosted(app)).map(|(b, a)| (b.0, a)).collect(),
     flat: app.ctx_menu.flat_shaded.iter().map(|b| b.0).collect(),
     peek_faces: app.ctx_menu.peek_faces.iter().map(|(b, f)| (b.0, *f)).collect(),
     peek_sketches: app.ctx_menu.peek_sketches.iter().map(|s| s.0).collect(),
@@ -972,7 +979,7 @@ fn sketch_3d_manipulator(app: &App, painter: &egui::Painter, view: &View) {
 
 /// The section and analysis settings as render parameters.
 fn view_params(app: &App) -> serde_json::Value {
-  let mut v = app.analysis.clone().unwrap_or(json!({}));
+  let mut v = crate::analyses::render_params(app).unwrap_or(json!({}));
   // a Sweep's or Loft's Analysis tab shows its analysis while the dialog is open
   if let Some(a) = app.dialog.as_ref().and_then(|d| d.tab_analysis())
     && v.get("analysis").is_none()
@@ -2996,9 +3003,12 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
         paint_dim(painter, s, if hot { DIM_INK_HOT } else { DIM_INK });
       }
       text.paint(painter, r.min + Vec2::new(4.0, 2.0), if hot { DIM_TEXT_HOT } else { DIM_TEXT });
-      // Fusion's tooltip under the text names the parameter with its full value
+      // Fusion's tooltip under the text names the parameter with its full value, light text on
+      // its dark tooltip panel
       let resp = match dim_param_name(app, c.id.0) {
-        Some(name) => resp.on_hover_text(dim_tooltip(&name, c.kind.is_angle(), dim.value, app.s.design.units)),
+        Some(name) => {
+          crate::navbar::dark_tip(resp, &dim_tooltip(&name, c.kind.is_angle(), dim.value, app.s.design.units))
+        }
         None => resp,
       };
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {
@@ -5169,9 +5179,7 @@ pub(crate) fn axis_param(origin: DVec3, dir: DVec3, o: DVec3, d: DVec3) -> Optio
 
 /// The Measure dialog's result: a line between the closest points with the distance.
 fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
-  if let Some(c) = app.dialog.as_ref().and_then(|d| d.marker())
-    && let Some(p) = view.to_screen(&app.cam, c)
-  {
+  for p in crate::analyses::centers(app).into_iter().filter_map(|c| view.to_screen(&app.cam, c)) {
     // centre of mass: Fusion's quartered circle
     let col = Color32::from_rgb(30, 30, 30);
     painter.circle_filled(p, 8.0, Color32::WHITE);

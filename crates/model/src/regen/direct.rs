@@ -19,7 +19,11 @@ impl Ctx<'_> {
       let shape = Shape::from_brep(&b.brep).map_err(ke)?;
       self.state.body_counter += 1;
       let name = if b.name.is_empty() { format!("Body{}", self.state.body_counter) } else { b.name.clone() };
-      self.state.bodies.push(Body::new(b.id, name, shape, id));
+      let mut body = Body::new(b.id, name, shape, id);
+      if b.mesh {
+        body.kind = super::BodyKind::Mesh;
+      }
+      self.state.bodies.push(body);
     }
     let mut warnings = Vec::new();
     for (i, edit) in edits.iter_mut().enumerate() {

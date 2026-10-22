@@ -146,6 +146,7 @@ pub fn draw(d: &DiffView, scene: &mut Scene) {
         highlight_color: color,
         colors: Vec::new(),
         analyze: false,
+        unanalyzed: false,
         unlit: false,
       });
     }

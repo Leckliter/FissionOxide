@@ -18,8 +18,8 @@ use crate::{BodyId, FaceRef};
 pub mod adaptive;
 pub mod adaptive3d;
 pub mod arcs;
-pub mod collide;
 pub mod axes;
+pub mod collide;
 pub mod finish3d;
 pub mod post;
 pub mod region;
@@ -746,7 +746,12 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath])
     OpKind::SteepShallow { faces, threshold } => finish3d::steep_shallow(&mut p, setup, model, op, faces, *threshold)?,
     OpKind::Contour3d { faces, min_slope } => finish3d::contour(&mut p, setup, model, op, faces, *min_slope)?,
     OpKind::Rotary { .. } | OpKind::Swarf { .. } => return Err("this operation needs a 4/5-axis machine".into()),
-    OpKind::TurnFace | OpKind::TurnRough | OpKind::TurnFinish | OpKind::Groove | OpKind::PartOff | OpKind::Thread { .. } => {
+    OpKind::TurnFace
+    | OpKind::TurnRough
+    | OpKind::TurnFinish
+    | OpKind::Groove
+    | OpKind::PartOff
+    | OpKind::Thread { .. } => {
       return Err("a lathe operation needs a turning setup".into());
     }
     OpKind::Drill { holes, peck } => {
@@ -816,7 +821,14 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath])
       drill = Some((ordered, *peck));
     }
   }
-  Ok(Toolpath { name: op.name.clone(), tool: op.tool.clone(), moves: p.moves, drill, axes: Vec::new(), turn: Vec::new() })
+  Ok(Toolpath {
+    name: op.name.clone(),
+    tool: op.tool.clone(),
+    moves: p.moves,
+    drill,
+    axes: Vec::new(),
+    turn: Vec::new(),
+  })
 }
 
 pub(crate) struct Path {

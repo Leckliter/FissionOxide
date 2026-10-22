@@ -46,6 +46,14 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       let extension = opt_expr(p, "extension").unwrap_or_default();
       add_feature(s, FeatureKind::Untrim { faces, bodies, loops, extension })
     })(),
+    "surface.stitch.gaps" => (|| {
+      let bodies = bodies(s, p, "bodies")?;
+      let max = p.get("max_gap").and_then(Value::as_f64).unwrap_or(1.0);
+      let open = fox_model::surface::open_edges(&s.model, &bodies, max);
+      Ok(serde_json::json!(
+        open.iter().map(|o| serde_json::json!({"body": o.body.0, "edge": o.edge, "gap": o.gap})).collect::<Vec<_>>()
+      ))
+    })(),
     // a plane tool stays with the plane trim (features.rs)
     "surface.trim" if trim_tool_kind(p).is_some() => trim_with(s, p),
     _ => return None,
@@ -64,7 +72,18 @@ fn trim_tool_kind(p: &Value) -> Option<&'static str> {
   }
 }
 
+/// Fusion's Trim (`cut_only`): only the surfaces the tool cuts change. With no surfaces to cut
+/// at all, the tool cuts none of them, which is Fusion's error.
+pub(crate) fn cut_only(p: &Value) -> Result<bool, CmdError> {
+  let on = p.get("cut_only").and_then(Value::as_bool).unwrap_or(false);
+  if on && ids(p, "bodies").is_empty() {
+    return Err(CmdError::new("Cutting Tool does not intersect any surface!"));
+  }
+  Ok(on)
+}
+
 fn trim_with(s: &mut Session, p: &Value) -> CmdResult {
+  let cut_only = cut_only(p)?;
   let targets = bodies(s, p, "bodies")?;
   if targets.is_empty() {
     return Err(CmdError::new("missing 'bodies'"));
@@ -87,7 +106,7 @@ fn trim_with(s: &mut Session, p: &Value) -> CmdResult {
   };
   let (keep, remove) = (points(p, "keep")?, points(p, "remove")?);
   let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-  add_feature(s, FeatureKind::TrimWith { bodies: targets, tool, flip, keep, remove })
+  add_feature(s, FeatureKind::TrimWith { bodies: targets, tool, flip, keep, remove, cut_only })
 }
 
 /// `face_distances`: [{face, distance}] for a variable offset.

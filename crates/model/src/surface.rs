@@ -74,3 +74,58 @@ pub struct FaceDistance {
   pub face: FaceRef,
   pub distance: String,
 }
+
+/// An open edge of bodies being stitched, and the widest gap between it and the open edge
+/// across from it (the nearest one along its whole length).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OpenEdge {
+  pub body: BodyId,
+  pub edge: u32,
+  pub gap: f64,
+  /// The edge's box (its ends and middle), to zoom to it.
+  pub lo: fox_kernel::glam::DVec3,
+  pub hi: fox_kernel::glam::DVec3,
+}
+
+/// The open edges of `bodies` that face another open edge less than `max_gap` away, widest
+/// gap first: what Stitch's Unstitched Edges table lists (the ones wider than the tolerance
+/// stay open). An edge with nothing across from it (the outer boundary) isn't listed.
+pub fn open_edges(model: &crate::regen::Model, bodies: &[BodyId], max_gap: f64) -> Vec<OpenEdge> {
+  use fox_kernel::Shape;
+  let mut open: Vec<(BodyId, fox_kernel::EdgeInfo, Shape)> = Vec::new();
+  for b in bodies {
+    let Some(body) = model.body(*b) else { continue };
+    for e in body.edges().iter().filter(|e| e.faces[1] == 0 && e.length > 1e-9) {
+      if let Ok(shape) = body.shape.edge_shape(e.id) {
+        open.push((*b, *e, shape));
+      }
+      // past this many the pairwise search costs too much for a dialog
+      if open.len() >= 200 {
+        break;
+      }
+    }
+  }
+  let mut out = Vec::new();
+  for (k, (body, e, _)) in open.iter().enumerate() {
+    let pts: Vec<Shape> = [e.start, e.mid, e.end].iter().filter_map(|p| Shape::vertex(*p).ok()).collect();
+    let mut best = f64::INFINITY;
+    for (j, (_, _, other)) in open.iter().enumerate() {
+      if j == k {
+        continue;
+      }
+      let widest = pts.iter().map(|p| p.distance_to(other).map_or(f64::INFINITY, |d| d.0)).fold(0.0, f64::max);
+      best = best.min(widest);
+    }
+    if best < max_gap {
+      out.push(OpenEdge {
+        body: *body,
+        edge: e.id,
+        gap: best,
+        lo: e.start.min(e.end).min(e.mid),
+        hi: e.start.max(e.end).max(e.mid),
+      });
+    }
+  }
+  out.sort_by(|a, b| b.gap.total_cmp(&a.gap));
+  out
+}

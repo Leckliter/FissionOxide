@@ -334,6 +334,35 @@ fn align_moves_a_component_only_as_far_as_the_relation_needs() {
 }
 
 #[test]
+fn align_with_object_bodies_moves_the_from_body() {
+  // two root bodies (no components): Fusion's default Object, Bodies, moves the From body
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 40, "depth": 30, "height": 10, "at": [20, 15]}));
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10, "at": [55, 5]}));
+  let (plate, block) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+  let faces =
+    json!({"moving_geometry": {"face": {"point": [55, 5, 0]}}, "fixed_geometry": {"face": {"point": [20, 15, 10]}}});
+  // as components it needs a component
+  assert!(s.execute("align", &faces).is_err());
+  let mut p = faces.clone();
+  p["objects"] = json!("bodies");
+  let r = run(&mut s, "align", p);
+  assert_eq!(r["name"], "Align1");
+  let (lo, hi) = bbox(&s, block);
+  assert!(near(lo, [50.0, 0.0, 10.0], 1e-6) && near(hi, [60.0, 10.0, 20.0], 1e-6), "{lo} {hi}");
+  assert!(near(bbox(&s, plate).0, [0.0, 0.0, 0.0], 1e-6));
+  // the offset still applies, along the To face's normal
+  let f = r["feature"].as_u64().unwrap();
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"offset": "5"}}));
+  assert!(near(bbox(&s, block).0, [50.0, 0.0, 15.0], 1e-6));
+  // a body isn't aligned to itself
+  let mut same =
+    json!({"moving_geometry": {"face": {"point": [20, 15, 0]}}, "fixed_geometry": {"face": {"point": [20, 15, 10]}}});
+  same["objects"] = json!("bodies");
+  assert!(s.execute("align", &same).is_err());
+}
+
+#[test]
 fn center_constraint_moves_a_component_only_along_the_plane_normal() {
   let mut s = Session::default();
   run(&mut s, "param.add", json!({"name": "wall", "expr": "10 mm"}));

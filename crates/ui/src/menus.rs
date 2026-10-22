@@ -174,6 +174,7 @@ pub(crate) struct Group {
 use crate::form_ui::{self, Act as FormAct};
 use crate::forms;
 use crate::insert_window::Target;
+use crate::mesh_ui::{self, Act as MeshAct};
 use crate::select::{Priority, SelTool};
 use Cmd::Dialog as D;
 
@@ -184,9 +185,9 @@ const PATTERN: &[E] = &[
 ];
 
 const SIMPLIFY: &[E] = &[
-  c("Remove Features", Icon::RemoveFeatures, D(Kind::Form(&forms::REMOVE_FACES))),
+  c("Remove Features", Icon::RemoveFeatures, D(Kind::Form(&forms::REMOVE_FEATURES))),
   c("Remove Faces", Icon::RemoveFaces, D(Kind::Form(&forms::REMOVE_FACES))),
-  x("Replace with Primitives", Icon::ReplacePrimitives),
+  c("Replace with Primitives", Icon::ReplacePrimitives, D(Kind::Form(&forms::REPLACE_PRIMITIVES))),
 ];
 
 const CREATE_PCB: &[E] = &[x("Associative PCB", Icon::InsertComponent), x("Create 3D PCB", Icon::InsertComponent)];
@@ -241,7 +242,7 @@ macro_rules! solid_modify {
       c("Replace Face", Icon::ReplaceFace, D(Kind::Form(&forms::REPLACE_FACE))),
       c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
       c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
-      x("Silhouette Split", Icon::SilhouetteSplit),
+      c("Silhouette Split", Icon::SilhouetteSplit, D(Kind::Form(&forms::SILHOUETTE_SPLIT))),
       E::Sep,
       c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
       c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
@@ -315,16 +316,16 @@ const INSPECT: &[E] = &[
   c("Interference", Icon::Interference, D(Kind::Interference)),
   c("Section Analysis", Icon::Section, D(Kind::Section)),
   E::Sep,
-  x("Curvature Comb Analysis", Icon::CurvComb),
+  c("Curvature Comb Analysis", Icon::CurvComb, D(Kind::Analysis("comb"))),
   c("Curvature Map Analysis", Icon::CurvMap, D(Kind::Analysis("curvature"))),
   c("Draft Analysis", Icon::DraftAnalysis, D(Kind::Analysis("draft"))),
-  x("Environment Map Analysis", Icon::EnvMap),
-  x("Isocurve Analysis", Icon::Isocurve),
+  c("Environment Map Analysis", Icon::EnvMap, D(Kind::Analysis("environment"))),
+  c("Isocurve Analysis", Icon::Isocurve, D(Kind::Analysis("isocurve"))),
   c("Zebra Analysis", Icon::Zebra, D(Kind::Analysis("zebra"))),
   E::Sep,
   c("Accessibility Analysis", Icon::Accessibility, D(Kind::Analysis("accessibility"))),
   c("Center of Mass", Icon::CenterOfMass, D(Kind::CenterOfMass)),
-  x("Minimum Radius Analysis", Icon::MinRadius),
+  c("Minimum Radius Analysis", Icon::MinRadius, D(Kind::Analysis("min_radius"))),
   E::Sep,
   x("Navigator", Icon::Navigator),
   E::Sep,
@@ -492,16 +493,16 @@ const SURFACE_MODIFY: &[E] = &[
 
 const MESH_CREATE: &[E] = &[
   c("Insert Mesh", Icon::InsertMesh, Cmd::Insert(Target::Mesh)).g(),
-  x("Tessellate", Icon::Tessellate).g(),
+  c("Tessellate", Icon::Tessellate, D(Kind::Form(&mesh_ui::TESSELLATE))).g(),
   E::Sep,
-  x("Create Mesh Section Sketch", Icon::MeshSection).g(),
-  x("Create Base Mesh Feature", Icon::BaseMesh).g(),
+  c("Create Mesh Section Sketch", Icon::MeshSection, D(Kind::Form(&mesh_ui::SECTION_SKETCH))).g(),
+  c("Create Base Mesh Feature", Icon::BaseMesh, Cmd::MeshEdit(MeshAct::BaseMesh)).g(),
 ];
 
 const MESH_PREPARE: &[E] = &[
-  x("Repair", Icon::Repair).g(),
-  x("Generate Face Groups", Icon::GenFaceGroups),
-  x("Combine Face Groups", Icon::CombineFaceGroups),
+  c("Repair", Icon::Repair, D(Kind::Form(&mesh_ui::REPAIR))).g(),
+  c("Generate Face Groups", Icon::GenFaceGroups, D(Kind::Form(&mesh_ui::GENERATE_FACE_GROUPS))),
+  c("Combine Face Groups", Icon::CombineFaceGroups, D(Kind::Form(&mesh_ui::COMBINE_FACE_GROUPS))),
 ];
 
 const EXPORT: &[E] = &[c("3D Print", Icon::Print3d, Cmd::Print3d)];
@@ -564,7 +565,7 @@ const SHEET_MODIFY: &[E] = &[
 ];
 
 const MESH_MODIFY: &[E] = &[
-  x("Direct Edit", Icon::DirectEdit).g(),
+  c("Direct Edit", Icon::DirectEdit, Cmd::MeshEdit(MeshAct::DirectEdit)).g(),
   x("Remesh", Icon::Remesh).g(),
   c("Reduce", Icon::Reduce, D(Kind::Form(&forms::MESH_REDUCE))).g(),
   c("Plane Cut", Icon::PlaneCut, D(Kind::PlaneCut)).g(),
@@ -1147,15 +1148,15 @@ const UTIL_INSPECT: &[E] = &[
   c("Interference", Icon::Interference, D(Kind::Interference)),
   c("Section Analysis", Icon::Section, D(Kind::Section)),
   E::Sep,
-  x("Curvature Comb Analysis", Icon::CurvComb),
+  c("Curvature Comb Analysis", Icon::CurvComb, D(Kind::Analysis("comb"))),
   c("Curvature Map Analysis", Icon::CurvMap, D(Kind::Analysis("curvature"))),
   c("Draft Analysis", Icon::DraftAnalysis, D(Kind::Analysis("draft"))),
-  x("Isocurve Analysis", Icon::Isocurve),
+  c("Isocurve Analysis", Icon::Isocurve, D(Kind::Analysis("isocurve"))),
   c("Zebra Analysis", Icon::Zebra, D(Kind::Analysis("zebra"))),
   E::Sep,
   c("Accessibility Analysis", Icon::Accessibility, D(Kind::Analysis("accessibility"))),
   c("Center of Mass", Icon::CenterOfMass, D(Kind::CenterOfMass)),
-  x("Minimum Radius Analysis", Icon::MinRadius),
+  c("Minimum Radius Analysis", Icon::MinRadius, D(Kind::Analysis("min_radius"))),
   E::Sep,
   x("Navigator", Icon::Navigator),
   E::Sep,
@@ -1302,6 +1303,56 @@ const MESH: [Group; 3] = [
   },
 ];
 
+const MESH_EDIT_CREATE: &[E] = &[x("Texture Extrude", Icon::Extrude).g()];
+
+const MESH_EDIT_PREPARE: &[E] = &[
+  c("Repair", Icon::Repair, D(Kind::Form(&mesh_ui::REPAIR))).g(),
+  c("Generate Face Groups", Icon::GenFaceGroups, D(Kind::Form(&mesh_ui::GENERATE_FACE_GROUPS))),
+  c("Combine Face Groups", Icon::CombineFaceGroups, D(Kind::Form(&mesh_ui::COMBINE_FACE_GROUPS))),
+  x("Close Cracks", Icon::Stitch).g(),
+];
+
+const MESH_EDIT_MODIFY: &[E] = &[
+  x("Erase And Fill", Icon::Patch).g(),
+  x("Bridge", Icon::Loft).g(),
+  c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
+  x("Separate", Icon::Separate).g(),
+  E::Sep,
+  x("Remesh", Icon::Remesh).g(),
+  c("Reduce", Icon::Reduce, D(Kind::Form(&forms::MESH_REDUCE))).g(),
+  c("Smooth", Icon::Smooth, D(Kind::Form(&forms::MESH_SMOOTH))).g(),
+  c("Reverse Normal", Icon::ReverseNormal, D(Kind::Form(&forms::REVERSE_NORMAL))).g(),
+  E::Sep,
+  x("Mesh Align", Icon::Align).g(),
+  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
+];
+
+const MESH_EDIT_FINISH: &[E] = &[c("Finish Direct Editing", Icon::Finish, Cmd::MeshEdit(MeshAct::Finish))];
+
+/// The DIRECT MESH EDITING contextual tab's own groups.
+const MESH_EDIT: [Group; 3] = [
+  Group { label: "CREATE", quick: &["Texture Extrude"], menu: MESH_EDIT_CREATE },
+  Group {
+    label: "PREPARE",
+    quick: &["Repair", "Generate Face Groups", "Combine Face Groups"],
+    menu: MESH_EDIT_PREPARE,
+  },
+  Group {
+    label: "MODIFY",
+    quick: &["Erase And Fill", "Bridge", "Delete", "Smooth", "Move/Copy"],
+    menu: MESH_EDIT_MODIFY,
+  },
+];
+
+/// What the tab ends with: CONSTRUCT, INSPECT, SELECT and EXPORT, then FINISH DIRECT EDITING.
+const MESH_EDIT_END: [Group; 5] = [
+  Group { label: "CONSTRUCT", quick: &["Offset Plane"], menu: CONSTRUCT },
+  Group { label: "INSPECT", quick: &["Measure", "Section Analysis"], menu: INSPECT },
+  Group { label: "SELECT", quick: &["Select"], menu: SELECT },
+  Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT },
+  Group { label: "FINISH DIRECT EDITING", quick: &["Finish Direct Editing"], menu: MESH_EDIT_FINISH },
+];
+
 fn find(menu: &[E], label: &str) -> Option<Item> {
   menu.iter().find_map(|e| match e {
     E::I(i) if i.label == label => Some(*i),
@@ -1330,7 +1381,15 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Render => (&RENDER, &[]),
     Tab::Turning => (&TURNING, &[]),
     Tab::Assembly => (&ASSEMBLY, &ASSEMBLY_SHARED),
+    Tab::MeshEdit => (&MESH_EDIT, &MESH_EDIT_END),
   }
+}
+
+/// The labels of a tab's tool groups, in order.
+#[cfg(test)]
+pub(crate) fn group_labels(tab: Tab) -> Vec<&'static str> {
+  let (own, shared) = groups(tab);
+  own.iter().chain(shared).map(|g| g.label).collect()
 }
 
 /// A command FissionOxide runs, as the toolbar lists it (for the S toolbox's search).
@@ -1353,7 +1412,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 15] = [
+const ALL_TABS: [Tab; 16] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
@@ -1369,6 +1428,7 @@ const ALL_TABS: [Tab; 15] = [
   Tab::Render,
   Tab::Turning,
   Tab::Assembly,
+  Tab::MeshEdit,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that

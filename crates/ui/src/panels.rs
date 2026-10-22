@@ -43,6 +43,8 @@ pub enum Tab {
   Turning,
   /// An Assembly Design's tab (in place of SOLID, SURFACE, ...).
   Assembly,
+  /// The DIRECT MESH EDITING contextual tab (MESH > Direct Edit, Create Base Mesh Feature).
+  MeshEdit,
 }
 
 impl Tab {
@@ -67,6 +69,7 @@ impl Tab {
       Tab::Render => "RENDER",
       Tab::Turning => "TURNING",
       Tab::Assembly => "ASSEMBLY",
+      Tab::MeshEdit => "DIRECT MESH EDITING",
     }
   }
 }
@@ -435,6 +438,9 @@ pub(crate) enum Cmd {
   Insert(crate::insert_window::Target),
   /// INSERT > Insert DXF: the docked INSERT DXF dialog.
   InsertDxf,
+  /// MESH > Direct Edit, Create Base Mesh Feature and Finish Direct Editing (see
+  /// [`crate::mesh_ui`]).
+  MeshEdit(crate::mesh_ui::Act),
 }
 
 impl Cmd {
@@ -442,6 +448,7 @@ impl Cmd {
     match self {
       Cmd::NewSketch => (Icon::Sketch, "Create Sketch", "Pick a plane or planar face to sketch on"),
       Cmd::Form(a) => crate::form_ui::info(a),
+      Cmd::MeshEdit(a) => crate::mesh_ui::info(a),
       Cmd::Dialog(k) => match k {
         Kind::Extrude => (Icon::Extrude, "Extrude", "Add depth to a sketch profile (E)"),
         Kind::Revolve => (Icon::Revolve, "Revolve", "Revolve a sketch profile around an axis"),
@@ -701,6 +708,7 @@ impl Cmd {
       Cmd::Form(a) => crate::form_ui::run(app, a),
       // an Assembly Design's New Component makes an external design
       Cmd::Dialog(Kind::NewComponent) if crate::asm_component::applies(app) => crate::asm_component::open(app),
+      Cmd::MeshEdit(a) => crate::mesh_ui::run(app, a),
       Cmd::Dialog(k) => app.start(k),
       Cmd::Params => app.show_params = !app.show_params,
       Cmd::Select => {
@@ -731,7 +739,8 @@ impl Cmd {
         let bodies: Vec<u32> =
           app.s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(body.0) } else { None }).collect();
         if bodies.is_empty() {
-          app.hint("Remove: select bodies first");
+          // Fusion opens REMOVE to pick them
+          app.start(Kind::Form(&crate::forms::REMOVE));
         } else {
           app.run("body.remove", json!({"bodies": bodies}));
           app.s.selection.clear();
@@ -854,6 +863,9 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
     app.tab = Tab::Solid;
   }
   crate::config_ui::check_base_mode(app);
+  if !app.mesh_edit.active && app.tab == Tab::MeshEdit {
+    app.tab = Tab::Mesh;
+  }
   egui::Panel::top("toolbar")
     .exact_size(96.0)
     .frame(egui::Frame::NONE.fill(theme::TOOLBAR).inner_margin(egui::Margin { left: 6, right: 6, top: 0, bottom: 0 }))
@@ -1179,6 +1191,9 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
         app.tab = Tab::Solid;
       }
     }
+    if app.mesh_edit.active {
+      tabs.push(Tab::MeshEdit);
+    }
     for t in tabs {
       let font = egui::FontId::proportional(12.5);
       let active = app.tab == t;
@@ -1360,6 +1375,18 @@ pub(super) fn tree_row(
 pub(super) fn eye_rect(row: Rect, depth: usize) -> Rect {
   let x = row.min.x + 8.0 + depth as f32 * 16.0;
   Rect::from_center_size(pos2(x + 24.0, row.center().y), vec2(18.0, 14.0))
+}
+
+/// A folder row's eye, as Fusion draws it: struck through while the folder is hidden; while the
+/// folder shows but some of its rows are hidden, drawn (open) only while the pointer is on the
+/// folder's row, which [`tree_row`] is about to lay out next.
+pub(super) fn folder_eye(ui: &egui::Ui, shown: bool, children_hidden: bool) -> Option<bool> {
+  if shown && children_hidden {
+    let next = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 25.0));
+    ui.rect_contains_pointer(next).then_some(true)
+  } else {
+    Some(shown)
+  }
 }
 
 fn is_open(ui: &egui::Ui, id: egui::Id, default: bool) -> bool {
@@ -1952,11 +1979,14 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
     return;
   }
   let id = egui::Id::new("tree-bodies");
-  let all_visible = bodies.iter().all(|b| b.2);
-  let ev = tree_row(ui, id, 1, Some(true), Some(all_visible), Icon::Folder, "Bodies", false, theme::TEXT);
+  // the folder's own eye: hiding it leaves each body's eye as it was
+  let shown = !app.ctx_menu.bodies_hidden;
+  let eye = folder_eye(ui, shown, bodies.iter().any(|b| !b.2));
+  let ev = tree_row(ui, id, 1, Some(true), eye, Icon::Folder, "Bodies", false, theme::TEXT);
   if ev.eye {
-    for (b, _, _) in &bodies {
-      app.run("body.visible", json!({"body": b.0, "visible": !all_visible}));
+    app.ctx_menu.bodies_hidden = shown;
+    if shown {
+      app.s.selection.retain(|s| !matches!(s, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. }));
     }
   }
   if let Some(r) = &ev.response {
@@ -1975,7 +2005,8 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
     let selected = app.s.selection.contains(&Sel::Body { body: bid });
     // while isolated, the bodies left out are hidden from the canvas: grey them, as Fusion does
     let isolated = app.ctx_menu.isolate.as_ref().map(|only| only.contains(&bid));
-    let color = if visible && isolated != Some(false) { theme::TEXT } else { theme::MUTED };
+    let drawn = visible && isolated != Some(false) && shown;
+    let color = if drawn { theme::TEXT } else { theme::MUTED };
     let row = id.with(bid.0);
     let ev = tree_row(ui, row, 2, None, Some(visible), body_icon(app, bid), &name, selected, color);
     if isolated == Some(true)
@@ -2003,16 +2034,22 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
       if crate::select::is_mesh(&app.s, bid) {
         r.context_menu(|ui| mesh_rows::mesh_context_menu(app, ui, row, bid, &name));
       } else {
-        r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
+        r.context_menu(|ui| browser_rows::body_context_menu(app, ui, row, bid, &name));
       }
     }
   }
 }
 
-/// A body row's icon: Fusion's yellow triangulated block for a mesh body, the grey block for a
-/// B-rep one.
+/// A body row's icon: Fusion's yellow triangulated block for a mesh body, its orange sheet for
+/// a surface body, the grey block for a solid.
 pub(crate) fn body_icon(app: &App, body: BodyId) -> Icon {
-  if crate::select::is_mesh(&app.s, body) { Icon::MeshBody } else { Icon::Body }
+  if crate::select::is_mesh(&app.s, body) {
+    Icon::MeshBody
+  } else if app.s.body_is_surface(body) {
+    Icon::SurfaceBody
+  } else {
+    Icon::Body
+  }
 }
 
 /// The hover lines of a body row's warning: Fusion's for a mesh body that isn't closed or has no
@@ -2054,102 +2091,6 @@ fn body_row_edits(
   }
   browser_edit::drag_source(ui, ev, browser_edit::dragged_bodies(app, bid), name);
   browser_edit::edit_box(app, ui, ev, row, depth);
-}
-
-/// A browser body's right-click menu, as in Fusion (less what FissionOxide can't do yet).
-fn body_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name: &str, visible: bool) {
-  let only = vec![Sel::Body { body: bid }];
-  let start = |app: &mut App, ui: &mut egui::Ui, kind: Kind| {
-    ui.close();
-    app.s.selection = only.clone();
-    app.start(kind);
-  };
-  if menu_item(ui, Icon::Move, "Move/Copy", Some("M")).clicked() {
-    start(app, ui, Kind::Move);
-  }
-  ui.separator();
-  // like Fusion's, these act on every selected body when the row is one of them
-  let browser_edit::Dragged::Bodies(bodies) = browser_edit::dragged_bodies(app, bid) else { return };
-  if menu_item(ui, Icon::Component, "Create Components from Bodies", None)
-    .on_hover_text("Each body becomes a component of its own, named after it")
-    .clicked()
-  {
-    ui.close();
-    for b in &bodies {
-      let name = app.s.body_name(*b);
-      app.run("component.create", json!({"name": name, "bodies": [b.0]}));
-    }
-  }
-  ui.separator();
-  // physical materials belong to components in FissionOxide
-  let in_component = app.s.design.component_of(bid).is_some();
-  if ui
-    .add_enabled_ui(in_component, |ui| menu_item(ui, Icon::PhysMaterial, "Physical Material", None))
-    .inner
-    .on_disabled_hover_text("Create a component from the body to give it a physical material")
-    .clicked()
-  {
-    start(app, ui, Kind::Material);
-  }
-  if menu_item(ui, Icon::Appearance, "Appearance", Some("A")).clicked() {
-    start(app, ui, Kind::Form(&crate::forms::APPEARANCE));
-  }
-  if menu_item(ui, Icon::Measure, "Properties", None).clicked() {
-    start(app, ui, Kind::Inspect);
-  }
-  ui.separator();
-  if menu_item(ui, Icon::ConvertMesh, "Save As Mesh", None)
-    .on_hover_text("Export this body as STL, OBJ or 3MF")
-    .clicked()
-  {
-    ui.close();
-    marking::save_as_mesh(app, bid);
-  }
-  ui.separator();
-  if menu_item(ui, Icon::Remove, "Delete", Some("Del")).clicked() {
-    ui.close();
-    app.s.selection = vec![Sel::Body { body: bid }];
-    app.delete_selection();
-  }
-  if menu_item(ui, Icon::RemoveBody, "Remove", None).on_hover_text("Remove the body (kept in the timeline)").clicked() {
-    ui.close();
-    app.run("body.remove", json!({"bodies": [bid.0]}));
-  }
-  if menu_item(ui, Icon::Params, "Rename", None).clicked() {
-    ui.close();
-    browser_edit::begin(ui, row, RenameTarget::Body(bid.0), name);
-  }
-  ui.separator();
-  if menu_item(ui, if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", Some("V")).clicked() {
-    ui.close();
-    marking::show_hide(app, &[bid]);
-  }
-  let isolated = app.ctx_menu.isolate.is_some();
-  if menu_item(ui, Icon::Body, if isolated { "Unisolate" } else { "Isolate" }, None).clicked() {
-    ui.close();
-    app.ctx_menu.isolate = if isolated { None } else { Some(vec![bid]) };
-  }
-  if menu_item(ui, Icon::Fit, "Find in Window", None).clicked() {
-    ui.close();
-    marking::find_in_window(app, &[bid], None);
-  }
-  ui.separator();
-  let locked = app.ctx_menu.unselectable.contains(&bid);
-  if menu_item(ui, Icon::Select, if locked { "Selectable" } else { "Selectable/Unselectable" }, None)
-    .on_hover_text(if locked { "Let the canvas pick the body again" } else { "Stop the canvas picking the body" })
-    .clicked()
-  {
-    ui.close();
-    let m = &mut app.ctx_menu;
-    m.unselectable.retain(|b| !bodies.contains(b));
-    if !locked {
-      m.unselectable.extend(&bodies);
-      app.s.selection.retain(
-        |s| !matches!(s, Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if bodies.contains(body)),
-      );
-    }
-  }
-  browser_edit::opacity_menu(app, ui, &bodies);
 }
 
 /// A context-menu row with an icon on the left and its shortcut key on the right.
@@ -2220,6 +2161,11 @@ pub(crate) enum RowCmd {
   ConvertDesignType,
   /// A sketch row's Redefine Sketch Plane.
   RedefinePlane,
+  // the body rows (see browser_rows)
+  MoveCopy,
+  Copy,
+  Remove,
+  Isolate,
 }
 
 /// One row of a browser context menu.
@@ -2316,8 +2262,10 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
     return;
   }
   let id = egui::Id::new("tree-construction");
-  let ev =
-    tree_row(ui, id, 1, Some(false), Some(app.construction_shown), Icon::Folder, "Construction", false, theme::TEXT);
+  // its eye waits for the pointer while a plane's own eye is off, as the Bodies folder's
+  let some_hidden = planes.iter().any(|(fid, _)| !crate::construction::eye(app, *fid));
+  let eye = folder_eye(ui, app.construction_shown, some_hidden);
+  let ev = tree_row(ui, id, 1, Some(false), eye, Icon::Folder, "Construction", false, theme::TEXT);
   if ev.eye {
     app.construction_shown = !app.construction_shown;
   }
@@ -3619,14 +3567,14 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 1.0;
-        let features: Vec<(FeatureId, String, Icon, bool)> = app
+        let features: Vec<(FeatureId, String, Icon, icons::Tint, bool)> = app
           .s
           .design
           .features
           .iter()
           .enumerate()
           .filter(|(i, _)| !hidden.hides(*i))
-          .map(|(_, f)| (f.id, f.name.clone(), feature_icon(&f.kind), f.suppressed))
+          .map(|(_, f)| (f.id, f.name.clone(), feature_icon(&f.kind), feature_tint(&f.kind), f.suppressed))
           .collect();
         let mut rects = Vec::with_capacity(features.len());
         let marker_dragged = matches!(drag, Some(TimelineDrag::Marker { .. }));
@@ -3636,7 +3584,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
         let mut collapsed: Option<(Rect, usize)> = None;
         // expanded groups: (open folder, last feature) for the bracket under them
         let mut brackets: Vec<(Rect, usize)> = Vec::new();
-        for (i, (id, name, icon, suppressed)) in features.into_iter().enumerate() {
+        for (i, (id, name, icon, tint, suppressed)) in features.into_iter().enumerate() {
           if let Some((rect, last)) = collapsed {
             if i <= last {
               rects.push(rect);
@@ -3719,7 +3667,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hid
           if dim {
             icons::draw(p, ir, icon, Color32::from_gray(185));
           } else {
-            icons::draw_color(p, ir, icon);
+            icons::draw_tinted(p, ir, icon, tint);
           }
           if r.drag_started() {
             app.s.selection = vec![Sel::Feature { feature: id }];
@@ -4028,6 +3976,24 @@ fn paint_marker(p: &egui::Painter, x: f32, top: f32, bottom: f32, c: Color32) {
   ));
 }
 
+/// The colour family of a feature's timeline icon: orange for the surface features, as Fusion
+/// draws them (and as the SURFACE tab's menus do), otherwise the icon's own.
+pub(crate) fn feature_tint(k: &FeatureKind) -> icons::Tint {
+  match k {
+    FeatureKind::SurfaceExtrude { .. }
+    | FeatureKind::SurfaceRevolve { .. }
+    | FeatureKind::Patch { .. }
+    | FeatureKind::Ruled { .. }
+    | FeatureKind::SurfaceOffset { .. }
+    | FeatureKind::SurfaceExtend { .. }
+    | FeatureKind::Untrim { .. }
+    | FeatureKind::Stitch { .. }
+    | FeatureKind::Unstitch { .. }
+    | FeatureKind::ReverseNormal { .. } => icons::Tint::Orange,
+    _ => icons::Tint::Blue,
+  }
+}
+
 pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
   use fox_engine::model::Primitive;
   match k {
@@ -4054,11 +4020,12 @@ pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Import { breps, meshes, .. } if breps.is_empty() && !meshes.is_empty() => Icon::MeshFeature,
     FeatureKind::Import { .. } => Icon::Import,
     FeatureKind::RemoveBodies { .. } => Icon::Remove,
-    FeatureKind::Flange { .. }
-    | FeatureKind::ContourFlange { .. }
-    | FeatureKind::EdgeFlange { .. }
-    | FeatureKind::Hem { .. }
-    | FeatureKind::Bend { .. } => Icon::Extrude,
+    // Fusion's flat sheet (BaseFlange) and bent flange (EdgeFlange) icons
+    FeatureKind::Flange { .. } => Icon::BaseFlange,
+    FeatureKind::EdgeFlange { .. } => Icon::EdgeFlange,
+    FeatureKind::ContourFlange { .. } => Icon::Flange,
+    FeatureKind::Hem { .. } => Icon::Hem,
+    FeatureKind::Bend { .. } => Icon::Extrude,
     FeatureKind::ConvertToSheetMetal { .. }
     | FeatureKind::Unfold { .. }
     | FeatureKind::Refold { .. }
@@ -4120,6 +4087,10 @@ pub(crate) fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::FullRoundFillet { .. } => Icon::Fillet,
     FeatureKind::IntersectionCurve { .. } => Icon::SplineFit,
     FeatureKind::Canvas { .. } => Icon::Canvas,
+    FeatureKind::Tessellate { .. } => Icon::Tessellate,
+    FeatureKind::MeshRepair { .. } => Icon::Repair,
+    FeatureKind::GenerateFaceGroups { .. } => Icon::GenFaceGroups,
+    FeatureKind::CombineFaceGroups { .. } => Icon::CombineFaceGroups,
     FeatureKind::MeshPlaneCut { .. } => Icon::PlaneCut,
   }
 }
@@ -4224,6 +4195,29 @@ pub(crate) use sketch_rows::{SketchRowState, drawn as sketch_drawn};
 #[cfg(test)]
 mod row_menu_tests {
   use super::*;
+
+  /// Surface features show orange icons in the timeline, as Fusion's (and the SURFACE tab's
+  /// menus) do; solid features keep their own colours.
+  #[test]
+  fn surface_features_have_orange_timeline_icons() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let sk = app.s.edit_sketch.expect("sketching");
+    app.run("surface.patch", json!({"sketch": sk.0}));
+    let f = app.s.design.features.last().unwrap();
+    assert_eq!(f.name, "SurfacePatch1", "Fusion's name for a Patch");
+    assert_eq!((feature_icon(&f.kind), feature_tint(&f.kind)), (Icon::Patch, icons::Tint::Orange));
+    app.run("extrude", json!({"sketch": sk.0, "distance": 5}));
+    let f = app.s.design.features.last().unwrap();
+    assert_eq!((feature_icon(&f.kind), feature_tint(&f.kind)), (Icon::Extrude, icons::Tint::Blue));
+    app.create_sketch(json!("xz"));
+    app.run("sketch.line", json!({"points": [[20, 0], [30, 0]]}));
+    app.run("surface.extrude", json!({"distance": 5}));
+    let f = app.s.design.features.last().unwrap();
+    assert_eq!(f.name, "SurfaceExtrude1");
+    assert_eq!((feature_icon(&f.kind), feature_tint(&f.kind)), (Icon::Extrude, icons::Tint::Orange));
+  }
 
   /// A sketch point's coordinate reads at the document precision with trailing zeros trimmed
   /// down to two decimals, as Fusion's status bar prints it.

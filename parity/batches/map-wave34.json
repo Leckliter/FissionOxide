@@ -1,0 +1,16 @@
+{
+  "ui:shortcuts:sketch-keys-from-3d": "ui-shortcut-sketch-scope",
+  "ui:shortcuts:sketch-key-on-face": "ui-shortcut-sketch-scope",
+  "ui:shortcuts:x-construction-mode": "ui-shortcut-sketch-scope",
+  "ui:shortcuts:3d-command-keeps-sketch": "ui-shortcut-sketch-scope",
+  "ui:shortcuts:j-in-part-design": "ui-shortcut-extra-keys",
+  "ui:shortcuts:home-key": "ui-shortcut-extra-keys",
+  "ui:shortcuts:v-nothing-selected": "ui-shortcut-extra-keys",
+  "ui:shortcuts:v-keeps-selection": "ui-shortcut-extra-keys",
+  "ui:shortcuts:shift-s-scripts": "ui-shortcut-extra-keys",
+  "ui:shortcuts:shift-n-component-colors": "ui-shortcut-extra-keys",
+  "ui:chrome:help-menu-current": "ui-shortcut-extra-keys",
+  "ui:documents:tab-dirty-star": "ui-documents-tabs-close",
+  "ui:documents:new-tab-numbering": "ui-documents-tabs-close",
+  "ui:documents:close-unsaved-save-dialog": "ui-documents-tabs-close"
+}

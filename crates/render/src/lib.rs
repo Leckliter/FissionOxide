@@ -290,6 +290,8 @@ pub struct Mesh {
   pub colors: Vec<[u8; 4]>,
   /// Shown with the scene's surface analysis (bodies, not sketch profiles).
   pub analyze: bool,
+  /// A body surface the analysis leaves alone: one not picked for it (drawn plainly).
+  pub unanalyzed: bool,
   /// Drawn in its colour without lighting (a sketch profile, which Fusion shades the same from
   /// every angle).
   pub unlit: bool,
@@ -334,12 +336,67 @@ impl Quad {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Analysis {
   /// Reflected stripes: kinks and steps in the stripes show where surfaces don't join smoothly.
-  Zebra { stripes: f32 },
-  /// Green where faces lean along the pull direction by more than `angle` (radians), red where
-  /// they lean against it, yellow in between.
-  Draft { pull: [f32; 3], angle: f32 },
+  /// `vertical`: the stripes run up and down rather than across.
+  Zebra { stripes: f32, vertical: bool },
+  /// By draft angle along the pull direction (radians): green at `hi` and above, red at `lo` and
+  /// below, shading through yellow in between; within `tol` of no draft (when above 0) yellow.
+  Draft { pull: [f32; 3], lo: f32, hi: f32, tol: f32 },
   /// Green where a tool coming along `dir` reaches the face, red where it can't.
   Accessibility { dir: [f32; 3] },
+  /// A studio environment reflected in the surface (Fusion's Environment Map): bright sky over a
+  /// dark floor, turned `rotate` radians about Z; `mirror` reflects the sky into the floor;
+  /// `sharp` adds bright light strips.
+  Environment { rotate: f32, mirror: bool, sharp: bool },
+}
+
+/// The colour a surface analysis gives a point with normal `n` (facing the viewer) seen along
+/// `view`, lit by `diff` (see `raster_tri`). The GL mesh shader repeats this arithmetic.
+pub fn analysis_tone(a: Analysis, n: Vec3, view: Vec3, diff: f32) -> Vec3 {
+  let green = Vec3::new(0.2, 0.75, 0.25);
+  let red = Vec3::new(0.85, 0.2, 0.2);
+  let yellow = Vec3::new(0.95, 0.85, 0.2);
+  match a {
+    Analysis::Zebra { stripes, vertical } => {
+      // stripes of a striped environment reflected in the surface
+      let r = n * (2.0 * n.dot(view)) - view;
+      let s = if vertical { r.x } else { r.z };
+      let band = ((s * 0.5 + 0.5) * stripes).floor() as i64;
+      let tone = if band % 2 == 0 { 0.1 } else { 0.95 };
+      Vec3::splat(tone * (0.75 + 0.25 * diff))
+    }
+    Analysis::Draft { pull, lo, hi, tol } => {
+      let d = n.dot(Vec3::from(pull).normalize_or_zero()).clamp(-1.0, 1.0);
+      let ang = d.asin();
+      let tone = if ang >= hi {
+        green
+      } else if ang <= lo {
+        red
+      } else if tol > 0.0 && ang.abs() <= tol {
+        yellow
+      } else if ang > 0.0 {
+        yellow.lerp(green, ang / hi)
+      } else {
+        yellow.lerp(red, ang / lo)
+      };
+      tone * (0.45 + diff)
+    }
+    Analysis::Accessibility { dir } => {
+      let d = n.dot(Vec3::from(dir).normalize_or_zero());
+      let tone = if d > 1e-3 { green } else { red };
+      tone * (0.45 + diff)
+    }
+    Analysis::Environment { rotate, mirror, sharp } => {
+      let r = n * (2.0 * n.dot(view)) - view;
+      let (s, c) = rotate.sin_cos();
+      let (x, y) = (r.x * c - r.y * s, r.x * s + r.y * c);
+      let z = if mirror { r.z.abs() } else { r.z };
+      let mut tone = if z >= 0.0 { 0.55 + 0.4 * z } else { 0.22 + 0.12 * z };
+      if sharp && z > 0.2 && z < 0.45 && (3.0 * y.atan2(x)).cos() > 0.5 {
+        tone = 1.0;
+      }
+      Vec3::splat(tone * (0.85 + 0.15 * diff))
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -638,6 +695,8 @@ pub struct Scene {
   pub background_top: [u8; 4],
   pub background_bottom: [u8; 4],
   pub analysis: Option<Analysis>,
+  /// How far the analysis colours fade back to the plain shading (1 − Fusion's Opacity / 100).
+  pub analysis_fade: f32,
   pub style: VisualStyle,
 }
 
@@ -762,6 +821,7 @@ impl Effects {
           highlight: None,
           colors: Vec::new(),
           analyze: false,
+          unanalyzed: false,
           ..(*m).clone()
         };
         r.color = [r.color[0], r.color[1], r.color[2], 255];
@@ -842,7 +902,8 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   let lights = [key, head, fill];
   let shade_of = |m: &Mesh| Shade {
     vertex_colors: false,
-    analysis: scene.analysis.filter(|_| m.analyze),
+    analysis: scene.analysis.filter(|_| m.analyze && !m.unanalyzed),
+    fade: scene.analysis_fade,
     paper: m.analyze && style.line_drawing(),
     unlit: m.unlit,
   };
@@ -1093,6 +1154,8 @@ fn clip_near(v: &[CV; 3]) -> Vec<CV> {
 struct Shade {
   vertex_colors: bool,
   analysis: Option<Analysis>,
+  /// The analysis colours' fade to plain shading ([`Scene::analysis_fade`]).
+  fade: f32,
   /// Flat and unlit (the line-drawing styles' surfaces).
   paper: bool,
   /// Unlit in its own colour ([`Mesh::unlit`]).
@@ -1190,29 +1253,9 @@ fn raster_tri(
       let c = match shade.analysis {
         _ if shade.paper || shade.unlit => base,
         None => base * (0.5 + diff) + Vec3::splat(spec),
-        Some(Analysis::Zebra { stripes }) => {
-          // stripes of a striped environment reflected in the surface
-          let r = n * (2.0 * n.dot(view)) - view;
-          let band = ((r.z * 0.5 + 0.5) * stripes).floor() as i64;
-          let tone = if band % 2 == 0 { 0.1 } else { 0.95 };
-          Vec3::splat(tone * (0.75 + 0.25 * diff))
-        }
-        Some(Analysis::Draft { pull, angle }) => {
-          let d = n.dot(Vec3::from(pull).normalize_or_zero());
-          let t = angle.sin();
-          let tone = if d > t {
-            Vec3::new(0.2, 0.75, 0.25)
-          } else if d < -t {
-            Vec3::new(0.85, 0.2, 0.2)
-          } else {
-            Vec3::new(0.95, 0.85, 0.2)
-          };
-          tone * (0.45 + diff)
-        }
-        Some(Analysis::Accessibility { dir }) => {
-          let d = n.dot(Vec3::from(dir).normalize_or_zero());
-          let tone = if d > 1e-3 { Vec3::new(0.2, 0.75, 0.25) } else { Vec3::new(0.85, 0.2, 0.2) };
-          tone * (0.45 + diff)
+        Some(a) => {
+          let tone = analysis_tone(a, n, view, diff);
+          tone + (base * (0.5 + diff) + Vec3::splat(spec) - tone) * shade.fade
         }
       };
       if let Some(p) = f.rgba.get_mut(i * 4..i * 4 + 4) {
@@ -1369,6 +1412,7 @@ mod tests {
       highlight_color: [0; 4],
       colors: vec![],
       analyze: false,
+      unanalyzed: false,
       unlit: false,
     }
   }

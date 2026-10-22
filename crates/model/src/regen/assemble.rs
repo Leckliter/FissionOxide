@@ -460,7 +460,23 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::AlignConstraint { moving, moving_geometry, fixed, fixed_geometry, relation, offset, flip } => {
+      FeatureKind::AlignConstraint { moving_geometry, fixed_geometry, relation, offset, flip, bodies, .. }
+        if !bodies.is_empty() =>
+      {
+        let fixed_frame = self.joint_frame(fixed_geometry)?;
+        let moving_frame = self.joint_frame(moving_geometry)?;
+        let rel = relation.resolve(self.align_shape(moving_geometry)?, self.align_shape(fixed_geometry)?);
+        let m = assembly::align_transform(fixed_frame, moving_frame, rel, self.len(offset)?, *flip)?;
+        for b in bodies {
+          let bi = self.body_index(*b)?;
+          let s = self.state.bodies[bi].shape.transformed(m).map_err(ke)?;
+          self.state.bodies[bi] = self.state.bodies[bi].with_shape(s, id);
+        }
+        Ok(None)
+      }
+      FeatureKind::AlignConstraint {
+        moving, moving_geometry, fixed, fixed_geometry, relation, offset, flip, ..
+      } => {
         let comp = self.component(*moving).map_err(|_| "the moving component no longer exists".to_string())?;
         if comp.grounded {
           return Err(format!("{} is grounded", comp.name));

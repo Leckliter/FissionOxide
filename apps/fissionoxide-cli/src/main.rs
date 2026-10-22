@@ -339,7 +339,9 @@ fn plugin(rest: &[String]) -> Result<(), String> {
     "update" => ("update", arg.as_ref().map_or(json!({}), |id| json!({"id": id}))),
     "check" => ("check", json!({"path": need()?})),
     "pack" => ("pack", json!({"dir": need()?, "path": rest.get(2).ok_or_else(usage)?})),
-    "publish" => ("publish", json!({"path": need()?, "project": flag(rest, "--project"), "folder": flag(rest, "--folder")})),
+    "publish" => {
+      ("publish", json!({"path": need()?, "project": flag(rest, "--project"), "folder": flag(rest, "--folder")}))
+    }
     "install" => {
       let mut p = match flag(rest, "--item") {
         Some(item) => json!({"item": item}),

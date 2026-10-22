@@ -25,6 +25,10 @@ pub(crate) struct Doc {
   last_sketch: Option<FeatureId>,
   pre_sketch_cam: Option<Camera>,
   fitted_once: bool,
+  /// The browser's Analysis folder: its analyses, sections and eye.
+  analyses: crate::analyses::Analyses,
+  sections: Vec<crate::dialogs::KeptSection>,
+  analysis_hidden: bool,
 }
 
 /// The open documents. The shown one lives in `App::s` (its slot here is `None`); the others
@@ -122,6 +126,9 @@ fn park(app: &mut App) -> Doc {
     last_sketch: app.last_sketch.take(),
     pre_sketch_cam: app.pre_sketch_cam.take(),
     fitted_once: app.fitted_once,
+    analyses: std::mem::take(&mut app.analyses),
+    sections: std::mem::take(&mut app.sections),
+    analysis_hidden: app.analysis_hidden,
   }
 }
 
@@ -139,6 +146,9 @@ fn unpark(app: &mut App, d: Doc) {
   app.last_sketch = d.last_sketch;
   app.pre_sketch_cam = d.pre_sketch_cam;
   app.fitted_once = d.fitted_once;
+  app.analyses = d.analyses;
+  app.sections = d.sections;
+  app.analysis_hidden = d.analysis_hidden;
   app.dialog = None;
   app.tool = Tool::Select;
   app.nav_mode = None;

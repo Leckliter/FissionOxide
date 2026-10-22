@@ -200,8 +200,11 @@ fn every_example_design_still_loads() {
 fn frozen_block() -> (Design, BodyId) {
   let (mut d, _) = block();
   let m = regenerate(&mut d);
-  let bodies: Vec<BaseBody> =
-    m.bodies.iter().map(|b| BaseBody { id: b.id, name: b.name.clone(), brep: b.shape.to_brep().unwrap() }).collect();
+  let bodies: Vec<BaseBody> = m
+    .bodies
+    .iter()
+    .map(|b| BaseBody { id: b.id, name: b.name.clone(), brep: b.shape.to_brep().unwrap(), mesh: false })
+    .collect();
   let id = m.bodies[0].id;
   d.collapse_history(bodies);
   (d, id)
@@ -239,11 +242,13 @@ fn direct_edits_replay_after_save_load() {
   assert!((volume(&m) - 40.0 * 20.0 * 15.0).abs() < 1e-6);
   // a move along the normal moves the face; the sideways part does nothing
   let top = top_face(&m);
-  d.add_direct_edit(DirectEdit::MoveFaces { faces: vec![top.clone()], translate: [3.0, 0.0, -5.0], rotate: None }).unwrap();
+  d.add_direct_edit(DirectEdit::MoveFaces { faces: vec![top.clone()], translate: [3.0, 0.0, -5.0], rotate: None })
+    .unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   assert!((volume(&m) - 8000.0).abs() < 1e-6);
-  d.add_direct_edit(DirectEdit::MoveFaces { faces: vec![top_face(&m)], translate: [3.0, 0.0, 0.0], rotate: None }).unwrap();
+  d.add_direct_edit(DirectEdit::MoveFaces { faces: vec![top_face(&m)], translate: [3.0, 0.0, 0.0], rotate: None })
+    .unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   let st = m.status.last().unwrap();

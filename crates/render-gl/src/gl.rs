@@ -51,6 +51,8 @@ uniform int u_has_hl;
 uniform int u_vcolor;
 uniform int u_mode;
 uniform vec4 u_param;
+uniform vec4 u_param2;
+uniform float u_fade;
 in vec3 v_nrm;
 in vec3 v_wpos;
 in vec3 v_col;
@@ -78,19 +80,51 @@ void main() {
     c = base;
   } else if (u_mode == 0) {
     c = base * (0.5 + diff) + vec3(spec);
-  } else if (u_mode == 1) {
-    vec3 r = n * (2.0 * dot(n, view)) - view;
-    float band = floor((r.z * 0.5 + 0.5) * u_param.x);
-    float tone = mod(band, 2.0) < 0.5 ? 0.1 : 0.95;
-    c = vec3(tone * (0.75 + 0.25 * diff));
-  } else if (u_mode == 2) {
-    float d = dot(n, u_param.xyz);
-    vec3 tone = d > u_param.w ? vec3(0.2, 0.75, 0.25) : (d < -u_param.w ? vec3(0.85, 0.2, 0.2) : vec3(0.95, 0.85, 0.2));
-    c = tone * (0.45 + diff);
   } else {
-    float d = dot(n, u_param.xyz);
-    vec3 tone = d > 1e-3 ? vec3(0.2, 0.75, 0.25) : vec3(0.85, 0.2, 0.2);
-    c = tone * (0.45 + diff);
+    // fox_render::analysis_tone
+    vec3 green = vec3(0.2, 0.75, 0.25);
+    vec3 red = vec3(0.85, 0.2, 0.2);
+    vec3 yellow = vec3(0.95, 0.85, 0.2);
+    vec3 t;
+    if (u_mode == 1) {
+      vec3 r = n * (2.0 * dot(n, view)) - view;
+      float s = u_param.y > 0.5 ? r.x : r.z;
+      float band = floor((s * 0.5 + 0.5) * u_param.x);
+      float tone = mod(band, 2.0) < 0.5 ? 0.1 : 0.95;
+      t = vec3(tone * (0.75 + 0.25 * diff));
+    } else if (u_mode == 2) {
+      float ang = asin(clamp(dot(n, u_param.xyz), -1.0, 1.0));
+      float lo = u_param2.x;
+      float hi = u_param2.y;
+      float tol = u_param2.z;
+      vec3 tone;
+      if (ang >= hi) {
+        tone = green;
+      } else if (ang <= lo) {
+        tone = red;
+      } else if (tol > 0.0 && abs(ang) <= tol) {
+        tone = yellow;
+      } else if (ang > 0.0) {
+        tone = mix(yellow, green, ang / hi);
+      } else {
+        tone = mix(yellow, red, ang / lo);
+      }
+      t = tone * (0.45 + diff);
+    } else if (u_mode == 3) {
+      float d = dot(n, u_param.xyz);
+      t = (d > 1e-3 ? green : red) * (0.45 + diff);
+    } else {
+      vec3 r = n * (2.0 * dot(n, view)) - view;
+      float sn = sin(u_param.x);
+      float cs = cos(u_param.x);
+      float x = r.x * cs - r.y * sn;
+      float y = r.x * sn + r.y * cs;
+      float z = u_param.y > 0.5 ? abs(r.z) : r.z;
+      float tone = z >= 0.0 ? 0.55 + 0.4 * z : 0.22 + 0.12 * z;
+      if (u_param.z > 0.5 && z > 0.2 && z < 0.45 && cos(3.0 * atan(y, x)) > 0.5) tone = 1.0;
+      t = vec3(tone * (0.85 + 0.15 * diff));
+    }
+    c = t + (base * (0.5 + diff) + vec3(spec) - t) * u_fade;
   }
   o_color = vec4(clamp(c, 0.0, 1.0), flat_c.a);
   o_id = id_color(v_id);
@@ -344,6 +378,7 @@ struct GpuMesh {
   highlight_color: [u8; 4],
   vertex_colors: bool,
   analyze: bool,
+  unanalyzed: bool,
   unlit: bool,
 }
 
@@ -504,6 +539,8 @@ pub struct Renderer {
   folds: Option<GpuInstances>,
   background_colors: [[u8; 4]; 2],
   analysis: Option<Analysis>,
+  /// [`Scene::analysis_fade`].
+  analysis_fade: f32,
   style: VisualStyle,
   target: Option<Target>,
   /// Leave out what's outside the view (on by default; it never changes the picture).
@@ -558,6 +595,8 @@ impl Renderer {
         "u_vcolor",
         "u_mode",
         "u_param",
+        "u_param2",
+        "u_fade",
       ],
     )?;
     let line = program(gl, header, LINE_VS, LINE_FS, &["u_vp", "u_size", "u_hidden", "u_hidden_alpha"])?;
@@ -605,6 +644,7 @@ impl Renderer {
         folds: None,
         background_colors: [[0, 0, 0, 255]; 2],
         analysis: None,
+        analysis_fade: 0.0,
         style: VisualStyle::default(),
         target: None,
         culling: true,
@@ -641,6 +681,7 @@ impl Renderer {
         g.highlight = m.highlight;
         g.highlight_color = m.highlight_color;
         g.analyze = m.analyze;
+        g.unanalyzed = m.unanalyzed;
         g.unlit = m.unlit;
       }
     } else {
@@ -663,6 +704,7 @@ impl Renderer {
       Some(upload_instances(gl, self.quad, &pack::markers(&scene.markers), MARKER_STRIDE, marker_attribs)?);
     self.background_colors = [scene.background_top, scene.background_bottom];
     self.analysis = scene.analysis;
+    self.analysis_fade = scene.analysis_fade;
     self.style = scene.style;
     Ok(())
   }
@@ -898,19 +940,22 @@ impl Renderer {
         if runs.is_empty() {
           continue;
         }
-        let (mode, param) = match self.analysis.filter(|_| m.analyze) {
-          _ if paper && m.analyze => (4, [0.0; 4]),
+        let (mode, param, param2) = match self.analysis.filter(|_| m.analyze && !m.unanalyzed) {
+          _ if paper && m.analyze => (4, [0.0; 4], [0.0; 4]),
           // unlit in its own colour (a sketch profile)
-          _ if m.unlit => (5, [0.0; 4]),
-          None => (0, [0.0; 4]),
-          Some(Analysis::Zebra { stripes }) => (1, [stripes, 0.0, 0.0, 0.0]),
-          Some(Analysis::Draft { pull, angle }) => {
+          _ if m.unlit => (5, [0.0; 4], [0.0; 4]),
+          None => (0, [0.0; 4], [0.0; 4]),
+          Some(Analysis::Zebra { stripes, vertical }) => (1, [stripes, vertical as u8 as f32, 0.0, 0.0], [0.0; 4]),
+          Some(Analysis::Draft { pull, lo, hi, tol }) => {
             let d = Vec3::from(pull).normalize_or_zero();
-            (2, [d.x, d.y, d.z, angle.sin()])
+            (2, [d.x, d.y, d.z, 0.0], [lo, hi, tol, 0.0])
           }
           Some(Analysis::Accessibility { dir }) => {
             let d = Vec3::from(dir).normalize_or_zero();
-            (3, [d.x, d.y, d.z, 0.0])
+            (3, [d.x, d.y, d.z, 0.0], [0.0; 4])
+          }
+          Some(Analysis::Environment { rotate, mirror, sharp }) => {
+            (6, [rotate, mirror as u8 as f32, sharp as u8 as f32, 0.0], [0.0; 4])
           }
         };
         let color = if mode == 4 {
@@ -926,6 +971,8 @@ impl Renderer {
         gl.uniform_1_i32(p.loc("u_vcolor"), (m.vertex_colors && mode != 4) as i32);
         gl.uniform_1_i32(p.loc("u_mode"), mode);
         gl.uniform_4_f32_slice(p.loc("u_param"), &param);
+        gl.uniform_4_f32_slice(p.loc("u_param2"), &param2);
+        gl.uniform_1_f32(p.loc("u_fade"), self.analysis_fade);
         gl.bind_vertex_array(Some(m.vao));
         for r in runs {
           gl.draw_elements(glow::TRIANGLES, r.len() as i32, glow::UNSIGNED_INT, (r.start * 4) as i32);
@@ -1317,6 +1364,7 @@ fn upload_mesh(gl: &Gl, m: &fox_render::Mesh) -> Result<GpuMesh, String> {
       highlight_color: m.highlight_color,
       vertex_colors: !m.colors.is_empty(),
       analyze: m.analyze,
+      unanalyzed: m.unanalyzed,
       unlit: m.unlit,
     })
   }

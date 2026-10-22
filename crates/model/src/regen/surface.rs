@@ -114,8 +114,8 @@ impl Ctx<'_> {
         }
         Ok((!changed).then(|| "the faces have no trims to remove".to_string()))
       }
-      FeatureKind::TrimWith { bodies, tool, flip, keep, remove } => {
-        self.trim_with(id, bodies, tool, *flip, keep, remove)
+      FeatureKind::TrimWith { bodies, tool, flip, keep, remove, cut_only } => {
+        self.trim_with(id, bodies, tool, (*flip, *cut_only), keep, remove)
       }
       FeatureKind::SurfaceOffset { faces, bodies, distance, face_distances } => {
         self.surface_offset(id, faces, bodies, distance, face_distances)
@@ -125,7 +125,7 @@ impl Ctx<'_> {
   }
 
   /// Face references grouped by body index, as face ids.
-  fn face_ids(&mut self, faces: &mut [FaceRef]) -> Result<Vec<(usize, Vec<u32>)>, String> {
+  pub(super) fn face_ids(&mut self, faces: &mut [FaceRef]) -> Result<Vec<(usize, Vec<u32>)>, String> {
     let mut out: Vec<(usize, Vec<u32>)> = Vec::new();
     for fr in faces.iter_mut() {
       let (bi, info) = self.face_info(fr)?;
@@ -143,7 +143,7 @@ impl Ctx<'_> {
     id: FeatureId,
     bodies: &[BodyId],
     tool: &mut TrimTool,
-    flip: bool,
+    (flip, cut_only): (bool, bool),
     keep: &[[f64; 3]],
     remove: &[[f64; 3]],
   ) -> FResult {
@@ -198,10 +198,17 @@ impl Ctx<'_> {
     for b in bodies {
       let bi = self.body_index(*b)?;
       let split = self.state.bodies[bi].shape.split_raw(&cutter).map_err(ke)?;
+      if cut_only && split.faces().map_err(ke)?.len() <= self.state.bodies[bi].faces().len() {
+        continue;
+      }
       let pts = face_points(&split)?;
       pieces.push((bi, split, pts));
     }
+    if cut_only && pieces.is_empty() {
+      return Err(NO_CUT.into());
+    }
     let chosen = pick_pieces(&pieces, keep, remove, |k, j| match pieces[k].2[j].1 {
+      _ if cut_only => Ok(true),
       Some(p) => {
         let s = side.of(p)?;
         Ok(if flip { s > 0.0 } else { s <= 0.0 })
@@ -224,7 +231,7 @@ impl Ctx<'_> {
       let skin = Shape::compound(kept.iter()).map_err(ke)?.sewn(1e-6).map_err(ke)?;
       self.state.bodies[bi] = self.state.bodies[bi].with_shape(skin, id);
     }
-    Ok((!removed).then(|| "the tool doesn't cut the surface".to_string()))
+    Ok((!removed && !cut_only).then(|| "the tool doesn't cut the surface".to_string()))
   }
 
   fn surface_offset(
@@ -279,6 +286,9 @@ impl Ctx<'_> {
     Ok(None)
   }
 }
+
+/// Fusion's error when a Trim tool cuts none of the surfaces.
+pub(super) const NO_CUT: &str = "Cutting Tool does not intersect any surface!";
 
 /// Which faces of split bodies (body index, split shape, faces with a point inside) stay: with
 /// `keep` points only the pieces nearest them, else every piece when there are `remove` points,
@@ -415,6 +425,7 @@ mod tests {
         flip: false,
         keep: vec![],
         remove: vec![],
+        cut_only: false,
       })
       .unwrap();
     assert_eq!(d.feature(tw).map(|f| f.kind.depends_on()), Some(vec![cs]));

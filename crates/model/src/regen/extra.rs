@@ -421,7 +421,26 @@ impl Ctx<'_> {
         self.state.bodies.retain(|b| b.id == keep || !bodies.contains(&b.id));
         Ok(None)
       }
-      FeatureKind::Unstitch { bodies } => {
+      FeatureKind::Unstitch { bodies, faces } => {
+        // picked faces come off their bodies one by one; the rest of each body stays together
+        for (bi, ids) in self.face_ids(faces)? {
+          let shape = self.state.bodies[bi].shape.clone();
+          let rest: Vec<Shape> = (1..=self.state.bodies[bi].faces().len() as u32)
+            .filter(|f| !ids.contains(f))
+            .map(|f| shape.face_shape(f))
+            .collect::<Result<_, _>>()
+            .map_err(ke)?;
+          let off: Vec<Shape> = ids.iter().map(|f| shape.face_shape(*f)).collect::<Result<_, _>>().map_err(ke)?;
+          if rest.is_empty() {
+            self.state.bodies.remove(bi);
+          } else {
+            let skin = Shape::compound(rest.iter()).map_err(ke)?.sewn(1e-6).map_err(ke)?;
+            self.state.bodies[bi] = self.state.bodies[bi].with_shape(skin, id);
+          }
+          for face in off {
+            self.new_body(id, face);
+          }
+        }
         for b in bodies.clone() {
           let bi = self.body_index(b)?;
           let shape = self.state.bodies[bi].shape.clone();
@@ -444,7 +463,7 @@ impl Ctx<'_> {
         Ok(None)
       }
       FeatureKind::SurfaceOffset { .. } => self.apply_surface(id, kind),
-      FeatureKind::Trim { bodies, tool, flip, keep, remove } => {
+      FeatureKind::Trim { bodies, tool, flip, keep, remove, cut_only } => {
         let pl = self.resolve_plane(tool)?;
         let n = pl.normal() * if *flip { -1.0 } else { 1.0 };
         let size = self.through_all(&pl);
@@ -464,12 +483,19 @@ impl Ctx<'_> {
           let bi = self.body_index(*b)?;
           let split = self.state.bodies[bi].shape.split_raw(&cutter).map_err(ke)?;
           let faces = split.faces().map_err(ke)?;
+          if *cut_only && faces.len() <= self.state.bodies[bi].faces().len() {
+            continue;
+          }
           centers.push(faces.iter().map(|f| f.center).collect::<Vec<_>>());
           pieces.push((bi, split, faces.iter().map(|f| (f.id, Some(f.center))).collect::<Vec<_>>()));
         }
-        // by default the faces behind the plane stay
-        let chosen =
-          super::surface::pick_pieces(&pieces, keep, remove, |k, j| Ok((centers[k][j] - pl.origin).dot(n) < 0.0))?;
+        if *cut_only && pieces.is_empty() {
+          return Err(super::surface::NO_CUT.into());
+        }
+        // by default the faces behind the plane stay (Fusion's Trim: all of them)
+        let chosen = super::surface::pick_pieces(&pieces, keep, remove, |k, j| {
+          Ok(*cut_only || (centers[k][j] - pl.origin).dot(n) < 0.0)
+        })?;
         for (k, (bi, split, faces)) in pieces.into_iter().enumerate() {
           let mut kept = Vec::new();
           for (j, (fid, _)) in faces.iter().enumerate() {
@@ -542,6 +568,10 @@ impl Ctx<'_> {
         self.state.canvases.insert(id, pl);
         Ok(None)
       }
+      FeatureKind::Tessellate { .. }
+      | FeatureKind::MeshRepair { .. }
+      | FeatureKind::GenerateFaceGroups { .. }
+      | FeatureKind::CombineFaceGroups { .. } => self.apply_mesh_prep(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

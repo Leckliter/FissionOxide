@@ -2003,6 +2003,10 @@ fn sketch_rows_have_eyes_and_hover_quietly() {
   h.move_then_click(eye);
   assert!(!fox_engine::scene::sketch_visible(&h.app.s, sk), "the row's eye hides the sketch");
   assert_eq!(h.app.s.selection, vec![fox_engine::Sel::Feature { feature: sk }], "and keeps it selected");
+  // with a sketch hidden the folder's eye is drawn only while the pointer is on its row
+  h.frame(vec![Event::PointerMoved(h.app.canvas.center())]);
+  h.frame(vec![]);
+  assert!(h.ctx.read_response(egui::Id::new("tree-sketches").with("eye")).is_none());
   h.move_then_click(eye);
   assert!(fox_engine::scene::sketch_visible(&h.app.s, sk));
   let folder_eye = egui::pos2(area.min.x + 8.0 + 16.0 + 24.0, row(6.0));
@@ -2011,6 +2015,67 @@ fn sketch_rows_have_eyes_and_hover_quietly() {
   assert!(!crate::panels::sketch_drawn(&h.app, sk));
   h.move_then_click(folder_eye);
   assert!(crate::panels::sketch_drawn(&h.app, sk));
+}
+
+/// Hiding the only body greys its eye and leaves the Bodies folder's eye undrawn until the
+/// pointer is on the folder's row, where it shows open (the folder still shows), as in Fusion.
+/// The folder's eye hides the folder: no body is drawn, each keeping its own eye.
+#[test]
+fn bodies_folder_eye_waits_for_the_pointer_while_a_body_is_hidden() {
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
+  let body = h.app.s.model.bodies[0].id;
+  let away = h.app.canvas.center();
+  h.frame(vec![Event::PointerMoved(away)]);
+  h.frame(vec![]);
+  let folder = egui::Id::new("tree-bodies");
+  let folder_eye = |h: &Harness| h.ctx.read_response(folder.with("eye")).is_some();
+  assert!(folder_eye(&h), "with every body shown the folder's eye is drawn");
+  // root, Document Settings, Units, Part Design, Named Views, Origin, then Bodies and Body1
+  let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("browser"))).expect("the browser is shown");
+  let row = |i: f32| area.min.y + 30.0 + 25.0 * i + 12.5;
+  h.move_then_click(egui::pos2(area.min.x + 8.0 + 32.0 + 24.0, row(7.0)));
+  assert!(!h.app.s.body_visible(body), "the row's eye hides the body");
+  h.frame(vec![Event::PointerMoved(away)]);
+  h.frame(vec![]);
+  assert!(!folder_eye(&h), "the folder's eye isn't drawn while the pointer is off its row");
+  assert!(!h.app.ctx_menu.bodies_hidden);
+  h.frame(vec![Event::PointerMoved(egui::pos2(area.min.x + 120.0, row(6.0)))]);
+  h.frame(vec![]);
+  assert!(folder_eye(&h), "on the folder's row it is drawn");
+  h.move_then_click(egui::pos2(area.min.x + 8.0 + 16.0 + 24.0, row(6.0)));
+  assert!(h.app.ctx_menu.bodies_hidden, "and hides the folder");
+  assert_eq!(crate::viewport::scene_options(&mut h.app).only_bodies, Some(Vec::new()), "no body is drawn");
+  h.frame(vec![Event::PointerMoved(away)]);
+  h.frame(vec![]);
+  assert!(folder_eye(&h), "the hidden folder's struck eye stays drawn");
+  h.move_then_click(egui::pos2(area.min.x + 8.0 + 16.0 + 24.0, row(6.0)));
+  assert!(!h.app.ctx_menu.bodies_hidden);
+  assert!(!h.app.s.body_visible(body), "the body keeps its own eye");
+}
+
+/// The first offset plane adds a collapsed Construction folder with an eye, as in Fusion; the
+/// eye hides the construction planes.
+#[test]
+fn construction_folder_starts_collapsed_with_an_eye() {
+  let mut h = Harness::new();
+  h.app.run("plane.offset", json!({"plane": "xy", "offset": 5})).unwrap();
+  let plane = h.app.s.design.features.last().expect("a plane").id;
+  h.frame(vec![Event::PointerMoved(h.app.canvas.center())]);
+  h.frame(vec![]);
+  let folder = egui::Id::new("tree-construction");
+  assert!(h.ctx.read_response(folder.with("tri")).is_some(), "the folder is listed");
+  assert!(h.ctx.read_response(folder.with("eye")).is_some(), "the folder has an eye");
+  // root, Document Settings, Units, Part Design, Named Views, Origin, then Construction
+  let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("browser"))).expect("the browser is shown");
+  let y = area.min.y + 30.0 + 25.0 * 6.0 + 12.5;
+  assert!(area.max.y < y + 12.5 + 10.0, "collapsed: Plane1 isn't showing ({area:?})");
+  h.move_then_click(egui::pos2(area.min.x + 8.0 + 16.0 + 24.0, y));
+  assert!(!h.app.construction_shown, "the folder's eye hides the planes");
+  h.move_then_click(egui::pos2(area.min.x + 8.0 + 16.0 + 4.0, y));
+  let open = h.ctx.memory(|m| m.area_rect(egui::Id::new("browser"))).expect("the browser is shown");
+  assert!(open.max.y >= y + 12.5 + 25.0, "the expander opens it on Plane1 ({open:?})");
+  assert_eq!(h.app.s.design.feature(plane).map(|f| f.name.as_str()), Some("Plane1"));
 }
 
 // ---------------------------------------------------------------- Document Settings and Named Views
@@ -2369,4 +2434,36 @@ fn finish_sketch_returns_to_the_tab_it_started_from() {
     h.frame(vec![]);
     assert_eq!(h.app.tab, tab);
   }
+}
+
+/// Resting on a sketch dimension shows its parameter as Fusion does: "d1 = 40.0 mm" in white
+/// on the dark tooltip panel, not egui's light box.
+#[test]
+fn a_hovered_dimensions_tooltip_is_dark() {
+  use crate::theme;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  let line = h.app.run("sketch.line", json!({"points": [[-20, 0], [20, 0]]})).unwrap();
+  let c = line["curves"][0].clone();
+  h.app.run("sketch.dimension", json!({"type": "distance", "curves": [c], "value": "40"})).unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.app.fit_view_now();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let label = h.find(vec![], "40.00").expect("the dimension's value is drawn");
+  let shown = h.rest_rects(label.center(), 1.2);
+  let tip = shown.iter().find(|(_, t)| t == "d1 = 40.0 mm").map(|(r, _)| *r);
+  let tip = tip.unwrap_or_else(|| panic!("the parameter tooltip: {shown:?}"));
+  assert!(tip.top() > label.top(), "under the text: {tip:?} vs {label:?}");
+  let shapes = h.frame_shapes(0.1);
+  assert!(
+    shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.fill == theme::TOOLTIP && r.rect.contains_rect(tip))),
+    "a dark panel behind the tooltip"
+  );
+  let color = shapes.iter().find_map(|s| match s {
+    egui::Shape::Text(t) if t.galley.text() == "d1 = 40.0 mm" => Some(text_color(t)),
+    _ => None,
+  });
+  assert_eq!(color, Some(theme::TOOLTIP_TITLE));
 }

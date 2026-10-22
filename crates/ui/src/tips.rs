@@ -1712,12 +1712,12 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // MESH
     (_, "Tessellate") => (
-      "Converts solid or surface bodies into mesh bodies.",
-      "Pick the bodies and the refinement. Use it to edit a body with mesh tools or export it as \
-       triangles.",
+      "Converts an existing solid or surface body into a mesh body.",
+      "Select the solid or surface body to tessellate, then adjust the mesh refinement settings to \
+       convert the body to a mesh body.",
     ),
     (_, "Create Mesh Section Sketch") => (
-      "Sketches the cross-section of a mesh along a plane.",
+      "Creates a sketch that contains a section line where a plane intersects a mesh body.",
       "Pick the mesh and a plane; the section's outline becomes sketch curves. Use them to rebuild a \
        scanned part as a solid.",
     ),
@@ -1743,6 +1743,32 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     (_, "Direct Edit") => (
       "Edits a mesh's triangles directly.",
       "Select triangles, then delete, move or fill them. Use it for small fixes to scanned meshes.",
+    ),
+    (_, "Finish Direct Editing") => (
+      "Finishes direct mesh editing and returns to the MESH tab.",
+      "The edited mesh is kept as a new body named after the original with _Edited, in the base \
+       feature the editing started.",
+    ),
+    (_, "Texture Extrude") => (
+      "Extrudes a texture into or out of the selected mesh faces.",
+      "Select mesh faces and a texture image; the faces are pushed in or out by the image's \
+       brightness.",
+    ),
+    (_, "Close Cracks") => (
+      "Closes narrow cracks between mesh faces.",
+      "Select the mesh body; open edges that nearly touch are joined so the mesh closes.",
+    ),
+    (_, "Erase And Fill") => (
+      "Deletes the selected mesh faces and fills the hole they leave.",
+      "Select faces with the Mesh Selection Palette; the hole is filled with a smooth patch.",
+    ),
+    (_, "Bridge") => (
+      "Connects two open boundaries of a mesh with new faces.",
+      "Select an open edge on each side; the faces between them are filled in.",
+    ),
+    (_, "Mesh Align") => (
+      "Aligns a mesh body to another body.",
+      "Select points on the mesh and matching points on the target; the mesh moves to fit them.",
     ),
     (_, "Remesh") => (
       "Rebuilds a mesh with evenly sized triangles.",

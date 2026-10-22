@@ -113,6 +113,10 @@ impl Dialog {
 
   /// The objects picked so far, as the selection the next pattern dialog takes them from.
   fn objects_selection(&self) -> Vec<Sel> {
+    // the Flange dialog's Type row keeps the picked edges
+    if self.flange_family() {
+      return self.picked_selection();
+    }
     let bodies: Vec<u32> = match self.kind {
       Kind::Form(f) => f
         .inputs

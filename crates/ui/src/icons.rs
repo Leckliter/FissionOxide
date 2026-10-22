@@ -68,6 +68,8 @@ pub enum Icon {
   Gear,
   Component,
   Body,
+  /// A surface body's browser row: an orange curved sheet, where a solid body has a grey block.
+  SurfaceBody,
   SketchSmall,
   Eye,
   EyeOff,
@@ -431,6 +433,9 @@ pub enum Icon {
   HemRolled,
   HemTeardrop,
   HemRope,
+  // the timeline's sheet metal flanges: a flat sheet, and a sheet with a flange bent up
+  BaseFlange,
+  EdgeFlange,
   // Reduce's Remesh Type, Plane Cut's Fill Type and Convert Mesh's Method (see `mesh`)
   RemeshAdaptive,
   RemeshUniform,
@@ -516,6 +521,7 @@ fn family(icon: Icon) -> Tint {
     | Sustainability | Select | WindowSel | FreeformSel | PaintSel => Tint::Green,
     Sketch | SketchSmall | Construction => Tint::Teal,
     MeshBody | MeshFeature => Tint::Gold,
+    SurfaceBody => Tint::Orange,
     _ => Tint::Blue,
   }
 }
@@ -1133,6 +1139,19 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.line((x0, y1), (x1, y0), BlueDark);
       k.line((x0, y0), (x1 + d, y0 - d * 0.7), BlueDark);
       k.line((x1, y1), (x1 + d, y0 - d * 0.7), BlueDark);
+    }
+    Icon::SurfaceBody => {
+      // a thin sheet curving up at its back, drawn in strips so each fill is convex
+      let near = |t: f32| (0.06 + 0.6 * t, 0.86 - 0.22 * (t * PI).sin());
+      let far = |t: f32| (0.34 + 0.6 * t, 0.5 - 0.22 * (t * PI).sin());
+      let n = 8;
+      for i in 0..n {
+        let (a, b) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
+        k.fill(&[near(a), near(b), far(b), far(a)], Blue);
+      }
+      let mut outline: Vec<(f32, f32)> = (0..=n).map(|i| near(i as f32 / n as f32)).collect();
+      outline.extend((0..=n).rev().map(|i| far(i as f32 / n as f32)));
+      k.p.add(Shape::closed_line(k.pts(&outline), Stroke::new(w * 0.8, k.edge(Blue))));
     }
     Icon::SketchSmall => {
       k.solid(&[(0.08, 0.2), (0.92, 0.2), (0.92, 0.84), (0.08, 0.84)], White);
@@ -2910,6 +2929,18 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
         pts.push((0.44, 0.48 + r - 0.04));
       }
       k.band(k.pts(&pts), 3.4);
+    }
+    Icon::BaseFlange => {
+      // a flat sheet seen from above, its thickness along the front
+      k.solid(&[(0.06, 0.52), (0.44, 0.3), (0.94, 0.48), (0.56, 0.72)], BlueLight);
+      k.solid(&[(0.06, 0.52), (0.56, 0.72), (0.56, 0.82), (0.06, 0.62)], Blue);
+      k.solid(&[(0.56, 0.72), (0.94, 0.48), (0.94, 0.58), (0.56, 0.82)], BlueDark);
+    }
+    Icon::EdgeFlange => {
+      // the sheet with a wall bent up along its back edge
+      k.solid(&[(0.06, 0.62), (0.44, 0.44), (0.94, 0.6), (0.56, 0.8)], BlueLight);
+      k.solid(&[(0.06, 0.62), (0.56, 0.8), (0.56, 0.88), (0.06, 0.7)], Blue);
+      k.solid(&[(0.44, 0.44), (0.44, 0.08), (0.94, 0.24), (0.94, 0.6)], Blue);
     }
   }
 }

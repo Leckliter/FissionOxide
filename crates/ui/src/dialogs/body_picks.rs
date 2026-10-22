@@ -71,12 +71,14 @@ mod tests {
       assert_eq!(app.s.selection, vec![Sel::Body { body: b1 }], "{kind:?}");
       assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("Body1"));
       d.sync_selection(&app.s);
-      assert_eq!(d.bodies, vec![b1.0], "{kind:?}: the dialog takes the body");
+      // (Combine's first pick is its target body)
+      let taken = if d.kind == Kind::Combine { d.target.into_iter().collect() } else { d.bodies.clone() };
+      assert_eq!(taken, vec![b1.0], "{kind:?}: the dialog takes the body");
       let p = a_face(&app, 1);
       crate::select::pick(&mut app, p, true);
       d.sync_selection(&app.s);
       if kind == Kind::Combine {
-        assert_eq!(d.bodies, vec![b1.0, b2.0], "target, then a tool");
+        assert_eq!((d.target, d.bodies.clone()), (Some(b1.0), vec![b2.0]), "target, then a tool");
       }
       d.cancel(&mut app.s);
       d.leave(&mut app);

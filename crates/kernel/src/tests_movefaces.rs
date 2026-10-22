@@ -13,7 +13,9 @@ fn cylinders(s: &Shape) -> Vec<FaceInfo> {
 }
 
 fn turn(origin: DVec3, axis: DVec3, deg: f64) -> DMat4 {
-  DMat4::from_translation(origin) * DMat4::from_axis_angle(axis.normalize(), deg.to_radians()) * DMat4::from_translation(-origin)
+  DMat4::from_translation(origin)
+    * DMat4::from_axis_angle(axis.normalize(), deg.to_radians())
+    * DMat4::from_translation(-origin)
 }
 
 #[test]
@@ -50,8 +52,7 @@ fn a_boss_moves_and_turns_with_its_faces() {
   // a square boss turned 45° about its own axis
   let square = Shape::make_box(DVec3::new(10.0, 10.0, 10.0), DVec3::new(20.0, 20.0, 15.0)).unwrap();
   let s = plate.boolean(&square, BoolOp::Union).unwrap();
-  let picked: Vec<u32> =
-    s.faces().unwrap().iter().filter(|f| f.center.z > 10.0 + 1e-6).map(|f| f.id).collect();
+  let picked: Vec<u32> = s.faces().unwrap().iter().filter(|f| f.center.z > 10.0 + 1e-6).map(|f| f.id).collect();
   assert_eq!(picked.len(), 5);
   let out = s.move_faces(&picked, turn(DVec3::new(15.0, 15.0, 0.0), DVec3::Z, 45.0)).unwrap();
   assert!((vol(&out) - vol(&s)).abs() < 1e-3);

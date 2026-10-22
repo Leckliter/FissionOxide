@@ -71,6 +71,7 @@ fn scene() -> Scene {
     background_top: [250, 250, 251, 255],
     background_bottom: [234, 236, 239, 255],
     analysis: None,
+    analysis_fade: 0.0,
     style: VisualStyle::default(),
   }
 }
@@ -121,9 +122,11 @@ fn gpu_matches_cpu() {
   };
   let analyses = [
     None,
-    Some(Analysis::Zebra { stripes: 12.0 }),
-    Some(Analysis::Draft { pull: [0.0, 0.0, 1.0], angle: 0.2 }),
+    Some(Analysis::Zebra { stripes: 12.0, vertical: false }),
+    Some(Analysis::Zebra { stripes: 12.0, vertical: true }),
+    Some(Analysis::Draft { pull: [0.0, 0.0, 1.0], lo: -0.2, hi: 0.2, tol: 0.05 }),
     Some(Analysis::Accessibility { dir: [0.0, 0.0, 1.0] }),
+    Some(Analysis::Environment { rotate: 0.5, mirror: true, sharp: true }),
   ];
   for analysis in analyses {
     let mut s = scene();

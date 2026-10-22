@@ -460,6 +460,91 @@ fn trim_removes_picked_pieces() {
   assert!(close(area(&s, id), 16.0, 1e-6), "{}", area(&s, id));
 }
 
+#[test]
+fn fusion_trim_changes_only_what_its_tool_cuts() {
+  // a plane at x = 4 with no pieces picked: the square is only split
+  let mut s = Session::default();
+  let id = square(&mut s);
+  let x4 = json!({"origin": [4, 0, 0], "normal": [1, 0, 0]});
+  run(&mut s, "surface.trim", json!({"bodies": [id], "tool": x4, "cut_only": true}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  assert_eq!(s.model.bodies[0].faces().len(), 2);
+  assert!(close(area(&s, id), 400.0, 1e-6), "{}", area(&s, id));
+  // the picked strip goes, whichever side of the plane it is on
+  let f = s.design.features.last().unwrap().id.0;
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"remove": [[7, 0, 0]]}}));
+  assert!(close(area(&s, id), 280.0, 1e-6), "{}", area(&s, id));
+
+  // a plane at z = 5 cuts the wall but not the square under it, which stays as it was
+  let mut s = Session::default();
+  let a = square(&mut s);
+  let patch = s.model.body(fox_model::BodyId(a)).unwrap().feature;
+  let w = wall(&mut s);
+  let z5 = json!({"origin": [0, 0, 5], "normal": [0, 0, 1]});
+  run(&mut s, "surface.trim", json!({"bodies": [a, w], "tool": z5, "cut_only": true, "remove": [[0, 0, 8]]}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  assert!(close(area(&s, w), 300.0, 1e-6), "{}", area(&s, w));
+  assert!(close(area(&s, a), 400.0, 1e-6), "{}", area(&s, a));
+  assert_eq!(s.model.body(fox_model::BodyId(a)).unwrap().feature, patch);
+
+  // a tool that cuts none of them is Fusion's error
+  let mut s = Session::default();
+  let id = square(&mut s);
+  let far = json!({"origin": [50, 0, 0], "normal": [1, 0, 0]});
+  let _ = s.execute("surface.trim", &json!({"bodies": [id], "tool": far, "cut_only": true}));
+  let errors = s.model.errors();
+  assert!(errors.iter().any(|e| e.contains("Cutting Tool does not intersect any surface!")), "{errors:?}");
+  let r = s.execute("surface.trim", &json!({"bodies": [], "tool": "yz", "cut_only": true}));
+  assert!(r.is_err_and(|e| e.0.contains("Cutting Tool does not intersect any surface!")));
+  // with a body tool: the box cuts the square, so it splits
+  let mut s = Session::default();
+  let id = square(&mut s);
+  run(&mut s, "box", json!({"width": 4, "depth": 4, "height": 4, "at": [0, 0], "operation": "new_body"}));
+  let tool = last(&s);
+  run(&mut s, "move", json!({"bodies": [tool], "translate": [0, 0, -2]}));
+  run(&mut s, "surface.trim", json!({"bodies": [id], "tool": {"body": tool}, "cut_only": true}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  assert_eq!(s.model.body(fox_model::BodyId(id)).unwrap().faces().len(), 2);
+}
+
+#[test]
+fn unstitch_picked_faces() {
+  // the top of a box comes off as a surface of its own; the other five stay together
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
+  let b = &s.model.bodies[0];
+  let top = b.faces().iter().max_by(|x, y| x.center.z.total_cmp(&y.center.z)).unwrap().id;
+  let id = b.id.0;
+  run(&mut s, "surface.unstitch", json!({"faces": [{"body": id, "face": top}]}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  let mut faces: Vec<usize> = s.model.bodies.iter().map(|b| b.faces().len()).collect();
+  faces.sort();
+  assert_eq!(faces, vec![1, 5]);
+  assert!(s.model.bodies.iter().all(|b| b.shape.solid_count() == 0));
+}
+
+#[test]
+fn stitch_gaps_list_the_edges_across_a_gap() {
+  // two squares half a millimetre apart: their facing edges, and only those
+  let mut s = Session::default();
+  let a = square(&mut s);
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10.5, -10], "corner2": [30.5, 10]}));
+  let sk = s.edit_sketch.unwrap().0;
+  run(&mut s, "surface.patch", json!({"sketch": sk}));
+  let b = last(&s);
+  let gaps = run(&mut s, "surface.stitch.gaps", json!({"bodies": [a, b]}));
+  let list = gaps.as_array().unwrap();
+  assert_eq!(list.len(), 2, "{gaps}");
+  assert!(list.iter().all(|g| close(g["gap"].as_f64().unwrap(), 0.5, 1e-6)), "{gaps}");
+  // a tolerance under the gap leaves them open; over it, the stitch closes them
+  run(&mut s, "surface.stitch", json!({"bodies": [a, b], "tolerance": "0.6 mm"}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  assert_eq!(s.model.bodies.len(), 1);
+  let open = s.model.bodies[0].edges().iter().filter(|e| e.faces[1] == 0).count();
+  assert_eq!(open, 6, "the two squares' outline");
+}
+
 /// Runs a JSONL example script.
 fn run_example(script: &str) -> Session {
   let mut s = Session::default();
@@ -484,4 +569,40 @@ fn surface_examples_build() {
   let s = run_example(include_str!("../../../examples/surface_shroud.jsonl"));
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
   assert!(s.model.bodies[0].shape.mass().unwrap().volume > 0.0);
+}
+
+/// Fusion names a Patch "SurfacePatch1" (its surface Extrude "SurfaceExtrude1"); surface bodies
+/// are told apart from solids, and a body outside a component takes a physical material of its
+/// own, which wins over its component's.
+#[test]
+fn surface_features_and_bodies_as_fusion_names_them() {
+  let mut s = Session::default();
+  let patch = square(&mut s);
+  let extruded = wall(&mut s);
+  let names: Vec<&str> = s
+    .design
+    .features
+    .iter()
+    .filter(|f| !matches!(f.kind, fox_model::FeatureKind::Sketch { .. }))
+    .map(|f| f.name.as_str())
+    .collect();
+  assert_eq!(names, ["SurfacePatch1", "SurfaceExtrude1"]);
+  run(&mut s, "box", json!({"width": 5, "depth": 5, "height": 5}));
+  let solid = last(&s);
+  let surface = |s: &Session, b: u32| s.body_is_surface(fox_model::BodyId(b));
+  assert!(surface(&s, patch) && surface(&s, extruded) && !surface(&s, solid));
+
+  run(&mut s, "body.material", json!({"bodies": [solid], "material": "aluminum"}));
+  let props = |s: &mut Session| {
+    run(s, "inspect.properties", json!({"items": [{"type": "body", "body": solid}]}))["items"][0].clone()
+  };
+  assert_eq!(props(&mut s)["material"], "Aluminum");
+  run(&mut s, "component.create", json!({"name": "Part", "bodies": [solid]}));
+  let comp = s.design.components.iter().find(|c| c.name == "Part").unwrap().id.0;
+  run(&mut s, "component.material", json!({"component": comp, "material": "Steel"}));
+  assert_eq!(props(&mut s)["material"], "Aluminum", "the body's own material wins");
+  run(&mut s, "body.material", json!({"bodies": [solid]}));
+  assert_eq!(props(&mut s)["material"], "Steel", "cleared, the component's shows");
+  assert!(s.execute("body.material", &json!({"bodies": [solid], "material": "cheese"})).is_err());
+  assert!(s.execute("body.material", &json!({"bodies": [999], "material": "Steel"})).is_err());
 }

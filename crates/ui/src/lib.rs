@@ -5,8 +5,12 @@
 //! ViewCube, sketch palette and command dialogs floating over it; the timeline at the bottom. The UI is thin: every action goes through [`Session::execute`] commands.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod analyses;
 mod asm_component;
 mod assembly_forms;
+mod bom_ui;
+#[cfg(test)]
+mod bom_ui_tests;
 mod cam_ui;
 mod canvas_ui;
 mod capture;
@@ -54,6 +58,7 @@ mod material_ui;
 mod menus;
 #[cfg(test)]
 mod mesh_body_tests;
+mod mesh_ui;
 mod navbar;
 mod notifications;
 mod origin;
@@ -279,8 +284,11 @@ pub struct App {
   pub(crate) measure_fmt: dialogs::MeasureFmt,
   /// Section analysis: `{plane, offset, flip}` (see [`fox_engine::scene::view_options`]).
   pub section: Option<Value>,
-  /// Surface analysis: `{analysis, pull?, angle?}`.
+  /// The open analysis dialog's render parameters, once it has its picks (see
+  /// `fox_engine::scene::view_options`).
   pub analysis: Option<Value>,
+  /// The browser's Analysis folder: the analyses kept with OK.
+  pub(crate) analyses: analyses::Analyses,
   /// A regeneration running in the background, and when it started. While it runs the UI shows
   /// the last image and takes no input (nothing may call the kernel; see `Session::begin`).
   pub(crate) rebuild: Option<(fox_engine::Rebuild, f64)>,
@@ -331,6 +339,8 @@ pub struct App {
   pub(crate) plugins: plugins_ui::PluginsUi,
   /// Manage Materials' Material Browser, while open.
   pub(crate) material_browser: Option<material_ui::Browser>,
+  /// MANAGE ▸ Bill of Materials' palette, while open.
+  pub(crate) bom: Option<bom_ui::Bom>,
   /// Insert > Sketch Library: the part picker and placing parts with clicks.
   pub(crate) library_ui: library_ui::LibraryUi,
   /// View ▸ Render Components….
@@ -360,6 +370,8 @@ pub struct App {
   pub(crate) inserts: insert_window::Inserts,
   /// New Component in an Assembly Design (an external design), while open.
   pub(crate) asm_component: Option<asm_component::AsmComponent>,
+  /// The DIRECT MESH EDITING tab, while open.
+  pub mesh_edit: mesh_ui::MeshEdit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -583,6 +595,7 @@ impl App {
       measure_fmt: dialogs::MeasureFmt::default(),
       section: None,
       analysis: None,
+      analyses: analyses::Analyses::default(),
       rebuild: None,
       manufacture: false,
       form: form_ui::FormEdit::default(),
@@ -608,6 +621,7 @@ impl App {
       clipboard: None,
       plugins: plugins_ui::PluginsUi::default(),
       material_browser: None,
+      bom: None,
       library_ui: library_ui::LibraryUi::default(),
       render_components: explode_ui::RenderComponents::default(),
       render: render_ui::RenderUi::default(),
@@ -622,6 +636,7 @@ impl App {
       docs: documents::Documents::default(),
       inserts: insert_window::Inserts::default(),
       asm_component: None,
+      mesh_edit: mesh_ui::MeshEdit::default(),
     }
   }
 
@@ -769,6 +784,8 @@ impl App {
     self.ctx_menu.peek_faces.clear();
     self.ctx_menu.peek_sketches.clear();
     self.ctx_menu.isolate = None;
+    // the analyses were the old design's
+    analyses::clear(self);
     self.data.save = None;
     // the Export window was for the old design
     self.files.export = None;
@@ -805,6 +822,16 @@ impl App {
   pub fn fit_view(&mut self) {
     let mut to = self.view_now();
     self.fit_cam(&mut to);
+    self.fly_to(to);
+  }
+
+  /// The camera moves smoothly to frame the box `lo`..`hi` (a few times its size, so what is
+  /// around it shows too).
+  pub(crate) fn zoom_to(&mut self, lo: fox_engine::kernel::glam::DVec3, hi: fox_engine::kernel::glam::DVec3) {
+    let pad = ((hi - lo).length() * 2.0).max(5.0);
+    let mut to = self.view_now();
+    let aspect = self.frame.as_ref().map(|f| f.width as f64 / f.height.max(1) as f64).unwrap_or(1.6);
+    to.fit(lo - pad, hi + pad, aspect);
     self.fly_to(to);
   }
 
@@ -1524,6 +1551,11 @@ impl App {
       self.status = None;
     }
     self.note_cmd(panels::Cmd::Dialog(kind));
+    // Bill of Materials is a palette beside whatever runs, not a command dialog
+    if kind == dialogs::Kind::Bom {
+      bom_ui::open(self);
+      return;
+    }
     self.cancel_dialog();
     self.tool = Tool::Select;
     self.dialog = Some(Dialog::open(self, kind));
@@ -1911,6 +1943,7 @@ impl App {
       self.draw_busy(ui, &ctx);
       return;
     }
+    analyses::refresh(self);
     // Escape closes the 3D PRINT dialog, Image Options and the data panel's prompts first
     let escaped = file_dialogs::escape(self, &ctx);
     if !escaped && !file_dialogs::modal_open(self) && self.electronics.is_none() {
@@ -1967,6 +2000,8 @@ impl App {
       }
       panels::assistant_tab(self, &ctx);
       panels::sketch_palette(self, &ctx);
+      mesh_ui::palette(self, &ctx);
+      bom_ui::show(self, &ctx);
       marking::show(self, &ctx);
       sim_ui::show(self, &ctx);
       file_menu::perf_overlay(self, &ctx);

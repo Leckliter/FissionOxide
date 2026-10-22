@@ -13,6 +13,7 @@ use crate::icons::Icon;
 use crate::theme;
 use crate::{App, panels};
 
+mod analysis;
 mod choice;
 mod construct;
 mod extrude;
@@ -27,18 +28,25 @@ mod modify;
 mod move_copy;
 mod pieces;
 mod press_owner;
+mod rows;
+mod simplify;
+mod stitch;
+pub(crate) use analysis::center_of_mass;
 pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod auto_cut;
 mod body_picks;
 mod copies;
 mod edit_more;
+mod flange;
+pub(crate) use flange::TYPE_ICONS as FLANGE_TYPES;
 #[cfg(test)]
 mod edit_tests;
 mod export_dxf;
 mod insert_mesh;
 #[cfg(test)]
 mod insert_mesh_tests;
+mod mesh;
 #[cfg(test)]
 mod mesh_tests;
 mod newcomp;
@@ -54,6 +62,7 @@ mod sketch_row_tests;
 mod solid;
 mod thread;
 pub(crate) use export_dxf::{SaveWindow, save_window};
+pub(crate) use mesh::group_triangle;
 pub(crate) use primitive::overlay as place_overlay;
 
 pub(crate) use section::{KeptSection, shown_section};
@@ -227,6 +236,10 @@ impl Kind {
       Kind::Analysis("zebra") => "ZEBRA ANALYSIS",
       Kind::Analysis("draft") => "DRAFT ANALYSIS",
       Kind::Analysis("accessibility") => "ACCESSIBILITY ANALYSIS",
+      Kind::Analysis("comb") => "CURVATURE COMB ANALYSIS",
+      Kind::Analysis("environment") => "ENVIRONMENT MAP ANALYSIS",
+      Kind::Analysis("isocurve") => "ISOCURVE ANALYSIS",
+      Kind::Analysis("min_radius") => "MINIMUM RADIUS ANALYSIS",
       Kind::Analysis(_) => "CURVATURE MAP ANALYSIS",
       Kind::DrawingView => "DRAWING VIEW",
       Kind::DrawingMoveView => "MOVE VIEW",
@@ -288,6 +301,10 @@ impl Kind {
       Kind::Analysis("zebra") => Icon::Zebra,
       Kind::Analysis("draft") => Icon::DraftAnalysis,
       Kind::Analysis("accessibility") => Icon::Accessibility,
+      Kind::Analysis("comb") => Icon::CurvComb,
+      Kind::Analysis("environment") => Icon::EnvMap,
+      Kind::Analysis("isocurve") => Icon::Isocurve,
+      Kind::Analysis("min_radius") => Icon::MinRadius,
       Kind::Analysis(_) => Icon::CurvMap,
       Kind::CenterOfMass => Icon::CenterOfMass,
       Kind::SkFillet => Icon::SkFillet,
@@ -346,8 +363,12 @@ impl Kind {
       Kind::Analysis("zebra") => ("Zebra Analysis", "Reflected stripes show how smoothly surfaces join"),
       Kind::Analysis("draft") => ("Draft Analysis", "Which faces have draft for moulding along a pull direction"),
       Kind::Analysis("accessibility") => ("Accessibility Analysis", "Which faces a tool can reach from a direction"),
+      Kind::Analysis("comb") => ("Curvature Comb Analysis", "Combs along edges show how their curvature changes"),
+      Kind::Analysis("environment") => ("Environment Map Analysis", "A reflected environment shows how surfaces flow"),
+      Kind::Analysis("isocurve") => ("Isocurve Analysis", "Curves across faces along their parameter directions"),
+      Kind::Analysis("min_radius") => ("Minimum Radius Analysis", "Where surfaces curve tighter than a tool can reach"),
       Kind::Analysis(_) => ("Curvature Map Analysis", "Colour by how sharply surfaces curve"),
-      Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected (or all) bodies"),
+      Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected bodies"),
       Kind::SkFillet => ("Fillet", "Round the corner where two lines or arcs meet"),
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
       Kind::SkChamfer2 => ("Two Distance Chamfer", "Bevel a corner by two distances"),
@@ -419,14 +440,7 @@ impl Kind {
   pub(crate) fn reports(self) -> bool {
     matches!(
       self,
-      Kind::Inspect
-        | Kind::Appearance
-        | Kind::Material
-        | Kind::FlatPattern
-        | Kind::Bom
-        | Kind::MotionStudy
-        | Kind::CenterOfMass
-        | Kind::Analysis(_)
+      Kind::Inspect | Kind::Appearance | Kind::Material | Kind::FlatPattern | Kind::Bom | Kind::MotionStudy
     )
   }
 
@@ -679,6 +693,10 @@ pub struct Dialog {
   pub(crate) switch_to: Option<Kind>,
   /// INSERT MESH's file, unit and placement (see [`insert_mesh`]).
   pub(crate) mesh: insert_mesh::Options,
+  /// An INSPECT analysis's settings (see [`analysis`]).
+  an: analysis::AnalysisForm,
+  /// The Flange dialog's Orientation and open groups (see [`flange`]).
+  flange: flange::State,
   /// Plane Cut's plane and settings (see [`plane_cut`]).
   plane_cut: plane_cut::State,
 }
@@ -816,6 +834,11 @@ impl Dialog {
       point: None,
       switch_to: None,
       mesh: insert_mesh::Options::default(),
+      an: analysis::AnalysisForm::new(match kind {
+        Kind::Analysis(k) => k,
+        _ => "",
+      }),
+      flange: flange::State::default(),
       plane_cut: plane_cut::State::default(),
     }
   }
@@ -865,7 +888,7 @@ impl Dialog {
       // the newest sketch's profiles are the ones to pick; Extrude takes only a picked one (as
       // in Fusion, E opens with Profiles: Select and no preview)
       d.sketch = s.edit_sketch.or(app.last_sketch).or_else(|| last_unconsumed_sketch(s));
-      if !matches!(kind, Kind::Extrude | Kind::Sweep)
+      if !matches!(kind, Kind::Extrude | Kind::Sweep | Kind::Flange)
         && let Some(sk) = d.sketch
         && let Some(r) = s.model.sketches.get(&sk)
         && r.profiles.len() == 1
@@ -922,7 +945,15 @@ impl Dialog {
       }
       Kind::RectPattern => d.join = false,
       Kind::CircPattern => d.circ_defaults(s),
-      Kind::Combine => d.op = "join",
+      Kind::Combine => {
+        // the first picked body is the target, the others tools; the Tool Bodies row is active
+        // once there is a target, as in Fusion
+        d.op = "join";
+        d.faces.clear();
+        d.edges.clear();
+        d.target = (!d.bodies.is_empty()).then(|| d.bodies.remove(0));
+        d.pick_row = usize::from(d.target.is_some());
+      }
       // Move turns by nothing until asked (the blank dialog's angle is a full turn)
       Kind::Move => {
         d.angle = "0 deg".into();
@@ -980,7 +1011,14 @@ impl Dialog {
         }
         d.point = d.bodies.first().and_then(|b| body_centre(s, *b));
       }
-      Kind::SplitBody => d.bodies = sel_only_bodies(s),
+      Kind::SplitBody => {
+        // Body to Split takes one body (the picked one), then Splitting Tool(s) is active; no
+        // tool until one is picked
+        d.bodies = sel_bodies(s).into_iter().take(1).collect();
+        d.faces.clear();
+        d.plane = Value::Null;
+        d.pick_row = usize::from(!d.bodies.is_empty());
+      }
       // the body: a picked body, or the body of a picked face (a mesh's faces aren't planes to cut with)
       Kind::PlaneCut => {
         d.bodies = sel_bodies(s).into_iter().take(1).collect();
@@ -1035,21 +1073,7 @@ impl Dialog {
         d.name = "NOTE".into();
         d.at = ["20".into(), "20".into()];
       }
-      Kind::Flange => {
-        // edges picked → edge flange; a sketch of open curves only → contour flange
-        let open_only = d.sketch.and_then(|sk| s.model.sketches.get(&sk)).is_some_and(|r| r.profiles.is_empty());
-        d.choice = if !d.edges.is_empty() {
-          "edge"
-        } else if open_only {
-          "contour"
-        } else {
-          "base"
-        };
-        d.distance = "10 mm".into();
-        d.angle = "90 deg".into();
-        d.position = "adjacent";
-        d.op = "new_body";
-      }
+      Kind::Flange => d.flange_defaults(s),
       // Fusion's flat hem, four thicknesses long, its bend at the edge
       Kind::Hem => {
         d.choice = "flat";
@@ -1189,8 +1213,9 @@ impl Dialog {
     if kind == Kind::Section {
       d.section_open(&app.s);
     }
-    if let Kind::Analysis(a) = kind {
-      app.analysis = Some(json!({"analysis": a, "pull": "z", "angle": 1.0}));
+    if let Kind::Analysis(_) = kind {
+      // nothing is drawn until a pick (see `inspect_analysis_rows`)
+      app.analysis = None;
     }
     d.start_placing(app);
     d.localize(app.s.design.units);
@@ -1382,11 +1407,16 @@ impl Dialog {
       | FeatureKind::Mirror { .. }
       | FeatureKind::Combine { .. }
       | FeatureKind::OffsetFaces { .. }) => edit_more::load(&app.s, kind)?,
+      kind @ (FeatureKind::Flange { .. }
+      | FeatureKind::ContourFlange { .. }
+      | FeatureKind::EdgeFlange { .. }
+      | FeatureKind::Hem { .. }) => flange::edit_dialog(app, kind)?,
       _ => return None,
     };
     d.editing = Some(id);
     d.unit = app.s.design.units;
     d.load_edit_anchor(&f.kind);
+    d.load_flange_edit_anchor(&app.s, &f.kind);
     // a stored bare length is mm, and an edit box always shows the unit, as Fusion's do ("2 mm")
     let lengths = match d.kind {
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => 3,
@@ -1567,41 +1597,15 @@ impl Dialog {
         ("scale", p)
       }
       Kind::SplitBody if self.target.is_some() => {
-        let tool = self.target?;
-        let bodies: Vec<u32> = self.bodies.iter().copied().filter(|b| *b != tool).collect();
-        let mut p = json!({"tool": tool, "remove_tool": self.flag});
-        if !bodies.is_empty() {
-          p["bodies"] = json!(bodies);
-        }
-        ("split_by_body", p)
+        ("split_by_body", json!({"tool": self.target?, "bodies": [self.bodies.first()?]}))
       }
       Kind::SplitBody => {
-        let mut p = json!({"plane": self.plane});
-        if !self.bodies.is_empty() {
-          p["bodies"] = json!(self.bodies);
+        if self.plane.is_null() {
+          return None;
         }
-        ("split", p)
+        ("split", json!({"plane": self.plane, "bodies": [self.bodies.first()?]}))
       }
-      Kind::Flange => match self.choice {
-        "edge" => (
-          "sheet.edge_flange",
-          json!({
-            "edges": self.edges, "height": self.distance, "angle": self.angle, "flip": self.flip,
-            "position": self.position, "corners": self.corners,
-          }),
-        ),
-        "contour" => {
-          let mut p =
-            json!({"sketch": self.sketch?.0, "distance": self.distance, "symmetric": self.flag, "flip": self.flip});
-          self.put_rule(&mut p);
-          ("sheet.contour_flange", p)
-        }
-        _ => {
-          let mut p = json!({"sketch": self.sketch?.0, "profiles": self.profiles, "flip": self.flip, "operation": op});
-          self.put_rule(&mut p);
-          ("sheet.flange", p)
-        }
-      },
+      Kind::Flange => return self.flange_command(),
       Kind::Hem => {
         let gap = if self.choice == "open" { self.distance2.as_str() } else { sheet::FLAT_HEM_GAP };
         ("sheet.hem", json!({"edges": self.edges, "length": self.distance, "gap": gap, "flip": self.flip}))
@@ -1884,10 +1888,10 @@ impl Dialog {
       Kind::Mirror => ("mirror", json!({"plane": self.plane, "bodies": self.bodies, "join": self.join})),
       Kind::RectPattern => ("pattern.rectangular", self.pattern_params()?),
       Kind::CircPattern => ("pattern.circular", self.circ_params()?),
-      Kind::Combine => {
-        let (target, tools) = self.bodies.split_first()?;
-        ("combine", json!({"target": target, "tools": tools, "operation": op, "keep_tools": self.keep_tools}))
-      }
+      Kind::Combine => (
+        "combine",
+        json!({"target": self.target?, "tools": self.bodies, "operation": op, "keep_tools": self.keep_tools}),
+      ),
       Kind::Move => self.move_command()?,
       Kind::RedefinePlane => self.redefine_command()?,
       Kind::ExportDxf => return None,
@@ -1944,6 +1948,7 @@ impl Dialog {
       Kind::Draft => self.draft_edit_set(),
       Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
       Kind::Hole | Kind::Mirror | Kind::Combine | Kind::PressPull => self.more_edit_set()?,
+      Kind::Flange | Kind::Hem => return self.flange_edit_set(),
       _ => return None,
     })
   }
@@ -1982,6 +1987,9 @@ impl Dialog {
     }
     if self.kind.reports() {
       self.refresh_report(s);
+      return;
+    }
+    if matches!(self.kind, Kind::Form(f) if crate::forms::close_only(f)) {
       return;
     }
     let Some((cmd, params)) = self.command() else {
@@ -2050,7 +2058,8 @@ impl Dialog {
       Kind::Fillet => self.fillet_ready(),
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty() || !self.bodies.is_empty(),
-      Kind::Combine => self.bodies.len() >= 2,
+      Kind::Combine => self.target.is_some() && !self.bodies.is_empty(),
+      Kind::SplitBody => !self.bodies.is_empty() && (self.target.is_some() || !self.plane.is_null()),
       Kind::Mirror if self.choice == "features" => !self.mirror_features.is_empty() && !self.plane.is_null(),
       Kind::Mirror => !self.bodies.is_empty() && !self.plane.is_null(),
       Kind::CircPattern => !self.bodies.is_empty() && self.circ_axis().is_some(),
@@ -2064,13 +2073,7 @@ impl Dialog {
       Kind::PressPull | Kind::OffsetFace => !self.faces.is_empty(),
       Kind::Draft => !self.plane.is_null() && !self.faces.is_empty(),
       Kind::Scale => !self.bodies.is_empty() && self.point.is_some(),
-      Kind::Flange => {
-        if self.choice == "edge" {
-          !self.edges.is_empty()
-        } else {
-          self.sketch.is_some()
-        }
-      }
+      Kind::Flange => self.flange_ready(),
       Kind::Hem => !self.edges.is_empty() && sheet::hem_folds(self.choice),
       Kind::Rip => !self.edges.is_empty(),
       Kind::NewComponent => self.choice == "empty" || !self.bodies.is_empty(),
@@ -2095,6 +2098,8 @@ impl Dialog {
       Kind::RedefinePlane => self.sketch.is_some() && self.redefine.picked.is_some(),
       Kind::ExportDxf => self.sketch.is_some(),
       Kind::InsertMesh => self.mesh.path.is_some(),
+      Kind::Analysis(k) => self.analysis_ready(k),
+      Kind::CenterOfMass => !self.bodies.is_empty(),
       Kind::PlaneCut => self.plane_cut_ready(),
       _ => true,
     }
@@ -2134,8 +2139,8 @@ impl Dialog {
         out.push(Sel::Face { body: BodyId(b), face: i });
       }
     }
-    if self.kind == Kind::Combine {
-      out.extend(self.bodies.iter().map(|b| Sel::Body { body: BodyId(*b) }));
+    if matches!(self.kind, Kind::Combine | Kind::SplitBody) {
+      return self.routed_selection();
     }
     if matches!(self.kind, Kind::Joint | Kind::AsBuiltJoint) {
       out.clear();
@@ -2281,13 +2286,14 @@ impl Dialog {
         let before = self.form.values.clone();
         self.form.sync(f, s, last_unconsumed_sketch(s));
         self.form.chain_path(f, s);
+        self.extend_chain(f, s);
+        stitch::find_open_edges(&mut self.form, f, s);
         if self.form.values != before {
           self.dirty = !self.picks();
         }
       }
-      Kind::Extrude | Kind::Revolve | Kind::Sweep | Kind::Flange
-        if !(self.kind == Kind::Flange && self.choice == "edge") =>
-      {
+      Kind::Flange => self.flange_sync(s),
+      Kind::Extrude | Kind::Revolve | Kind::Sweep => {
         let mut pts = Vec::new();
         for sel in &s.selection {
           if let Sel::Profile { sketch, index } = sel
@@ -2336,7 +2342,7 @@ impl Dialog {
         }
         self.sync_loft_guides(s);
       }
-      Kind::Hem | Kind::Rip | Kind::Flange if !self.applied => {
+      Kind::Hem | Kind::Rip if !self.applied => {
         let e = sel_edges(s);
         if e != self.edges {
           self.edges = e;
@@ -2382,13 +2388,7 @@ impl Dialog {
           self.dirty = !self.picks();
         }
       }
-      Kind::SplitBody => {
-        let b = sel_only_bodies(s);
-        if b != self.bodies {
-          self.bodies = b;
-          self.dirty = true;
-        }
-      }
+      Kind::SplitBody => self.sync_split_body(s),
       Kind::NewComponent => {
         let b = sel_bodies(s);
         if b != self.bodies {
@@ -2438,7 +2438,8 @@ impl Dialog {
       Kind::CircPattern if self.editing.is_none() => self.circ_sync(s),
       Kind::Interference => self.interference_sync(s),
       Kind::Section => self.section_sync(s),
-      Kind::Combine | Kind::Mirror | Kind::CircPattern if !self.applied || !self.picks() => {
+      Kind::Combine if !self.applied => self.sync_combine(s),
+      Kind::Mirror | Kind::CircPattern if !self.applied || !self.picks() => {
         let mut b: Vec<u32> = Vec::new();
         for x in &s.selection {
           let id = match x {
@@ -2468,6 +2469,7 @@ impl Dialog {
     {
       crate::origin::clear(app);
     }
+    self.route_picks(app);
     self.hole_sync(app);
     self.redefine_sync(app);
     self.plane_cut_sync(app);
@@ -2544,6 +2546,12 @@ impl Dialog {
               self.fields(app, ui);
             });
           }
+          // Stitch's Stitch Result and Unstitched Edges groups
+          if let Kind::Form(f) = self.kind
+            && f.cmd == "surface.stitch"
+          {
+            self.stitch_groups(app, ui);
+          }
           // a failed preview's message is in the error toast instead, as Fusion shows it
           if let Some(e) = self.error.as_ref().filter(|_| !self.failed()) {
             ui.add_space(6.0);
@@ -2567,7 +2575,8 @@ impl Dialog {
               egui::FontId::proportional(11.0),
               theme::GROUP_LABEL,
             );
-            if !self.kind.reports() {
+            let close_only = matches!(self.kind, Kind::Form(f) if crate::forms::close_only(f));
+            if !self.kind.reports() && !close_only {
               if self.picks() && !self.picks_fixed() {
                 self.live_checkbox(ui, &mut app.s);
               }
@@ -2602,6 +2611,9 @@ impl Dialog {
       self.switch_pattern(app, k);
       return true;
     }
+    if std::mem::take(&mut self.live.withdraw) {
+      self.withdraw(&mut app.s);
+    }
     if self.dirty {
       self.preview(&mut app.s);
     }
@@ -2623,6 +2635,13 @@ impl Dialog {
         }
         keep = false;
       }
+      ok = false;
+    }
+    // an analysis is kept in the browser's Analysis folder
+    if ok && let Some((kind, params)) = self.analysis_ok() {
+      crate::analyses::keep(app, kind, params);
+      app.s.selection.clear();
+      keep = false;
       ok = false;
     }
     if ok {
@@ -2678,7 +2697,11 @@ impl Dialog {
   /// timeline, as in Fusion.
   pub(crate) fn heading(&self) -> String {
     if self.editing.is_some() {
-      return "EDIT FEATURE".into();
+      // sheet metal features name their command, as Fusion's EDIT EDGE FLANGE does
+      return self.flange_title().map_or("EDIT FEATURE".into(), |t| format!("EDIT {t}"));
+    }
+    if let Some(t) = self.flange_title() {
+      return t.into();
     }
     match self.kind {
       Kind::Move => self.move_title().unwrap_or(self.kind.title()),
@@ -2711,6 +2734,13 @@ impl Dialog {
       return Some(section::CUT_PLANE_HINT.into());
     }
     if !self.ready() {
+      // a form's own wording for the row waiting for a pick
+      if let Kind::Form(f) = self.kind
+        && f.cmd != "sketch.text.form"
+        && let Some(p) = self.form.first_missing(f).and_then(|(key, _)| crate::forms::prompt(f, key))
+      {
+        return Some(p.into());
+      }
       return Some(match self.kind {
         Kind::Extrude => "Select sketch profiles or planar faces to extrude".into(),
         Kind::Revolve if self.sketch.is_some() => "Select the axis to revolve the profile around".into(),
@@ -2721,7 +2751,6 @@ impl Dialog {
         Kind::Loft => "Select profiles or planar faces".into(),
         Kind::Sweep if self.profiles.is_empty() => "Specify a sweep type or select an object to sweep".into(),
         Kind::Sweep => "Select path".into(),
-        Kind::Combine if self.bodies.is_empty() => "Select target body".into(),
         Kind::Mirror if self.choice == "features" && self.mirror_features.is_empty() => {
           "Select features to mirror".into()
         }
@@ -2731,7 +2760,14 @@ impl Dialog {
           "Select solid or surface bodies in the canvas or browser to pattern".into()
         }
         Kind::CircPattern => "Select axis".into(),
-        Kind::Combine => "Select tool bodies".into(),
+        Kind::Combine if self.pick_row == 0 => "Select target body".into(),
+        Kind::Combine => "Select bodies to combine with target body".into(),
+        Kind::SplitBody if self.pick_row == 0 => "Select Body to split".into(),
+        Kind::SplitBody => "Select splitting tool(s)".into(),
+        // a routed form asks for its active row's picks
+        Kind::Form(f) if crate::forms::routed(f) => {
+          sentence(self.form.row_prompt(f).unwrap_or_else(|| self.missing_input()))
+        }
         Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
         Kind::Draft if self.pick_row == 0 || self.plane.is_null() => "Select pull direction".into(),
         Kind::Draft => "Select faces to draft".into(),
@@ -2740,6 +2776,7 @@ impl Dialog {
         Kind::OffsetFace => "Select face(s) to offset".into(),
         Kind::Scale if self.bodies.is_empty() => "Select bodies or sketches to scale".into(),
         Kind::Scale => "Select point".into(),
+        Kind::Flange => flange::PICK_PROMPT.into(),
         Kind::PlaneCut => plane_cut::HINT.into(),
         // one prompt for the whole pick, as Fusion words it
         Kind::SkScale => {
@@ -2758,6 +2795,10 @@ impl Dialog {
     // Offset's prompt names its values whatever the pointer is over, as Fusion's does
     if self.kind == Kind::SkOffset {
       return Some("Modify offset distance or side settings".into());
+    }
+    // the flange's, whatever the pointer is over, as Fusion words it
+    if let Some(p) = self.flange_prompt() {
+      return Some(p.into());
     }
     // Mirror's prompt once both picks are in, whatever the pointer is over, as Fusion words it
     if self.kind == Kind::Mirror && self.editing.is_none() {
@@ -2829,6 +2870,8 @@ impl Dialog {
           | Kind::SkRectPattern
           | Kind::SkScale
           | Kind::Scale
+          | Kind::Analysis(_)
+          | Kind::CenterOfMass
       )
   }
 
@@ -2841,6 +2884,12 @@ impl Dialog {
       // OK waits for Compute, and Section Analysis for its cut plane
       Kind::Interference => self.report.is_some(),
       Kind::Section => !self.plane.is_null(),
+      // Remove Features applies from its own Remove button
+      Kind::Form(f) if crate::forms::close_only(f) => false,
+      // Trim previews its tool's cut, but OK waits for a piece to remove
+      Kind::Form(f) if f.cmd == crate::forms::TRIM_CMD => {
+        self.ready() && self.form_value("remove").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+      }
       // an offset of 0.00 sits on its curve, a fillet or shell of 0.00 has no size: OK waits
       // for a value
       _ => self.ready() && !self.waits_for_value(),
@@ -2857,6 +2906,7 @@ impl Dialog {
       Kind::Draft => !self.draft_angle_set(),
       Kind::Fillet if self.editing.is_none() && self.solid.fillet_type != "full_round" => !length_set(&self.radius),
       Kind::Shell if self.editing.is_none() => !length_set(&self.radius),
+      Kind::Flange => self.flange_waits(),
       _ => false,
     }
   }
@@ -2921,6 +2971,8 @@ impl Dialog {
       Kind::DrawingMoveView | Kind::DrawingDimension => "pick a view",
       Kind::DrawingView if self.choice == "flat" => "select a sheet metal body",
       Kind::RedefinePlane => "select a planar face or a work plane",
+      Kind::Analysis(k) => self.analysis_missing(k),
+      Kind::CenterOfMass => "select bodies and/or components",
       Kind::PlaneCut => "select a mesh body and a cut plane",
       _ => "missing input",
     }
@@ -3051,23 +3103,7 @@ impl Dialog {
         }
         ui.end_row();
       }
-      Kind::Combine => {
-        ui.label("Target");
-        match self.bodies.first() {
-          Some(b) => sel_chip(ui, self.accent(), &app.s.body_name(BodyId(*b)), true),
-          None => sel_chip(ui, self.accent(), "Select", false),
-        };
-        ui.end_row();
-        ui.label("Tools");
-        ui.label(format!("{}", self.bodies.len().saturating_sub(1)));
-        ui.end_row();
-        ui.label("Operation");
-        self.combo(ui, "op", &OPS[1..4], false);
-        ui.end_row();
-        ui.label("");
-        ui.checkbox(&mut self.keep_tools, "Keep tools");
-        ui.end_row();
-      }
+      Kind::Combine => self.combine_fields(ui),
       Kind::Move => self.move_fields(app, ui),
       Kind::Inspect => self.inspect(app, ui),
       // the palettes draw outside the grid (see `show`)
@@ -3077,13 +3113,14 @@ impl Dialog {
       Kind::InsertMesh => self.insert_mesh_rows(app, ui),
       Kind::Section => self.section_fields(app, ui),
       Kind::PlaneCut => self.plane_cut_rows(app, ui),
-      Kind::Analysis(kind) => analysis_fields(app, ui, kind),
+      Kind::Analysis(kind) => self.inspect_analysis_rows(app, ui, kind),
       Kind::Form(f) => {
         let mut dirty = false;
         let op = self.operation().to_string();
         self.form_fields(f, app, ui, &mut dirty);
         self.path_type_switch(f);
         self.form_cut_rows(ui, &op);
+        self.flange_type_switch(f);
         if dirty && (!self.picks() || self.applied) {
           self.dirty = true;
         }
@@ -3118,6 +3155,15 @@ impl Dialog {
       .position(|x| x.key() == "faces")
       .and_then(|j| self.form.values[j].as_array().map(Vec::len))
       .unwrap_or(0);
+    if std::ptr::eq(f, &crate::forms::REMOVE_FEATURES) {
+      self.remove_features_fields(app, ui);
+      return;
+    }
+    // Extend's Analysis tab
+    if crate::forms::has_analysis_tab(f) && self.solid.rsl.analysis_tab {
+      self.analysis_rows(ui);
+      return;
+    }
     let text_form = f.cmd == "sketch.text.form";
     let params = if text_form { crate::value_box::params_of(&app.s) } else { Vec::new() };
     for (i, input) in f.inputs.iter().enumerate() {
@@ -3130,8 +3176,16 @@ impl Dialog {
       if f.cmd == "thread" && self.thread_form_field(f, i, s, ui, dirty) {
         continue;
       }
+      if self.mesh_form_field(f, i, s, ui, dirty) {
+        continue;
+      }
       let v = self.form.values[i].clone();
       let greyed = crate::forms::greyed(f, input.key());
+      // Stitch's Tolerance has a slider under it
+      if f.cmd == "surface.stitch" && input.key() == "tolerance" {
+        self.stitch_tolerance(i, input, ui, dirty);
+        continue;
+      }
       // Coil's Profile: the circle drawn before the dialog opened
       if f.cmd == "coil.form" && input.key() == "plane" {
         ui.label("Profile");
@@ -3364,6 +3418,16 @@ impl Dialog {
         }
         // counted on the tools' chip
         Input::Planes { .. } => {}
+        Input::Pick { label, multi, .. } => self.form_pick_row(app, ui, i, label, *multi),
+        Input::TrimTool { label, .. } => {
+          ui.label(*label);
+          let n = match v.get("curves").and_then(Value::as_array) {
+            Some(c) => c.len().max(1),
+            None => usize::from(!v.is_null()),
+          };
+          sel_chip(ui, accent, &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
+          ui.end_row();
+        }
         Input::Slider { label, max, .. } => {
           // the value, and a slider under it
           let mut t = v.as_str().unwrap_or("").to_string();
@@ -3530,9 +3594,6 @@ impl Dialog {
       let text = if n == 0 { "Select".to_string() } else { format!("{n} {what}") };
       sel_chip(ui, accent, &text, n > 0);
     };
-    const FLANGES: [(&str, &str); 3] =
-      [("base", "Base (profile)"), ("edge", "Edge"), ("contour", "Contour (open path)")];
-    const POSITIONS: [(&str, &str); 3] = [("adjacent", "Adjacent"), ("inside", "Inside"), ("outside", "Outside")];
     const RELIEFS: [(&str, &str); 3] = [("rectangular", "Rectangular"), ("round", "Round"), ("none", "None")];
     const JOINTS: [(&str, &str); 8] = [
       ("rigid", "Rigid"),
@@ -3558,73 +3619,12 @@ impl Dialog {
       Kind::Draft => self.draft_rows(ui, dirty),
       Kind::Scale => self.scale_rows(ui, dirty),
       Kind::OffsetFace => self.offset_face_rows(ui, dirty),
-      Kind::SplitBody => {
-        ui.label("Bodies to split");
-        sel_chip(ui, accent, &self.bodies_label(), !self.bodies.is_empty());
-        ui.end_row();
-        ui.label("Splitting tool");
-        let shown = match self.target {
-          Some(b) => app.s.body_name(BodyId(b)),
-          None => self.plane_label.clone(),
-        };
-        let bodies: Vec<(u32, String)> = app.s.model.bodies.iter().map(|b| (b.id.0, app.s.body_name(b.id))).collect();
-        egui::ComboBox::from_id_salt("splittool").selected_text(shown).width(140.0).show_ui(ui, |ui| {
-          for (l, p) in [("XY plane", "xy"), ("XZ plane", "xz"), ("YZ plane", "yz")] {
-            if ui.selectable_label(self.target.is_none() && self.plane_label == l, l).clicked() {
-              self.target = None;
-              self.plane = json!(p);
-              self.plane_label = l.into();
-              *dirty = true;
-            }
-          }
-          ui.separator();
-          for (id, n) in &bodies {
-            if ui.selectable_label(self.target == Some(*id), n).clicked() {
-              self.target = Some(*id);
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-        if self.target.is_some() {
-          Self::check(ui, "Remove the tool body", &mut self.flag, dirty);
-        }
+      Kind::SplitBody => self.split_body_fields(ui),
+      Kind::Flange => self.flange_rows(app, ui, dirty),
+      Kind::Hem => {
+        self.flange_type_row(ui);
+        self.hem_rows(app, ui, dirty);
       }
-      Kind::Flange => {
-        let before = self.choice;
-        Self::choose(ui, "Type", "flange", &mut self.choice, &FLANGES, dirty);
-        if before != self.choice {
-          self.withdraw(&mut app.s);
-        }
-        match self.choice {
-          "edge" => {
-            ui.label("Edges");
-            chip(ui, self.edges.len(), "selected");
-            ui.end_row();
-            Self::field(ui, "Height", &mut self.distance, dirty);
-            Self::field(ui, "Bend angle", &mut self.angle, dirty);
-            Self::choose(ui, "Position", "pos", &mut self.position, &POSITIONS, dirty);
-            Self::choose(ui, "Corners", "corners", &mut self.corners, &CORNERS, dirty);
-          }
-          "contour" => {
-            ui.label("Sketch");
-            ui.label(self.sketch.and_then(|s| app.s.design.feature(s)).map(|f| f.name.clone()).unwrap_or_default());
-            ui.end_row();
-            Self::field(ui, "Distance", &mut self.distance, dirty);
-            Self::check(ui, "Symmetric", &mut self.flag, dirty);
-            self.rule_combo(ui);
-          }
-          _ => {
-            ui.label("Profiles");
-            chip(ui, self.profiles.len(), "selected");
-            ui.end_row();
-            self.rule_combo(ui);
-            Self::choose(ui, "Operation", "op", &mut self.op, &OPS[..2], dirty);
-          }
-        }
-        Self::check(ui, "Flip", &mut self.flip, dirty);
-      }
-      Kind::Hem => self.hem_rows(app, ui, dirty),
       Kind::Fold => self.fold_rows(app, ui, dirty),
       Kind::ConvertSheet => self.convert_rows(ui),
       Kind::Rip => self.rip_rows(ui, dirty),
@@ -3822,29 +3822,7 @@ impl Dialog {
         Self::check(ui, "Flip", &mut self.flip, dirty);
       }
       Kind::Interference => self.interference_fields(app, ui),
-      Kind::CenterOfMass => {
-        let r = self.report.clone().unwrap_or(Value::Null);
-        let c: Vec<f64> = r
-          .get("center")
-          .and_then(Value::as_array)
-          .map(|a| a.iter().filter_map(Value::as_f64).collect())
-          .unwrap_or_default();
-        ui.label("Bodies");
-        ui.label(format!("{}", r.get("bodies").and_then(Value::as_array).map(Vec::len).unwrap_or(0)));
-        ui.end_row();
-        if let [x, y, z] = c.as_slice() {
-          ui.label(RichText::new("Centre").strong());
-          let u = self.unit;
-          ui.label(format!("{:.3}, {:.3}, {:.3} {}", u.from_mm(*x), u.from_mm(*y), u.from_mm(*z), u.symbol()));
-          ui.end_row();
-        }
-        ui.label("Mass");
-        ui.label(format!("{:.2} g", r.get("mass_g").and_then(Value::as_f64).unwrap_or(0.0)));
-        ui.end_row();
-        ui.label("Volume");
-        ui.label(format!("{:.3} mm³", r.get("volume_mm3").and_then(Value::as_f64).unwrap_or(0.0)));
-        ui.end_row();
-      }
+      Kind::CenterOfMass => self.center_of_mass_rows(app, ui),
       Kind::Bom => {
         let rows = self.report.as_ref().and_then(Value::as_array).cloned().unwrap_or_default();
         if rows.is_empty() {
@@ -4450,10 +4428,6 @@ impl Dialog {
         s.execute("assembly.interference", &json!({"bodies": self.bodies}))
       }
       Kind::Bom => s.execute("assembly.bom", &json!({})),
-      Kind::CenterOfMass => {
-        let bodies = sel_only_bodies(s);
-        s.execute("inspect.center_of_mass", &json!({"bodies": bodies}))
-      }
       Kind::MotionStudy => match self.target {
         Some(j) => s.execute(
           "motion.study",
@@ -5255,6 +5229,10 @@ impl Dialog {
   pub(crate) fn leave(&mut self, app: &mut App) {
     // an edit closed some other way keeps what it shows and rolls forward
     self.end_edit(&mut app.s, true);
+    if let Kind::Analysis(_) = self.kind {
+      // OK kept it in the Analysis folder; Cancel and Escape leave nothing
+      app.analysis = None;
+    }
     if let Some((priority, vertices)) = self.saved_filter.take() {
       app.sel_priority = priority;
       app.sel_filter.vertices = vertices;
@@ -5344,48 +5322,6 @@ pub(crate) fn apply_appearance(app: &mut App, name: &str, color: [u8; 3], faces:
   }
   p["bodies"] = json!(bodies);
   app.run("body.appearance", p).is_some()
-}
-
-/// Surface analysis settings: the pull direction and draft angle where they apply.
-fn analysis_fields(app: &mut App, ui: &mut egui::Ui, kind: &'static str) {
-  let mut on = app.analysis.as_ref().is_some_and(|a| a["analysis"] == kind);
-  let mut a = app
-    .analysis
-    .clone()
-    .filter(|a| a["analysis"] == kind)
-    .unwrap_or(json!({"analysis": kind, "pull": "z", "angle": 1.0}));
-  ui.label("");
-  ui.checkbox(&mut on, "Show analysis");
-  ui.end_row();
-  if matches!(kind, "draft" | "accessibility") {
-    ui.label(if kind == "draft" { "Pull direction" } else { "Tool direction" });
-    let cur = a["pull"].as_str().unwrap_or("z").to_string();
-    egui::ComboBox::from_id_salt("pull").selected_text(axis_label(&cur)).width(140.0).show_ui(ui, |ui| {
-      for k in ["x", "y", "z"] {
-        if ui.selectable_label(cur == k, axis_label(k)).clicked() {
-          a["pull"] = json!(k);
-        }
-      }
-    });
-    ui.end_row();
-  }
-  if kind == "draft" {
-    ui.label("Draft angle");
-    let mut ang = a["angle"].as_f64().unwrap_or(1.0);
-    ui.add(egui::DragValue::new(&mut ang).speed(0.1).range(0.0..=45.0).suffix("°"));
-    a["angle"] = json!(ang);
-    ui.end_row();
-  }
-  let legend = match kind {
-    "zebra" => "Stripes that kink or jump show where faces meet without tangency or curvature continuity",
-    "draft" => "Green: positive draft · yellow: less than the angle · red: undercut",
-    "accessibility" => "Green: reachable along the direction · red: hidden from it",
-    _ => "Blue: flat · green → yellow → red: curving more tightly",
-  };
-  ui.label("");
-  ui.label(RichText::new(legend).small().color(theme::MUTED));
-  ui.end_row();
-  app.analysis = on.then_some(a);
 }
 
 /// `s` with its first letter capitalised, as a cursor prompt is written.
@@ -5509,6 +5445,19 @@ fn press_pull_kind(s: &Session) -> Kind {
     Kind::Fillet
   } else {
     Kind::PressPull
+  }
+}
+
+impl Dialog {
+  /// Extend with Tangent Chain: the picked edges and the edges that continue them smoothly.
+  fn extend_chain(&mut self, f: &crate::forms::Form, s: &Session) {
+    let at = |k: &str| f.inputs.iter().position(|x| x.key() == k);
+    let (Some(ei), Some(ci)) = (at("edges"), at("chain")) else { return };
+    if f.cmd != crate::forms::EXTEND_CMD || self.form.values[ci] != json!(true) {
+      return;
+    }
+    let edges = self.form.values[ei].as_array().cloned().unwrap_or_default();
+    self.form.values[ei] = json!(with_tangent_chain(s, &edges));
   }
 }
 
@@ -5738,6 +5687,8 @@ impl Dialog {
       Kind::Fillet | Kind::Chamfer => Some(&mut self.radius),
       Kind::SkScale => Some(&mut self.a),
       Kind::Scale if self.choice != "non_uniform" => Some(&mut self.a),
+      // an edge flange's Height, in the box on its arrow
+      Kind::Flange if self.choice == "edge" => Some(&mut self.distance),
       _ => None,
     }
   }
@@ -5910,7 +5861,9 @@ mod tests {
     // a command without its own wording asks for its missing input as a sentence
     assert_eq!(Dialog::blank(Kind::Hem).prompt(false).as_deref(), Some("Select an edge to hem"));
     // one with nothing to select or specify has no prompt
-    assert_eq!(Dialog::blank(Kind::CenterOfMass).prompt(false), None);
+    assert_eq!(Dialog::blank(Kind::Bom).prompt(false), None);
+    // Center of Mass asks for its pick, as Fusion's does
+    assert_eq!(Dialog::blank(Kind::CenterOfMass).prompt(false).as_deref(), Some("Select bodies and/or components"));
     assert_eq!(Dialog::blank(Kind::Inspect).prompt(false).as_deref(), Some("Select objects to measure."));
   }
 
@@ -6475,6 +6428,7 @@ mod tests {
     apply(&mut s, &mut d);
     d.applied = false;
     let mut d = Dialog::blank(Kind::SplitBody);
+    d.bodies = vec![s.model.bodies[0].id.0];
     d.plane = json!("xz");
     apply(&mut s, &mut d);
     assert_eq!(s.model.bodies.len(), 2);
@@ -6496,6 +6450,8 @@ mod tests {
     d.sketch = s.edit_sketch;
     d.rule = "Alu".into();
     run(&mut s, "sketch.finish", json!({}));
+    // the profile picked (Fusion's Flange picks nothing itself)
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     apply(&mut s, &mut d);
     d.applied = false;
     let mut d = Dialog::blank(Kind::Flange);
@@ -6993,11 +6949,113 @@ mod tests {
     let bottom = s.model.bodies[1].faces().iter().find(|f| f.normal.z < -0.9).unwrap().id;
     let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
     let picks = vec![Sel::Face { body: block, face: bottom }, Sel::Face { body: plate, face: top }];
-    let mut d = form(&mut s, &ALIGN, picks, &[]);
+    let mut d = form(&mut s, &ALIGN, picks, &[("objects", json!("components"))]);
     assert_eq!(d.command().unwrap().0, "align");
     apply(&mut s, &mut d);
     let m = s.model.body(block).unwrap().shape.mass().unwrap();
     assert!((m.bbox_min.z - 10.0).abs() < 1e-6 && (m.bbox_min.x - 50.0).abs() < 1e-6, "{:?}", m.bbox_min);
+  }
+
+  #[test]
+  fn align_remove_and_simplify_dialogs_as_fusion() {
+    use crate::forms::*;
+    let shown = |d: &Dialog, f: &'static Form| -> Vec<&str> {
+      (0..f.inputs.len()).filter(|i| d.form.shown(f, *i)).map(|i| f.inputs[i].key()).collect()
+    };
+    // ALIGN: Object (Bodies), From and To; OK greyed and Fusion's prompt until both are picked
+    let mut s = Session::default();
+    s.execute("box", &json!({"width": 40, "depth": 30, "height": 10, "at": [20, 15]})).unwrap();
+    s.execute("box", &json!({"width": 10, "depth": 10, "height": 10, "at": [55, 5]})).unwrap();
+    let (plate, block) = (s.model.bodies[0].id, s.model.bodies[1].id);
+    let mut d = form(&mut s, &ALIGN, vec![], &[]);
+    assert_eq!(shown(&d, &ALIGN), ["objects", "moving", "fixed"]);
+    assert_eq!(d.form.values[0], json!("bodies"));
+    assert!(!d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select geometry or snap point on alignable object"));
+    let bottom = s.model.bodies[1].faces().iter().find(|f| f.normal.z < -0.9).unwrap().id;
+    let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    d = form(&mut s, &ALIGN, vec![Sel::Face { body: block, face: bottom }], &[]);
+    assert_eq!(d.prompt(false).as_deref(), Some("Select geometry or snap point on alignable object"));
+    let picks = vec![Sel::Face { body: block, face: bottom }, Sel::Face { body: plate, face: top }];
+    let mut d = form(&mut s, &ALIGN, picks, &[]);
+    assert_eq!(shown(&d, &ALIGN), ["objects", "moving", "fixed", "relation", "offset", "flip"]);
+    assert!(d.ok_enabled());
+    // root bodies: the From body moves onto the plate
+    apply(&mut s, &mut d);
+    let m = s.model.body(block).unwrap().shape.mass().unwrap();
+    assert!((m.bbox_min.z - 10.0).abs() < 1e-6 && (m.bbox_min.x - 50.0).abs() < 1e-6, "{:?}", m.bbox_min);
+    assert!(!crate::forms::preview_box(&ALIGN));
+
+    // Remove with nothing selected opens REMOVE: Objects, OK greyed, Fusion's prompt
+    let mut app = App::with_session(Session::default());
+    app.s.execute("box", &json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    let b = app.s.model.bodies[0].id;
+    crate::panels::Cmd::RemoveBodies.run(&mut app);
+    let d = app.dialog.as_mut().expect("REMOVE opens");
+    assert_eq!(d.kind, Kind::Form(&REMOVE));
+    assert_eq!(REMOVE.title, "REMOVE");
+    assert!(matches!(REMOVE.inputs, [Input::Bodies { label: "Objects", required: true, .. }]));
+    assert!(!d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select bodies or components to remove"));
+    app.s.selection = vec![Sel::Body { body: b }];
+    d.form.sync(&REMOVE, &app.s, None);
+    assert!(d.ok_enabled());
+    apply(&mut app.s, d);
+    assert!(app.s.model.bodies.is_empty());
+    // with bodies selected it removes them at once, as before
+    let mut app = App::with_session(Session::default());
+    app.s.execute("box", &json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    app.s.selection = vec![Sel::Body { body: app.s.model.bodies[0].id }];
+    crate::panels::Cmd::RemoveBodies.run(&mut app);
+    assert!(app.dialog.is_none() && app.s.model.bodies.is_empty());
+
+    // REMOVE FEATURES: Bodies, the Features group all ticked, only Close
+    let mut s = Session::default();
+    s.execute("box", &json!({"width": 40, "depth": 30, "height": 10, "at": [20, 15]})).unwrap();
+    s.execute("cylinder", &json!({"radius": 5, "height": 10, "at": [12, 15], "operation": "cut"})).unwrap();
+    let mut d = form(&mut s, &REMOVE_FEATURES, vec![], &[]);
+    assert!(close_only(&REMOVE_FEATURES) && !d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select solid bodies"));
+    let keys: Vec<&str> = REMOVE_FEATURES.inputs.iter().map(Input::key).collect();
+    assert_eq!(keys, ["bodies", "all", "fillet", "hole", "chamfer", "extrude", "revolve", "other"]);
+    assert_eq!(d.rf_types(), REMOVE_FEATURE_TYPES);
+    assert!(d.form.values[1..].iter().all(|v| *v == json!(true)));
+    d.rf_tick("fillet", false);
+    assert_eq!(d.form.values[1], json!(false));
+    assert_eq!(d.rf_types(), ["hole", "chamfer", "extrude", "revolve", "other"]);
+    d.rf_tick("all", true);
+    assert_eq!(d.rf_types(), REMOVE_FEATURE_TYPES);
+    assert!(greyed(&REMOVE_FEATURES, "chamfer").is_some() && greyed(&REMOVE_FEATURES, "hole").is_none());
+    let body = s.model.bodies[0].id;
+    let mut d = form(&mut s, &REMOVE_FEATURES, vec![Sel::Body { body }], &[]);
+    // picking the body applies nothing; the hole is found and Remove takes it off
+    let before = s.model.bodies[0].shape.mass().unwrap().volume;
+    d.preview(&mut s);
+    assert!(!d.applied);
+    let found = d.rf_found(&mut s);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0]["type"], "hole");
+    d.rf_remove(&mut s);
+    assert!(d.error.is_none(), "{:?}", d.error);
+    let after = s.model.bodies[0].shape.mass().unwrap().volume;
+    assert!((after - before - std::f64::consts::PI * 250.0).abs() < 1e-3, "{before} {after}");
+    assert!(d.rf_found(&mut s).is_empty());
+    // closing keeps the removal
+    d.cancel(&mut s);
+    assert!((s.model.bodies[0].shape.mass().unwrap().volume - after).abs() < 1e-9);
+
+    // Replace with Primitives: Bodies and the primitive; OK swaps the body for a box
+    let mut s = Session::default();
+    s.execute("cylinder", &json!({"radius": 5, "height": 20})).unwrap();
+    let body = s.model.bodies[0].id;
+    let d = form(&mut s, &REPLACE_PRIMITIVES, vec![], &[]);
+    assert!(!d.ok_enabled());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select solid bodies"));
+    let mut d = form(&mut s, &REPLACE_PRIMITIVES, vec![Sel::Body { body }], &[]);
+    assert_eq!(d.command().unwrap().0, "replace_with_primitives");
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), 1);
+    assert!((s.model.bodies[0].shape.mass().unwrap().volume - 2000.0).abs() < 1e-6);
   }
 
   #[test]
@@ -7297,7 +7355,7 @@ mod tests {
     let b = s.model.bodies[0].id;
     // extend the edge at x = 10 by the default 5 mm
     let e = s.model.bodies[0].edges().iter().find(|e| (e.mid.x - 10.0).abs() < 1e-6).unwrap().id;
-    let mut d = form(&mut s, &EXTEND, vec![Sel::Edge { body: b, edge: e }], &[]);
+    let mut d = form(&mut s, &EXTEND, vec![Sel::Edge { body: b, edge: e }], &[("distance", json!("5 mm"))]);
     apply(&mut s, &mut d);
     assert!((area(&s, b) - 150.0).abs() < 1e-6, "{}", area(&s, b));
     d.applied = false;
