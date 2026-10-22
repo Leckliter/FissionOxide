@@ -432,7 +432,8 @@ mod tests {
       .unwrap();
     let e = d
       .add_feature(FeatureKind::Extrude {
-        sketch: s,
+        sketch: Some(s),
+        faces: vec![],
         profiles: vec![],
         extent: Extent::distance("5 mm"),
         operation: Operation::NewBody,

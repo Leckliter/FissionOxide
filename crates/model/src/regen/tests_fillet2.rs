@@ -12,7 +12,14 @@ fn block(x: f64, y: f64, z: &str) -> Design {
   let plane = PlaneRef::Origin { plane: OriginPlane::Xy };
   let s = d.add_feature(FeatureKind::Sketch { plane, sketch: s, links: Vec::new() }).unwrap();
   let extent = Extent::distance(z);
-  d.add_feature(FeatureKind::Extrude { sketch: s, profiles: vec![], extent, operation: Operation::NewBody }).unwrap();
+  d.add_feature(FeatureKind::Extrude {
+    sketch: Some(s),
+    faces: vec![],
+    profiles: vec![],
+    extent,
+    operation: Operation::NewBody,
+  })
+  .unwrap();
   d
 }
 

@@ -16,7 +16,14 @@ fn offset_trapezoid_top(behaviours: Behaviours, dist: &str) -> (f64, usize) {
   let plane = PlaneRef::Origin { plane: OriginPlane::Xy };
   let sk = d.add_feature(FeatureKind::Sketch { plane, sketch: s, links: Vec::new() }).unwrap();
   let extent = Extent::distance("10");
-  d.add_feature(FeatureKind::Extrude { sketch: sk, profiles: vec![], extent, operation: Operation::NewBody }).unwrap();
+  d.add_feature(FeatureKind::Extrude {
+    sketch: Some(sk),
+    faces: vec![],
+    profiles: vec![],
+    extent,
+    operation: Operation::NewBody,
+  })
+  .unwrap();
   let m = regenerate(&mut d);
   assert!(m.errors().is_empty(), "{:?}", m.errors());
   let b = &m.bodies[0];

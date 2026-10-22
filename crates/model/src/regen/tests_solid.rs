@@ -416,7 +416,8 @@ fn bar_under_a_cylinder() -> (Design, FeatureId, FeatureId) {
 
 fn extrude_to(d: &mut Design, sk: FeatureId, kind: ExtentKind, to: FaceRef, distance: &str) -> FeatureId {
   d.add_feature(FeatureKind::Extrude {
-    sketch: sk,
+    sketch: Some(sk),
+    faces: vec![],
     profiles: vec![],
     extent: Extent { kind, to: Some(to), ..Extent::distance(distance) },
     operation: Operation::NewBody,
@@ -431,7 +432,8 @@ fn extrude_to_a_vertex() {
   let point = |at: [f64; 3]| Some(construct::PointRef::At { at });
   let e = d
     .add_feature(FeatureKind::Extrude {
-      sketch: sk,
+      sketch: Some(sk),
+      faces: vec![],
       profiles: vec![],
       extent: Extent { kind: ExtentKind::ToVertex, to_point: point([50.0, -20.0, 12.0]), ..Extent::distance("0") },
       operation: Operation::NewBody,
@@ -625,7 +627,8 @@ fn block() -> (Design, FaceRef) {
   let mut d = Design::new("block");
   let s = sketch(&mut d, XY, rect([0.0, 0.0], [40.0, 20.0]));
   d.add_feature(FeatureKind::Extrude {
-    sketch: s,
+    sketch: Some(s),
+    faces: vec![],
     profiles: vec![],
     extent: Extent::distance("10"),
     operation: Operation::NewBody,
@@ -783,7 +786,8 @@ fn split_circles_keep_their_faces_in_old_files_and_merge_in_new_ones() {
     let mut d = Design::new("obround");
     let sk = sketch(&mut d, XY, obround_of_circles(legacy));
     d.add_feature(FeatureKind::Extrude {
-      sketch: sk,
+      sketch: Some(sk),
+      faces: vec![],
       profiles: vec![[-3.0, 0.0]],
       extent: Extent::distance("4"),
       operation: Operation::NewBody,

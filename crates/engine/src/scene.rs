@@ -829,8 +829,8 @@ impl SceneBuilder {
 /// shown with `sketch.visible`).
 pub fn sketch_consumed(s: &Session, id: FeatureId) -> bool {
   s.design.features.iter().take(s.design.active_len()).any(|g| match &g.kind {
-    FeatureKind::Extrude { sketch, .. }
-    | FeatureKind::Revolve { sketch, .. }
+    FeatureKind::Extrude { sketch, .. } => *sketch == Some(id),
+    FeatureKind::Revolve { sketch, .. }
     | FeatureKind::Flange { sketch, .. }
     | FeatureKind::ContourFlange { sketch, .. }
     | FeatureKind::Hole { sketch, .. } => *sketch == id,

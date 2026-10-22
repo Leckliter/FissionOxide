@@ -1531,3 +1531,46 @@ fn sketch_palette_options_hide_their_part_of_the_sketch() {
   assert!(above(&whole) > 0 && above(&sliced) == 0, "the side above the plane is cut away: {}", above(&sliced));
   assert!(sliced.meshes.iter().any(|m| !m.analyze), "and capped");
 }
+
+/// `ui:dialogs:extrude-body-face-pick`: Extrude takes a body's planar face in place of a sketch
+/// profile, as Fusion's does: a box primitive's top face joins, makes a new body or cuts back
+/// along the face's outward normal, saves and reloads, and a curved face is refused.
+#[test]
+fn extrude_takes_a_planar_body_face() {
+  let boxed = || {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 34, "depth": 20, "height": 10}));
+    let b = &s.model.bodies[0];
+    let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let face = json!([{"body": b.id.0, "face": top}]);
+    (s, face)
+  };
+  let (mut s, face) = boxed();
+  let r = run(&mut s, "extrude", json!({"faces": face, "distance": 5, "operation": "join"}));
+  assert!(r["error"].is_null(), "{r}");
+  assert_eq!(s.model.bodies.len(), 1);
+  assert!((total_volume(&s) - 34.0 * 20.0 * 15.0).abs() < 1e-6, "{}", total_volume(&s));
+  let f = s.design.features.last().unwrap();
+  let fox_model::FeatureKind::Extrude { sketch, faces, .. } = &f.kind else { panic!("{:?}", f.kind) };
+  assert_eq!((sketch, faces.len(), f.name.as_str()), (&None, 1, "Extrude1"));
+  // it saves and reloads as it was
+  let back = fox_model::Design::from_json(&s.design.to_json()).unwrap();
+  assert_eq!(back.features.last().unwrap().kind, s.design.features.last().unwrap().kind);
+
+  let (mut s, face) = boxed();
+  run(&mut s, "extrude", json!({"faces": face, "distance": 5, "operation": "new_body"}));
+  assert_eq!(s.model.bodies.len(), 2);
+  assert!((total_volume(&s) - 34.0 * 20.0 * 15.0).abs() < 1e-6, "{}", total_volume(&s));
+
+  let (mut s, face) = boxed();
+  let r = run(&mut s, "extrude", json!({"faces": face, "distance": -3, "operation": "cut"}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!((total_volume(&s) - 34.0 * 20.0 * 7.0).abs() < 1e-6, "{}", total_volume(&s));
+
+  let mut s = Session::default();
+  run(&mut s, "cylinder", json!({"radius": 5, "height": 10}));
+  let b = &s.model.bodies[0];
+  let side = b.faces().iter().find(|f| f.kind != fox_kernel::SurfaceKind::Plane).unwrap().id;
+  let e = s.execute("extrude", &json!({"faces": [{"body": b.id.0, "face": side}], "distance": 5})).unwrap_err();
+  assert_eq!(e.0, "only planar faces can be extruded");
+}

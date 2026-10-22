@@ -35,6 +35,9 @@ pub(super) struct Cache {
   draft_box: bool,
   /// Draft: the pull direction it was found for, a point on its face or plane and the normal.
   pull: Option<(Value, DVec3, DVec3)>,
+  /// Extrude of a face: the face it was found for, and the middle of the face's edge the taper
+  /// handle sits on with the unit direction into the face.
+  face_taper: Option<(Value, DVec3, DVec3)>,
 }
 
 /// Draft's angle handle turns in 5° steps, as Fusion's does.
@@ -142,7 +145,7 @@ impl Dialog {
   /// on the first face) or face (Press Pull), or the offset curves (Sketch Offset).
   fn anchor_key(&self) -> Value {
     match self.kind {
-      Kind::PressPull | Kind::OffsetFace | Kind::Shell | Kind::Draft => json!(self.faces.first()),
+      Kind::PressPull | Kind::OffsetFace | Kind::Shell | Kind::Draft | Kind::Extrude => json!(self.faces.first()),
       Kind::Scale => json!([self.bodies, self.point]),
       Kind::SkOffset => json!({"offset": self.curves}),
       Kind::Fillet => json!(self.edges.first().or(self.faces.first())),
@@ -187,6 +190,14 @@ impl Dialog {
         if !self.applied && self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) =>
       {
         self.manip.pivot = centre(s, &self.bodies).map(|c| (self.bodies.clone(), c));
+      }
+      // a face extrude's arrow and taper handle, on its face before the preview changes it
+      Kind::Extrude if !self.applied && self.extrudes_faces() => {
+        let key = self.anchor_key();
+        if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
+          self.manip.anchor = anchor(s, &key).map(|(o, d)| (key.clone(), o, d));
+          self.manip.face_taper = face_taper_edge(s, &key).map(|(m, i)| (key, m, i));
+        }
       }
       Kind::Move => self.refresh_move(s),
       // an edge flange's arrow, found on the sheet before the preview bends it
@@ -571,7 +582,7 @@ impl Dialog {
   }
 
   /// The face anchor (a point and the outward normal) while it is for the first picked face.
-  fn face_anchor(&self) -> Option<(DVec3, DVec3)> {
+  pub(super) fn face_anchor(&self) -> Option<(DVec3, DVec3)> {
     let (key, o, n) = self.manip.anchor.as_ref()?;
     (*key == self.anchor_key() && !self.faces.is_empty()).then_some((*o, *n))
   }
@@ -581,6 +592,14 @@ impl Dialog {
   /// inward for a positive taper (which narrows the extrusion), for the taper angle.
   fn taper_handle(&self, s: &Session) -> Option<Vec<Handle>> {
     let m = self.manipulator(s)?;
+    let a = self.ang(s, self.solid.ext.taper())?;
+    let up = if m.value < 0.0 { -m.dir } else { m.dir };
+    if self.extrudes_faces() {
+      // beside the picked face's edge farthest from the arrow
+      let (key, mid, inward) = self.manip.face_taper.as_ref()?;
+      return (*key == self.anchor_key())
+        .then(|| vec![Handle::dial(*mid, up.cross(*inward), up, None, a, deg(a)).taper()]);
+    }
     let r = s.model.sketches.get(&self.sketch?)?;
     // (an edited extrude without picks keeps its stored profile, as its arrow does)
     let at = match self.profiles.first() {
@@ -589,9 +608,7 @@ impl Dialog {
     };
     let profile = r.profiles.iter().find(|p| p.contains(at))?;
     let (mid, inward) = taper_edge(&profile.outer.polygon(), at, &|p| profile.contains(p))?;
-    let up = if m.value < 0.0 { -m.dir } else { m.dir };
     let inward = (r.plane.x * inward[0] + r.plane.y * inward[1]).try_normalize()?;
-    let a = self.ang(s, self.solid.ext.taper())?;
     let center = r.plane.to_world(mid);
     Some(vec![Handle::dial(center, up.cross(inward), up, None, a, deg(a)).taper()])
   }
@@ -1072,6 +1089,23 @@ fn pick_frame(s: &Session, body: BodyId, o: &Value) -> Option<DMat4> {
 /// Where Extrude's taper handle sits on a profile's outline `poly` (sketch coordinates, closed):
 /// the middle of the side farthest from `at` (the distance arrow's foot, so it stays clear of it), with the unit direction
 /// across it into the profile (`inside` tells which way that is).
+/// A planar face's edge farthest from its centre (`key` is `{body, face}`): its middle, and the
+/// unit direction from it into the face, in the face's plane.
+fn face_taper_edge(s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
+  let get = |k: &str| key.get(k).and_then(Value::as_u64).map(|v| v as u32);
+  let (body, face) = (s.model.body(BodyId(get("body")?))?, get("face")?);
+  let f = body.faces().iter().find(|f| f.id == face)?;
+  let e = body
+    .edges()
+    .iter()
+    .filter(|e| e.faces.contains(&face))
+    .max_by(|x, y| (x.mid - f.center).length().total_cmp(&(y.mid - f.center).length()))?;
+  let v = f.center - e.mid;
+  let along = (e.end - e.start).try_normalize().unwrap_or(DVec3::ZERO);
+  let inward = v - f.normal * v.dot(f.normal) - along * v.dot(along);
+  Some((e.mid, inward.try_normalize()?))
+}
+
 fn taper_edge(poly: &[[f64; 2]], at: [f64; 2], inside: &dyn Fn([f64; 2]) -> bool) -> Option<([f64; 2], [f64; 2])> {
   let n = poly.len();
   let (a, b) = (0..n)
@@ -1166,6 +1200,30 @@ mod tests {
 
   /// Extrude's taper handle: a dial at the arrow's head that writes the taper angle; the floating
   /// value box edits the distance (Extrude) or radius (Fillet) the arrow shows.
+  #[test]
+  fn a_face_extrudes_taper_handle_sits_on_the_faces_edge() {
+    use crate::handles::Shape;
+    // `ui:dialogs:extrude-body-face-pick`: the arrow and the taper disc on a box's top face, as
+    // found before the preview, the disc on the middle of an outer edge turning inward
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 34, "depth": 20, "height": 10}));
+    let b = &s.model.bodies[0];
+    let top = *b.faces().iter().find(|f| f.normal.z > 0.9).unwrap();
+    let mut d = Dialog::blank(Kind::Extrude);
+    d.sketch = None;
+    d.faces = vec![json!({"body": b.id.0, "face": top.id})];
+    d.distance = "5 mm".into();
+    d.refresh_manip(&s);
+    let m = d.manipulator(&s).unwrap();
+    assert!(close(m.origin, top.center) && close(m.dir, DVec3::Z), "{m:?}");
+    let h = d.handles(&s);
+    let Shape::Dial { center, axis, zero, .. } = h[0].shape else { panic!("{h:?}") };
+    assert_eq!(h[0].head, crate::handles::Head::Taper);
+    assert!((center.z - top.center.z).abs() < 1e-9 && close(zero, DVec3::Z), "{center:?}");
+    let inward = axis.cross(zero);
+    assert!(inward.dot(top.center - center) > 0.0 && inward.z.abs() < 1e-9, "{inward:?}");
+  }
+
   #[test]
   fn extrude_taper_handle_and_the_value_box_fields() {
     use crate::handles::Shape;

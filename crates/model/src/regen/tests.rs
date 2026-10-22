@@ -26,7 +26,8 @@ fn block_design() -> (Design, FeatureId, FeatureId) {
   let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("w", "20"), links: Vec::new() }).unwrap();
   let e = d
     .add_feature(FeatureKind::Extrude {
-      sketch: s,
+      sketch: Some(s),
+      faces: vec![],
       profiles: vec![],
       extent: Extent::distance("h"),
       operation: Operation::NewBody,
@@ -72,7 +73,8 @@ fn hole_on_top_face_follows_height_changes() {
     .add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face, x: None }, sketch: hole, links: Vec::new() })
     .unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: hs,
+    sketch: Some(hs),
+    faces: vec![],
     profiles: vec![],
     extent: Extent { kind: ExtentKind::ThroughAll, flip: true, ..Extent::distance("0") },
     operation: Operation::Cut,
@@ -133,7 +135,8 @@ fn join_cut_and_split_bodies() {
   s2.add_rectangle([30.0, 0.0], [50.0, 20.0]).unwrap();
   let s2 = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s2, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: s2,
+    sketch: Some(s2),
+    faces: vec![],
     profiles: vec![],
     extent: Extent::distance("10"),
     operation: Operation::Join,
@@ -148,7 +151,8 @@ fn join_cut_and_split_bodies() {
   s3.add_rectangle([20.0, -5.0], [24.0, 25.0]).unwrap();
   let s3 = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s3, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: s3,
+    sketch: Some(s3),
+    faces: vec![],
     profiles: vec![],
     extent: Extent { kind: ExtentKind::Symmetric, ..Extent::distance("50") },
     operation: Operation::Cut,
@@ -357,7 +361,8 @@ fn failing_feature_does_not_stop_the_timeline() {
     .unwrap();
   let bad2 = d
     .add_feature(FeatureKind::Extrude {
-      sketch: s,
+      sketch: Some(s),
+      faces: vec![],
       profiles: vec![],
       extent: Extent::distance("nope"),
       operation: Operation::Join,
@@ -490,7 +495,8 @@ fn flange_edge_flange_and_flat_pattern() {
   hole.add_circle(PtSpec::At(50.0, 25.0), 5.0).unwrap();
   let hs = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: hole, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: hs,
+    sketch: Some(hs),
+    faces: vec![],
     profiles: vec![],
     extent: Extent { kind: ExtentKind::Symmetric, ..Extent::distance("10") },
     operation: Operation::Cut,
@@ -595,7 +601,8 @@ fn convert_solid_to_sheet_metal() {
   let mut d = sheet_design();
   let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("60", "40"), links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: s,
+    sketch: Some(s),
+    faces: vec![],
     profiles: vec![],
     extent: Extent::distance("3"),
     operation: Operation::NewBody,
@@ -818,7 +825,8 @@ fn refold_carries_cuts_made_in_the_flat() {
   slot.add_rectangle([40.0, 45.0], [60.0, 60.0]).unwrap();
   let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: slot, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: s,
+    sketch: Some(s),
+    faces: vec![],
     profiles: vec![],
     extent: Extent { kind: ExtentKind::Symmetric, ..Extent::distance("10") },
     operation: Operation::Cut,
@@ -897,7 +905,8 @@ fn split_at_step(behaviours: Behaviours) -> Vec<usize> {
   s2.add_rectangle([0.0, 0.0], [20.0, 20.0]).unwrap();
   let s2 = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s2, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: s2,
+    sketch: Some(s2),
+    faces: vec![],
     profiles: vec![],
     extent: Extent::distance("20"),
     operation: Operation::Join,
@@ -934,7 +943,8 @@ fn along_top_circle(behaviours: Behaviours) -> (f64, f64) {
   s.add_circle(PtSpec::At(0.0, 0.0), 10.0).unwrap();
   let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: s,
+    sketch: Some(s),
+    faces: vec![],
     profiles: vec![],
     extent: Extent::distance("10"),
     operation: Operation::NewBody,
@@ -1021,7 +1031,8 @@ fn frames_design(legacy: bool) -> (Design, Model, [FeatureId; 4]) {
   let sketch_on = |d: &mut Design, plane: PlaneRef, sketch: Sketch| {
     let s = d.add_feature(FeatureKind::Sketch { plane, sketch, links: Vec::new() }).unwrap();
     let e = FeatureKind::Extrude {
-      sketch: s,
+      sketch: Some(s),
+      faces: vec![],
       profiles: vec![],
       extent: Extent::distance("3"),
       operation: Operation::NewBody,

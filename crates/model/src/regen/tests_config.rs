@@ -30,7 +30,8 @@ fn block() -> (Design, FeatureId) {
   let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("w", "20"), links: Vec::new() }).unwrap();
   let e = d
     .add_feature(FeatureKind::Extrude {
-      sketch: s,
+      sketch: Some(s),
+      faces: vec![],
       profiles: vec![],
       extent: Extent::distance("h"),
       operation: Operation::NewBody,
@@ -275,7 +276,8 @@ fn delete_face_and_base_feature_in_a_parametric_timeline() {
     .add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face: top, x: None }, sketch: hole, links: Vec::new() })
     .unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: hs,
+    sketch: Some(hs),
+    faces: vec![],
     profiles: vec![],
     extent: Extent { kind: ExtentKind::ThroughAll, flip: true, ..Extent::distance("0") },
     operation: Operation::Cut,

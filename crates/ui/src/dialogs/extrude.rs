@@ -3,8 +3,8 @@
 //! object / all), Distance, Taper Angle, wall location and thickness, Operation. Direction and
 //! Extent Type together make the engine's extent (`Dialog::extent`).
 
-use fox_engine::Session;
 use fox_engine::model::{Extent, ThinSide};
+use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 use super::{Dialog, OPS, choice, sel_chip};
@@ -93,7 +93,8 @@ impl Dialog {
     ui.end_row();
 
     ui.label("Profiles");
-    let n = self.profiles.len();
+    // sketch profiles, else the planar faces picked in their place
+    let n = if self.profiles.is_empty() { self.faces.len() } else { self.profiles.len() };
     if !creating {
       ui.label("(unchanged)");
     } else if n == 0 {
@@ -254,6 +255,38 @@ impl Dialog {
       "offset"
     };
     ext.start_face = e.start_face.as_ref().and_then(|f| serde_json::to_value(f).ok()).unwrap_or(Value::Null);
+  }
+
+  /// Takes the selected planar faces of bodies as the profiles while no sketch profile is picked,
+  /// as Fusion's Extrude does. Once To object or a start object is chosen, later face picks are
+  /// for those rows: the profile faces stay (less any deselected).
+  pub(super) fn sync_extrude_faces(&mut self, s: &Session) {
+    let planar: Vec<Value> = s
+      .selection
+      .iter()
+      .filter_map(|x| match x {
+        Sel::Face { body, face } if super::is_planar(s, *body, *face) => Some(json!({"body": body.0, "face": face})),
+        _ => None,
+      })
+      .collect();
+    let objects = self.extent == "to_object" || self.solid.ext.start == "object";
+    let faces = if !self.profiles.is_empty() {
+      Vec::new()
+    } else if objects && !self.faces.is_empty() {
+      self.faces.iter().filter(|f| planar.contains(f)).cloned().collect()
+    } else if objects {
+      planar.into_iter().take(1).collect()
+    } else {
+      planar
+    };
+    if faces != self.faces {
+      // extruding a body's face defaults to Join, as from a sketch on a face
+      if self.faces.is_empty() && self.op == "new_body" && self.editing.is_none() {
+        self.op = "join";
+      }
+      self.faces = faces;
+      self.dirty = true;
+    }
   }
 
   /// "N Profiles | Area : …" for the status bar while an extrude has profiles picked, in the

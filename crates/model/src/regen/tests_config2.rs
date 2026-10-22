@@ -26,7 +26,8 @@ fn block() -> (Design, FeatureId, FeatureId) {
   let sk = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s, links: Vec::new() }).unwrap();
   let e = d
     .add_feature(FeatureKind::Extrude {
-      sketch: sk,
+      sketch: Some(sk),
+      faces: vec![],
       profiles: vec![],
       extent: Extent::distance("h"),
       operation: Operation::NewBody,
@@ -128,7 +129,8 @@ fn plate_with_hole() -> (Design, Model) {
     .add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face: top, x: None }, sketch: hole, links: Vec::new() })
     .unwrap();
   d.add_feature(FeatureKind::Extrude {
-    sketch: hs,
+    sketch: Some(hs),
+    faces: vec![],
     profiles: vec![],
     extent: Extent { kind: ExtentKind::ThroughAll, flip: true, ..Extent::distance("0") },
     operation: Operation::Cut,

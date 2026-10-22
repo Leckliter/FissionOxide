@@ -861,7 +861,16 @@ impl Dialog {
 
   /// Does this dialog preview on demand (see [`Kind::picks_model`])?
   fn picks(&self) -> bool {
-    self.kind.picks_model() || (self.kind == Kind::Flange && self.choice == "edge") || self.hole_single()
+    self.kind.picks_model()
+      || (self.kind == Kind::Flange && self.choice == "edge")
+      || self.hole_single()
+      || self.extrudes_faces()
+  }
+
+  /// Does this Extrude take planar body faces as its profiles (none of a sketch's picked)? Its
+  /// preview then changes the very body picked, so it previews as the model-picking dialogs do.
+  fn extrudes_faces(&self) -> bool {
+    self.kind == Kind::Extrude && self.profiles.is_empty() && !self.faces.is_empty()
   }
 
   /// Opens a dialog for a new feature, capturing the current selection.
@@ -1155,6 +1164,8 @@ impl Dialog {
         {
           d.op = "join";
         }
+        // selected faces become the profiles on the first selection sync (planar ones only)
+        d.faces.clear();
       }
       _ => {}
     }
@@ -1275,10 +1286,18 @@ impl Dialog {
   pub fn edit(app: &App, id: FeatureId) -> Option<Dialog> {
     let f = app.s.design.feature(id)?;
     let mut d = match &f.kind {
-      FeatureKind::Extrude { sketch, profiles, extent, operation } => {
+      FeatureKind::Extrude { sketch, profiles, faces, extent, operation } => {
         let mut d = Dialog::blank(Kind::Extrude);
-        d.sketch = Some(*sketch);
+        d.sketch = *sketch;
         d.profiles = profiles.clone();
+        // the extruded faces where the model has them (for the drag arrow)
+        d.faces = faces
+          .iter()
+          .filter_map(|f| {
+            let id = app.s.model.body(f.body)?.find_face(f)?;
+            Some(json!({"body": f.body.0, "face": id}))
+          })
+          .collect();
         // a flipped extrude shows a negative distance, as in Fusion (`extrude::split_sign`)
         d.distance = if extent.flip { extrude::negate(&extent.distance) } else { extent.distance.clone() };
         d.distance2 = extent.distance2.clone();
@@ -1501,6 +1520,8 @@ impl Dialog {
         self.edges = picks;
       }
       FeatureKind::Extrude { sketch, profiles, .. } => {
+        // faces extruded keep their picks
+        let Some(sketch) = sketch else { return false };
         let Some(r) = s.model.sketches.get(&sketch) else { return false };
         // the regions the stored points fall in (none stored: every region)
         let mut picked = Vec::new();
@@ -1836,10 +1857,17 @@ impl Dialog {
         let (distance, flip) = self.extrude_distance();
         (
           "extrude",
-          self.with_extrude_rows(self.with_object(json!({
-            "sketch": self.sketch?.0, "profiles": self.profiles, "distance": distance, "distance2": self.distance2,
-            "extent": self.extent, "flip": flip, "operation": op,
-          }))?)?,
+          self.with_extrude_rows(self.with_object(if self.extrudes_faces() {
+            json!({
+              "faces": self.faces, "distance": distance, "distance2": self.distance2, "extent": self.extent,
+              "flip": flip, "operation": op,
+            })
+          } else {
+            json!({
+              "sketch": self.sketch?.0, "profiles": self.profiles, "distance": distance, "distance2": self.distance2,
+              "extent": self.extent, "flip": flip, "operation": op,
+            })
+          })?)?,
         )
       }
       Kind::Revolve => {
@@ -2073,7 +2101,7 @@ impl Dialog {
     }
     match self.kind {
       Kind::Form(f) => self.form.missing(f).is_none(),
-      Kind::Extrude => self.sketch.is_some() && !self.profiles.is_empty(),
+      Kind::Extrude => (self.sketch.is_some() && !self.profiles.is_empty()) || self.extrudes_faces(),
       Kind::Revolve => self.sketch.is_some() && !self.axis.is_empty(),
       Kind::Fillet => self.fillet_ready(),
       Kind::Chamfer => !self.edges.is_empty(),
@@ -2164,6 +2192,16 @@ impl Dialog {
     if matches!(self.kind, Kind::Combine | Kind::SplitBody) {
       return self.routed_selection();
     }
+    // a face extrude's start face and object stay picked with its faces
+    if self.kind == Kind::Extrude {
+      for v in [&self.solid.ext.start_face, &self.solid.to] {
+        match (get(v, "body"), get(v, "face")) {
+          (Some(b), Some(i)) => out.push(Sel::Face { body: BodyId(b), face: i }),
+          (Some(b), None) if v.get("vertex").is_none() => out.push(Sel::Body { body: BodyId(b) }),
+          _ => {}
+        }
+      }
+    }
     if matches!(self.kind, Kind::Joint | Kind::AsBuiltJoint) {
       out.clear();
       for (b, o) in &self.origins {
@@ -2229,6 +2267,18 @@ impl Dialog {
   pub fn manipulator(&self, s: &Session) -> Option<Manipulator> {
     let len = |e: &str| fox_engine::expr::eval(e, fox_engine::expr::Kind::Length, &s.model.params).ok();
     match self.kind {
+      Kind::Extrude if matches!(self.extent, "one_side" | "symmetric" | "two_sides") && self.extrudes_faces() => {
+        // on the first face, along its outward normal (as found before the preview changed it)
+        let (origin, dir) = self.face_anchor().or_else(|| {
+          let f = self.faces.first()?;
+          let get = |k: &str| f.get(k).and_then(Value::as_u64).map(|x| x as u32);
+          let info = s.model.body(BodyId(get("body")?))?.faces().iter().find(|x| Some(x.id) == get("face"))?;
+          Some((info.center, info.normal))
+        })?;
+        let (distance, flip) = self.extrude_distance();
+        let sign = if flip { -1.0 } else { 1.0 };
+        Some(Manipulator { origin, dir, value: sign * len(&distance)? })
+      }
       Kind::Extrude if matches!(self.extent, "one_side" | "symmetric" | "two_sides") => {
         let r = s.model.sketches.get(&self.sketch?)?;
         // no arrow until a profile is picked (an edited extrude keeps its stored profiles)
@@ -2331,7 +2381,10 @@ impl Dialog {
           self.profiles = pts;
           self.dirty = true;
         }
-        if self.kind == Kind::Extrude {
+        // (a face extrude's preview changes the picked body: its picks wait for a click, which
+        // withdraws the preview first)
+        if self.kind == Kind::Extrude && (!self.applied || !self.picks()) {
+          self.sync_extrude_faces(s);
           self.sync_object(s);
         }
         if self.kind == Kind::Sweep {
@@ -2903,7 +2956,7 @@ impl Dialog {
   /// fails (a fillet too big for its edges), until a value that works is typed.
   pub(crate) fn ok_enabled(&self) -> bool {
     let input = match self.kind {
-      Kind::Extrude if !self.picks_fixed() => !self.profiles.is_empty(),
+      Kind::Extrude if !self.picks_fixed() => !self.profiles.is_empty() || !self.faces.is_empty(),
       // OK waits for Compute, and Section Analysis for its cut plane
       Kind::Interference => self.report.is_some(),
       Kind::Section => !self.plane.is_null(),
@@ -5344,7 +5397,11 @@ fn last_unconsumed_sketch(s: &Session) -> Option<FeatureId> {
     .rev()
     .find(|f| {
       matches!(f.kind, FeatureKind::Sketch { .. })
-        && !feats.iter().any(|g| matches!(&g.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } if *sketch == f.id))
+        && !feats.iter().any(|g| match &g.kind {
+          FeatureKind::Extrude { sketch, .. } => *sketch == Some(f.id),
+          FeatureKind::Revolve { sketch, .. } => *sketch == f.id,
+          _ => false,
+        })
     })
     .map(|f| f.id)
 }

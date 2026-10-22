@@ -645,20 +645,42 @@ impl Ctx<'_> {
         self.state.sketches.insert(id, r);
         Ok(w)
       }
-      FeatureKind::Extrude { sketch, profiles, extent, operation } => {
-        let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
-        let (chosen, missing) = pick_profiles(&sk, profiles);
-        if chosen.is_empty() {
-          return Err(if sk.profiles.is_empty() {
-            "the sketch has no closed profiles".into()
-          } else {
-            "the selected profiles no longer exist".into()
-          });
-        }
-        let mut sk = sk;
-        let lift = self.extrude_start(extent, &sk.plane)?;
-        sk.plane.origin += sk.plane.normal() * lift;
-        let mut n = sk.plane.normal() * if extent.flip { -1.0 } else { 1.0 };
+      FeatureKind::Extrude { sketch, profiles, faces, extent, operation } => {
+        // the profiles as faces, and the plane they extrude from
+        let (plane, bases, missing) = match sketch {
+          _ if !faces.is_empty() => {
+            let (mut plane, mut bases) = self.extrude_faces(faces)?;
+            let lift = self.extrude_start(extent, &plane)?;
+            if lift.abs() > 0.0 {
+              plane.origin += plane.normal() * lift;
+              bases =
+                bases.iter().map(|f| f.translated(plane.normal() * lift)).collect::<Result<_, _>>().map_err(ke)?;
+            }
+            (plane, bases, false)
+          }
+          Some(sketch) => {
+            let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?;
+            let (chosen, missing) = pick_profiles(sk, profiles);
+            if chosen.is_empty() {
+              return Err(if sk.profiles.is_empty() {
+                "the sketch has no closed profiles".into()
+              } else {
+                "the selected profiles no longer exist".into()
+              });
+            }
+            let mut plane = sk.plane;
+            plane.origin += plane.normal() * self.extrude_start(extent, &plane)?;
+            let mut bases = Vec::new();
+            for p in &chosen {
+              let mut face = Shape::face(&plane, p).map_err(ke)?;
+              naming::label_profile(&mut face, &plane, p, id);
+              bases.push(face);
+            }
+            (plane, bases, missing)
+          }
+          None => return Err("select sketch profiles or planar faces to extrude".into()),
+        };
+        let mut n = plane.normal() * if extent.flip { -1.0 } else { 1.0 };
         let mut trim = None;
         let (start, length) = match extent.kind {
           ExtentKind::OneSide => (0.0, self.len(&extent.distance)?),
@@ -670,9 +692,9 @@ impl Ctx<'_> {
             let (d1, d2) = (self.len(&extent.distance)?, self.len(&extent.distance2)?);
             (-d2, d1 + d2)
           }
-          ExtentKind::ThroughAll => (0.0, self.through_all(&sk.plane)),
+          ExtentKind::ThroughAll => (0.0, self.through_all(&plane)),
           ExtentKind::ThroughAllBoth => {
-            let d = self.through_all(&sk.plane);
+            let d = self.through_all(&plane);
             (-d, 2.0 * d)
           }
           ExtentKind::ToFace => {
@@ -685,13 +707,13 @@ impl Ctx<'_> {
             if info.kind != fox_kernel::SurfaceKind::Plane || info.normal.cross(n).length() > 1e-6 {
               // a curved or tilted face: extrude through and trim to it
               let offset = self.len(&extent.distance)?;
-              if (info.center - sk.plane.origin).dot(n) < 0.0 {
+              if (info.center - plane.origin).dot(n) < 0.0 {
                 n = -n;
               }
               trim = Some(solid::Trim::Face { body: bi, face: fid, offset });
-              (0.0, self.through_all(&sk.plane))
+              (0.0, self.through_all(&plane))
             } else {
-              let mut d = (info.origin - sk.plane.origin).dot(n);
+              let mut d = (info.origin - plane.origin).dot(n);
               if d < 0.0 {
                 n = -n;
                 d = -d;
@@ -703,16 +725,16 @@ impl Ctx<'_> {
             let fr = extent.to.as_mut().ok_or("pick the body to extrude to")?;
             let bi = self.body_index(fr.body)?;
             let center = self.state.bodies[bi].shape.mass().map_err(ke)?.center_of_mass;
-            if (center - sk.plane.origin).dot(n) < 0.0 {
+            if (center - plane.origin).dot(n) < 0.0 {
               n = -n;
             }
             trim = Some(solid::Trim::Body { body: bi });
-            (0.0, self.through_all(&sk.plane))
+            (0.0, self.through_all(&plane))
           }
           ExtentKind::ToVertex => {
             let pr = extent.to_point.as_mut().ok_or("pick the vertex or point to extrude to")?;
             let at = self.point_of(pr)?;
-            let mut d = (at - sk.plane.origin).dot(n);
+            let mut d = (at - plane.origin).dot(n);
             if d.abs() < 1e-9 {
               return Err("the point lies in the sketch plane".into());
             }
@@ -733,7 +755,7 @@ impl Ctx<'_> {
         if thin < 0.0 {
           return Err("the thin wall thickness must be positive".into());
         }
-        let along = n.dot(sk.plane.normal()).signum();
+        let along = n.dot(plane.normal()).signum();
         let tapered = taper.abs() > 1e-12 || taper2.abs() > 1e-12;
         // `height` is signed along `n`
         let side = |face: &Shape, height: f64, angle: f64| -> Result<Shape, String> {
@@ -756,9 +778,7 @@ impl Ctx<'_> {
           side(&face, length, taper)
         };
         let mut tools = Vec::new();
-        for p in &chosen {
-          let mut face = Shape::face(&sk.plane, p).map_err(ke)?;
-          naming::label_profile(&mut face, &sk.plane, p, id);
+        for face in bases {
           if thin > 0.0 {
             let (outer, inner) = match extent.thin_side {
               ThinSide::Inside => (face.clone(), face.offset_face(-thin).map_err(ke)?),
@@ -775,7 +795,7 @@ impl Ctx<'_> {
         }
         let mut tool = union_all(tools)?;
         if let Some(t) = trim {
-          tool = self.trim_to_object(tool, t, &sk.plane)?;
+          tool = self.trim_to_object(tool, t, &plane)?;
         }
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
@@ -2294,6 +2314,23 @@ impl Ctx<'_> {
         Ok(c.bodies.iter().filter_map(|b| self.body_index(*b).ok()).collect())
       }
     }
+  }
+
+  /// Planar body faces an extrude takes as its profiles, each as a face of its own, and the plane
+  /// they extrude from: the first face's, with its outward normal (away from the body).
+  fn extrude_faces(&self, faces: &mut [crate::FaceRef]) -> Result<(Plane, Vec<Shape>), String> {
+    let mut plane = None;
+    let mut bases = Vec::new();
+    for fr in faces {
+      let body = &self.state.bodies[self.body_index(fr.body)?];
+      let fid = body.find_face(fr).ok_or("a selected face could not be found")?;
+      refresh_face(fr, body, fid);
+      let info = body.faces().iter().find(|f| f.id == fid).ok_or("a selected face could not be found")?;
+      let p = info.plane().ok_or("only planar faces can be extruded")?;
+      plane.get_or_insert(p);
+      bases.push(body.shape.face_shape(fid).map_err(ke)?);
+    }
+    Ok((plane.ok_or("select sketch profiles or planar faces to extrude")?, bases))
   }
 
   /// How far along the sketch normal an extrusion starts: its start face (flat and parallel to

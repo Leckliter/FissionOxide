@@ -2504,6 +2504,56 @@ fn the_extrude_preview_is_not_hover_highlighted() {
   assert_eq!(prompt.as_deref(), Some("Hold Ctrl to modify selection"));
 }
 
+/// `ui:dialogs:extrude-body-face-pick`: with Extrude open, a click on a box's top face fills
+/// Profiles with it and brings the distance arrow up on the face; a typed distance and Enter
+/// join the extrusion to the box, as in Fusion. A face picked before E is taken too.
+#[test]
+fn extrude_takes_a_clicked_planar_body_face() {
+  use fox_engine::Sel;
+  use fox_engine::model::FeatureKind;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 34, "depth": 20, "height": 10})).unwrap();
+  h.app.s.selection.clear();
+  h.settle();
+  let b = &h.app.s.model.bodies[0];
+  let top = *b.faces().iter().find(|f| f.normal.z > 0.9).unwrap();
+  h.app.start(crate::dialogs::Kind::Extrude);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!(h.app.dialog.as_ref().unwrap().manipulator(&h.app.s).is_none(), "no arrow before a pick");
+  let at = h.screen(top.origin);
+  h.move_then_click(at);
+  // (the Join preview changes the box, so the face is no longer selected while it shows)
+  let d = h.app.dialog.as_ref().unwrap();
+  assert_eq!(d.prompt(false).as_deref(), Some("Specify distance and taper angle"), "the face is the profile");
+  let m = d.manipulator(&h.app.s).expect("the arrow on the face");
+  assert!((m.origin - top.center).length() < 1e-6 && m.dir.z > 0.999, "{:?} {:?}", m.origin, m.dir);
+  let field = |h: &mut Harness| h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone();
+  h.frame(typing("5"));
+  h.frame(vec![]);
+  assert_eq!(field(&mut h), "5 mm");
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert!(h.app.dialog.is_none(), "Enter is OK");
+  let f = h.app.s.design.features.last().unwrap();
+  let FeatureKind::Extrude { sketch, faces, .. } = &f.kind else { panic!("{:?}", f.kind) };
+  assert_eq!((sketch, faces.len()), (&None, 1));
+  assert_eq!(h.app.s.model.bodies.len(), 1, "joined to the box");
+  let v = h.app.s.model.bodies[0].shape.mass().unwrap().volume;
+  assert!((v - 34.0 * 20.0 * 15.0).abs() < 1e-6, "{v}");
+
+  // a face selected before E is the profile
+  let b = &h.app.s.model.bodies[0];
+  let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  h.app.s.selection = vec![Sel::Face { body: b.id, face: top }];
+  h.app.start(crate::dialogs::Kind::Extrude);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!(h.app.dialog.as_ref().unwrap().manipulator(&h.app.s).is_some(), "the arrow on the preselected face");
+}
+
 /// `ui:surface:finish-sketch-returns-tab`: a sketch started from the SURFACE tab comes back to
 /// SURFACE on Finish Sketch, and one started from SOLID to SOLID.
 #[test]

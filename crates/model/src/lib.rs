@@ -846,10 +846,15 @@ pub enum FeatureKind {
     links: Vec<SketchLink>,
   },
   Extrude {
-    sketch: FeatureId,
+    /// The sketch whose profiles are extruded; `None` when `faces` are.
+    sketch: Option<FeatureId>,
     /// Interior points (sketch coordinates) of the chosen regions; empty = every region.
     #[serde(default)]
     profiles: Vec<[f64; 2]>,
+    /// Planar body faces extruded as profiles instead of a sketch's, as Fusion's Extrude takes
+    /// them; they extrude along the first face's normal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    faces: Vec<FaceRef>,
     extent: Extent,
     #[serde(default)]
     operation: Operation,
@@ -2252,7 +2257,7 @@ impl FeatureKind {
       FeatureKind::Sketch { plane, .. } => plane_dep(plane),
       FeatureKind::Revolve { sketch, axis, .. } => std::iter::once(*sketch).chain(axis_dep(axis)).collect(),
       FeatureKind::Extrude { sketch, extent, .. } => {
-        std::iter::once(*sketch).chain(extent.to_point.as_ref().and_then(construct::PointRef::feature)).collect()
+        sketch.iter().copied().chain(extent.to_point.as_ref().and_then(construct::PointRef::feature)).collect()
       }
       FeatureKind::Flange { sketch, .. }
       | FeatureKind::ContourFlange { sketch, .. }
@@ -3287,7 +3292,8 @@ mod tests {
       .unwrap();
     let e = d
       .add_feature(FeatureKind::Extrude {
-        sketch: s,
+        sketch: Some(s),
+        faces: vec![],
         profiles: vec![],
         extent: Extent::distance("10"),
         operation: Operation::NewBody,
@@ -3329,7 +3335,8 @@ mod tests {
       })
       .unwrap();
     d.add_feature(FeatureKind::Extrude {
-      sketch: s,
+      sketch: Some(s),
+      faces: vec![],
       profiles: vec![],
       extent: Extent::distance("width * 2"),
       operation: Operation::NewBody,

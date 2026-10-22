@@ -33,7 +33,7 @@ pub(super) struct Extra {
   pub(super) rails: Vec<(FeatureId, Vec<u32>)>,
   pub(super) centerline: Option<(FeatureId, Vec<u32>)>,
   /// Extrude to object: the picked face or body (`{body, face}` or `{body}`).
-  to: Value,
+  pub(super) to: Value,
   /// When editing an extrude to an object: its extent kind and stored reference.
   to_kind: &'static str,
   to_ref: Value,
@@ -913,7 +913,8 @@ impl Dialog {
       .selection
       .iter()
       .filter_map(|x| match x {
-        Sel::Face { body, face } => Some(json!({"body": body.0, "face": face})),
+        // (not a face extruded as a profile)
+        Sel::Face { body, face } => Some(json!({"body": body.0, "face": face})).filter(|f| !self.faces.contains(f)),
         Sel::Body { body } => Some(json!({"body": body.0})),
         // to a vertex: the plane through it parallel to the sketch
         Sel::Vertex { body, edge, end } => Some(json!({"vertex": {"body": body.0, "edge": edge}, "end": end})),
