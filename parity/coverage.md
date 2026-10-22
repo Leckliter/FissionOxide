@@ -35,7 +35,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 
 ## Design workspace: solid
 - [done (2026-10-21)] Extrude, Fillet, Chamfer, Shell, Press Pull, Move, Hole dialogs (first pass)
-- [todo] Create: New Component, Revolve, Sweep, Loft, Rib, Web, Emboss, Thread, Box/Cylinder/Sphere/Torus/Coil/Pipe, patterns, Mirror, Thicken, Boundary Fill, Base Feature, Joint Origin
+- [in progress (2026-10-22, prober 8)] Create: New Component, Revolve, Sweep, Loft, Rib, Web, Emboss, Thread, Box/Cylinder/Sphere/Torus/Coil/Pipe, patterns, Mirror, Thicken, Boundary Fill, Base Feature, Joint Origin
 - [todo] Modify: Draft, Scale, Combine, Offset Face, Replace Face, Split Face, Split Body, Silhouette Split, Align, Delete, Remove, Simplify, Physical Material, Appearance, Manage Materials, Change Parameters, Compute All, Direct Edit
 - [todo] Manipulators for every feature: arrows, rings, floating value boxes, drag behaviour, snapping
 - [todo] Edit Feature for every feature; feature errors and warnings in the timeline
