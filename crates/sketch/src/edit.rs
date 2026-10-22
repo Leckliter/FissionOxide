@@ -550,7 +550,9 @@ impl Sketch {
     let (u, w) = (dir(self, l1).ok_or(SketchError::NoCurve(l1))?, dir(self, line).ok_or(SketchError::NoCurve(line))?);
     let turn = cross(u, w).atan2(dot(u, w)).rem_euclid(PI);
     let (a, b) = if (turn - angle).abs() <= (PI - turn - angle).abs() { (l1, line) } else { (line, l1) };
-    self.add_constraint(ConstraintKind::Angle { a, b, value: Dim::new(angle) })?;
+    // its expression carries the unit (a bare number reads as degrees when the sketch rebuilds)
+    let deg = format!("{} deg", fox_expr::trim_number(angle.to_degrees()));
+    self.add_constraint(ConstraintKind::Angle { a, b, value: Dim::expr(deg, angle) })?;
     Ok(line)
   }
 
@@ -1247,6 +1249,11 @@ mod tests {
     assert_eq!(dims[0], ("Chamfer distance", 10.0));
     assert_eq!(dims[1].0, "Angle");
     assert!((dims[1].1 - 30f64.to_radians()).abs() < 1e-12);
+    let expr = s.constraints.iter().find_map(|c| c.kind.dim().filter(|_| c.kind.is_angle())).unwrap().expr.clone();
+    assert!(
+      (fox_expr::eval(&expr, fox_expr::Kind::Angle, &fox_expr::Empty).unwrap() - 30f64.to_radians()).abs() < 1e-9,
+      "{expr}"
+    );
     // the angle drives the chamfer: at 45° it leaves the bottom at 45°
     let id = s.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Angle { .. })).unwrap().id;
     s.set_dim(id, Dim::new(45f64.to_radians())).unwrap();
