@@ -1429,3 +1429,82 @@ fn sketch_modify_commands_report_removed_constraints() {
   assert_eq!(r["pieces"].as_array().map(Vec::len), Some(2), "{r}");
   assert!(r.get("removed").is_none() && r.get("warning").is_none(), "{r}");
 }
+
+/// The Sketch Palette's Profile, Points, Projected Geometries and Construction Geometries
+/// options each take their part out of the edited sketch's drawing, and Slice sections the model.
+#[test]
+fn sketch_palette_options_hide_their_part_of_the_sketch() {
+  use crate::scene::{Pick, SceneBuilder, SketchShow, ViewOptions};
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
+  let body = s.model.bodies[0].id.0;
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let sk = s.edit_sketch.expect("editing");
+  run(&mut s, "sketch.rect", json!({"corner1": [30, 30], "corner2": [50, 40]}));
+  let r = run(&mut s, "sketch.line", json!({"points": [[60, 0], [70, 10]]}));
+  let guide = r["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.construction", json!({"curves": [guide], "on": true}));
+  let projected = run(&mut s, "sketch.project", json!({"body": body}))["curves"].as_array().unwrap().len();
+  assert!(projected >= 4, "the box's outline: {projected} curves");
+  // a text's glyph outlines are fixed too, but they are the user's, not projected
+  run(&mut s, "sketch.text", json!({"at": [60, 30], "text": "I", "height": 5, "font": "sans"}));
+  let sketch = &s.model.sketches[&sk].sketch;
+  assert!(sketch.texts.len() == 1 && !sketch.texts[0].points.is_empty(), "the text made glyph points");
+  let links = match &s.design.feature(sk).unwrap().kind {
+    fox_model::FeatureKind::Sketch { links, .. } => links.clone(),
+    _ => Vec::new(),
+  };
+  let proj = crate::scene::projected_curves(sketch, &links);
+  assert_eq!(proj.len(), projected, "{proj:?}");
+  assert!(!proj.contains(&fox_sketch::CurveId(guide as u32)));
+  let curves = sketch.curves.len();
+  // the sketch points drawn: not the origin, and not a text's glyph points (only its anchor shows)
+  let glyph: std::collections::HashSet<_> = sketch.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
+  let points = sketch.points.iter().filter(|p| p.id != fox_sketch::ORIGIN && !glyph.contains(&p.id)).count();
+
+  let count = |s: &Session, opts: ViewOptions| {
+    let (scene, picks) = SceneBuilder::default().build(s, &opts);
+    let is = |id: u32, f: &dyn Fn(&Pick) -> bool| picks.get(id).is_some_and(|p| f(&p));
+    let lines = scene.lines.iter().filter(|l| is(l.id, &|p| matches!(p, Pick::SketchCurve { .. }))).count();
+    let pts = scene.markers.iter().filter(|m| is(m.id, &|p| matches!(p, Pick::SketchPoint { .. }))).count();
+    let mesh_id = |m: &fox_render::Mesh| m.tri_ids.first().copied().unwrap_or(m.id);
+    let profiles = scene.meshes.iter().filter(|m| is(mesh_id(m), &|p| matches!(p, Pick::Profile { .. }))).count();
+    (lines, pts, profiles)
+  };
+  let all = count(&s, ViewOptions::default());
+  assert_eq!(all.0, curves, "every curve is drawn");
+  assert!(all.1 >= points, "every sketch point is drawn: {}", all.1);
+  assert!(all.2 >= 1, "the rectangle's profile is shaded: {}", all.2);
+  let show = |f: fn(&mut SketchShow)| {
+    let mut sh = SketchShow::default();
+    f(&mut sh);
+    ViewOptions { sketch_show: sh, ..Default::default() }
+  };
+  assert_eq!(count(&s, show(|o| o.profiles = false)).2, 0, "Profile off removes the shading");
+  assert_eq!(count(&s, show(|o| o.points = false)).1, 0, "Points off hides the sketch points");
+  assert_eq!(count(&s, show(|o| o.construction = false)).0, curves - 1, "Construction Geometries off hides the guide");
+  assert_eq!(
+    count(&s, show(|o| o.projected = false)).0,
+    curves - projected,
+    "Projected Geometries off hides the outline"
+  );
+  // another sketch's drawing is not the palette's business
+  run(&mut s, "sketch.finish", json!({}));
+  let after = count(&s, show(|o| o.construction = false));
+  assert_eq!(after.0, count(&s, ViewOptions::default()).0, "options apply to the sketch being edited");
+  // Slice: the body is cut at the sketch plane and capped (a plane through the box's middle)
+  let plane = fox_kernel::Plane { origin: fox_kernel::glam::DVec3::new(0.0, 0.0, 2.5), ..s.model.sketches[&sk].plane };
+  let whole = SceneBuilder::default().build(&s, &ViewOptions::default()).0;
+  let sliced = SceneBuilder::default().build(&s, &ViewOptions { section: Some(plane), ..Default::default() }).0;
+  // vertices the triangles still use (clipping leaves the cut-off ones in the buffer)
+  let above = |sc: &fox_render::Scene| {
+    sc.meshes
+      .iter()
+      .filter(|m| m.analyze)
+      .flat_map(|m| m.indices.iter().map(|i| m.positions[*i as usize]))
+      .filter(|p| p[2] > 2.5 + 1e-3)
+      .count()
+  };
+  assert!(above(&whole) > 0 && above(&sliced) == 0, "the side above the plane is cut away: {}", above(&sliced));
+  assert!(sliced.meshes.iter().any(|m| !m.analyze), "and capped");
+}

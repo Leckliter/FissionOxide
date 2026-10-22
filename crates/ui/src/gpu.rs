@@ -268,6 +268,7 @@ mod tests {
       peek_faces: Vec::new(),
       peek_sketches: Vec::new(),
       glyph_hover: Vec::new(),
+      palette: Default::default(),
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

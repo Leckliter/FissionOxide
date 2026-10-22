@@ -280,6 +280,9 @@ pub struct Prefs {
   /// General → "Automatic recovery backup interval", minutes between backups of the unsaved
   /// design; 0 never backs up.
   pub recovery_minutes: u32,
+  /// Sketch → the solver's "n degrees of freedom · m profiles" line at the foot of the Sketch
+  /// Palette; off, the palette ends with its rows as Fusion's does.
+  pub show_dof: bool,
 }
 
 impl Default for Prefs {
@@ -305,6 +308,7 @@ impl Default for Prefs {
       orbit: OrbitType::Constrained,
       camera_pivot: true,
       recovery_minutes: 5,
+      show_dof: false,
     }
   }
 }
@@ -351,6 +355,7 @@ impl Prefs {
       ("OrbitType", self.orbit.key().to_string()),
       ("CameraPivot", flag(self.camera_pivot)),
       ("RecoveryMinutes", self.recovery_minutes.to_string()),
+      ("SketchDegreesOfFreedom", flag(self.show_dof)),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -387,6 +392,7 @@ impl Prefs {
         "orbittype" => p.orbit = pick(&OrbitType::ALL, OrbitType::key, v).unwrap_or(p.orbit),
         "camerapivot" => p.camera_pivot = b.unwrap_or(p.camera_pivot),
         "recoveryminutes" => p.recovery_minutes = v.trim().parse().unwrap_or(p.recovery_minutes),
+        "sketchdegreesoffreedom" => p.show_dof = b.unwrap_or(p.show_dof),
         _ => {}
       }
     }
@@ -930,6 +936,12 @@ fn page_ui(app: &mut App, ui: &mut egui::Ui) {
         flag_row(ui, "Show sketch dimensions", &mut p.show_dims, "");
         flag_row(ui, "Show sketch constraints", &mut p.show_constraints, "");
         flag_row(ui, "Snap sketch points to grid", &mut p.snap, "");
+        flag_row(
+          ui,
+          "Show degrees of freedom in the Sketch Palette",
+          &mut p.show_dof,
+          "A line under the palette's options: the sketch's degrees of freedom and profiles",
+        );
       });
       ui.add_space(6.0);
       note(ui, "Default units apply to new designs; Document Settings changes a design's own units.");
@@ -1009,6 +1021,7 @@ mod tests {
       orbit: OrbitType::Free,
       camera_pivot: false,
       recovery_minutes: 15,
+      show_dof: true,
     };
     let ini = "[Updates]\nMode=notify\n\n[Window]\nMaximized=1\n";
     let text = p.write_into(ini);

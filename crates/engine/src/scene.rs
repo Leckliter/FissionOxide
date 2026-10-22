@@ -211,6 +211,29 @@ pub struct ViewOptions {
   /// Curves of the edited sketch drawn as a thin grey outline: a sketch Mirror's or pattern's
   /// preview before OK, as Fusion shows it.
   pub preview_curves: Vec<u32>,
+  /// The Sketch Palette's Profile, Points, Projected Geometries and Construction Geometries
+  /// options: what the sketch being edited draws.
+  pub sketch_show: SketchShow,
+}
+
+/// What the Sketch Palette shows of the sketch being edited (every option on by default, as
+/// Fusion's palette starts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SketchShow {
+  /// The light-blue shading of closed profiles.
+  pub profiles: bool,
+  /// The sketch points.
+  pub points: bool,
+  /// Curves projected from the model (and included 3D geometry).
+  pub projected: bool,
+  /// Construction curves and centerlines.
+  pub construction: bool,
+}
+
+impl Default for SketchShow {
+  fn default() -> Self {
+    SketchShow { profiles: true, points: true, projected: true, construction: true }
+  }
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -404,7 +427,11 @@ impl SceneBuilder {
         continue;
       }
       // profiles (shaded regions)
-      let profiles = if opts.hide_profiles_of.contains(&f.id) { &[][..] } else { &r.profiles[..] };
+      let profiles = if opts.hide_profiles_of.contains(&f.id) || is_edit && !opts.sketch_show.profiles {
+        &[][..]
+      } else {
+        &r.profiles[..]
+      };
       for (i, prof) in profiles.iter().enumerate() {
         let pick = Pick::Profile { sketch: f.id, index: i };
         let mesh = self
@@ -456,6 +483,11 @@ impl SceneBuilder {
         pickable,
         &opts.hover_more,
         if is_edit { &opts.preview_curves } else { &[] },
+        if is_edit { opts.sketch_show } else { SketchShow::default() },
+        match &f.kind {
+          FeatureKind::Sketch { links, .. } => links,
+          _ => &[],
+        },
       );
     }
 
@@ -698,8 +730,11 @@ fn sketch_lines(
   pickable: bool,
   hover_more: &[Pick],
   preview: &[u32],
+  show: SketchShow,
+  links: &[fox_model::SketchLink],
 ) {
   let w = |p: [f64; 2]| plane.to_world(p).as_vec3().to_array();
+  let projected = projected_curves(sk, links);
   // a text's outlines are blue while the text can still move (its anchor is free), as in
   // Fusion, though its glyph points are placed, not solved
   let text_free: std::collections::HashSet<CurveId> =
@@ -732,6 +767,10 @@ fn sketch_lines(
     scene.lines.push(Polyline { points, color, width, id, on_top: editing, dashed, behind: false });
   };
   for c in &sk.curves {
+    // the palette's Construction Geometries and Projected Geometries options
+    if !show.construction && c.construction || !show.projected && projected.contains(&c.id) {
+      continue;
+    }
     let pts = curve_polyline(sk, &c.kind);
     if pts.len() < 2 {
       continue;
@@ -746,8 +785,8 @@ fn sketch_lines(
     }
     push(scene, pts.into_iter().map(w).collect(), look(pick, idle, c.construction), id, c.construction);
   }
-  // included 3D geometry, at its world position
-  for c in &sk.curves3d {
+  // included 3D geometry, at its world position (projected geometry to the palette)
+  for c in sk.curves3d.iter().filter(|c| show.projected && (show.construction || !c.construction)) {
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
     let points = c.kind.polyline(48).into_iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
     let id = if pickable { picks.id(pick) } else { 0 };
@@ -795,7 +834,8 @@ fn sketch_lines(
   let glyph_points: std::collections::HashSet<PointId> =
     sk.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
   let filled = filled_points(sk);
-  for p in sk.points.iter().filter(|p| !glyph_points.contains(&p.id)) {
+  // the palette's Points option: off, no sketch point is drawn (or picked)
+  for p in sk.points.iter().filter(|p| show.points && !glyph_points.contains(&p.id)) {
     let pick = Pick::SketchPoint { sketch: sid, point: p.id };
     let at = w([p.x, p.y]);
     let id = if pickable { picks.id(pick) } else { 0 };
@@ -824,6 +864,26 @@ pub fn filled_points(sk: &Sketch) -> std::collections::HashSet<PointId> {
   let mut out = joined_points(sk);
   for c in &sk.curves {
     out.extend(curve_end_points(&c.kind));
+  }
+  out
+}
+
+/// The curves of a sketch that are projected geometry (what the Sketch Palette's Projected
+/// Geometries option shows or hides): the curves linked to body edges, and those whose points
+/// are all fixed, as `sketch.project` leaves them (a curve on the origin alone is the user's,
+/// and so are a text's glyph outlines, fixed as they are).
+pub fn projected_curves(
+  sk: &Sketch,
+  links: &[fox_model::SketchLink],
+) -> std::collections::HashSet<fox_sketch::CurveId> {
+  let mut out: std::collections::HashSet<fox_sketch::CurveId> = links.iter().map(|l| l.curve).collect();
+  let glyph: std::collections::HashSet<PointId> = sk.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
+  for c in &sk.curves {
+    let pts = fox_sketch::curve_points(&c.kind);
+    let fixed = |id: &PointId| sk.point(*id).is_some_and(|p| p.fixed);
+    if pts.iter().any(|p| *p != fox_sketch::ORIGIN && !glyph.contains(p)) && pts.iter().all(fixed) {
+      out.insert(c.id);
+    }
   }
   out
 }

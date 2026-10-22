@@ -1448,3 +1448,113 @@ fn a_constraint_row_tooltip_is_fusions_dark_panel() {
   let later = h.rest(row.center(), 3.0);
   assert_eq!(later, shown, "the panel doesn't grow");
 }
+
+impl Harness {
+  /// Opens a sketch on XY and returns the palette's right edge and the y of the row `label`.
+  fn palette_row(&mut self, label: &str) -> (f32, f32) {
+    if self.app.s.edit_sketch.is_none() {
+      self.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+      for _ in 0..3 {
+        self.frame(vec![]);
+      }
+    }
+    let r = self.find(vec![], label).unwrap_or_else(|| panic!("the palette lists {label}"));
+    (self.app.canvas.right() - 34.0, r.center().y)
+  }
+}
+
+/// Fusion's palette tooltips: "Construction" and "Centerline" on the Linetype icons, none on the
+/// checkbox rows.
+#[test]
+fn the_sketch_palette_tooltips_name_the_linetypes_and_nothing_else() {
+  let mut h = Harness::new();
+  let (right, y) = h.palette_row("Linetype");
+  // the icons sit at the row's right end: Centerline, then Construction to its left
+  let shown = h.rest(Pos2::new(right - 14.0 - 11.0, y), 1.0);
+  assert!(shown.iter().any(|t| t == "Centerline"), "{shown:?}");
+  let shown = h.rest(Pos2::new(right - 14.0 - 22.0 - 6.0 - 11.0, y), 1.0);
+  assert!(shown.iter().any(|t| t == "Construction"), "{shown:?}");
+  assert!(!shown.iter().any(|t| t.contains("Normal/Construction")), "{shown:?}");
+  // a checkbox row shows no tooltip: resting on its box draws the same text as resting on its label
+  for label in ["Slice", "Profile", "Points", "Projected Geometries", "3D Sketch"] {
+    let (right, y) = h.palette_row(label);
+    let r = h.find(vec![], label).unwrap();
+    let on_label = h.rest(r.center(), 1.0);
+    let on_box = h.rest(Pos2::new(right - 14.0 - 9.0, y), 1.5);
+    assert_eq!(on_label.len(), on_box.len(), "{label}: {on_box:?}");
+    assert!(!on_box.iter().any(|t| t.contains("FissionOxide")), "{on_box:?}");
+  }
+}
+
+/// Every Options checkbox is live: clicking Profile, Points, Projected Geometries, Construction
+/// Geometries, Slice and 3D Sketch toggles the option.
+#[test]
+fn the_sketch_palette_checkboxes_all_toggle() {
+  let mut h = Harness::new();
+  let before = h.app.palette;
+  for label in ["Slice", "Profile", "Points", "Projected Geometries", "Construction Geometries", "3D Sketch"] {
+    let (right, y) = h.palette_row(label);
+    h.move_then_click(Pos2::new(right - 14.0 - 9.0, y));
+  }
+  let p = h.app.palette;
+  assert_eq!(p.slice, !before.slice);
+  assert_eq!(p.profile, !before.profile);
+  assert_eq!(p.points, !before.points);
+  assert_eq!(p.projected, !before.projected);
+  assert_eq!(p.construction, !before.construction);
+  assert_eq!(p.sketch_3d, !before.sketch_3d);
+  // the scene follows
+  let opts = crate::viewport::scene_options(&mut h.app);
+  assert_eq!(opts.sketch_show, p.show());
+  assert!(opts.section.is_some(), "Slice sections at the sketch plane");
+}
+
+/// The header chevron docks the palette into a vertical SKETCH PALETTE tab at the canvas's right
+/// edge; the tab floats the palette out again, where a click elsewhere puts it back and the pin
+/// docks it open.
+#[test]
+fn the_sketch_palette_chevron_collapses_it_into_a_tab() {
+  use crate::palette::Dock;
+  let mut h = Harness::new();
+  let (right, _) = h.palette_row("Linetype");
+  let header = h.find(vec![], "SKETCH PALETTE").expect("the header");
+  let chevron = Pos2::new(right - 12.0, header.center().y);
+  h.move_then_click(chevron);
+  assert_eq!(h.app.palette.dock, Dock::Collapsed);
+  assert!(h.find(vec![], "Finish Sketch").is_none(), "the palette is gone");
+  let tab = h.find(vec![], "SKETCH PALETTE").expect("the tab names it");
+  let tab_rect = crate::palette::tab_rect(h.app.canvas);
+  assert!(tab_rect.intersects(tab), "{tab:?} in {tab_rect:?}");
+  assert!(tab_rect.right() >= h.app.canvas.right() - 2.0, "at the canvas's right edge");
+  h.move_then_click(tab_rect.center());
+  assert_eq!(h.app.palette.dock, Dock::Floating);
+  assert!(h.find(vec![], "Finish Sketch").is_some(), "the palette floats out");
+  // a click on the canvas slides it back
+  h.move_then_click(h.app.canvas.center() + vec2(0.0, 150.0));
+  assert_eq!(h.app.palette.dock, Dock::Collapsed);
+  // pinned, it stays
+  h.move_then_click(tab_rect.center());
+  assert_eq!(h.app.palette.dock, Dock::Floating);
+  let header = h.find(vec![], "SKETCH PALETTE").expect("the header");
+  h.move_then_click(Pos2::new(right - 24.0 - 12.0, header.center().y));
+  assert_eq!(h.app.palette.dock, Dock::Open);
+  h.move_then_click(h.app.canvas.center() + vec2(0.0, 150.0));
+  assert_eq!(h.app.palette.dock, Dock::Open);
+  assert!(h.find(vec![], "Finish Sketch").is_some());
+}
+
+/// Fusion's palette ends with the 3D Sketch row and Finish Sketch; the degrees-of-freedom line is
+/// a preference, off to begin with.
+#[test]
+fn the_sketch_palette_has_no_footer_unless_preferred() {
+  let mut h = Harness::new();
+  h.palette_row("3D Sketch");
+  h.app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+  let dof =
+    |texts: &[(Rect, String)]| texts.iter().any(|(_, t)| t.contains("degrees of freedom") || t == "Fully constrained");
+  let texts = h.frame_texts(1.0 / 60.0, vec![]);
+  assert!(!dof(&texts), "{texts:?}");
+  h.app.preferences.values.show_dof = true;
+  let texts = h.frame_texts(1.0 / 60.0, vec![]);
+  assert!(dof(&texts), "{texts:?}");
+}

@@ -2549,6 +2549,10 @@ pub(crate) fn readout_anchor(canvas: Rect, palette: Option<Rect>) -> egui::Pos2 
 /// The SKETCH PALETTE shown on the right of the canvas while a sketch is open.
 pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
   let Some(sk) = app.s.edit_sketch else { return };
+  if !app.palette.shown() {
+    crate::palette::palette_tab(app, ctx);
+    return;
+  }
   let canvas = app.canvas;
   let at = palette_pos(
     canvas,
@@ -2563,7 +2567,8 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
         let width = 270.0;
         ui.set_width(width);
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        dialog_header(ui, Icon::Sketch, "SKETCH PALETTE", width);
+        let header = dialog_header(ui, Icon::Sketch, "SKETCH PALETTE", width);
+        crate::palette::header_controls(app, ui, header);
         egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 14, top: 6, bottom: 8 }).show(ui, |ui| {
           ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
           let section = |ui: &mut egui::Ui, title: &str| {
@@ -2608,8 +2613,7 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
             if icons::icon_button(ui, Icon::Centerline, 22.0, "Centerline", centerline, None).clicked() {
               app.toggle_centerline();
             }
-            if icons::icon_button(ui, Icon::Construction, 22.0, "Normal/Construction (X)", construction, None).clicked()
-            {
+            if icons::icon_button(ui, Icon::Construction, 22.0, "Construction", construction, None).clicked() {
               app.toggle_construction();
             }
           });
@@ -2624,27 +2628,30 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
           row(ui, "Snap", &mut |ui| {
             ui.checkbox(&mut app.snap, "");
           });
-          // options FissionOxide doesn't have yet are listed, greyed, as in Fusion's palette
-          for (label, on) in [("Slice", false), ("Profile", true), ("Points", true)] {
-            row(ui, label, &mut |ui| {
-              let mut v = on;
-              ui.add_enabled(false, egui::Checkbox::without_text(&mut v))
-                .on_disabled_hover_text("Not in FissionOxide yet");
-            });
-          }
+          row(ui, "Slice", &mut |ui| {
+            ui.checkbox(&mut app.palette.slice, "");
+          });
+          row(ui, "Profile", &mut |ui| {
+            ui.checkbox(&mut app.palette.profile, "");
+          });
+          row(ui, "Points", &mut |ui| {
+            ui.checkbox(&mut app.palette.points, "");
+          });
           row(ui, "Dimensions", &mut |ui| {
             ui.checkbox(&mut app.show_dims, "");
           });
           row(ui, "Constraints", &mut |ui| {
             ui.checkbox(&mut app.show_constraints, "");
           });
-          for (label, on) in [("Projected Geometries", true), ("Construction Geometries", true), ("3D Sketch", false)] {
-            row(ui, label, &mut |ui| {
-              let mut v = on;
-              ui.add_enabled(false, egui::Checkbox::without_text(&mut v))
-                .on_disabled_hover_text("Not in FissionOxide yet");
-            });
-          }
+          row(ui, "Projected Geometries", &mut |ui| {
+            ui.checkbox(&mut app.palette.projected, "");
+          });
+          row(ui, "Construction Geometries", &mut |ui| {
+            ui.checkbox(&mut app.palette.construction, "");
+          });
+          row(ui, "3D Sketch", &mut |ui| {
+            ui.checkbox(&mut app.palette.sketch_3d, "");
+          });
           // Fusion's Feature Options while a polygon tool is active: circumscribed, inscribed, edge
           if matches!(app.tool, Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon) {
             ui.add_space(4.0);
@@ -2710,7 +2717,8 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
               });
             }
           }
-          if let Some(r) = app.s.model.sketches.get(&sk) {
+          // Fusion's palette ends with the 3D Sketch row; the solver's readout is a preference
+          if let Some(r) = app.s.model.sketches.get(&sk).filter(|_| app.preferences.values.show_dof) {
             ui.add_space(4.0);
             let (txt, col) = if !r.report.ok() {
               ("Over-constrained / conflicting".to_string(), theme::ERROR)
@@ -2737,6 +2745,8 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
         });
       });
     });
+  let shown = ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")));
+  crate::palette::end_frame(app, ctx, shown);
 }
 
 /// The types of the running sketch tool, for the palette's Feature Options section: Fusion
@@ -2793,7 +2803,7 @@ pub fn dialog_frame() -> egui::Frame {
 
 /// The title bar of a command dialog: the command's icon and title, ▸▸, and a thin rule in the
 /// command family's accent colour.
-pub fn dialog_header(ui: &mut egui::Ui, icon: Icon, title: &str, width: f32) {
+pub fn dialog_header(ui: &mut egui::Ui, icon: Icon, title: &str, width: f32) -> Rect {
   let (rect, _) = ui.allocate_exact_size(vec2(width, 30.0), egui::Sense::hover());
   let p = ui.painter();
   p.rect_filled(rect, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, theme::DIALOG_HEADER);
@@ -2812,6 +2822,7 @@ pub fn dialog_header(ui: &mut egui::Ui, icon: Icon, title: &str, width: f32) {
       Stroke::NONE,
     ));
   }
+  rect
 }
 
 /// The primary dialog button (OK, Finish Sketch): a light tint of the command's accent with an

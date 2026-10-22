@@ -37,6 +37,7 @@ mod menus;
 mod navbar;
 mod notifications;
 mod origin;
+mod palette;
 mod panels;
 mod params_ui;
 mod plugins_ui;
@@ -118,6 +119,8 @@ pub struct App {
   /// Snap sketch clicks to the grid.
   pub snap: bool,
   pub show_constraints: bool,
+  /// The Sketch Palette's other options and whether it is open, collapsed or floating.
+  pub palette: palette::SketchPalette,
   /// Floating panels.
   pub browser_open: bool,
   pub show_comments: bool,
@@ -318,6 +321,8 @@ struct RenderKey {
   peek_sketches: Vec<u32>,
   /// Sketch items a hovered constraint glyph highlights.
   glyph_hover: Vec<Pick>,
+  /// The Sketch Palette's display options (Slice, Profile, Points, ...).
+  palette: palette::SketchPalette,
 }
 
 impl App {
@@ -422,6 +427,7 @@ impl App {
       show_dims: true,
       snap: false,
       show_constraints: true,
+      palette: Default::default(),
       browser_open: true,
       show_comments: true,
       canvas_px: [0, 0],

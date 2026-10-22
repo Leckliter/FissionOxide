@@ -761,7 +761,24 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
     hover_more: app.glyph_hover.clone(),
     preview_curves: app.dialog.as_ref().map(|d| d.preview_curves().to_vec()).unwrap_or_default(),
+    sketch_show: app.palette.show(),
+    // the palette's Slice: the model sectioned at the sketch plane, the side the camera is on cut
+    // away so the sketch shows over the cut
+    section: match app.s.edit_sketch.filter(|_| app.palette.slice).and_then(|sk| app.s.model.sketches.get(&sk)) {
+      Some(r) => Some(slice_plane(r.plane, app.cam.eye())),
+      None => analysis.section,
+    },
     ..analysis
+  }
+}
+
+/// The sketch plane as a section plane with its normal towards `eye`, so the section cuts away
+/// what is between the camera and the sketch.
+pub(crate) fn slice_plane(plane: Plane, eye: DVec3) -> Plane {
+  if (eye - plane.origin).dot(plane.normal()) >= 0.0 {
+    plane
+  } else {
+    Plane { origin: plane.origin, x: plane.y, y: plane.x }
   }
 }
 
@@ -790,6 +807,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     peek_faces: app.ctx_menu.peek_faces.iter().map(|(b, f)| (b.0, *f)).collect(),
     peek_sketches: app.ctx_menu.peek_sketches.iter().map(|s| s.0).collect(),
     glyph_hover: app.glyph_hover.clone(),
+    palette: app.palette,
   };
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
@@ -4727,6 +4745,26 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
 
 #[cfg(test)]
 mod tests {
+  /// The palette's Slice sections the model at the sketch plane, cutting away the camera's side.
+  #[test]
+  fn slice_sections_the_model_at_the_sketch_plane_towards_the_camera() {
+    use fox_engine::kernel::Plane;
+    use fox_engine::kernel::glam::DVec3;
+    assert_eq!(super::slice_plane(Plane::XY, DVec3::new(1.0, 2.0, 30.0)).normal(), DVec3::Z);
+    let flipped = super::slice_plane(Plane::XY, DVec3::new(1.0, 2.0, -30.0));
+    assert_eq!(flipped.normal(), -DVec3::Z);
+    assert_eq!(flipped.origin, DVec3::ZERO);
+    let mut app = crate::App::with_session(fox_engine::Session::default());
+    app.run("box", serde_json::json!({"width": 20, "depth": 10, "height": 5}));
+    app.create_sketch(serde_json::json!("xy"));
+    assert!(super::scene_options(&mut app).section.is_none(), "Slice starts off");
+    app.palette.slice = true;
+    let pl = super::scene_options(&mut app).section.expect("Slice sections at the sketch plane");
+    assert!((app.cam.eye() - pl.origin).dot(pl.normal()) > 0.0, "the camera's side is cut away");
+    app.finish_sketch();
+    assert!(super::scene_options(&mut app).section.is_none(), "only while sketching");
+  }
+
   /// Text reads along the sketch's x axis on the XY plane; on a plane whose x axis runs up or
   /// across the screen the text is turned to read left to right.
   #[test]
