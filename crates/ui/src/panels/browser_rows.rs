@@ -852,7 +852,7 @@ mod tests {
     app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
     assert!(app.s.dirty);
     assert_eq!(window_title(&app), format!("Untitled* ({user}) - FissionOxide"));
-    assert_eq!(crate::documents::tab_label(&app.s), "Untitled", "the tab shows the lock, not a star, until saved");
+    assert_eq!(crate::documents::tab_label(&app.s), "Untitled*", "the tab shows the lock and the star until saved");
     // saved to a file: the name and version show, the tab stars its unsaved changes
     app.s.path = Some(std::path::PathBuf::from("/tmp/Bracket.fox"));
     assert_eq!(root_label(&app), "Bracket v1");

@@ -137,7 +137,8 @@ fn a_new_electronics_design_has_its_own_tab() {
   work(&mut h.app);
   ecad_chrome::new_electronics_design(&mut h.app, None);
   assert_eq!((h.app.docs.count(), h.app.docs.active()), (2, 1));
-  assert_eq!(documents::tab_label(&h.app.s), "Untitled");
+  // numbered after the open "Untitled*", as Fusion numbers new tabs
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled(1)");
   assert_eq!(ecad_chrome::doc_kind(h.app.electronics.as_ref()), DocKind::Electronics);
   // the part design's tab is as it was, in the Design workspace
   documents::switch_to(&mut h.app, 0);

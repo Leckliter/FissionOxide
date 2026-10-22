@@ -40,13 +40,17 @@ pub struct Documents {
   active: usize,
   /// "What do you want to design?", while open.
   pub(crate) chooser: Option<Chooser>,
-  /// The tab whose close waits on "Save changes?".
+  /// The tab whose close waits on "Save changes?" (or, never saved, on the Save dialog).
   pub(crate) closing: Option<usize>,
+  /// The shown tab scrolls into view in an overflowing tab strip (it just opened or showed).
+  reveal: bool,
+  /// Where the overflow "v" is, while the tabs don't fit.
+  pub(crate) overflow_at: Option<Rect>,
 }
 
 impl Default for Documents {
   fn default() -> Self {
-    Documents { slots: vec![None], active: 0, chooser: None, closing: None }
+    Documents { slots: vec![None], active: 0, chooser: None, closing: None, reveal: false, overflow_at: None }
   }
 }
 
@@ -83,15 +87,27 @@ pub(crate) fn doc_name(s: &Session) -> String {
     .unwrap_or_else(|| s.design.name.clone())
 }
 
-/// A document tab's label: "Untitled" (with a lock) until saved, then "Name v1", starred when
-/// dirty.
+/// A document tab's label: "Untitled" (with a lock) until saved, then "Name v1"; starred when
+/// dirty ("Untitled*"), as in Fusion.
 pub(crate) fn tab_label(s: &Session) -> String {
+  let star = if s.dirty { "*" } else { "" };
   if unsaved(s) {
-    doc_name(s)
+    format!("{}{star}", doc_name(s))
   } else {
-    let star = if s.dirty { "*" } else { "" };
     format!("{} v{}{star}", doc_name(s), s.hub.as_ref().map(|h| h.version).unwrap_or(1))
   }
+}
+
+/// The name of a new tab's design, as Fusion numbers them: "Untitled", else the first of
+/// "Untitled(1)", "Untitled(2)"... that no open tab has.
+pub(crate) fn next_untitled(app: &App) -> String {
+  let base = fox_engine::model::Design::default().name;
+  let names: Vec<String> =
+    app.docs.slots.iter().map(|d| doc_name(d.as_ref().map(|d| &d.s).unwrap_or(&app.s))).collect();
+  std::iter::once(base.clone())
+    .chain((1..).map(|n| format!("{base}({n})")))
+    .find(|c| !names.contains(c))
+    .unwrap_or(base)
 }
 
 /// Whether closing the document would lose work: it has changes not saved anywhere.
@@ -103,6 +119,12 @@ pub(crate) fn has_unsaved_work(s: &Session) -> bool {
 /// electronics document never saved (Fusion asks for a new Electronics Design too).
 fn asks_first(app: &App) -> bool {
   has_unsaved_work(&app.s) || (app.electronics.is_some() && unsaved(&app.s))
+}
+
+/// Whether closing the shown document asks with the Save dialog (Don't Save added) rather than
+/// "Save changes?": a never-saved design, as in Fusion. Electronics documents keep their prompt.
+fn saves_on_close(app: &App) -> bool {
+  unsaved(&app.s) && app.electronics.is_none()
 }
 
 // ---------------------------------------------------------------- switching
@@ -180,6 +202,7 @@ pub(crate) fn switch_to(app: &mut App, i: usize) {
   let active = app.docs.active;
   app.docs.slots[active] = Some(doc);
   app.docs.active = i;
+  app.docs.reveal = true;
   if let Some(d) = app.docs.slots[i].take() {
     unpark(app, d);
   }
@@ -192,12 +215,16 @@ fn add_tab(app: &mut App) {
   app.docs.slots[active] = Some(doc);
   app.docs.slots.push(None);
   app.docs.active = app.docs.slots.len() - 1;
+  app.docs.reveal = true;
 }
 
-/// Create New: a new design of type `ty` in a new tab; the open documents stay as they are.
+/// Create New: a new design of type `ty` in a new tab, numbered "Untitled(n)" when an open tab
+/// is already "Untitled"; the open documents stay as they are.
 pub(crate) fn new_document(app: &mut App, ty: DesignType, unit: Option<LengthUnit>) {
+  let name = next_untitled(app);
   add_tab(app);
   app.new_design_of(ty, unit);
+  app.s.design.name = name;
 }
 
 /// Before a design is opened in place of the shown one: if the shown one has unsaved changes,
@@ -226,12 +253,17 @@ pub(crate) fn drop_new_tab(app: &mut App, back: usize) {
 }
 
 /// The tab's X: closes it, asking first when it has unsaved changes (the tab shows while asked).
+/// A never-saved design asks with the Save dialog, Don't Save added, as in Fusion; a saved one
+/// with "Save changes?".
 pub(crate) fn request_close(app: &mut App, i: usize) {
   if i >= app.docs.slots.len() {
     return;
   }
   switch_to(app, i);
   if asks_first(app) {
+    if saves_on_close(app) {
+      app.save(false);
+    }
     app.docs.closing = Some(i);
   } else {
     close_now(app, i);
@@ -262,25 +294,83 @@ pub(crate) fn close_now(app: &mut App, i: usize) {
 
 // ---------------------------------------------------------------- the tab strip
 
-/// The document tabs in `w` (one fills it; more share it), then the "+".
+/// The narrowest a document tab gets: past that the strip scrolls.
+pub(crate) const TAB_MIN_W: f32 = 160.0;
+
+/// The "v" at the end of an overflowing strip, listing every tab.
+const OVERFLOW_W: f32 = 22.0;
+
+/// Whether `n` tabs overflow a strip `w` wide (it then scrolls and shows the "v").
+pub(crate) fn tabs_overflow(n: usize, w: f32) -> bool {
+  n as f32 * TAB_MIN_W > w
+}
+
+/// The document tabs in `w` (one fills it; more share it), then the "+". When they don't fit
+/// the strip scrolls, keeping the shown tab in view, and a "v" lists them all, as in Fusion.
 pub(crate) fn tab_strip(app: &mut App, ui: &mut egui::Ui, w: f32) {
   let n = app.docs.slots.len();
-  let each = (w / n as f32).floor();
-  let mut switch = None;
-  let mut close = None;
-  for i in 0..n {
-    let shown = i == app.docs.active;
-    let (label, locked, kind) = match &app.docs.slots[i] {
+  let labels: Vec<(String, bool, crate::ecad_chrome::DocKind)> = (0..n)
+    .map(|i| match &app.docs.slots[i] {
       Some(d) => (tab_label(&d.s), unsaved(&d.s), crate::ecad_chrome::doc_kind(d.electronics.as_ref())),
       None => (tab_label(&app.s), unsaved(&app.s), crate::ecad_chrome::doc_kind(app.electronics.as_ref())),
-    };
-    let (clicked, closed) = document_tab(ui, i, each, &label, locked, shown, kind);
-    if clicked {
-      switch = Some(i);
+    })
+    .collect();
+  let bottom = ui.max_rect().bottom();
+  let overflow = tabs_overflow(n, w);
+  let reveal = std::mem::take(&mut app.docs.reveal);
+  app.docs.overflow_at = None;
+  let mut switch = None;
+  let mut close = None;
+  let mut tabs = |ui: &mut egui::Ui, each: f32| {
+    for (i, (label, locked, kind)) in labels.iter().enumerate() {
+      let shown = i == app.docs.active;
+      let (resp, closed) = document_tab(ui, i, each, bottom, label, *locked, shown, *kind);
+      if shown && reveal {
+        resp.scroll_to_me(None);
+      }
+      if resp.clicked() && !closed {
+        switch = Some(i);
+      }
+      if closed {
+        close = Some(i);
+      }
     }
-    if closed {
-      close = Some(i);
+  };
+  if overflow {
+    let view_w = (w - OVERFLOW_W - 4.0).max(TAB_MIN_W);
+    let h = ui.available_height();
+    ui.allocate_ui(vec2(view_w, h), |ui| {
+      egui::ScrollArea::horizontal()
+        .id_salt("doc-tabs")
+        .max_width(view_w)
+        .min_scrolled_height(h)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(ui, |ui| {
+          // the tabs sit on the bar's bottom edge, as outside the scroll
+          let layout = egui::Layout::left_to_right(egui::Align::Max);
+          ui.allocate_ui_with_layout(vec2(n as f32 * TAB_MIN_W, h), layout, |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            tabs(ui, TAB_MIN_W);
+          });
+        });
+    });
+    ui.add_space(4.0);
+    let (r, resp) = ui.allocate_exact_size(vec2(OVERFLOW_W, 30.0), egui::Sense::click());
+    app.docs.overflow_at = Some(r);
+    if resp.hovered() {
+      ui.painter().rect_filled(r, 2.0, Color32::from_gray(214));
     }
+    icons::chevron(ui.painter(), r.center(), theme::ICON_INK);
+    let resp = resp.on_hover_text(OVERFLOW_TIP);
+    egui::Popup::menu(&resp).show(|ui| {
+      for (i, (label, _, _)) in labels.iter().enumerate() {
+        if ui.selectable_label(i == app.docs.active, label).clicked() {
+          switch = Some(i);
+        }
+      }
+    });
+  } else {
+    tabs(ui, (w / n as f32).floor());
   }
   ui.add_space(4.0);
   let (r, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), egui::Sense::click());
@@ -296,25 +386,30 @@ pub(crate) fn tab_strip(app: &mut App, ui: &mut egui::Ui, w: f32) {
   }
 }
 
+/// The overflow "v" button's tooltip.
+pub(crate) const OVERFLOW_TIP: &str = "Show all open documents";
+
 /// The "+" button's tooltip.
 pub(crate) const PLUS_TIP: &str = "New Design";
 
 /// One tab: the document's icon (a component, or an electronics document's board or sheet), the
-/// name centred, a lock while unsaved and an X. The shown tab merges into the toolbar below; the
-/// others are darker. Returns (clicked, X clicked).
+/// name centred, a lock while unsaved and an X. The shown tab merges into the toolbar below (the
+/// bar ends at `bottom`); the others are darker. Returns the tab's response and whether its X was
+/// clicked.
+#[allow(clippy::too_many_arguments)]
 fn document_tab(
   ui: &mut egui::Ui,
   i: usize,
   w: f32,
+  bottom: f32,
   label: &str,
   locked: bool,
   shown: bool,
   kind: crate::ecad_chrome::DocKind,
-) -> (bool, bool) {
-  let full = ui.max_rect();
+) -> (egui::Response, bool) {
   let (slot, resp) = ui.allocate_exact_size(vec2(w, 30.0), egui::Sense::click());
   // the tab runs to the bottom edge of the bar and merges into the toolbar
-  let rect = Rect::from_min_max(pos2(slot.min.x, full.bottom() - 33.0), pos2(slot.max.x - 1.0, full.bottom() + 1.0));
+  let rect = Rect::from_min_max(pos2(slot.min.x, bottom - 33.0), pos2(slot.max.x - 1.0, bottom + 1.0));
   let fill = if shown {
     theme::TOOLBAR
   } else if resp.hovered() {
@@ -345,7 +440,7 @@ fn document_tab(
   }
   icons::draw(ui.painter(), close, Icon::Close, theme::ICON_INK);
   let closed = cr.on_hover_text("Close").clicked();
-  (resp.clicked() && !closed, closed)
+  (resp, closed)
 }
 
 // ---------------------------------------------------------------- What do you want to design?
@@ -610,10 +705,17 @@ fn tile(ui: &mut egui::Ui, k: NewKind, picked: bool) -> egui::Response {
 
 // ---------------------------------------------------------------- closing an unsaved tab
 
-/// "Save changes?" for a tab closing with unsaved changes: Save (keeps the tab and saves),
-/// Don't Save (closes it) or Cancel.
+/// "Save changes?" for a saved design's tab closing with unsaved changes: Save (keeps the tab
+/// and saves), Don't Save (closes it) or Cancel.
 fn close_prompt(app: &mut App, ctx: &egui::Context) {
   let Some(i) = app.docs.closing else { return };
+  // a never-saved design asks with the Save dialog ([`crate::data_panel::save_window`])
+  if saves_on_close(app) {
+    if app.data.save.is_none() {
+      app.docs.closing = None;
+    }
+    return;
+  }
   let name = crate::ecad_chrome::close_name(app.electronics.as_ref()).map_or_else(|| doc_name(&app.s), str::to_string);
   let mut act = None;
   let (_, closed) = file_dialogs::modal(ctx, "close-design", "Close", 420.0, |ui| {
