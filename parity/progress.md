@@ -13,7 +13,8 @@ Comments panel" (report `2026-10-21-document-settings-views.md`, `map-wave17.jso
 from wave 13 on is `ready` in `index.jsonl` with no fixer yet. "Status bar readouts" is done (report
 `2026-10-21-status-readouts.md`, `map-wave18.json`); "Camera" is done (report `2026-10-21-camera-navbar.md`,
 `map-wave19.json`); "Display settings" is done (report
-`2026-10-21-display-settings.md`, `map-wave20.json`); "Grid and snaps" is `in progress`. Earlier: chrome, toolbar, ViewCube and
+`2026-10-21-display-settings.md`, `map-wave20.json`); "Grid and snaps" is done (report `2026-10-21-grid-snaps.md`,
+`map-wave21.json`). Earlier: chrome, toolbar, ViewCube and
 navigation bar, marking menus, browser and timeline menus, Preferences, the basic sketch flow, the
 first-pass feature dialogs, face/edge/body colours, every sketch CREATE and MODIFY tool, the
 selection remainder, every constraint, the palette, the heads-up input (reports in

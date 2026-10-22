@@ -432,3 +432,11 @@ its Environment is a flat list of sixteen names without Fusion's Theme row and h
 Effects has three unchecked boxes against Fusion's seven with a preset row, Object Visibility has
 five rows against fourteen, and Ground Plane Offset is a large window without the Adaptive
 checkbox. 5 rows in one batch (`parity/batches/map-wave20.json`), two match rows.
+
+## 2026-10-21, prober 7 (continued): grid and snaps
+
+The Grid and Snaps menu, Grid Settings and Set Increments in both apps (report
+`parity/reports/2026-10-21-grid-snaps.md`). The entries match; Fusion's 3D view hides the grid
+until Layout Grid is on, greys the lock until then, keeps Incremental Move on, and opens docked
+Adaptive / Fixed dialogs where FissionOxide shows the grid by default and uses submenus with
+values. 3 rows in one batch (`parity/batches/map-wave21.json`), one match row.

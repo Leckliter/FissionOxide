@@ -1,0 +1,5 @@
+{
+  "ui:navbar:grid-menu-defaults": "ui-grid-snaps-2",
+  "ui:navbar:grid-settings-dialog": "ui-grid-snaps-2",
+  "ui:navbar:set-increments-dialog": "ui-grid-snaps-2"
+}
