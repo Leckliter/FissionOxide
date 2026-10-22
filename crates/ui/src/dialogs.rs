@@ -14,6 +14,7 @@ use crate::theme;
 use crate::{App, panels};
 
 mod choice;
+mod construct;
 mod extrude;
 mod hole_pattern;
 mod icon_row;
@@ -162,7 +163,7 @@ impl Kind {
       Kind::Mirror => "MIRROR",
       Kind::Combine => "COMBINE",
       Kind::Move => "MOVE/COPY",
-      Kind::OffsetPlane => "OFFSET PLANE",
+      Kind::OffsetPlane => construct::TITLE,
       Kind::Inspect => "MEASURE",
       Kind::Appearance => "APPEARANCE",
       Kind::RedefinePlane => "REDEFINE SKETCH PLANE",
@@ -205,6 +206,8 @@ impl Kind {
       Kind::MotionStudy => "MOTION STUDY",
       Kind::CopyComponent => "DUPLICATE COMPONENT",
       Kind::NewDrawing => "CREATE DRAWING",
+      // every plane, axis and point command opens Fusion's one construction dialog
+      Kind::Form(_) if construct::method_of(self).is_some() => construct::TITLE,
       Kind::Form(f) => f.title,
       Kind::Section => "SECTION ANALYSIS",
       Kind::Analysis("zebra") => "ZEBRA ANALYSIS",
@@ -651,6 +654,9 @@ pub struct Dialog {
   last_pick: Value,
   /// Scale: the point it scales about (world mm), once picked or filled in from the first body.
   point: Option<[f64; 3]>,
+  /// Another command this dialog switches to (a construction dialog's Type or Method): the app
+  /// cancels this one and starts that.
+  pub(crate) switch_to: Option<Kind>,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -784,6 +790,7 @@ impl Dialog {
       ghosts: Vec::new(),
       last_pick: Value::Null,
       point: None,
+      switch_to: None,
     }
   }
 
@@ -2013,6 +2020,7 @@ impl Dialog {
       Kind::Hole => self.hole_ready(),
       Kind::Fold => self.sketch.is_some(),
       Kind::RectPattern => self.pattern_ready(),
+      Kind::OffsetPlane => !self.plane.is_null(),
       Kind::PressPull | Kind::OffsetFace => !self.faces.is_empty(),
       Kind::Draft => !self.plane.is_null() && !self.faces.is_empty(),
       Kind::Scale => !self.bodies.is_empty() && self.point.is_some(),
@@ -2804,6 +2812,7 @@ impl Dialog {
       Kind::Hole => "sketch points to drill (Point tool) are needed",
       Kind::RectPattern => self.pattern_missing(),
       Kind::Fold => "pick a sketch with a bend line",
+      Kind::OffsetPlane => "select a plane",
       Kind::PressPull | Kind::OffsetFace => "select faces",
       Kind::Draft if self.plane.is_null() => "select the pull direction",
       Kind::Draft => "select faces to draft",
@@ -2843,6 +2852,7 @@ impl Dialog {
 
   fn fields(&mut self, app: &mut App, ui: &mut egui::Ui) {
     let creating = !self.picks_fixed();
+    self.construct_rows(ui);
     match self.kind {
       // Create Sketch has no dialog (`show` returns before drawing one): the planes to pick are
       // drawn in the viewport (`viewport::plane_picker`) with the cursor hint
@@ -2860,7 +2870,9 @@ impl Dialog {
       Kind::CircPattern if creating => self.circ_rows(ui),
       Kind::OffsetPlane | Kind::Mirror => {
         ui.label("Plane");
-        if creating {
+        if self.kind == Kind::OffsetPlane && creating {
+          self.offset_plane_chip(ui, &mut app.s);
+        } else if creating {
           self.plane_choice(ui);
         } else if self.kind == Kind::Mirror {
           sel_chip(ui, self.accent(), "1 selected", true);
@@ -2869,9 +2881,7 @@ impl Dialog {
         }
         ui.end_row();
         if self.kind == Kind::OffsetPlane {
-          ui.label("Offset");
-          self.text(ui, true);
-          ui.end_row();
+          self.offset_plane_rows(ui);
         } else {
           ui.label("Type");
           let types = [("bodies", "Bodies"), ("features", "Features")];

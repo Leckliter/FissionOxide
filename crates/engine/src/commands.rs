@@ -515,6 +515,7 @@ cmds! {
   "select.seed_boundary" => "Select the faces connected to a seed face without crossing the boundary edges; defaults: the selected face and edges", "{seed?: {body, face}, edges?: [{body, edge}]}";
   "sketch.plane" => "Redefine Sketch Plane: put a sketch on another plane or planar face made before it (its curves keep their sketch coordinates); the features after it recompute", "{sketch, plane}";
   "design.type" => "Fusion's design type: part, assembly or hybrid (which toolbar tabs show); no type reads it", "{type?: part|assembly|hybrid}";
+  "construction.visible" => "Show or hide a construction plane, axis or point (the browser row's eye, V)", "{feature, visible: bool}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1664,6 +1665,25 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         return Err(CmdError::new(format!("the sketch can't go on that plane: {e}")));
       }
       Ok(feature_status(s, id))
+    }
+    "construction.visible" => {
+      let id = FeatureId(req_u32(p, "feature")?);
+      let v = p.get("visible").and_then(Value::as_bool).unwrap_or(true);
+      s.edit(|d| {
+        let f = d.feature_mut(id).ok_or(CmdError::new("no such feature"))?;
+        if !matches!(
+          f.kind,
+          FeatureKind::ConstructionPlane { .. }
+            | FeatureKind::ConstructionAxis { .. }
+            | FeatureKind::ConstructionPoint { .. }
+        ) {
+          return Err(CmdError::new("not a construction plane, axis or point"));
+        }
+        // shown is the default: no flag to save
+        f.visible = (!v).then_some(false);
+        Ok(())
+      })?;
+      Ok(json!({}))
     }
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
