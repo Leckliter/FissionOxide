@@ -21,7 +21,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [done (2026-10-21)] Marking menus on empty canvas, face, edge; todo: body, vertex, sketch point, construction geometry, timeline feature, in-sketch
 - [done (2026-10-21); not exercised: the look of each visual style and environment, each effect toggled, object visibility toggles, the ground plane offset value] Display settings: every visual style, environment, effects, object visibility, ground plane, full screen
 - [done (2026-10-21); not exercised: Snap to Grid while sketching, lock while zooming, Fixed fields, Incremental Move during a drag] Grid and snaps: layout grid in 3D and sketch, lock, snap, grid settings, incremental move
-- [todo] Origin planes/axes visibility, construction geometry display, sketch visibility
+- [in progress (2026-10-22, prober 8)] Origin planes/axes visibility, construction geometry display, sketch visibility
 
 ## Design workspace: sketch
 - [done (2026-10-21)] Create Sketch flow, rectangle, circle, line, trim, offset, polygon, dimension edit, Horizontal
