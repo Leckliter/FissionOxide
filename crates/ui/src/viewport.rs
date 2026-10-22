@@ -2606,7 +2606,12 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
   let mut consumed = false;
   let font = egui::FontId::proportional(12.0);
   let mut glyph_count: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
-  let mut hovered_items: Vec<Pick> = Vec::new();
+  // a Coincident glyph only shows while its merged point is hovered
+  let hovered_point = match app.hover {
+    Some(Pick::SketchPoint { sketch, point }) if sketch == sk => Some(point),
+    _ => None,
+  };
+  let mut right_click: Option<(fox_engine::sketch::ConstraintId, Pos2)> = None;
   for c in &sketch.constraints {
     if c.kind.dim().is_some() && !app.show_dims || c.kind.dim().is_none() && !app.show_constraints {
       continue;
@@ -2650,46 +2655,68 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       }
       continue;
     }
-    // geometric constraint glyph: Fusion's small grey line-art symbol beside its geometry, in a
-    // row with the others on the same curve or point
-    let Some((anchor, key)) = glyph_anchor(&sketch, &c.kind) else { continue };
-    let k = glyph_count.entry(key).or_default();
-    let Some(at) = to_screen(anchor) else { continue };
-    // a tangent glyph where a line meets an arc (a fillet) sits on the line just past the arc's
-    // end and outside the shape, as Fusion's does; the rest sit up and right of their anchor
-    let nudge = glyph_nudge(&sketch, &c.kind).and_then(|(along, out)| {
-      let a = to_screen([anchor[0] + along[0], anchor[1] + along[1]])? - at;
-      let o = to_screen([anchor[0] + out[0], anchor[1] + out[1]])? - at;
-      let (a, o) = (a.normalized(), o.normalized());
-      (a.is_finite() && o.is_finite()).then_some(a * 12.0 + o * 9.0)
-    });
-    let at = match nudge {
-      Some(n) => at + n + Vec2::new(14.0 * *k as f32, 0.0),
-      None => at + Vec2::new(10.0 + 14.0 * *k as f32, -10.0),
-    };
-    *k += 1;
-    let r = Rect::from_center_size(at, Vec2::splat(2.0 * crate::glyphs::HALF + 3.0));
-    let resp = ui.interact(r, ui.id().with(("glyph", c.id.0)), Sense::click());
-    let col = if selected || resp.hovered() { crate::theme::ACCENT } else { GLYPH_INK };
-    if resp.hovered() {
-      // a hovered glyph highlights what it constrains
-      hovered_items.extend(c.kind.curves().into_iter().map(|curve| Pick::SketchCurve { sketch: sk, curve }));
-      hovered_items.extend(c.kind.points().into_iter().map(|point| Pick::SketchPoint { sketch: sk, point }));
+    // geometric constraint glyphs: Fusion's small grey line-art symbols where it puts them (one
+    // per line for Parallel, Collinear and Equal), in a row with the others on the same curve or
+    // point
+    let places = crate::glyphs::places(&sketch, &c.kind, hovered_point, &to_screen);
+    let spots: Vec<(Pos2, Rect, egui::Response)> = places
+      .iter()
+      .enumerate()
+      .map(|(i, p)| {
+        let k = glyph_count.entry(p.key).or_default();
+        let at = p.at + p.dir * (14.0 * *k as f32);
+        *k += 1;
+        let r = Rect::from_center_size(at, Vec2::splat(2.0 * crate::glyphs::HALF + 3.0));
+        (at, r, ui.interact(r, ui.id().with(("glyph", c.id.0, i)), Sense::click()))
+      })
+      .collect();
+    // hovering one glyph lights every glyph of the constraint: a pale blue box with dark ink;
+    // the geometry stays as it is and there is no tooltip
+    let hovered = spots.iter().any(|(_, _, resp)| resp.hovered());
+    for (at, r, resp) in &spots {
+      if hovered {
+        painter.rect_filled(*r, 2.0, GLYPH_HOVER_FILL);
+      }
+      let col = if selected {
+        crate::theme::ACCENT
+      } else if hovered {
+        GLYPH_HOVER_INK
+      } else {
+        GLYPH_INK
+      };
+      crate::glyphs::paint(painter, *at, &c.kind, col);
+      if resp.clicked() {
+        let add = ui.input(|i| i.modifiers.shift);
+        crate::panels::toggle_sel(&mut app.s, Sel::SketchConstraint { sketch: sk, constraint: c.id }, add);
+        consumed = true;
+      }
+      if resp.secondary_clicked()
+        && let Some(p) = resp.interact_pointer_pos()
+      {
+        right_click = Some((c.id, p));
+      }
     }
-    crate::glyphs::paint(painter, at, &c.kind, col);
-    if resp.clicked() {
-      let add = ui.input(|i| i.modifiers.shift);
-      crate::panels::toggle_sel(&mut app.s, Sel::SketchConstraint { sketch: sk, constraint: c.id }, add);
-      consumed = true;
-    }
-    resp.on_hover_text(format!("{} (click to select, Del to remove)", c.kind.name()));
   }
-  app.glyph_hover = hovered_items;
+  // Fusion's glyph hover leaves the constrained geometry unhighlighted
+  app.glyph_hover.clear();
+  // a right-click on a glyph selects its constraint and opens the marking menu for it
+  if let Some((constraint, p)) = right_click {
+    let sel = Sel::SketchConstraint { sketch: sk, constraint };
+    if !app.s.selection.contains(&sel) {
+      app.s.selection = vec![sel];
+    }
+    app.hover = None;
+    crate::marking::open(app, p);
+    consumed = true;
+  }
   consumed
 }
 
 /// Constraint glyph ink: Fusion's grey.
 const GLYPH_INK: Color32 = Color32::from_rgb(105, 105, 110);
+/// A hovered glyph's box fill and ink, as sampled in Fusion.
+pub(crate) const GLYPH_HOVER_FILL: Color32 = Color32::from_rgb(189, 215, 226);
+pub(crate) const GLYPH_HOVER_INK: Color32 = Color32::from_rgb(68, 69, 69);
 
 /// A dimension's value as drawn. The font has no ⌀ (U+2300), so a diameter's glyph is painted
 /// the way Fusion draws it, a circle with a slash, in front of the number.
@@ -3111,36 +3138,6 @@ fn sketch_center(s: &Sketch) -> Option<[f64; 2]> {
   Some([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0])
 }
 
-/// The point of curve `a` nearest curve `b` (where a tangent pair touches): the best of samples
-/// along `a`, refined on the stretch around it.
-fn touch_point(s: &Sketch, a: fox_engine::sketch::CurveId, b: fox_engine::sketch::CurveId) -> Option<[f64; 2]> {
-  let pts = fox_engine::scene::curve_polyline(s, &s.curve(a)?.kind);
-  let lerp = |p: [f64; 2], q: [f64; 2], t: f64| [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
-  let d = |p: [f64; 2]| s.distance_to_curve(b, p).unwrap_or(f64::INFINITY);
-  let mut best: Option<(f64, usize, f64)> = None;
-  for (i, w) in pts.windows(2).enumerate() {
-    for k in 0..=16 {
-      let t = k as f64 / 16.0;
-      let dist = d(lerp(w[0], w[1], t));
-      if best.is_none_or(|(bd, _, _)| dist < bd) {
-        best = Some((dist, i, t));
-      }
-    }
-  }
-  let (dist, i, t) = best?;
-  if !dist.is_finite() {
-    return None;
-  }
-  let (p, q) = (pts[i], pts[i + 1]);
-  // ternary search on the sixteenth around the best sample
-  let (mut lo, mut hi) = ((t - 1.0 / 16.0).max(0.0), (t + 1.0 / 16.0).min(1.0));
-  for _ in 0..40 {
-    let (m1, m2) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
-    if d(lerp(p, q, m1)) < d(lerp(p, q, m2)) { hi = m2 } else { lo = m1 }
-  }
-  Some(lerp(p, q, (lo + hi) / 2.0))
-}
-
 /// The curves a curve-picking sketch tool has picked so far, for the status bar's readout.
 pub(crate) fn picked_curves(app: &App) -> Vec<Sel> {
   let Some(sk) = app.s.edit_sketch else { return Vec::new() };
@@ -3179,83 +3176,6 @@ pub(crate) fn curve_min_distance(
     }
   }
   Some(d)
-}
-
-/// Where a geometric constraint's glyph goes, and a key grouping glyphs on the same curve/point.
-fn glyph_anchor(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], u32)> {
-  // a polygon's glyph sits by its centre point
-  if let ConstraintKind::Polygon { center, .. } = k {
-    return Some((s.pos(*center)?, center.0 | 0x8000_0000));
-  }
-  // perpendicular and tangent glyphs sit at the corner or junction the two curves share
-  if let ConstraintKind::Perpendicular { a, b } | ConstraintKind::Tangent { a, b } = k
-    && let Some(p) = s.curve_points(*a).iter().find(|p| s.curve_points(*b).contains(p))
-  {
-    return Some((s.pos(*p)?, p.0 | 0x8000_0000));
-  }
-  // a tangent pair: the glyph sits where the curves touch, in its own row (not with the line's
-  // other glyphs at its midpoint). For a line and a circle or arc that is the point of the line
-  // nearest the centre, or the line's end nearest the touch when only its extension is tangent
-  if let ConstraintKind::Tangent { a, b } = k
-    && let Some(at) = tangent_touch(s, *a, *b).or_else(|| touch_point(s, *a, *b))
-  {
-    return Some((at, 0x4000_0000 | (a.0 ^ b.0.rotate_left(16))));
-  }
-  if let Some(c) = k.curves().first() {
-    let curve = s.curve(*c)?;
-    let pts = fox_engine::scene::curve_polyline(s, &curve.kind);
-    let m = *pts.get(pts.len() / 2)?;
-    let m = if pts.len() == 2 { [(pts[0][0] + pts[1][0]) / 2.0, (pts[0][1] + pts[1][1]) / 2.0] } else { m };
-    return Some((m, c.0));
-  }
-  let p = *k.points().first()?;
-  Some((s.pos(p)?, p.0 | 0x8000_0000))
-}
-
-/// For a tangent constraint between a line and an arc that share an end (a sketch fillet): the
-/// unit direction along the line away from the arc, and the direction out of the shape (away
-/// from the arc's centre), both in sketch coordinates; None for other glyphs.
-fn glyph_nudge(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], [f64; 2])> {
-  let ConstraintKind::Tangent { a, b } = k else { return None };
-  let (line, arc) = match (s.curve(*a).map(|c| &c.kind), s.curve(*b).map(|c| &c.kind)) {
-    (Some(CurveKind::Line { .. }), Some(CurveKind::Arc { .. })) => (*a, *b),
-    (Some(CurveKind::Arc { .. }), Some(CurveKind::Line { .. })) => (*b, *a),
-    _ => return None,
-  };
-  let lp = s.curve_points(line);
-  let ap = s.curve_points(arc);
-  let shared = *lp.iter().find(|p| ap[1..].contains(p))?;
-  let other = *lp.iter().find(|p| **p != shared)?;
-  let (j, o, c) = (s.pos(shared)?, s.pos(other)?, s.pos(*ap.first()?)?);
-  let unit = |v: [f64; 2]| {
-    let l = v[0].hypot(v[1]);
-    (l > 1e-9).then(|| [v[0] / l, v[1] / l])
-  };
-  let along = unit([o[0] - j[0], o[1] - j[1]])?;
-  let out = unit([j[0] - c[0], j[1] - c[1]])?;
-  Some((along, out))
-}
-
-/// For a Tangent between a line and a circle or arc: the point of the line's segment nearest the
-/// circle's centre (the touch point when the segment reaches it, otherwise the nearer end).
-fn tangent_touch(s: &Sketch, a: fox_engine::sketch::CurveId, b: fox_engine::sketch::CurveId) -> Option<[f64; 2]> {
-  use fox_engine::sketch::CurveKind;
-  let kind = |id: fox_engine::sketch::CurveId| s.curve(id).map(|c| &c.kind);
-  let (line, round) = match (kind(a)?, kind(b)?) {
-    (CurveKind::Line { .. }, CurveKind::Circle { .. } | CurveKind::Arc { .. }) => (a, b),
-    (CurveKind::Circle { .. } | CurveKind::Arc { .. }, CurveKind::Line { .. }) => (b, a),
-    _ => return None,
-  };
-  let pts = s.curve_points(line);
-  let (p0, p1) = (s.pos(pts[0])?, s.pos(pts[1])?);
-  let c = s.pos(s.curve_points(round)[0])?;
-  let d = [p1[0] - p0[0], p1[1] - p0[1]];
-  let len2 = d[0] * d[0] + d[1] * d[1];
-  if len2 < 1e-18 {
-    return None;
-  }
-  let t = (((c[0] - p0[0]) * d[0] + (c[1] - p0[1]) * d[1]) / len2).clamp(0.0, 1.0);
-  Some([p0[0] + t * d[0], p0[1] + t * d[1]])
 }
 
 /// Rubber-band preview of the shape being drawn.
@@ -5210,17 +5130,21 @@ mod tests {
     assert!((s.radius(circle.id).unwrap() - 3.0).abs() < 1e-9);
     assert_eq!(s.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).count(), 2);
     assert!(s.constraints.iter().all(|c| c.kind.dim().is_none()), "no dimension: {:?}", s.constraints);
-    // each tangent glyph sits where the circle touches its line, not at the line's midpoint
-    let anchors: Vec<([f64; 2], u32)> = s
+    // each tangent glyph sits where the circle touches its line, not at the line's midpoint (the
+    // sketch as the screen, y down, with the glyph's above-right offset taken back off)
+    let screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, -p[1] as f32));
+    let anchors: Vec<([f32; 2], u32)> = s
       .constraints
       .iter()
       .filter(|c| matches!(c.kind, ConstraintKind::Tangent { .. }))
-      .map(|c| glyph_anchor(s, &c.kind).unwrap())
+      .map(|c| crate::glyphs::places(s, &c.kind, None, &screen)[0])
+      .map(|p| ([p.at.x - 10.0, -(p.at.y + 10.0)], p.key))
       .collect();
-    let near = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-3;
+    let near = |p: [f32; 2], q: [f32; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-3;
     assert!(near(anchors[0].0, [3.0, 0.0]) && near(anchors[1].0, [0.0, 3.0]), "{anchors:?}");
     assert_ne!(anchors[0].1, anchors[1].1);
-    assert_ne!(anchors[0].1, glyph_anchor(s, &ConstraintKind::Horizontal { line: circle.id }).unwrap().1);
+    let on_circle = crate::glyphs::places(s, &ConstraintKind::Horizontal { line: circle.id }, None, &screen)[0];
+    assert_ne!(anchors[0].1, on_circle.key);
   }
 
   /// Two lines that don't meet read out their least distance; crossing ones none.
@@ -5778,14 +5702,23 @@ mod tests {
     app.run("sketch.slot", json!({"sketch": sk.0, "start": [0, 0], "end": [20, 0], "width": 10})).unwrap();
     app.run("sketch.polygon", json!({"sketch": sk.0, "center": [50, 0], "vertex": [60, 0], "sides": 5})).unwrap();
     let s = app.s.design.sketch(sk).unwrap();
+    // the sketch as the screen, y down
+    let screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, -p[1] as f32));
     for c in &s.constraints {
-      let Some((at, _)) = glyph_anchor(s, &c.kind) else { continue };
+      let places = crate::glyphs::places(s, &c.kind, None, &screen);
+      let at: Vec<[f32; 2]> = places.iter().map(|p| [p.at.x, -p.at.y]).collect();
       match &c.kind {
-        // a tangent glyph at the point the line and the arc share: a slot corner
+        // a tangent glyph by the slot corner the line and the arc share: 12 px along the line
+        // away from the arc and 9 px out of the slot
         ConstraintKind::Tangent { .. } => {
-          assert!((at[0].abs() < 1e-9 || (at[0] - 20.0).abs() < 1e-9) && (at[1].abs() - 5.0).abs() < 1e-9, "{at:?}");
+          let [at] = at[..] else { panic!("one tangent glyph: {at:?}") };
+          assert!(
+            ((at[0] - 12.0).abs() < 1e-4 || (at[0] - 8.0).abs() < 1e-4) && (at[1].abs() - 14.0).abs() < 1e-4,
+            "{at:?}"
+          );
         }
-        ConstraintKind::Polygon { .. } => assert_eq!(at, [50.0, 0.0]),
+        // the polygon's glyph above-right of its centre
+        ConstraintKind::Polygon { .. } => assert_eq!(at, [[60.0, 10.0]]),
         _ => {}
       }
     }
@@ -5813,19 +5746,20 @@ mod tests {
     let lines: Vec<u64> = r["curves"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
     app.run("sketch.fillet", json!({"sketch": sk.0, "curves": [lines[0], lines[1]], "radius": 5})).unwrap();
     let s = app.s.design.sketch(sk).unwrap();
+    // the sketch as the screen, y down
+    let screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, -p[1] as f32));
     let mut seen = 0;
     for c in &s.constraints {
       let ConstraintKind::Tangent { .. } = c.kind else { continue };
-      let (at, _) = glyph_anchor(s, &c.kind).unwrap();
-      let (along, out) = glyph_nudge(s, &c.kind).expect("a fillet's tangent glyph is nudged");
-      if (at[1]).abs() < 1e-9 {
+      let [place] = crate::glyphs::places(s, &c.kind, None, &screen)[..] else { panic!("one glyph") };
+      let at = place.at;
+      // 12 px along the line, 9 px out of the shape
+      if (at.y - 9.0).abs() < 1e-3 {
         // the bottom line's end at (35, 0): along the line to the left, out of the shape downward
-        assert!((at[0] - 35.0).abs() < 1e-9, "{at:?}");
-        assert!(along[0] < -0.99 && out[1] < -0.99, "{along:?} {out:?}");
+        assert!((at.x - 23.0).abs() < 1e-3, "{at:?}");
       } else {
         // the right line's end at (40, 5): up the line, out of the shape to the right
-        assert!((at[0] - 40.0).abs() < 1e-9 && (at[1] - 5.0).abs() < 1e-9, "{at:?}");
-        assert!(along[1] > 0.99 && out[0] > 0.99, "{along:?} {out:?}");
+        assert!((at.x - 49.0).abs() < 1e-3 && (at.y + 17.0).abs() < 1e-3, "{at:?}");
       }
       seen += 1;
     }
@@ -5847,19 +5781,25 @@ mod tests {
     let r = app.run("sketch.circle", json!({"sketch": sk.0, "center": [100, 10], "radius": 10})).unwrap();
     let circle = r["curves"][0].as_u64().unwrap();
     app.run("sketch.constrain", json!({"sketch": sk.0, "type": "tangent", "curves": [line, circle]})).unwrap();
+    // the sketch as the screen, y down, with the glyph's above-right offset taken back off
+    let screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, -p[1] as f32));
+    let anchor = |s: &Sketch, k: &ConstraintKind| {
+      let p = crate::glyphs::places(s, k, None, &screen)[0];
+      ([p.at.x - 10.0, -(p.at.y + 10.0)], p.key)
+    };
     let s = app.s.design.sketch(sk).unwrap();
     let c = s.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).unwrap();
-    let (at, key) = glyph_anchor(s, &c.kind).unwrap();
-    assert!((at[0] - 40.0).abs() < 1e-9 && at[1].abs() < 1e-9, "the right end, nearest the touch: {at:?}");
+    let (at, key) = anchor(s, &c.kind);
+    assert!((at[0] - 40.0).abs() < 1e-3 && at[1].abs() < 1e-3, "the right end, nearest the touch: {at:?}");
     let line_id = fox_engine::sketch::CurveId(line as u32);
-    assert_ne!(key, glyph_anchor(s, &ConstraintKind::Horizontal { line: line_id }).unwrap().1, "its own row");
+    assert_ne!(key, anchor(s, &ConstraintKind::Horizontal { line: line_id }).1, "its own row");
     // a circle sitting on the segment itself: the glyph is at the touch point
     let r = app.run("sketch.circle", json!({"sketch": sk.0, "center": [20, 10], "radius": 10})).unwrap();
     let on = r["curves"][0].as_u64().unwrap();
     app.run("sketch.constrain", json!({"sketch": sk.0, "type": "tangent", "curves": [on, line]})).unwrap();
     let s = app.s.design.sketch(sk).unwrap();
     let c = s.constraints.iter().rfind(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).unwrap();
-    let (at, _) = glyph_anchor(s, &c.kind).unwrap();
-    assert!((at[0] - 20.0).abs() < 1e-9 && at[1].abs() < 1e-9, "{at:?}");
+    let (at, _) = anchor(s, &c.kind);
+    assert!((at[0] - 20.0).abs() < 1e-3 && at[1].abs() < 1e-3, "{at:?}");
   }
 }

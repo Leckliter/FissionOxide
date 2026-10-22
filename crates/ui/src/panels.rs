@@ -2966,8 +2966,15 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   if n >= 3 || !sel.iter().all(|s| noun(s) == first) {
     return Some(format!("Multiple selections | {n}"));
   }
-  let count = format!("{n} {}", if n == 1 { first.0 } else { first.1 });
   let model = &app.s.model;
+  // one constraint glyph reads its name, as Fusion's "Horizontal Constraint"
+  if let [Sel::SketchConstraint { sketch, constraint }] = sel
+    && let Some(c) = model.sketches.get(sketch).and_then(|r| r.sketch.constraints.iter().find(|c| c.id == *constraint))
+    && c.kind.dim().is_none()
+  {
+    return Some(format!("{} Constraint", c.kind.name()));
+  }
+  let count = format!("{n} {}", if n == 1 { first.0 } else { first.1 });
   let sum = |f: &dyn Fn(&Sel) -> Option<f64>| sel.iter().map(f).sum::<Option<f64>>();
   let u = app.s.design.units;
   let readout = match sel[0] {

@@ -1941,3 +1941,62 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
   };
   Some(Tip { line, more })
 }
+
+/// What a dropdown row's tooltip says, as Fusion's: its paragraphs, then "Press Ctrl+/ for more
+/// help." where Fusion shows it. The SKETCH > CONSTRAINTS rows carry Fusion's own descriptions;
+/// other rows say what the toolbar tooltip says, without its title and shortcut.
+pub(crate) fn menu_paragraphs(scope: Scope, label: &str) -> Vec<&'static str> {
+  let fusion: Option<&[&'static str]> = match (scope, label) {
+    (Scope::Sketch, "Horizontal/Vertical") => Some(&[
+      "Constrains a single line, or two points, to lie on either the vertical or horizontal axis, whichever is \
+       closer to the current alignment.",
+    ]),
+    (Scope::Sketch, "Coincident") => Some(&[
+      "Constrains the position of two points or a point and a line or curve together.",
+      "This could be a point constrained along a line, two points constrainted to each other, or a point \
+       constrained along a curve.",
+    ]),
+    (Scope::Sketch, "Tangent") => {
+      Some(&["Constrains a curve and another object so that they touch at a single point but never cross each other."])
+    }
+    (Scope::Sketch, "Equal") => {
+      Some(&["Constrains similar objects so that their sizes are identical. When the size of one object changes, the \
+       others adjust, too."])
+    }
+    (Scope::Sketch, "Parallel") => {
+      Some(&["Constrains two lines so that they extend in the same direction and never intersect."])
+    }
+    (Scope::Sketch, "Perpendicular") => {
+      Some(&["Constrains two objects so that they lie perpendicular (at a 90-degree angle) to each other."])
+    }
+    (Scope::Sketch, "Fix/UnFix") => Some(&["Locks the size and location of a point or object."]),
+    (Scope::Sketch, "MidPoint") => Some(&["Constrains a point or object to the midpoint of another object."]),
+    (Scope::Sketch, "Concentric") => {
+      Some(&["Constrains two or more arcs, circles, or ellipses to the same center point."])
+    }
+    (Scope::Sketch, "Collinear") => Some(&[
+      "Constrains two or more objects so that they share a common line.",
+      "This could be a line and a rectangle, where the line and one edge of the rectangle lie along the same line.",
+    ]),
+    (Scope::Sketch, "Symmetry") => {
+      Some(&["Constrains two or more objects so that they are symmetrical (identical to each other in relation to a \
+       common axis)."])
+    }
+    (Scope::Sketch, "Curvature") => {
+      Some(&["Constrains two or more objects to create a smooth, continuous curvature between them (G2 continuity)."])
+    }
+    (Scope::Sketch, "Polygon") => {
+      Some(&["Constrains a closed sketch profile with sides of the same length and equal angles as a regular polygon."])
+    }
+    _ => None,
+  };
+  match fusion {
+    Some(p) => p.iter().copied().chain(std::iter::once(MORE_HELP)).collect(),
+    None => {
+      tip(scope, label).map(|t| std::iter::once(t.line).chain(t.more.split("\n\n")).collect()).unwrap_or_default()
+    }
+  }
+}
+
+/// The last line of Fusion's tooltips for commands with a help page.
+pub(crate) const MORE_HELP: &str = "Press Ctrl+/ for more help.";

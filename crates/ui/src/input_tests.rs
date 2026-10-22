@@ -1304,3 +1304,143 @@ fn origin_items_are_hovered_and_picked_in_the_canvas() {
   h.frame(vec![]);
   assert_eq!(origin::picked(&h.app), None);
 }
+
+// ---------------------------------------------------------------- constraint glyphs
+
+/// Each constraint's glyphs sit where Fusion puts them: Horizontal below the line's middle,
+/// Vertical right of it, Parallel one under each line, Equal one on each line, Perpendicular
+/// inside the shared corner, MidPoint above the point, Symmetry above each point and on the
+/// axis, and Coincident nothing until its point is hovered.
+#[test]
+fn constraint_glyphs_sit_where_fusion_puts_them() {
+  use crate::glyphs::{GAP, places};
+  use fox_engine::sketch::{ConstraintKind, CurveKind, PointId, Sketch};
+  let mut s = Sketch::new();
+  let p = |s: &mut Sketch, x: f64, y: f64| s.add_point(x, y);
+  let (a, b, c, d) = (p(&mut s, 0.0, 0.0), p(&mut s, 20.0, 0.0), p(&mut s, 0.0, 10.0), p(&mut s, 20.0, 10.0));
+  let line = |s: &mut Sketch, a: PointId, b: PointId| s.add_curve(CurveKind::Line { a, b }).unwrap();
+  let (bottom, top, left) = (line(&mut s, a, b), line(&mut s, c, d), line(&mut s, a, c));
+  // the sketch as the screen at 1 px per mm, y down
+  let screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, -p[1] as f32));
+  let at = |k: ConstraintKind| -> Vec<Pos2> { places(&s, &k, None, &screen).into_iter().map(|p| p.at).collect() };
+  let near = |p: Pos2, x: f32, y: f32| (p.x - x).abs() < 1e-3 && (p.y - y).abs() < 1e-3;
+  let h = at(ConstraintKind::Horizontal { line: bottom });
+  assert!(h.len() == 1 && near(h[0], 10.0, GAP), "below the middle: {h:?}");
+  let v = at(ConstraintKind::Vertical { line: left });
+  assert!(v.len() == 1 && near(v[0], GAP, -5.0), "right of the middle: {v:?}");
+  let par = at(ConstraintKind::Parallel { a: bottom, b: top });
+  assert!(par.len() == 2 && near(par[0], 10.0, GAP) && near(par[1], 10.0, -10.0 + GAP), "one under each: {par:?}");
+  let eq = at(ConstraintKind::Equal { a: bottom, b: top });
+  assert!(eq.len() == 2 && near(eq[0], 10.0, 0.0) && near(eq[1], 10.0, -10.0), "on each line: {eq:?}");
+  let perp = at(ConstraintKind::Perpendicular { a: bottom, b: left });
+  let r = GAP / 2f32.sqrt();
+  assert!(perp.len() == 1 && near(perp[0], r, -r), "inside the corner at the origin: {perp:?}");
+  let mid = at(ConstraintKind::Midpoint { p: c, line: bottom });
+  assert!(mid.len() == 1 && near(mid[0], 0.0, -10.0 - GAP), "above the point: {mid:?}");
+  let sym = at(ConstraintKind::Symmetric { a, b, line: left });
+  assert!(sym.len() == 3 && near(sym[0], 0.0, -GAP) && near(sym[1], 20.0, -GAP) && near(sym[2], 0.0, -5.0), "{sym:?}");
+  assert!(at(ConstraintKind::Coincident { a: b, b: d }).is_empty(), "no coincident glyph at rest");
+  let co = places(&s, &ConstraintKind::Coincident { a: b, b: d }, Some(d), &screen);
+  assert!(co.len() == 1 && near(co[0].at, 20.0 - GAP, -10.0 + GAP), "below-left of the hovered point: {co:?}");
+}
+
+impl Harness {
+  /// A sketch on XY with two parallel slanted lines, fitted to the view; returns the sketch,
+  /// the Parallel constraint's id and its two glyphs' screen positions.
+  fn parallel_sketch(&mut self) -> (fox_engine::model::FeatureId, fox_engine::sketch::ConstraintId, Vec<Pos2>) {
+    self.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sk = self.app.s.edit_sketch.unwrap();
+    // slanted, so the lines pick up no Horizontal of their own and the Parallel's glyphs stand alone
+    self.app.run("sketch.line", json!({"points": [[0, 0], [40, 10]]})).unwrap();
+    self.app.run("sketch.line", json!({"points": [[0, 20], [40, 30]]})).unwrap();
+    let curves: Vec<u32> = self.app.s.design.sketch(sk).unwrap().curves.iter().map(|c| c.id.0).collect();
+    self.app.run("sketch.constrain", json!({"type": "parallel", "curves": curves})).unwrap();
+    let kinds: Vec<&str> = self.app.s.design.sketch(sk).unwrap().constraints.iter().map(|c| c.kind.name()).collect();
+    assert_eq!(kinds, ["Parallel"], "only the Parallel, so its glyphs sit unstacked");
+    self.app.tab = crate::panels::Tab::Sketch;
+    self.app.fit_view_now();
+    for _ in 0..3 {
+      self.frame(vec![]);
+    }
+    let s = self.app.s.design.sketch(sk).unwrap();
+    let c =
+      s.constraints.iter().find(|c| matches!(c.kind, fox_engine::sketch::ConstraintKind::Parallel { .. })).unwrap();
+    let app = &self.app;
+    let screen = |p: [f64; 2]| Some(on_screen(app, fox_engine::kernel::glam::DVec3::new(p[0], p[1], 0.0)));
+    let at: Vec<Pos2> = crate::glyphs::places(s, &c.kind, None, &screen).into_iter().map(|p| p.at).collect();
+    (sk, c.id, at)
+  }
+}
+
+/// Hovering a glyph fills every glyph of its constraint pale blue with dark ink, highlights no
+/// geometry and shows no tooltip; clicking it selects the constraint and the status reads its
+/// name; right-clicking it opens the marking menu for it.
+#[test]
+fn a_hovered_glyph_lights_its_constraint_and_a_click_names_it() {
+  use crate::viewport::{GLYPH_HOVER_FILL, GLYPH_HOVER_INK};
+  let mut h = Harness::new();
+  let (sk, id, at) = h.parallel_sketch();
+  assert_eq!(at.len(), 2, "a glyph under each line");
+  let shapes = h.shapes(vec![Event::PointerMoved(at[0])]);
+  let boxes = shapes.iter().filter(|s| matches!(s, egui::Shape::Rect(r) if r.fill == GLYPH_HOVER_FILL)).count();
+  assert_eq!(boxes, 2, "both glyphs of the Parallel fill pale blue");
+  let dark =
+    shapes.iter().any(|s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.color == GLYPH_HOVER_INK));
+  assert!(dark, "the glyph's ink turns dark grey");
+  assert!(h.app.glyph_hover.is_empty(), "the lines stay unhighlighted");
+  let shown = h.rest(at[0], 4.0);
+  assert!(!shown.iter().any(|t| t.contains("click to select") || t == "Parallel"), "no tooltip: {shown:?}");
+  // a click selects it and the status names it
+  h.move_then_click(at[0]);
+  assert_eq!(h.app.s.selection, vec![fox_engine::Sel::SketchConstraint { sketch: sk, constraint: id }]);
+  let texts = h.frame_texts(1.0 / 60.0, vec![]);
+  assert!(
+    texts.iter().any(|(_, t)| t == "Parallel Constraint"),
+    "{:?}",
+    texts.iter().map(|(_, t)| t).collect::<Vec<_>>()
+  );
+  // a right-click on the other glyph opens the marking menu for the constraint
+  h.frame(vec![key(egui::Key::Escape)]);
+  h.frame(vec![Event::PointerMoved(at[1])]);
+  let right = |pressed| Event::PointerButton {
+    pos: at[1],
+    button: egui::PointerButton::Secondary,
+    pressed,
+    modifiers: Default::default(),
+  };
+  h.frame(vec![right(true)]);
+  h.frame(vec![right(false)]);
+  h.frame(vec![]);
+  assert!(h.app.marking.is_some(), "the marking menu opened");
+  assert_eq!(h.app.s.selection, vec![fox_engine::Sel::SketchConstraint { sketch: sk, constraint: id }]);
+}
+
+/// A CONSTRAINTS row's tooltip is Fusion's dark panel beside the menu: the description and
+/// "Press Ctrl+/ for more help.", no title, and nothing more after resting longer.
+#[test]
+fn a_constraint_row_tooltip_is_fusions_dark_panel() {
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  h.app.tab = crate::panels::Tab::Sketch;
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  let label = panel_label(&all, "CONSTRAINTS").expect("the CONSTRAINTS panel");
+  h.move_then_click(label.center());
+  let row = h.find(vec![], "Coincident").expect("the Coincident row");
+  // egui shows no tooltip for a pointer that moved within 0.1 s of a click
+  h.frame_texts(0.3, vec![]);
+  let shown = h.rest(row.center(), 1.2);
+  let paragraphs = crate::tips::menu_paragraphs(crate::tips::Scope::Sketch, "Coincident");
+  assert_eq!(paragraphs.last().copied(), Some(crate::tips::MORE_HELP));
+  for p in &paragraphs {
+    assert!(shown.iter().any(|t| t == p), "{p:?} in {shown:?}");
+  }
+  assert_eq!(shown.iter().filter(|t| *t == "Coincident").count(), 1, "the row, not a title: {shown:?}");
+  let tip = crate::tips::tip(crate::tips::Scope::Sketch, "Coincident").unwrap();
+  assert!(!shown.iter().any(|t| t == tip.line || t == tip.more), "{shown:?}");
+  // it sits right of the menu and doesn't change after 3 s
+  let texts = h.frame_texts(0.1, vec![]);
+  let first = texts.iter().find(|(_, t)| t == paragraphs[0]).map(|(r, _)| *r).expect("the description is drawn");
+  assert!(first.left() > row.right(), "beside the menu: {first:?} vs row {row:?}");
+  let later = h.rest(row.center(), 3.0);
+  assert_eq!(later, shown, "the panel doesn't grow");
+}

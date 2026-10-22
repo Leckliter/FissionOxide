@@ -44,7 +44,7 @@
 {"name": "ui-sketch-tangent-circles-dims", "items": 5, "status": "done", "pr": "4277cd7", "fixer": "cloud task_2220c805 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-text-mirror-patterns", "items": 5, "status": "done", "pr": "512ffa2", "fixer": "cloud session_01LFcRA2qqVBcvY5yGRQG39A (requested 2026-10-21)"}
 {"name": "ui-sketch-constraint-flow", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_87cbca0d (requested 2026-10-21 by the coordinator)"}
-{"name": "ui-sketch-constraint-glyphs", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_c4f40ac7 (requested 2026-10-21 by the coordinator)"}
+{"name": "ui-sketch-constraint-glyphs", "items": 5, "status": "done", "pr": "pending", "fixer": "cloud task_c4f40ac7 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-constraint-solver", "items": 5, "status": "done", "pr": "39c2622", "fixer": "cloud task_729babcb (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-line-heads-up", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_24111eda (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-palette-options", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_86794268 (requested 2026-10-21 by the coordinator)"}

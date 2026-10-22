@@ -1661,8 +1661,8 @@ pub(crate) fn options_dots(p: &egui::Painter, c: egui::Pos2, color: Color32) {
 /// menu, level with the row, holding the command's description and instructions as paragraphs
 /// with a blank line between them. No title and no shortcut line: the row shows both.
 fn menu_tip(resp: egui::Response, scope: Scope, it: &Item) -> egui::Response {
-  let tip = tips::tip(scope, it.label);
-  if tip.is_none() && it.cmd.is_some() {
+  let paragraphs = tips::menu_paragraphs(scope, it.label);
+  if paragraphs.is_empty() && it.cmd.is_some() {
     return resp;
   }
   let style = resp.ctx.global_style();
@@ -1680,10 +1680,8 @@ fn menu_tip(resp: egui::Response, scope: Scope, it: &Item) -> egui::Response {
     ui.set_max_width(300.0);
     ui.spacing_mut().item_spacing.y = 12.0;
     ui.style_mut().visuals.override_text_color = Some(Color32::WHITE);
-    if let Some(t) = tip {
-      for paragraph in std::iter::once(t.line).chain(t.more.split("\n\n")) {
-        ui.add(egui::Label::new(paragraph).wrap());
-      }
+    for paragraph in paragraphs {
+      ui.add(egui::Label::new(paragraph).wrap());
     }
     if it.cmd.is_none() {
       ui.add(egui::Label::new(RichText::new("Not in FissionOxide yet").color(theme::MUTED)).wrap());
