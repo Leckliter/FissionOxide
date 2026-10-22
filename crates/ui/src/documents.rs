@@ -46,11 +46,25 @@ pub struct Documents {
   reveal: bool,
   /// Where the overflow "v" is, while the tabs don't fit.
   pub(crate) overflow_at: Option<Rect>,
+  /// The window's X waits while the unsaved documents ask, one at a time.
+  pub(crate) quitting: bool,
+  /// While quitting, how many tabs were open when the last one asked: still as many, and that
+  /// tab still unsaved, means its prompt was cancelled.
+  asked: Option<usize>,
 }
 
 impl Default for Documents {
   fn default() -> Self {
-    Documents { slots: vec![None], active: 0, chooser: None, closing: None, reveal: false, overflow_at: None }
+    Documents {
+      slots: vec![None],
+      active: 0,
+      chooser: None,
+      closing: None,
+      reveal: false,
+      overflow_at: None,
+      quitting: false,
+      asked: None,
+    }
   }
 }
 
@@ -125,6 +139,19 @@ fn asks_first(app: &App) -> bool {
 /// "Save changes?": a never-saved design, as in Fusion. Electronics documents keep their prompt.
 fn saves_on_close(app: &App) -> bool {
   unsaved(&app.s) && app.electronics.is_none()
+}
+
+/// [`asks_first`] for a parked document.
+fn parked_asks_first(d: &Doc) -> bool {
+  has_unsaved_work(&d.s) || (d.electronics.is_some() && unsaved(&d.s))
+}
+
+/// The first tab that would ask before closing, if any.
+fn first_asking(app: &App) -> Option<usize> {
+  (0..app.docs.slots.len()).find(|&i| match &app.docs.slots[i] {
+    Some(d) => parked_asks_first(d),
+    None => asks_first(app),
+  })
 }
 
 // ---------------------------------------------------------------- switching
@@ -206,6 +233,16 @@ pub(crate) fn switch_to(app: &mut App, i: usize) {
   if let Some(d) = app.docs.slots[i].take() {
     unpark(app, d);
   }
+}
+
+/// Ctrl+Tab and Ctrl+Shift+Tab: the next (or previous) tab shows, wrapping around, as in Fusion.
+pub(crate) fn cycle(app: &mut App, forward: bool) {
+  let n = app.docs.slots.len();
+  if n < 2 {
+    return;
+  }
+  let i = if forward { (app.docs.active + 1) % n } else { (app.docs.active + n - 1) % n };
+  switch_to(app, i);
 }
 
 /// Parks the shown document and adds an empty tab after the others, shown.
@@ -325,10 +362,43 @@ pub(crate) fn close_now(app: &mut App, i: usize) {
   }
 }
 
+// ---------------------------------------------------------------- the window's X
+
+/// The window's X, as Fusion's: while a document has unsaved work the close waits, and each
+/// such document shows and asks as its tab's X does (the Save dialog with Don't Save for a
+/// never-saved design); Cancel keeps the app open with every tab as it was. Once none asks, the
+/// window closes.
+pub(crate) fn window_close(app: &mut App, ctx: &egui::Context) {
+  if ctx.input(|i| i.viewport().close_requested()) && !app.docs.quitting && first_asking(app).is_some() {
+    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+    app.docs.quitting = true;
+    app.docs.asked = None;
+    app.docs.chooser = None;
+  }
+  if !app.docs.quitting || app.docs.closing.is_some() || app.data.save.is_some() {
+    return;
+  }
+  // the last prompt ended with its tab still open and unsaved: it was cancelled
+  if app.docs.asked.take().is_some_and(|n| n == app.docs.slots.len()) && asks_first(app) {
+    app.docs.quitting = false;
+    return;
+  }
+  match first_asking(app) {
+    Some(i) => {
+      app.docs.asked = Some(app.docs.slots.len());
+      request_close(app, i);
+    }
+    None => {
+      app.docs.quitting = false;
+      ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- the tab strip
 
-/// The narrowest a document tab gets: past that the strip scrolls.
-pub(crate) const TAB_MIN_W: f32 = 160.0;
+/// The narrowest a document tab gets, as Fusion's (about 150 px): past that the strip scrolls.
+pub(crate) const TAB_MIN_W: f32 = 150.0;
 
 /// The widest a document tab gets, as Fusion's: one open design doesn't stretch its tab across
 /// the bar, the rest of the bar stays grey.
@@ -400,8 +470,8 @@ pub(crate) fn tab_strip(app: &mut App, ui: &mut egui::Ui, w: f32) {
     icons::chevron(ui.painter(), r.center(), theme::ICON_INK);
     let resp = resp.on_hover_text(OVERFLOW_TIP);
     egui::Popup::menu(&resp).show(|ui| {
-      for (i, (label, _, _)) in labels.iter().enumerate() {
-        if ui.selectable_label(i == app.docs.active, label).clicked() {
+      for (i, (label, _, kind)) in labels.iter().enumerate() {
+        if document_row(ui, label, *kind, i == app.docs.active).clicked() {
           switch = Some(i);
         }
       }
@@ -423,6 +493,37 @@ pub(crate) fn tab_strip(app: &mut App, ui: &mut egui::Ui, w: f32) {
   } else if let Some(i) = switch {
     switch_to(app, i);
   }
+}
+
+/// A row of the "v" list: the document's icon (Fusion's orange design icon; a check mark for the
+/// shown one) and its label.
+fn document_row(ui: &mut egui::Ui, label: &str, kind: crate::ecad_chrome::DocKind, shown: bool) -> egui::Response {
+  let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width().max(220.0), 26.0), egui::Sense::click());
+  let p = ui.painter();
+  if r.hovered() {
+    p.rect_filled(rect, 0.0, theme::HOVER);
+  }
+  let icon = Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), Vec2::splat(16.0));
+  if shown {
+    let s = Stroke::new(2.0, theme::TEXT);
+    let (a, b, c) = (
+      icon.left_center() + vec2(2.0, 0.0),
+      icon.center_bottom() + vec2(-1.0, -3.0),
+      icon.right_top() + vec2(-2.0, 3.0),
+    );
+    p.line_segment([a, b], s);
+    p.line_segment([b, c], s);
+  } else {
+    crate::ecad_chrome::doc_icon(p, icon, kind);
+  }
+  p.text(
+    pos2(rect.left() + 32.0, rect.center().y),
+    egui::Align2::LEFT_CENTER,
+    label,
+    egui::FontId::proportional(13.0),
+    theme::TEXT,
+  );
+  r
 }
 
 /// The overflow "v" button's tooltip.
@@ -498,8 +599,9 @@ fn document_tab(
 // ---------------------------------------------------------------- What do you want to design?
 
 /// The chooser's tiles, in Fusion's order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NewKind {
+  #[default]
   Part,
   Assembly,
   Hybrid,
@@ -529,35 +631,37 @@ impl NewKind {
     }
   }
 
-  /// The right pane's description.
+  /// The right pane's description, Fusion's words.
   pub fn description(self) -> &'static str {
     match self {
-      NewKind::Part => {
-        "Design a single part. Sketch and model bodies with solid, surface, mesh, sheet metal and plastic tools, \
-         and keep the part's history in the timeline."
-      }
+      NewKind::Part => "Create sketches and bodies to model a single component to manufacture or use in an assembly.",
       NewKind::Assembly => {
-        "Bring components together. Insert parts and subassemblies, place them with joints and constraints, \
-         and study how they move."
+        "Create or insert parts and other assemblies as external components, then define relationships between \
+         them to create an assembly."
       }
       NewKind::Hybrid => {
-        "Model parts and assemble them in one design: bodies, components and joints together, with every \
-         modeling tool."
+        "Create and model internal components, insert external components, and define relationships between them."
       }
-      NewKind::Drawing => "Document a design with 2D drawing views, dimensions, annotations and parts lists.",
-      NewKind::Electronics => "Design a circuit: a schematic and a printed circuit board, linked to a 3D PCB.",
-      NewKind::ElectronicsLibrary => "Create and manage symbols, footprints and 3D packages for electronics parts.",
+      NewKind::Drawing => "Create views and annotations to document the active design for manufacturing.",
+      NewKind::Electronics => "Create and manage schematics, 2D PCB, and 3D PCB documents.",
+      NewKind::ElectronicsLibrary => "Create and manage components for your electronics designs.",
     }
   }
 
   /// What FissionOxide can't create yet, with why (the tile is greyed).
   pub fn unavailable(self) -> Option<&'static str> {
     match self {
-      NewKind::Drawing => {
-        Some("New drawings start from a design in FissionOxide: open the design, then the Drawing workspace")
-      }
       NewKind::ElectronicsLibrary => Some("Electronics libraries aren't in FissionOxide yet"),
       _ => None,
+    }
+  }
+
+  /// The small badge on the tile's picture.
+  fn badge(self) -> Color32 {
+    match self {
+      NewKind::Part | NewKind::Assembly | NewKind::Hybrid => theme::ICON_ORANGE,
+      NewKind::Drawing => theme::ACCENT,
+      NewKind::Electronics | NewKind::ElectronicsLibrary => theme::ICON_GREEN,
     }
   }
 
@@ -584,24 +688,28 @@ impl NewKind {
 }
 
 /// A Part Design's Type: a standard part or a sheet metal part.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PartType {
+  #[default]
   Standard,
   SheetMetal,
 }
 
-/// "What do you want to design?": the tile picked, the part type and unit system.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// "What do you want to design?": the tile picked, the part type and unit system, and a
+/// Drawing's Type (a drawing or a template) and Automate.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Chooser {
   pub kind: NewKind,
   pub part: PartType,
   pub unit: LengthUnit,
+  pub template: bool,
+  pub automate: bool,
 }
 
 /// The "+": opens the chooser on Part Design in the default units (Preferences ▸ General).
 pub(crate) fn open_chooser(app: &mut App) {
   let unit = LengthUnit::parse(app.preferences.values.units.key()).unwrap_or(LengthUnit::Mm);
-  app.docs.chooser = Some(Chooser { kind: NewKind::Part, part: PartType::Standard, unit });
+  app.docs.chooser = Some(Chooser { unit, automate: true, ..Default::default() });
 }
 
 /// "Inch (in), ouncemass", as the chooser's Unit System list shows a unit.
@@ -632,6 +740,8 @@ pub(crate) fn create(app: &mut App, c: Chooser) {
       }
     }
     None if c.kind == NewKind::Electronics => crate::ecad_chrome::new_electronics_design(app, Some(c.unit)),
+    // a drawing of the shown design, as Fusion's "Design: Untitled": Create Drawing opens on it
+    None if c.kind == NewKind::Drawing => app.start(crate::dialogs::Kind::NewDrawing),
     None => new_document(app, DesignType::Part, Some(c.unit)),
   }
 }
@@ -642,13 +752,56 @@ pub(crate) fn windows(app: &mut App, ctx: &egui::Context) {
   close_prompt(app, ctx);
 }
 
-const TILE: Vec2 = vec2(132.0, 108.0);
+/// A tile: a white picture over a grey label band.
+pub(crate) const TILE: Vec2 = vec2(104.0, 145.0);
+/// The chooser's width, as Fusion's.
+pub(crate) const CHOOSER_W: f32 = 640.0;
+/// The labels' column in the right pane ("Type", "Unit System").
+const LABEL_W: f32 = 78.0;
+
+/// The Type buttons' tooltips: (Type, title, description).
+pub(crate) const PART_TYPES: [(PartType, &str, &str); 2] = [
+  (PartType::Standard, "Standard", "Creates a standard container for design elements like sketches and bodies."),
+  (
+    PartType::SheetMetal,
+    "Sheet Metal",
+    "Creates a component that is subject to sheet metal rules and can be used to create flat patterns.",
+  ),
+];
+
+/// A row of the right pane: the label at the left, its control after it.
+fn pane_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+  ui.horizontal(|ui| {
+    ui.allocate_ui_with_layout(vec2(LABEL_W, 26.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+      ui.set_min_width(LABEL_W);
+      ui.label(RichText::new(label).color(theme::TEXT));
+    });
+    add(ui);
+  });
+}
+
+/// A full-width rule, as under Fusion's title and above its buttons.
+fn rule(ui: &mut egui::Ui) {
+  ui.add(egui::Separator::default().horizontal().spacing(10.0).grow(file_dialogs::MARGIN));
+}
+
+/// A small lightning bolt, Automate's icon.
+fn bolt(p: &egui::Painter, c: egui::Pos2) {
+  let pts = [vec2(1.5, -7.0), vec2(-4.0, 1.0), vec2(-0.5, 1.0), vec2(-1.5, 7.0), vec2(4.0, -1.0), vec2(0.5, -1.0)]
+    .map(|v| c + v);
+  p.add(egui::Shape::convex_polygon(pts[..3].to_vec(), theme::ICON_ORANGE, Stroke::NONE));
+  p.add(egui::Shape::convex_polygon(pts[3..].to_vec(), theme::ICON_ORANGE, Stroke::NONE));
+  p.line_segment([pts[2], pts[5]], Stroke::new(2.0, theme::ICON_ORANGE));
+}
 
 fn chooser_window(app: &mut App, ctx: &egui::Context) {
   let Some(mut c) = app.docs.chooser else { return };
   let mut create_new = false;
   let mut cancel = false;
-  let (_, closed) = file_dialogs::modal(ctx, "new-design", "What do you want to design?", 760.0, |ui| {
+  let mut learn_more = false;
+  let design = doc_name(&app.s);
+  let (_, closed) = file_dialogs::modal(ctx, "new-design", "What do you want to design?", CHOOSER_W, |ui| {
+    rule(ui);
     ui.horizontal_top(|ui| {
       // the tiles, three to a row
       ui.vertical(|ui| {
@@ -668,50 +821,81 @@ fn chooser_window(app: &mut App, ctx: &egui::Context) {
         }
       });
       ui.add_space(16.0);
-      // the picked tile's description, Type and Unit System
+      // the picked tile's description, then its settings, each label left of its control
       ui.vertical(|ui| {
         ui.set_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = 8.0;
         ui.label(RichText::new(c.kind.label()).strong().size(15.0));
-        ui.add_space(4.0);
         ui.label(RichText::new(c.kind.description()).color(theme::TEXT));
-        if let Some(why) = c.kind.unavailable() {
-          ui.add_space(4.0);
-          ui.label(RichText::new(why).color(theme::MUTED));
-        }
-        ui.add_space(12.0);
-        if c.kind == NewKind::Part {
-          ui.label(RichText::new("Type").color(theme::GROUP_LABEL));
-          ui.horizontal(|ui| {
-            for (t, icon, tip) in
-              [(PartType::Standard, Icon::Body, "Part"), (PartType::SheetMetal, Icon::Flange, "Sheet Metal Part")]
-            {
-              if icons::icon_button(ui, icon, 28.0, tip, c.part == t, None).clicked() {
+        ui.add_space(6.0);
+        match c.kind {
+          NewKind::Part => pane_row(ui, "Type", |ui| {
+            for (t, title, tip) in PART_TYPES {
+              let icon = if t == PartType::Standard { Icon::Body } else { Icon::Flange };
+              let r = icons::icon_button(ui, icon, 28.0, "", c.part == t, None).on_hover_ui(|ui| {
+                ui.label(RichText::new(title).strong());
+                ui.label(tip);
+              });
+              if r.clicked() {
                 c.part = t;
               }
             }
-          });
-          ui.add_space(8.0);
-        }
-        if c.kind.unavailable().is_none() {
-          ui.label(RichText::new("Unit System").color(theme::GROUP_LABEL));
-          egui::ComboBox::from_id_salt("new-design-units")
-            .width(220.0)
-            .selected_text(unit_system_label(c.unit))
-            .show_ui(ui, |ui| {
-              for u in LengthUnit::ALL {
-                ui.selectable_value(&mut c.unit, u, unit_system_label(u));
-              }
+          }),
+          NewKind::Drawing => {
+            pane_row(ui, "Type", |ui| {
+              ui.radio_value(&mut c.template, false, "Drawing");
+              ui.add_enabled(false, egui::RadioButton::new(c.template, "Template"))
+                .on_disabled_hover_text("Drawing templates aren't in FissionOxide yet");
             });
+            pane_row(ui, "Automate", |ui| {
+              let mut on = true;
+              ui.add_enabled(false, egui::Checkbox::without_text(&mut on))
+                .on_disabled_hover_text("FissionOxide's Create Drawing places the base and projected views");
+              let (r, _) = ui.allocate_exact_size(vec2(16.0, 18.0), egui::Sense::hover());
+              bolt(ui.painter(), r.center());
+            });
+            pane_row(ui, "Design", |ui| {
+              ui.label(RichText::new(&design).color(theme::TEXT));
+            });
+          }
+          _ => {}
+        }
+        if c.kind.unavailable().is_none() && c.kind != NewKind::Drawing {
+          pane_row(ui, "Unit System", |ui| {
+            egui::ComboBox::from_id_salt("new-design-units")
+              .width(ui.available_width().min(200.0))
+              .selected_text(unit_system_label(c.unit))
+              .show_ui(ui, |ui| {
+                for u in LengthUnit::ALL {
+                  ui.selectable_value(&mut c.unit, u, unit_system_label(u));
+                }
+              });
+          });
         }
       });
     });
-    let b = file_dialogs::footer(ui, Some("Learn More"), "Create New", c.kind.unavailable().is_none());
-    if b.left {
-      crate::help::open(app, crate::help::DOCS);
-    }
-    create_new |= b.primary;
-    cancel = b.cancel;
+    ui.add_space(10.0);
+    rule(ui);
+    // "Learn More" is a link at the left, Cancel and Create New at the right
+    ui.allocate_ui_with_layout(
+      vec2(ui.available_width(), file_dialogs::BUTTON.y),
+      egui::Layout::left_to_right(egui::Align::Center),
+      |ui| {
+        let link = ui
+          .add(egui::Label::new(RichText::new("Learn More").color(theme::ACCENT)).sense(egui::Sense::click()))
+          .on_hover_cursor(egui::CursorIcon::PointingHand);
+        learn_more = link.clicked();
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+          create_new |=
+            ui.add_enabled(c.kind.unavailable().is_none(), file_dialogs::blue_button("Create New")).clicked();
+          cancel = ui.add(file_dialogs::white_button("Cancel")).clicked();
+        });
+      },
+    );
   });
+  if learn_more {
+    crate::help::open(app, crate::help::DOCS);
+  }
   if closed || cancel {
     app.docs.chooser = None;
   } else if create_new {
@@ -721,34 +905,40 @@ fn chooser_window(app: &mut App, ctx: &egui::Context) {
   }
 }
 
-/// A chooser tile: a picture and the label, outlined blue when picked, greyed when FissionOxide
-/// can't make it.
+/// A chooser tile: the picture on white with a small coloured badge, the label in a grey band
+/// below, outlined blue when picked, greyed when FissionOxide can't make it.
 fn tile(ui: &mut egui::Ui, k: NewKind, picked: bool) -> egui::Response {
   let (rect, r) = ui.allocate_exact_size(TILE, egui::Sense::click());
   let off = k.unavailable().is_some();
   let p = ui.painter();
-  let fill = if picked {
-    Color32::from_rgb(232, 242, 252)
-  } else if r.hovered() {
-    theme::HOVER
-  } else {
-    Color32::WHITE
-  };
-  let stroke = if picked { Stroke::new(2.0, theme::ACCENT) } else { Stroke::new(1.0, theme::BORDER) };
-  p.rect(rect, 4.0, fill, stroke, egui::StrokeKind::Inside);
-  let pic = Rect::from_center_size(rect.center() - vec2(0.0, 12.0), Vec2::splat(44.0));
+  let band_h = 41.0;
+  let pic_area = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - band_h));
+  let band = Rect::from_min_max(pos2(rect.left(), rect.bottom() - band_h), rect.max);
+  p.rect_filled(pic_area, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, Color32::WHITE);
+  let band_fill = if r.hovered() && !picked { Color32::from_gray(226) } else { Color32::from_gray(238) };
+  p.rect_filled(band, egui::CornerRadius { nw: 0, ne: 0, sw: 3, se: 3 }, band_fill);
+  let pic = Rect::from_center_size(pic_area.center(), Vec2::splat(52.0));
   if off {
     icons::draw(p, pic, k.icon(), Color32::from_gray(185));
   } else {
     icons::draw_color(p, pic, k.icon());
   }
-  p.text(
-    pos2(rect.center().x, rect.bottom() - 18.0),
-    egui::Align2::CENTER_CENTER,
-    k.label(),
+  let badge = Rect::from_min_size(pic_area.left_bottom() + vec2(6.0, -22.0), Vec2::splat(16.0));
+  let badge_fill = if off { Color32::from_gray(200) } else { k.badge() };
+  p.rect_filled(badge, 2.0, badge_fill);
+  icons::draw(p, badge.shrink(2.0), k.icon(), Color32::WHITE);
+  // the label, centred and wrapped in the band
+  let mut job = egui::text::LayoutJob::simple(
+    k.label().to_string(),
     egui::FontId::proportional(12.5),
     if off { theme::MUTED } else { theme::TEXT },
+    band.width() - 8.0,
   );
+  job.halign = egui::Align::Center;
+  let galley = p.layout_job(job);
+  p.galley(pos2(band.center().x, band.center().y - galley.size().y / 2.0), galley, theme::TEXT);
+  let stroke = if picked { Stroke::new(2.0, theme::ACCENT) } else { Stroke::new(1.0, theme::BORDER) };
+  p.rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Inside);
   match k.unavailable() {
     Some(why) => r.on_hover_text(why),
     None => r,

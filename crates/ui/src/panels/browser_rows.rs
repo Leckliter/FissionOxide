@@ -13,16 +13,6 @@ use crate::{App, RenameTarget, marking, theme};
 
 // ---------------------------------------------------------------- labels
 
-/// Who is signed in: Fusion puts the account name in the window title; FissionOxide has the
-/// machine's user.
-pub(crate) fn user_name() -> String {
-  std::env::var("USER")
-    .or_else(|_| std::env::var("USERNAME"))
-    .ok()
-    .filter(|u| !u.trim().is_empty())
-    .unwrap_or_else(|| "Local user".into())
-}
-
 /// Whether the design has never been saved (no hub version, no file).
 pub(crate) fn unsaved(app: &App) -> bool {
   crate::documents::unsaved(&app.s)
@@ -44,11 +34,10 @@ pub(crate) fn root_label(app: &App) -> String {
   if unsaved(app) { "(Unsaved)".into() } else { format!("{} v{}", doc_name(app), version(app)) }
 }
 
-/// The window title, as Fusion's "Untitled* (user) - Autodesk Fusion".
+/// The window title, as Fusion's "Untitled - Autodesk Fusion": the shown tab's label, then the
+/// product.
 pub(crate) fn window_title(app: &App) -> String {
-  let name = if unsaved(app) { doc_name(app) } else { format!("{} v{}", doc_name(app), version(app)) };
-  let star = if app.s.dirty { "*" } else { "" };
-  format!("{name}{star} ({}) - FissionOxide", user_name())
+  format!("{} - FissionOxide", crate::documents::tab_label(&app.s))
 }
 
 /// The small padlock after an unsaved document's tab name.
@@ -848,17 +837,17 @@ mod tests {
     let mut app = App::with_session(Session::default());
     assert_eq!(root_label(&app), "(Unsaved)");
     assert_eq!(crate::documents::tab_label(&app.s), "Untitled");
-    let user = user_name();
-    assert_eq!(window_title(&app), format!("Untitled ({user}) - FissionOxide"));
+    // the title is the tab's label and the product, without the user, as Fusion's
+    assert_eq!(window_title(&app), "Untitled - FissionOxide");
     app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
     assert!(app.s.dirty);
-    assert_eq!(window_title(&app), format!("Untitled* ({user}) - FissionOxide"));
+    assert_eq!(window_title(&app), "Untitled* - FissionOxide");
     assert_eq!(crate::documents::tab_label(&app.s), "Untitled*", "the tab shows the lock and the star until saved");
     // saved to a file: the name and version show, the tab stars its unsaved changes
     app.s.path = Some(std::path::PathBuf::from("/tmp/Bracket.fox"));
     assert_eq!(root_label(&app), "Bracket v1");
     assert_eq!(crate::documents::tab_label(&app.s), "Bracket v1*");
-    assert_eq!(window_title(&app), format!("Bracket v1* ({user}) - FissionOxide"));
+    assert_eq!(window_title(&app), "Bracket v1* - FissionOxide");
     app.s.dirty = false;
     assert_eq!(crate::documents::tab_label(&app.s), "Bracket v1");
   }

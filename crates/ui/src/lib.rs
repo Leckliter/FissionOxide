@@ -1018,8 +1018,8 @@ impl App {
     self.s.store_root.clone().unwrap_or_else(fox_engine::store::Store::default_root)
   }
 
-  /// The window title, as Fusion's: "Untitled* (user) - FissionOxide" until the design is
-  /// saved, then its name and version, starred while it has unsaved changes.
+  /// The window title, as Fusion's: the shown tab's label ("Untitled", "Bracket v2*"), then
+  /// " - FissionOxide".
   pub fn title(&self) -> String {
     panels::window_title(self)
   }
@@ -1311,6 +1311,13 @@ impl App {
     }
     if pressed(Key::N, Modifiers::COMMAND) {
       documents::new_document(self, fox_engine::model::DesignType::Part, None);
+    }
+    // Ctrl+Tab and Ctrl+Shift+Tab cycle the document tabs (Shift first: Ctrl+Tab ignores it)
+    if pressed(Key::Tab, Modifiers::COMMAND | Modifiers::SHIFT) {
+      documents::cycle(self, false);
+    }
+    if pressed(Key::Tab, Modifiers::COMMAND) {
+      documents::cycle(self, true);
     }
     if pressed(Key::Escape, Modifiers::NONE) {
       self.escape();
@@ -2166,6 +2173,8 @@ impl App {
   /// The full UI for one frame.
   pub fn draw(&mut self, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
+    // the window's X asks to save unsaved designs first
+    documents::window_close(self, &ctx);
     ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
     let (focused, time) = ctx.input(|i| (i.focused, i.time));
     if focused && !self.window_focused {

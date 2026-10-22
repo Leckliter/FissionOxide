@@ -220,7 +220,7 @@ fn tabs_star_unsaved_changes_and_number_new_designs() {
     h.key(Key::N, Modifiers::COMMAND);
     assert_eq!(documents::tab_label(&h.app.s), format!("Untitled({n})"));
   }
-  assert!(h.app.title().starts_with("Untitled(4) ("), "{}", h.app.title());
+  assert_eq!(h.app.title(), "Untitled(4) - FissionOxide", "the title is the tab's label and the product");
   // a closed number is the next one used
   documents::request_close(&mut h.app, 2);
   assert_eq!(h.app.docs.count(), 4);
@@ -309,21 +309,168 @@ fn the_chooser_has_fusions_six_tiles() {
     ["Part Design", "Assembly Design", "Hybrid Design", "Drawing", "Electronics Design", "Electronics Library"]
   );
   let greyed: Vec<NewKind> = NewKind::ALL.into_iter().filter(|k| k.unavailable().is_some()).collect();
-  assert_eq!(greyed, [NewKind::Drawing, NewKind::ElectronicsLibrary]);
+  assert_eq!(greyed, [NewKind::ElectronicsLibrary]);
   assert_eq!(documents::unit_system_label(fox_engine::model::LengthUnit::In), "Inch (in), ouncemass");
   assert_eq!(documents::unit_system_label(fox_engine::model::LengthUnit::Mm), "Millimeter (mm), gram");
   // greyed tiles make nothing
   let mut h = Harness::new("tiles");
-  let c = documents::Chooser { kind: NewKind::Drawing, part: PartType::Standard, unit: Default::default() };
+  let c = documents::Chooser { kind: NewKind::ElectronicsLibrary, ..Default::default() };
   documents::create(&mut h.app, c);
   assert_eq!(h.app.docs.count(), 1);
+  assert!(h.app.dialog.is_none());
+  // Drawing documents the shown design: Create Drawing opens on it, in the same tab
+  let c = documents::Chooser { kind: NewKind::Drawing, automate: true, ..Default::default() };
+  documents::create(&mut h.app, c);
+  assert_eq!(h.app.docs.count(), 1);
+  assert_eq!(h.app.dialog.as_ref().map(|d| d.kind), Some(crate::dialogs::Kind::NewDrawing));
+}
+
+#[test]
+fn the_chooser_has_fusions_words_and_sizes() {
+  assert_eq!(
+    NewKind::Part.description(),
+    "Create sketches and bodies to model a single component to manufacture or use in an assembly."
+  );
+  assert_eq!(
+    NewKind::Assembly.description(),
+    "Create or insert parts and other assemblies as external components, then define relationships between them \
+     to create an assembly."
+  );
+  assert_eq!(
+    NewKind::Hybrid.description(),
+    "Create and model internal components, insert external components, and define relationships between them."
+  );
+  assert_eq!(
+    NewKind::Drawing.description(),
+    "Create views and annotations to document the active design for manufacturing."
+  );
+  assert_eq!(NewKind::Electronics.description(), "Create and manage schematics, 2D PCB, and 3D PCB documents.");
+  assert_eq!(NewKind::ElectronicsLibrary.description(), "Create and manage components for your electronics designs.");
+  let tips: Vec<(&str, &str)> = documents::PART_TYPES.iter().map(|(_, t, d)| (*t, *d)).collect();
+  assert_eq!(
+    tips,
+    [
+      ("Standard", "Creates a standard container for design elements like sketches and bodies."),
+      (
+        "Sheet Metal",
+        "Creates a component that is subject to sheet metal rules and can be used to create flat patterns."
+      ),
+    ]
+  );
+  assert_eq!(documents::TILE, vec2(104.0, 145.0));
+  // the window is about 640 x 413, as Fusion's
+  let mut h = Harness::new("chooser-size");
+  documents::open_chooser(&mut h.app);
+  assert!(h.app.docs.chooser.is_some_and(|c| c.automate && c.kind == NewKind::Part));
+  h.frame(vec![]);
+  h.frame(vec![]);
+  let r = h.area(crate::file_dialogs::modal_id("new-design")).expect("the chooser shows");
+  assert!((r.width() - 640.0).abs() < 30.0 && (r.height() - 413.0).abs() < 40.0, "{r:?}");
+}
+
+#[test]
+fn ctrl_tab_cycles_the_document_tabs() {
+  let mut h = Harness::new("ctrl-tab");
+  documents::new_document(&mut h.app, DesignType::Part, None);
+  documents::new_document(&mut h.app, DesignType::Part, None);
+  h.frame(vec![]);
+  assert_eq!(h.app.docs.active(), 2);
+  h.key(Key::Tab, Modifiers::COMMAND);
+  assert_eq!(h.app.docs.active(), 0, "Ctrl+Tab wraps from the last tab to the first");
+  h.key(Key::Tab, Modifiers::COMMAND);
+  assert_eq!(h.app.docs.active(), 1);
+  h.key(Key::Tab, Modifiers::COMMAND | Modifiers::SHIFT);
+  assert_eq!(h.app.docs.active(), 0, "Ctrl+Shift+Tab goes back");
+  h.key(Key::Tab, Modifiers::COMMAND | Modifiers::SHIFT);
+  assert_eq!(h.app.docs.active(), 2, "and wraps to the last");
+}
+
+#[test]
+fn tabs_keep_fusions_minimum_width_and_closing_the_last_shows_its_neighbour() {
+  // about 150 px a tab before the strip scrolls, as in a 908 px Fusion window
+  assert_eq!(documents::TAB_MIN_W, 150.0);
+  assert!(!documents::tabs_overflow(4, 600.0));
+  assert!(documents::tabs_overflow(5, 600.0));
+  let mut h = Harness::new("overflow-close");
+  for _ in 0..6 {
+    documents::new_document(&mut h.app, DesignType::Part, None);
+  }
+  h.frame(vec![]);
+  assert_eq!((h.app.docs.count(), h.app.docs.active()), (7, 6));
+  // closing the shown rightmost tab shows its left neighbour
+  documents::request_close(&mut h.app, 6);
+  assert_eq!((h.app.docs.count(), h.app.docs.active()), (6, 5));
+}
+
+/// A frame whose input carries the window's X; returns the commands the app sent the window.
+fn close_window(h: &mut Harness) -> Vec<egui::ViewportCommand> {
+  h.time += 1.0 / 60.0;
+  let mut input = RawInput {
+    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+    time: Some(h.time),
+    ..Default::default()
+  };
+  input.viewports.insert(
+    egui::ViewportId::ROOT,
+    egui::ViewportInfo { events: vec![egui::ViewportEvent::Close], ..Default::default() },
+  );
+  let app = &mut h.app;
+  let mut out = h.ctx.run_ui(input, |ui| app.draw(ui));
+  out.textures_delta.clear();
+  out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default()
+}
+
+fn frame_commands(h: &mut Harness) -> Vec<egui::ViewportCommand> {
+  h.time += 1.0 / 60.0;
+  let input = RawInput {
+    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+    time: Some(h.time),
+    ..Default::default()
+  };
+  let app = &mut h.app;
+  let mut out = h.ctx.run_ui(input, |ui| app.draw(ui));
+  out.textures_delta.clear();
+  out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default()
+}
+
+#[test]
+fn the_windows_x_asks_to_save_unsaved_designs() {
+  use egui::ViewportCommand;
+  let mut h = Harness::new("window-close");
+  // nothing unsaved: the window just closes
+  let cmds = close_window(&mut h);
+  assert!(!cmds.contains(&ViewportCommand::CancelClose), "{cmds:?}");
+  // an unsaved design in the second tab, the first shown: the close waits and that tab asks
+  documents::new_document(&mut h.app, DesignType::Part, None);
+  work(&mut h.app);
+  documents::switch_to(&mut h.app, 0);
+  let cmds = close_window(&mut h);
+  assert!(cmds.contains(&ViewportCommand::CancelClose), "{cmds:?}");
+  assert!(h.app.docs.quitting);
+  assert_eq!((h.app.docs.closing, h.app.docs.active()), (Some(1), 1), "the unsaved tab shows and asks");
+  assert!(h.app.data.save.is_some(), "with the Save dialog, as its tab's X");
+  // the Save dialog's Cancel keeps the app open with every tab as it was
+  h.app.data.save = None;
+  h.app.docs.closing = None;
+  let cmds = frame_commands(&mut h);
+  assert!(!cmds.contains(&ViewportCommand::Close), "{cmds:?}");
+  assert!(!h.app.docs.quitting);
+  assert_eq!(h.app.docs.count(), 2);
+  assert!(h.app.s.dirty, "the work is still there");
+  // again, and Don't Save: the tab goes and the window closes
+  close_window(&mut h);
+  assert_eq!(h.app.docs.closing, Some(1));
+  h.app.data.save = None;
+  documents::close_now(&mut h.app, 1);
+  let cmds = frame_commands(&mut h);
+  assert!(cmds.contains(&ViewportCommand::Close), "{cmds:?}");
+  assert!(!h.app.docs.quitting);
 }
 
 #[test]
 fn an_assembly_design_has_the_assembly_tab_and_document_type() {
   let mut h = Harness::new("assembly");
-  let c =
-    documents::Chooser { kind: NewKind::Assembly, part: PartType::Standard, unit: fox_engine::model::LengthUnit::In };
+  let c = documents::Chooser { kind: NewKind::Assembly, unit: fox_engine::model::LengthUnit::In, ..Default::default() };
   documents::create(&mut h.app, c);
   h.frame(vec![]);
   assert_eq!(h.app.s.design.design_type, DesignType::Assembly);
@@ -339,7 +486,7 @@ fn an_assembly_design_has_the_assembly_tab_and_document_type() {
   h.frame(vec![]);
   assert_eq!(h.app.tab, Tab::Assembly, "each tab keeps its toolbar tab");
   // a sheet metal part opens on SHEET METAL
-  let c = documents::Chooser { kind: NewKind::Part, part: PartType::SheetMetal, unit: Default::default() };
+  let c = documents::Chooser { kind: NewKind::Part, part: PartType::SheetMetal, ..Default::default() };
   documents::create(&mut h.app, c);
   h.frame(vec![]);
   assert_eq!(h.app.tab, Tab::SheetMetal);
