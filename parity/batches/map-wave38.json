@@ -15,5 +15,13 @@
   "ui:dialogs:copy-ghost-preview": "ui-reverify-dialogs-2",
   "ui:dialogs:split-face-rows": "ui-reverify-dialogs-3",
   "ui:dialogs:remove-features-dialog": "ui-reverify-dialogs-3",
-  "ui:dialogs:replace-with-primitives": "ui-reverify-dialogs-3"
+  "ui:dialogs:replace-with-primitives": "ui-reverify-dialogs-3",
+  "ui:chrome:dark-theme": "ui-reverify-chrome-1",
+  "ui:chrome:data-panel-project-list": "ui-reverify-chrome-1",
+  "ui:chrome:text-commands": "ui-reverify-chrome-1",
+  "ui:chrome:view-submenu": "ui-reverify-chrome-1",
+  "ui:chrome:data-panel-file-row": "ui-reverify-chrome-1",
+  "ui:chrome:open-dialog": "ui-reverify-chrome-1",
+  "ui:chrome:export-dialog": "ui-reverify-chrome-1",
+  "ui:chrome:arrow-glyph-boxes": "ui-reverify-chrome-1"
 }

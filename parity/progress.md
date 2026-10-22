@@ -1,8 +1,26 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 18:05, session "Re-verification sweep, verifier 2"
+## Last stop: 2026-10-22, 18:15, session "Re-verification sweep, verifier 2"
 
-Swept the dialogs area of the re-verification line (kept `in progress` in `coverage.md`). `main` did not
+Swept dialogs (below) and then chrome. Chrome: of the 31 keys `fixing-merged` at the start, 21
+`verified`, 8 reopened into `ui-reverify-chrome-1` (`ready`, no fixer; keys in `map-wave38.json`): the
+dark theme only darkens Preferences and its Theme dropdown then will not open (P1), a Data Panel project
+needs a double-click on its icon to open (P1), no Text Commands panel, File > View's extra Explode /
+Render Components, Data Panel list view rows collapsing, the Open window's overlapping Samples tree,
+greyed IPT / FBX export, and missing-glyph boxes (Data Panel arrows, Upload and Preferences close
+buttons, PARAMETERS' header). Left `fixing-merged` in chrome: `ui:chrome:comments-expand` (Fusion's
+COMMENTS header did not expand on an unsaved tab: compare on a saved design) and
+`ui:chrome:status-two-faces-angle` (Ctrl/Shift+click from the automation tool does not add to
+FissionOxide's selection, so two faces could not be picked), plus four chrome keys the fixers merged
+during this session (`home-start-page`, `check-updates-job-status`, `profile-menu`,
+`window-title-format`).
+
+The dark-theme test left `Theme=dark` in `%LOCALAPPDATA%\FissionOxide\settings.ini` and the UI could
+not set it back; the verifier closed FissionOxide, set `Theme=light` in the file and relaunched. If you
+try the theme again, do the same afterwards. FissionOxide now runs a fresh empty "Untitled" at x 0..907
+with the Data Panel closed.
+
+Dialogs: swept the dialogs area of the re-verification line (kept `in progress` in `coverage.md`). `main` did not
 build on Windows (`far` is a Windows header macro in `crates/kernel/cpp/surface3.cpp`); fixed in
 `b399613d`, then rebuilt. Of the 56 dialogs keys that were `fixing-merged`: 40 `verified`, 16 reopened
 (`mismatch`), plus one new row `ui:dialogs:preview-checkbox-extra` (FissionOxide's Preview checkbox,
@@ -48,11 +66,13 @@ documents 3, manage 2, viewcube 1, plastic 1).
 
 ## Next verifier: start here
 
-1. Keep the sweep line `in progress`. Sketch and dialogs are swept; take chrome next (31 keys after
-   the fixers' latest merges; list them with
-   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='chrome' and r['status']=='fixing-merged']"`),
-   then canvas and the rest in `coverage.md`'s order. Fixers keep merging: sketch is back to 12
-   `fixing-merged` keys (new fixes), so recount each area before starting it.
+1. Keep the sweep line `in progress`. Sketch, dialogs and chrome are swept; take canvas next (19
+   keys; list them with
+   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='canvas' and r['status']=='fixing-merged']"`),
+   then navbar (13), viewcube, marking-menu (7), browser (10), timeline (19), manip (12) and the rest
+   in `coverage.md`'s order, then the six chrome and twelve sketch keys left. Fixers keep merging
+   (sketch went from 4 to 12 and chrome gained 4 during verifier 2): recount each area before
+   starting it. 235 keys were `fixing-merged` at 18:15.
 2. Pick up the four sketch keys above when a body crosses a sketch plane (draw on XY, extrude, sketch on
    XZ through the body for Intersect and Slice; Look At on XZ and YZ in both apps).
 3. Rebuild first (kill `fissionoxide.exe`, `cargo build --release -p fissionoxide`, about 3 min).

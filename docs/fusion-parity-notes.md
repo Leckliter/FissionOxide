@@ -618,3 +618,11 @@ crosses a body. Three new rows, one P1: a window box over a whole sketch then De
 Point(d2) in this sketch". Of the seven open rows in done batches, five verified and two set to match as
 superseded. Two wave-37 batches (`ui-reverify-sketch-1`, `ui-reverify-sketch-2`); 271 keys remain
 fixing-merged, dialogs next.
+
+## 2026-10-22, verifier 2: re-verification sweep, dialogs and chrome
+Rebuilt after fixing a Windows-only build break (`far` macro in `surface3.cpp`, `b399613d`). Dialogs:
+40 of 56 verified, 16 reopened, one new row (an extra Preview checkbox in many dialogs). Chrome: 21 of
+31 verified, 8 reopened, 2 left (COMMENTS needs a saved design; two-face selection cannot be made with
+the automation tool). The dark theme darkens only Preferences and its dropdown then sticks; a Data Panel
+project opens only on a double-click on its icon. Four wave-38 batches (`ui-reverify-dialogs-1/-2/-3`,
+`ui-reverify-chrome-1`); report `parity/reports/2026-10-22-reverify-dialogs-chrome.md`. Canvas next.
