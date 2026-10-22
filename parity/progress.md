@@ -10,8 +10,8 @@ on every ribbon button, pin/unpin, customise shortcuts" for the SOLID tab (repor
 `2026-10-21-data-panel.md`, `map-wave15.json`); the File menu dialogs (report
 `2026-10-21-file-dialogs.md`, `map-wave16.json`); "Document Settings, units change, Named Views,
 Comments panel" (report `2026-10-21-document-settings-views.md`, `map-wave17.json`). Every batch
-from wave 13 on is `ready` in `index.jsonl` with no fixer yet. "Status bar readouts for every
-selection kind; lower-left messages" is `in progress`. Earlier: chrome, toolbar, ViewCube and
+from wave 13 on is `ready` in `index.jsonl` with no fixer yet. "Status bar readouts" is done (report
+`2026-10-21-status-readouts.md`, `map-wave18.json`); "Camera: orbit/pan/zoom ..." is `in progress`. Earlier: chrome, toolbar, ViewCube and
 navigation bar, marking menus, browser and timeline menus, Preferences, the basic sketch flow, the
 first-pass feature dialogs, face/edge/body colours, every sketch CREATE and MODIFY tool, the
 selection remainder, every constraint, the palette, the heads-up input (reports in

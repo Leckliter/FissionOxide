@@ -12,11 +12,11 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [done (2026-10-21); not exercised: grid view, folder menus, drag and drop, Trash contents, multi-version history, Filter field] Data Panel: projects, folders, upload, versions, search, Recent/Activity/Trash
 - [done (2026-10-21); Open Recent, New Drawing and Insert into Design are not in Fusion's current File menu; not exercised: New..., completing Save or Export, Save As on a saved design] Save, Save As, Open, Open Recent, Export, New Drawing, Insert into Design, Capture Image, 3D Print dialogs
 - [done (2026-10-21); not exercised: the unit change itself, Set as Default, named view rename/update/delete, comments on a saved document] Document Settings, units change, Named Views (create, edit, restore), Comments panel
-- [in progress (2026-10-21, prober 7)] Status bar readouts for every selection kind; lower-left messages
+- [done (2026-10-21); not exercised: edge alone and vertex in Fusion, vertex and two faces in FissionOxide, construction geometry in the canvas, components, command-time lower-left messages] Status bar readouts for every selection kind; lower-left messages
 
 ## Design workspace: canvas
 - [done (2026-10-21)] ViewCube (faces, edges, corners, arrows, menu, home, fade, compass), navigation bar flyouts
-- [todo] Camera: orbit/pan/zoom with every mouse preset, Fit, Look At, zoom-to-cursor, animation timing, orthographic/perspective switch
+- [in progress (2026-10-21, prober 7)] Camera: orbit/pan/zoom with every mouse preset, Fit, Look At, zoom-to-cursor, animation timing, orthographic/perspective switch
 - [done (2026-10-21); not exercised: Body/Edge priority behaviour, Freeform and Paint selection, Select Through] Selection: hover/selected colours for face, edge, vertex, body, sketch curve, sketch point, construction plane, axis; window and crossing boxes; Select Other; selection filters and priority; Escape and empty-click
 - [done (2026-10-21)] Marking menus on empty canvas, face, edge; todo: body, vertex, sketch point, construction geometry, timeline feature, in-sketch
 - [todo] Display settings: every visual style, environment, effects, object visibility, ground plane, full screen

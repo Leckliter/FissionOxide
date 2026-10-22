@@ -404,3 +404,11 @@ Type dialog, New Named View names the row inline, and COMMENTS expands a docked 
 FissionOxide has a radio popup, the pencil on the wrong row, no design-type menu, "Named View 1"
 with a status line and a floating Comments window. 5 rows plus the reopened `comments-expand` in
 one batch (`parity/batches/map-wave17.json`), four match rows.
+
+## 2026-10-21, prober 7 (continued): status bar readouts
+
+Every selection kind reachable on a one-body design read in both apps (report
+`parity/reports/2026-10-21-status-readouts.md`). The browser rows, a face, a sketch point and the
+timeline feature read alike; FissionOxide prints the face readout already on hover, loses the
+first kind of a mixed selection, and keeps a timeline feature selected after Escape. 4 rows in one
+batch (`parity/batches/map-wave18.json`), four match rows.

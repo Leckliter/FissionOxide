@@ -1,0 +1,6 @@
+{
+  "ui:chrome:status-readout-on-hover": "ui-status-readouts",
+  "ui:chrome:status-mixed-selection": "ui-status-readouts",
+  "ui:chrome:status-two-faces-angle": "ui-status-readouts",
+  "ui:chrome:escape-clears-feature-selection": "ui-status-readouts"
+}
