@@ -920,75 +920,106 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
+/// The workspace the window shows, as the switcher names it.
+pub(crate) fn workspace_label(app: &App) -> &'static str {
+  if app.electronics.is_some() {
+    "ELECTRONICS"
+  } else if app.drawing.is_some() {
+    "DRAWING"
+  } else if app.generative {
+    "GENERATIVE"
+  } else if app.render.active {
+    "RENDER"
+  } else if app.manufacture {
+    "MANUFACTURE"
+  } else if app.simulation.is_some() {
+    "SIMULATION"
+  } else {
+    "DESIGN"
+  }
+}
+
+/// The switcher's label size: every workspace's name at DESIGN's, as Fusion's.
+pub(crate) const SWITCHER_FONT: f32 = 13.5;
+/// The ▾'s half-width and its gap after the name.
+const SWITCHER_CARET: f32 = 3.5;
+pub(crate) const SWITCHER_CARET_GAP: f32 = 6.0;
+
+/// The switcher's width for a name `text_w` wide, and the x of the name's left edge and of the
+/// ▾'s centre from the button's left: Fusion's 92 px button, growing for a name too long for it,
+/// with the name and the caret a few px after it centred together.
+pub(crate) fn switcher_layout(text_w: f32) -> (f32, f32, f32) {
+  let group = text_w + SWITCHER_CARET_GAP + 2.0 * SWITCHER_CARET;
+  let width = (group + 24.0).max(92.0);
+  let left = (width - group) / 2.0;
+  (width, left, left + text_w + SWITCHER_CARET_GAP + SWITCHER_CARET)
+}
+
 fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
   ui.vertical(|ui| {
     ui.add_space(9.0);
-    let (rect, resp) = ui.allocate_exact_size(vec2(92.0, 76.0), egui::Sense::click());
+    let label = workspace_label(app);
+    let font = egui::FontId::proportional(SWITCHER_FONT);
+    let ink = Color32::from_gray(30);
+    let tw = ui.painter().layout_no_wrap(label.into(), font.clone(), ink).size().x;
+    let (width, text_x, caret_x) = switcher_layout(tw);
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 76.0), egui::Sense::click());
     let fill = if resp.hovered() { theme::HOVER } else { Color32::from_rgb(248, 248, 248) };
-    ui.painter().rect(rect, 4.0, fill, Stroke::new(1.0, Color32::from_gray(196)), egui::StrokeKind::Inside);
-    ui.painter().text(
-      rect.center() - vec2(8.0, 0.0),
-      egui::Align2::CENTER_CENTER,
-      if app.electronics.is_some() {
-        "ELECTRONICS"
-      } else if app.drawing.is_some() {
-        "DRAWING"
-      } else if app.generative {
-        "GENERATIVE"
-      } else if app.render.active {
-        "RENDER"
-      } else if app.manufacture {
-        "MANUFACTURE"
-      } else if app.simulation.is_some() {
-        "SIMULATION"
-      } else {
-        "DESIGN"
-      },
-      egui::FontId::proportional(
-        if app.manufacture || app.electronics.is_some() || app.generative || app.simulation.is_some() {
-          10.0
-        } else if app.drawing.is_some() {
-          12.5
-        } else {
-          13.5
-        },
-      ),
-      Color32::from_gray(30),
-    );
-    icons::chevron(ui.painter(), rect.center() + vec2(32.0, 0.0), Color32::from_gray(30));
+    let p = ui.painter();
+    p.rect(rect, 4.0, fill, Stroke::new(1.0, Color32::from_gray(196)), egui::StrokeKind::Inside);
+    let at = pos2(rect.left() + text_x, rect.center().y);
+    p.text(at, egui::Align2::LEFT_CENTER, label, font.clone(), ink);
+    // the font has no semi-bold face: a second pass a little over gives the weight
+    p.text(at + vec2(0.4, 0.0), egui::Align2::LEFT_CENTER, label, font, ink);
+    icons::chevron(p, pos2(rect.left() + caret_x, rect.center().y), ink);
     let resp = resp.on_hover_text("Change Workspace");
     egui::Popup::menu(&resp).show(|ui| workspace_menu(app, ui));
   });
 }
 
-/// Fusion's workspace list: upper-case names, a padlock on the workspaces that need an
-/// extension, and DRAWING ▸ and ELECTRONICS ▸ submenus for the documents they create.
+/// The workspace menu's rows: Fusion's, taller than other menus' and semi-bold.
+pub(crate) const WORKSPACE_ROW_H: f32 = 32.0;
+const WORKSPACE_FONT: f32 = 13.0;
+/// The room a row keeps right of its name for the padlock or the ▸.
+const WORKSPACE_LOCK_W: f32 = 26.0;
+const WORKSPACE_ARROW_W: f32 = 18.0;
+/// The name's inset from the row's left edge, and the margin past the widest row's end.
+const WORKSPACE_PAD: f32 = 10.0;
+/// Resting on a workspace row this long opens its tooltip, as in Fusion.
+pub(crate) const WORKSPACE_TIP_SECS: f64 = 1.5;
+/// The tooltip's width and the height of its picture.
+const WORKSPACE_TIP_W: f32 = 280.0;
+const WORKSPACE_TIP_PICTURE_H: f32 = 140.0;
+
+/// Fusion's workspace list: semi-bold upper-case names in a list as wide as the longest, a
+/// padlock on the workspaces that need an extension, DRAWING ▸ and ELECTRONICS ▸ submenus for
+/// the documents they create, and no fill on the current workspace.
 fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
-  const WIDTH: f32 = 200.0;
+  const SUB_WIDTH: f32 = 200.0;
   ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-  ui.set_min_width(WIDTH);
-  let drawing = app.drawing.is_some();
-  let ecad = app.electronics.is_some();
-  let plain = !drawing && !ecad;
+  let font = egui::FontId::proportional(WORKSPACE_FONT);
+  let width = WORKSPACES
+    .iter()
+    .map(|w| {
+      let tw = ui.painter().layout_no_wrap(w.to_uppercase(), font.clone(), theme::TEXT).size().x;
+      tw + match workspace_trail(w) {
+        Trail::Lock => WORKSPACE_LOCK_W,
+        Trail::Arrow => WORKSPACE_ARROW_W,
+        Trail::None => 0.0,
+      }
+    })
+    .fold(0.0, f32::max)
+    + 2.0 * WORKSPACE_PAD;
+  ui.set_min_width(width);
   for w in WORKSPACES {
-    let current = match w {
-      "Drawing" => drawing && !ecad,
-      "Manufacture" => app.manufacture && plain,
-      "Electronics" => ecad,
-      "Generative Design" => app.generative && plain,
-      "Render" => app.render.active && plain,
-      "Simulation" => app.simulation.is_some() && plain,
-      "Animation" => false,
-      _ => plain && !app.manufacture && !app.generative && !app.render.active && app.simulation.is_none(),
-    };
-    let lock = matches!(w, "Generative Design" | "Simulation");
     let sub: &[&str] = match w {
       "Drawing" => &["From Design", "From Animation"],
       "Electronics" => &["New Electronics Design", "New Schematic", "New PCB", "New Electronics Library", "New 3D PCB"],
       _ => &[],
     };
-    let r = workspace_row(ui, WIDTH, &w.to_uppercase(), current, lock, !sub.is_empty());
+    let r = workspace_row(ui, width, &w.to_uppercase(), workspace_trail(w), true);
     if sub.is_empty() {
+      let r = workspace_tip(r, w);
       if r.clicked() {
         ui.close();
         if w == "Animation" {
@@ -1001,9 +1032,9 @@ fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
     }
     egui::containers::menu::SubMenu::new().show(ui, &r, |ui| {
       ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-      ui.set_min_width(WIDTH);
+      ui.set_min_width(SUB_WIDTH);
       for item in sub {
-        if workspace_row(ui, WIDTH, item, false, false, false).clicked() {
+        if workspace_row(ui, SUB_WIDTH, item, Trail::None, false).clicked() {
           ui.close();
           open_workspace_document(app, w, item);
         }
@@ -1012,45 +1043,123 @@ fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
   }
 }
 
-/// One row of the workspace menu (or of its submenus): the name, a padlock, or a ▸ arrow.
-fn workspace_row(ui: &mut egui::Ui, width: f32, label: &str, current: bool, lock: bool, sub: bool) -> egui::Response {
-  let (rect, resp) = ui.allocate_exact_size(vec2(width, 24.0), egui::Sense::click());
+/// What a workspace row shows after its name.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Trail {
+  None,
+  /// The workspace needs an extension.
+  Lock,
+  /// The row opens a submenu.
+  Arrow,
+}
+
+fn workspace_trail(w: &str) -> Trail {
+  match w {
+    "Generative Design" | "Simulation" => Trail::Lock,
+    "Drawing" | "Electronics" => Trail::Arrow,
+    _ => Trail::None,
+  }
+}
+
+/// One row of the workspace menu (`top`: semi-bold and Fusion's taller row) or of its
+/// submenus: the name, then a padlock at the row's end or a ▸ just after the name.
+fn workspace_row(ui: &mut egui::Ui, width: f32, label: &str, trail: Trail, top: bool) -> egui::Response {
+  let h = if top { WORKSPACE_ROW_H } else { 24.0 };
+  let (rect, resp) = ui.allocate_exact_size(vec2(width, h), egui::Sense::click());
   let p = ui.painter();
-  if current {
-    p.rect_filled(rect, 0.0, theme::SELECTED);
-  } else if resp.hovered() {
+  if resp.hovered() {
     p.rect_filled(rect, 0.0, theme::HOVER);
   }
-  p.text(
-    rect.left_center() + vec2(10.0, 0.0),
-    egui::Align2::LEFT_CENTER,
-    label,
-    egui::FontId::proportional(12.5),
-    theme::TEXT,
-  );
+  let font = egui::FontId::proportional(if top { WORKSPACE_FONT } else { 12.5 });
+  let at = rect.left_center() + vec2(WORKSPACE_PAD, 0.0);
+  let r = p.text(at, egui::Align2::LEFT_CENTER, label, font.clone(), theme::TEXT);
+  if top {
+    // the font has no semi-bold face: a second pass a little over gives the weight
+    p.text(at + vec2(0.4, 0.0), egui::Align2::LEFT_CENTER, label, font, theme::TEXT);
+  }
   let ink = Color32::from_gray(80);
-  if lock {
-    // a padlock: the shackle over the body
-    let c = rect.right_center() - vec2(16.0, 1.0);
-    p.rect_filled(Rect::from_min_max(c + vec2(-5.0, -1.0), c + vec2(5.0, 6.0)), 1.0, ink);
-    let arc: Vec<Pos2> = (0..=8)
-      .map(|i| {
-        let a = std::f32::consts::PI * (1.0 + i as f32 / 8.0);
-        c + vec2(3.5 * a.cos(), 3.5 * a.sin())
-      })
-      .collect();
-    p.add(egui::Shape::line(arc, Stroke::new(1.5, ink)));
-    p.line_segment([c + vec2(-3.5, -1.0), c + vec2(-3.5, -3.0)], Stroke::new(1.5, ink));
-    p.line_segment([c + vec2(3.5, -1.0), c + vec2(3.5, -3.0)], Stroke::new(1.5, ink));
+  match trail {
+    Trail::Lock => {
+      // a padlock: the shackle over the body
+      let c = rect.right_center() - vec2(16.0, 1.0);
+      p.rect_filled(Rect::from_min_max(c + vec2(-5.0, -1.0), c + vec2(5.0, 6.0)), 1.0, ink);
+      let arc: Vec<Pos2> = (0..=8)
+        .map(|i| {
+          let a = std::f32::consts::PI * (1.0 + i as f32 / 8.0);
+          c + vec2(3.5 * a.cos(), 3.5 * a.sin())
+        })
+        .collect();
+      p.add(egui::Shape::line(arc, Stroke::new(1.5, ink)));
+      p.line_segment([c + vec2(-3.5, -1.0), c + vec2(-3.5, -3.0)], Stroke::new(1.5, ink));
+      p.line_segment([c + vec2(3.5, -1.0), c + vec2(3.5, -3.0)], Stroke::new(1.5, ink));
+    }
+    Trail::Arrow => {
+      let c = pos2(r.right() + 10.0, rect.center().y);
+      p.add(egui::Shape::convex_polygon(
+        vec![c + vec2(-3.0, -5.0), c + vec2(4.0, 0.0), c + vec2(-3.0, 5.0)],
+        ink,
+        Stroke::NONE,
+      ));
+    }
+    Trail::None => {}
   }
-  if sub {
-    let c = rect.right_center() - vec2(12.0, 0.0);
-    p.add(egui::Shape::convex_polygon(
-      vec![c + vec2(-3.0, -5.0), c + vec2(4.0, 0.0), c + vec2(-3.0, 5.0)],
-      ink,
-      Stroke::NONE,
-    ));
+  resp
+}
+
+/// A workspace row's tooltip, as Fusion's: after resting on the row for
+/// [`WORKSPACE_TIP_SECS`], a dark panel right of the menu, level with the row, with the bold
+/// title "<Name> Workspace", a line saying what the workspace does, and a picture of it.
+fn workspace_tip(resp: egui::Response, w: &str) -> egui::Response {
+  let Some(line) = crate::tips::workspace(w) else { return resp };
+  let rested = crate::ribbon_tip::rested(&resp);
+  if !resp.hovered() {
+    return resp;
   }
+  if rested < WORKSPACE_TIP_SECS {
+    resp.ctx.request_repaint_after(std::time::Duration::from_secs_f64(WORKSPACE_TIP_SECS - rested));
+    return resp;
+  }
+  let style = resp.ctx.global_style();
+  // the row spans the menu's content; its frame (the menu margin and a 1 px stroke) lies beyond
+  let edge = resp.rect.right() + f32::from(style.spacing.menu_margin.right) + 1.0;
+  let anchor = Rect::from_min_max(pos2(edge, resp.rect.top()), pos2(edge, resp.rect.bottom()));
+  let frame = egui::Frame::new()
+    .fill(theme::TOOLTIP)
+    .corner_radius(egui::CornerRadius::same(4))
+    .inner_margin(egui::Margin::symmetric(10, 8))
+    .shadow(style.visuals.popup_shadow);
+  let mut tooltip = egui::Tooltip::for_enabled(&resp);
+  tooltip.popup =
+    tooltip.popup.anchor(anchor).align(egui::RectAlign::RIGHT_START).gap(6.0).width(WORKSPACE_TIP_W).frame(frame);
+  tooltip.show(|ui| {
+    ui.set_max_width(WORKSPACE_TIP_W);
+    ui.spacing_mut().item_spacing.y = 10.0;
+    let title = format!("{w} Workspace");
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let r = ui.label(RichText::new(&title).font(font.clone()).color(theme::TOOLTIP_TITLE)).rect;
+    // the font has no bold face: a second pass half a pixel over gives the weight
+    ui.painter().text(r.left_top() + vec2(0.6, 0.0), egui::Align2::LEFT_TOP, &title, font, theme::TOOLTIP_TITLE);
+    ui.add(egui::Label::new(RichText::new(line).color(theme::TOOLTIP_TEXT)).wrap());
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), WORKSPACE_TIP_PICTURE_H), egui::Sense::hover());
+    ui.painter().rect(
+      r,
+      2.0,
+      theme::ILLUSTRATION,
+      Stroke::new(1.0, theme::ILLUSTRATION_FRAME),
+      egui::StrokeKind::Inside,
+    );
+    // until pictures of each workspace exist, a command typical of it painted large
+    let icon = match w {
+      "Generative Design" => Icon::CreateForm,
+      "Render" => Icon::Appearance,
+      "Animation" => Icon::Play,
+      "Simulation" => Icon::CurvMap,
+      "Manufacture" => Icon::Print3d,
+      _ => Icon::Extrude,
+    };
+    let side = WORKSPACE_TIP_PICTURE_H - 30.0;
+    icons::draw_tinted(ui.painter(), Rect::from_center_size(r.center(), Vec2::splat(side)), icon, icons::Tint::Blue);
+  });
   resp
 }
 

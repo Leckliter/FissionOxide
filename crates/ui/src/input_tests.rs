@@ -1160,6 +1160,92 @@ fn the_workspace_menu_lists_fusions_workspaces() {
   assert!(h.app.drawing.is_some() || h.app.dialog.is_some(), "From Design opens the Drawing workspace");
 }
 
+/// Fusion's workspace menu rows: semi-bold upper case on taller rows, the list as wide as its
+/// longest name (not 200 px), and no fill on the current workspace.
+#[test]
+fn the_workspace_menu_rows_are_fusions() {
+  let mut h = Harness::new();
+  let switcher = h.find(vec![], "DESIGN").expect("the switcher");
+  h.move_then_click(switcher.center());
+  // the pointer rests on the button, away from every row
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  let row = |t: &str| all.iter().find(|(r, s)| s == t && r.top() > switcher.bottom()).map(|(r, _)| *r);
+  let design = row("DESIGN").expect("the DESIGN row");
+  let generative = row("GENERATIVE DESIGN").expect("the GENERATIVE DESIGN row");
+  let render = row("RENDER").expect("the RENDER row");
+  let step = (render.center().y - generative.center().y).abs();
+  assert!((step - crate::panels::WORKSPACE_ROW_H).abs() < 0.5, "rows {step} apart");
+  // semi-bold: each name drawn twice, a fraction of a pixel apart
+  assert_eq!(all.iter().filter(|(r, s)| s == "RENDER" && r.top() > switcher.bottom()).count(), 2);
+  // the rows' fills: none is drawn behind the current DESIGN row
+  let shapes = h.frame_shapes(1.0 / 60.0);
+  let behind = shapes.iter().any(|s| match s {
+    egui::Shape::Rect(r) => {
+      r.fill == crate::theme::SELECTED && r.rect.contains(design.center()) && r.rect.height() < 60.0
+    }
+    _ => false,
+  });
+  assert!(!behind, "no fill on the current workspace");
+  // the list hugs GENERATIVE DESIGN and its padlock
+  let menu = shapes
+    .iter()
+    .filter_map(|s| match s {
+      egui::Shape::Rect(r) if r.rect.contains(design.center()) && r.rect.contains(generative.center()) => Some(r.rect),
+      _ => None,
+    })
+    .filter(|r| r.height() < 400.0)
+    .min_by(|a, b| a.area().total_cmp(&b.area()))
+    .expect("the menu's frame");
+  assert!(menu.width() < 200.0, "the menu is {} wide", menu.width());
+  assert!(menu.right() > generative.right() + 20.0, "room for the padlock: {menu:?} vs {generative:?}");
+}
+
+/// Resting on a workspace row for 1.5 s opens Fusion's dark tooltip right of the menu: the bold
+/// "<Name> Workspace" title and what the workspace does.
+#[test]
+fn a_workspace_row_has_fusions_tooltip() {
+  let mut h = Harness::new();
+  let switcher = h.find(vec![], "DESIGN").expect("the switcher");
+  h.move_then_click(switcher.center());
+  let render = h.find(vec![], "RENDER").expect("the RENDER row");
+  // egui shows no tooltip for a pointer that moved within 0.1 s of a click
+  h.frame_texts(0.3, vec![]);
+  let early = h.rest(render.center(), 1.0);
+  assert!(!early.iter().any(|t| t == "Render Workspace"), "not yet after 1 s: {early:?}");
+  let shown = h.rest_rects(render.center(), 1.8);
+  let title = shown.iter().find(|(_, t)| t == "Render Workspace").map(|(r, _)| *r);
+  let title = title.unwrap_or_else(|| panic!("the title after 1.5 s: {shown:?}"));
+  assert!(shown.iter().any(|(_, t)| t == "Generates realistic renderings of the design."), "{shown:?}");
+  assert!(title.left() > render.right(), "right of the menu: {title:?} vs {render:?}");
+  assert!((title.top() - render.top()).abs() < 30.0, "level with the row: {title:?} vs {render:?}");
+  // Generative Design's words are Fusion's too
+  assert_eq!(
+    crate::tips::workspace("Generative Design"),
+    Some("Creates multiple designs that meet your geometric, performance, and manufacturing requirements.")
+  );
+}
+
+/// The workspace button names every workspace at DESIGN's size, the ▾ a few px after the name,
+/// growing for MANUFACTURE rather than shrinking the name.
+#[test]
+fn the_workspace_button_keeps_designs_label_size() {
+  let mut h = Harness::new();
+  let design = h.find(vec![], "DESIGN").expect("the switcher");
+  crate::panels::switch_workspace(&mut h.app, "Manufacture");
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let manufacture = h.find(vec![], "MANUFACTURE").expect("the switcher names Manufacture");
+  assert!((manufacture.height() - design.height()).abs() < 0.5, "{manufacture:?} vs {design:?}");
+  let (width, left, caret) = crate::panels::switcher_layout(manufacture.width());
+  assert!(width > 92.0, "the button grows: {width}");
+  assert!(left >= 10.0, "the name isn't pressed against the edge: {left}");
+  let gap = caret - 3.5 - (left + manufacture.width());
+  assert!((gap - crate::panels::SWITCHER_CARET_GAP).abs() < 0.01 && gap >= 4.0, "a spaced caret: {gap}");
+  // DESIGN keeps Fusion's 92 px button
+  assert_eq!(crate::panels::switcher_layout(design.width()).0, 92.0);
+}
+
 /// The browser's root row and Origin folder have eye toggles, Document Settings starts expanded
 /// (its Units and Part Design rows push Origin down), and hovering a row names it in the status
 /// readout.

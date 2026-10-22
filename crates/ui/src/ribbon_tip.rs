@@ -23,6 +23,24 @@ pub(crate) fn title(label: &str, key: &str) -> String {
   if key.is_empty() { label.to_string() } else { format!("{label} ({key})") }
 }
 
+/// How long the pointer has rested on `resp`, in seconds (0 when it isn't on it). Call it every
+/// frame the widget is drawn: a gap means the pointer left and came back.
+pub(crate) fn rested(resp: &egui::Response) -> f64 {
+  let now = resp.ctx.input(|i| i.time);
+  if !resp.hovered() {
+    return 0.0;
+  }
+  // (hovered since, last seen hovered)
+  let id = resp.id.with("tip-rest");
+  let since = resp.ctx.data_mut(|d| {
+    let (since, last) = d.get_temp::<(f64, f64)>(id).unwrap_or((now, now));
+    let since = if now - last > 0.25 { now } else { since };
+    d.insert_temp(id, (since, now));
+    since
+  });
+  now - since
+}
+
 /// Shows the tooltip of the ribbon button `resp` for the command `label` on the `scope` toolbar,
 /// its texts looked up under `lookup` (the label, or a tab's own version of it such as
 /// [`tips::SURFACE_EXTRUDE`]); `missing` adds "Not in FissionOxide yet", `key` is its shortcut
@@ -40,20 +58,7 @@ pub(crate) fn show(
   let tip = tips::tip(scope, lookup);
   let illustrated = tips::illustrated(scope, lookup);
   let ctx = resp.ctx.clone();
-  let now = ctx.input(|i| i.time);
-  // (hovered since, last seen hovered): a gap means the pointer left and came back
-  let id = resp.id.with("tip-rest");
-  let since = if resp.hovered() {
-    ctx.data_mut(|d| {
-      let (since, last) = d.get_temp::<(f64, f64)>(id).unwrap_or((now, now));
-      let since = if now - last > 0.25 { now } else { since };
-      d.insert_temp(id, (since, now));
-      since
-    })
-  } else {
-    now
-  };
-  let rested = now - since;
+  let rested = rested(&resp);
   let style = ctx.global_style();
   let frame = egui::Frame::new()
     .fill(theme::TOOLTIP)

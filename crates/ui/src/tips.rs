@@ -2076,6 +2076,24 @@ pub(crate) fn menu_paragraphs(scope: Scope, label: &str) -> Vec<&'static str> {
   }
 }
 
+/// What the workspace menu's tooltip for `workspace` says under its "<Name> Workspace" title.
+/// Render's and Generative Design's are Fusion's words; the rest say the same kind of thing.
+pub(crate) fn workspace(workspace: &str) -> Option<&'static str> {
+  Some(match workspace {
+    "Design" => "Creates and edits 3D models of parts and assemblies.",
+    "Generative Design" => {
+      "Creates multiple designs that meet your geometric, performance, and manufacturing requirements."
+    }
+    "Render" => "Generates realistic renderings of the design.",
+    "Animation" => "Creates exploded views and animations of the design's assemblies.",
+    "Simulation" => "Tests how the design performs under loads, heat, and other real-world conditions.",
+    "Manufacture" => "Creates toolpaths to machine the design and builds to 3D print it.",
+    "Drawing" => "Creates 2D drawings of the design or of an animation.",
+    "Electronics" => "Creates schematics, PCBs, and electronics libraries.",
+    _ => return None,
+  })
+}
+
 /// The last line of Fusion's tooltips for commands with a help page.
 pub(crate) const MORE_HELP: &str = "Press Ctrl+/ for more help.";
 
