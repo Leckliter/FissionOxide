@@ -1,18 +1,21 @@
 # Prober progress
 
-## Last stop: 2026-10-21, 21:55, session "Parity prober 7" (sketch display, sketch browser rows, ribbon tooltips)
+## Last stop: 2026-10-21, 22:30, session "Parity prober 7" (seven areas this session)
 
-Finished this session: "Sketch display", "Sketch browser rows, context menus, Edit Sketch,
-Redefine Sketch Plane, Save As DXF" (report
-`parity/reports/2026-10-21-sketch-display-browser-rows.md`, batches `map-wave13.json`) and
-"Tooltips on every ribbon button (short and expanded), pin/unpin, customise shortcuts" for the
-SOLID tab (report `parity/reports/2026-10-21-ribbon-tooltips.md`, batches `map-wave14.json`:
-`ui-toolbar-tooltips` 3 items, `ui-toolbar-customize-2` 3 items, both `ready`; five match rows;
-`ui:menus:row-options-glyph` and `ui:menus:tooltip-style` verified). All three marked `done` in
-`coverage.md`. Earlier: chrome, toolbar, ViewCube and navigation bar, marking menus, browser and
-timeline menus, Preferences, the basic sketch flow, the first-pass feature dialogs, face/edge/body
-colours, every sketch CREATE and MODIFY tool, the selection remainder, every constraint, the
-palette, the heads-up input and the sketch display (reports in `parity/reports/`).
+Finished this session, in order: "Sketch display", "Sketch browser rows, context menus, Edit
+Sketch, Redefine Sketch Plane, Save As DXF" (report
+`parity/reports/2026-10-21-sketch-display-browser-rows.md`, batches `map-wave13.json`); "Tooltips
+on every ribbon button, pin/unpin, customise shortcuts" for the SOLID tab (report
+`2026-10-21-ribbon-tooltips.md`, `map-wave14.json`); "Data Panel" (report
+`2026-10-21-data-panel.md`, `map-wave15.json`); the File menu dialogs (report
+`2026-10-21-file-dialogs.md`, `map-wave16.json`); "Document Settings, units change, Named Views,
+Comments panel" (report `2026-10-21-document-settings-views.md`, `map-wave17.json`). Every batch
+from wave 13 on is `ready` in `index.jsonl` with no fixer yet. "Status bar readouts for every
+selection kind; lower-left messages" is `in progress`. Earlier: chrome, toolbar, ViewCube and
+navigation bar, marking menus, browser and timeline menus, Preferences, the basic sketch flow, the
+first-pass feature dialogs, face/edge/body colours, every sketch CREATE and MODIFY tool, the
+selection remainder, every constraint, the palette, the heads-up input (reports in
+`parity/reports/`).
 
 ## Next prober: start here
 

@@ -394,3 +394,13 @@ wide Save modal; FissionOxide goes to the Windows dialogs for Open and each Expo
 window carries Description and Milestone rows, its 3D Print and Capture Image windows are large and
 sparse, and none of its floating windows close on Escape. 7 new rows plus the reopened
 `file-menu-items` in one batch (`parity/batches/map-wave16.json`), three match rows.
+
+## 2026-10-21, prober 7 (continued): Document Settings, units, Named Views, Comments
+
+The Units and Part Design rows, the Named Views folder and the COMMENTS header in both apps
+(report `parity/reports/2026-10-21-document-settings-views.md`). Fusion's Change Active Units is a
+docked dialog with a unit-system dropdown, its Part Design row has a pencil and a Convert Design
+Type dialog, New Named View names the row inline, and COMMENTS expands a docked panel;
+FissionOxide has a radio popup, the pencil on the wrong row, no design-type menu, "Named View 1"
+with a status line and a floating Comments window. 5 rows plus the reopened `comments-expand` in
+one batch (`parity/batches/map-wave17.json`), four match rows.

@@ -11,8 +11,8 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [done (2026-10-21)] Preferences dialog (layout, General); todo: every other Preferences page vs Fusion's
 - [done (2026-10-21); not exercised: grid view, folder menus, drag and drop, Trash contents, multi-version history, Filter field] Data Panel: projects, folders, upload, versions, search, Recent/Activity/Trash
 - [done (2026-10-21); Open Recent, New Drawing and Insert into Design are not in Fusion's current File menu; not exercised: New..., completing Save or Export, Save As on a saved design] Save, Save As, Open, Open Recent, Export, New Drawing, Insert into Design, Capture Image, 3D Print dialogs
-- [in progress (2026-10-21, prober 7)] Document Settings, units change, Named Views (create, edit, restore), Comments panel
-- [todo] Status bar readouts for every selection kind; lower-left messages
+- [done (2026-10-21); not exercised: the unit change itself, Set as Default, named view rename/update/delete, comments on a saved document] Document Settings, units change, Named Views (create, edit, restore), Comments panel
+- [in progress (2026-10-21, prober 7)] Status bar readouts for every selection kind; lower-left messages
 
 ## Design workspace: canvas
 - [done (2026-10-21)] ViewCube (faces, edges, corners, arrows, menu, home, fade, compass), navigation bar flyouts

@@ -1,0 +1,7 @@
+{
+  "ui:browser:units-dialog": "ui-document-settings-views",
+  "ui:browser:row-edit-pencils": "ui-document-settings-views",
+  "ui:browser:convert-design-type": "ui-document-settings-views",
+  "ui:browser:new-named-view-inline-name": "ui-document-settings-views",
+  "ui:browser:named-view-icon": "ui-document-settings-views"
+}
