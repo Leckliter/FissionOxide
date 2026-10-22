@@ -5607,6 +5607,11 @@ mod tests {
     let body = app.s.model.bodies[0].id;
     let face = app.s.model.bodies[0].faces()[0].id;
     app.hover = Some(Pick::Face { body, face });
+    // with no command running the hover reads nothing (ui-status-readouts); PROJECT's picking does
+    assert_eq!(crate::panels::selection_text(&app), None);
+    app.start(crate::dialogs::Kind::Project);
+    app.hover = Some(Pick::Face { body, face });
+    app.sel_priority = crate::select::Priority::Face;
     // faces and edges (the default priority): the face lights and reads out
     assert!(crate::panels::selection_text(&app).unwrap().starts_with("1 Face"));
     let o = scene_options(&mut app);

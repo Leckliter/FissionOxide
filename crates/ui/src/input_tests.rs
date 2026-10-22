@@ -12,6 +12,10 @@ struct Harness {
   time: f64,
   /// The window width (1440 unless a test narrows it).
   width: f32,
+  /// The modifier keys held during each frame (Ctrl for a Ctrl+click), and the ones last told
+  /// to egui (a change is sent as the frame's first event).
+  mods: egui::Modifiers,
+  sent_mods: egui::Modifiers,
 }
 
 impl Harness {
@@ -22,7 +26,14 @@ impl Harness {
   fn with_width(width: f32) -> Harness {
     let ctx = egui::Context::default();
     crate::theme::apply(&ctx);
-    let mut h = Harness { ctx, app: App::with_session(Session::default()), time: 0.0, width };
+    let mut h = Harness {
+      ctx,
+      app: App::with_session(Session::default()),
+      time: 0.0,
+      width,
+      mods: egui::Modifiers::NONE,
+      sent_mods: egui::Modifiers::NONE,
+    };
     for _ in 0..3 {
       h.frame(vec![]);
     }
@@ -34,8 +45,12 @@ impl Harness {
   }
 
   /// A frame in a window of `size` (the window was resized or maximised).
-  fn frame_in(&mut self, size: egui::Vec2, events: Vec<Event>) {
+  fn frame_in(&mut self, size: egui::Vec2, mut events: Vec<Event>) {
     self.time += 1.0 / 60.0;
+    if self.mods != self.sent_mods {
+      events.insert(0, Event::ModifiersChanged(self.mods));
+      self.sent_mods = self.mods;
+    }
     let input = RawInput {
       screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
       time: Some(self.time),
@@ -1550,7 +1565,7 @@ fn hovering_a_corner_picks_the_vertex_by_default() {
   let Some(Pick::Vertex { body, edge, end }) = h.app.hover else { panic!("hover {:?}", h.app.hover) };
   let pos = fox_engine::scene::vertex_pos(&h.app.s, body, edge, end).unwrap();
   assert!((pos - corner).length() < 1e-6, "{pos}");
-  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Vertex | X: 10.00 Y: 10.00 Z: 20.00 mm"));
+  assert_eq!(crate::panels::selection_text(&h.app), None, "a hovered vertex reads nothing");
   h.frame(vec![Harness::button(at, true)]);
   h.frame(vec![Harness::button(at, false)]);
   h.frame(vec![]);
@@ -1575,11 +1590,12 @@ fn origin_items_are_hovered_and_picked_in_the_canvas() {
   h.frame(vec![]);
   h.frame(vec![]);
   assert_eq!(h.app.hover_origin, Some(OriginItem::Point));
-  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Origin Point | X: 0.00 Y: 0.00 Z: 0.00 mm"));
+  assert_eq!(crate::panels::selection_text(&h.app), None, "hovered, it reads nothing");
   h.frame(vec![Harness::button(at, true)]);
   h.frame(vec![Harness::button(at, false)]);
   h.frame(vec![]);
   assert_eq!(origin::picked(&h.app), Some(OriginItem::Point));
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Origin Point | X: 0.00 Y: 0.00 Z: 0.00 mm"));
   // clicking it again clears it
   h.frame(vec![Harness::button(at, true)]);
   h.frame(vec![Harness::button(at, false)]);
@@ -2054,4 +2070,72 @@ fn box_is_drawn_on_a_picked_plane_before_its_dialog_opens() {
   assert!(!d.placing() && d.preview_applied(), "{:?}", d.prompt(false));
   assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog"))).is_some());
   assert_eq!(h.app.s.model.bodies.len(), 1, "the box is previewed");
+}
+
+/// ui-status-readouts: hovering a face prints nothing in the status bar; a click selects the edge
+/// and a Ctrl+click on a face adds it, the readout counting both kinds with their least distance.
+#[test]
+fn ctrl_click_adds_a_face_to_an_edge_and_reads_both() {
+  use fox_engine::kernel::glam::DVec3;
+  use fox_engine::scene::Pick;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+  h.settle();
+  let top = h.screen(DVec3::new(0.0, 0.0, 20.0));
+  h.frame(vec![Event::PointerMoved(top)]);
+  h.frame(vec![]);
+  assert!(matches!(h.app.hover, Some(Pick::Face { .. })), "hover {:?}", h.app.hover);
+  assert_eq!(crate::panels::selection_text(&h.app), None, "a hovered face reads nothing");
+  let edge_at = h.screen(DVec3::new(0.0, 10.0, 20.0));
+  h.move_then_click(edge_at);
+  let [edge @ fox_engine::Sel::Edge { .. }] = h.app.s.selection[..] else { panic!("{:?}", h.app.s.selection) };
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("1 Edge | Length : 20.00 mm"));
+  h.mods = egui::Modifiers::COMMAND;
+  h.move_then_click(top);
+  h.mods = egui::Modifiers::NONE;
+  assert_eq!(h.app.s.selection.len(), 2, "{:?}", h.app.s.selection);
+  assert_eq!(h.app.s.selection[0], edge, "the Ctrl+click keeps the edge");
+  assert!(matches!(h.app.s.selection[1], fox_engine::Sel::Face { .. }));
+  // the edge lies on the top face
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("1 Face 1 Edge | Min Distance : 0.00 mm"));
+}
+
+/// ui-status-readouts: Escape after clicking a timeline icon clears the selection and the readout,
+/// and the icon still under the pointer doesn't light its body again until the pointer moves.
+#[test]
+fn escape_clears_a_timeline_pick_and_its_highlight() {
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+  h.settle();
+  let body = h.app.s.model.bodies[0].id;
+  let feature = h.app.s.design.features[0].id;
+  // find the feature's icon along the timeline at the window's foot
+  let mut icon = None;
+  'scan: for y in (860..900).step_by(4) {
+    for x in (0..600).step_by(4) {
+      let p = egui::pos2(x as f32, y as f32);
+      h.frame(vec![Event::PointerMoved(p)]);
+      h.frame(vec![]);
+      if h.app.ctx_menu.peek == vec![body] {
+        icon = Some(p + vec2(4.0, 0.0));
+        break 'scan;
+      }
+    }
+  }
+  let icon = icon.expect("the timeline icon lights the body");
+  assert_eq!(crate::panels::selection_text(&h.app), None, "a hovered icon reads nothing");
+  h.move_then_click(icon);
+  assert_eq!(h.app.s.selection, vec![fox_engine::Sel::Feature { feature }]);
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Box1"));
+  h.frame(vec![key(egui::Key::Escape)]);
+  h.frame(vec![]);
+  assert!(h.app.s.selection.is_empty(), "{:?}", h.app.s.selection);
+  assert_eq!(crate::panels::selection_text(&h.app), None);
+  assert!(h.app.ctx_menu.peek.is_empty(), "nothing stays lit while the pointer rests on the icon");
+  h.frame(vec![]);
+  assert!(h.app.ctx_menu.peek.is_empty());
+  // moving over the icon lights it again
+  h.frame(vec![Event::PointerMoved(icon + vec2(1.0, 0.0))]);
+  h.frame(vec![]);
+  assert_eq!(h.app.ctx_menu.peek, vec![body]);
 }

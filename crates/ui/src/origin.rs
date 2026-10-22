@@ -190,9 +190,9 @@ pub(crate) fn clear(app: &mut App) {
   app.picked_origin = None;
 }
 
-/// The status bar's readout for the picked origin item, else the hovered one.
+/// The status bar's readout for the picked origin item (a hovered one reads nothing, as in Fusion).
 pub(crate) fn status(app: &App) -> Option<String> {
-  let item = picked(app).or(app.hover_origin)?;
+  let item = picked(app)?;
   Some(match item {
     OriginItem::Point => format!("{} | {}", item.status(), coords(app, DVec3::ZERO)),
     _ => item.status().to_string(),
@@ -458,11 +458,11 @@ mod tests {
     assert_eq!(status(&app), None);
     pick(&mut app, OriginItem::Point);
     assert_eq!(status(&app).as_deref(), Some("Origin Point | X: 0.00 Y: 0.00 Z: 0.00 mm"));
-    // hovered, with nothing picked, the status names the hovered item
+    // hovered, with nothing picked, the status reads nothing (ui-status-readouts)
     clear(&mut app);
     app.hover_origin = Some(OriginItem::Xz);
-    assert_eq!(status(&app).as_deref(), Some("XZ Plane"));
-    assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("XZ Plane"));
+    assert_eq!(status(&app), None);
+    assert_eq!(crate::panels::selection_text(&app), None);
     // a model selection wins over a hovered origin item
     app.s.selection = vec![Sel::Body { body }];
     assert_eq!(crate::panels::selection_text(&app), Some(app.s.body_name(body)));

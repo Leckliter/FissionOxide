@@ -2804,9 +2804,9 @@ pub fn unsaved_banner(app: &mut App, ctx: &egui::Context) {
     });
 }
 
-/// What is selected (or hovered), at the canvas's bottom-right corner, as Fusion shows it.
+/// What is selected, at the canvas's bottom-right corner, as Fusion shows it.
 pub fn selection_info(app: &mut App, ctx: &egui::Context) {
-  // an extrude's picked profiles read "1 Profile | Area: …"; otherwise what's selected or hovered
+  // an extrude's picked profiles read "1 Profile | Area: …"; otherwise what's selected
   let text = match app.dialog.as_ref().and_then(|d| d.profile_status(&app.s)) {
     Some(p) => p,
     None => {
@@ -2829,24 +2829,27 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
   );
 }
 
-/// The selection readout, as Fusion's: `1 Face | Area : 100.00 mm^2` (one face's area, two faces
-/// just `2 Faces`), `2 Edges | Length : 20.00 mm`, `Multiple selections | 9` from three items or
-/// mixed kinds, a body's or feature's name; the browser or timeline row under the pointer names
-/// itself instead.
+/// The selection readout, as Fusion's: `1 Face | Area : 100.00 mm^2`, two planar faces their angle
+/// (`2 Faces | Angle : 90.0 deg`) or, parallel, their distance, `2 Edges | Length : 20.00 mm`, two
+/// items of different kinds each counted with the least distance between them
+/// (`1 Face 1 Edge | Min Distance : 0.10 in`), `Multiple selections | 9` from three or more, a
+/// body's or feature's name. Only what is selected reads out: hovering a face, an edge or a
+/// browser or timeline row prints nothing, as in Fusion, except while a command dialog is
+/// picking, when the item under the pointer reads out as a click would pick it.
 pub(crate) fn selection_text(app: &App) -> Option<String> {
-  if let Some(l) = &app.ctx_menu.peek_label {
-    return Some(l.clone());
-  }
   let (hovered, picked);
   let sel = match app.s.selection.as_slice() {
     // a curve-picking sketch tool's picks read out like a selection ("2 Sketch Curves | ...")
     [] => {
-      // a picked or hovered origin plane, axis or point: "XY Plane", "Y Axis", "Origin Point | X: …"
+      // a picked origin plane, axis or point: "XY Plane", "Y Axis", "Origin Point | X: …"
       if let Some(t) = crate::origin::status(app) {
         return Some(t);
       }
       picked = crate::viewport::picked_curves(app);
       if picked.is_empty() {
+        // a hovered item reads out only while a command is picking (PROJECT's Bodies filter reads
+        // "Body1" over the body); with no command running hovering prints nothing, as in Fusion
+        app.dialog.as_ref()?;
         // what a click would pick: under the Bodies priority the body ("Body1"), not its face
         let h = app.hover?;
         let t = crate::select::targets(&app.s, h, app.sel_priority);
@@ -2873,6 +2876,13 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   };
   let first = noun(&sel[0]);
   let n = sel.len();
+  // two items of different kinds: "1 Face 1 Edge | Min Distance : 0.10 in" (two sketch curves of
+  // different kinds stay "Multiple selections | 2")
+  if let [a, b] = sel
+    && std::mem::discriminant(a) != std::mem::discriminant(b)
+  {
+    return Some(mixed_pair_text(app, *a, *b, noun(a).0, noun(b).0));
+  }
   if n >= 3 || !sel.iter().all(|s| noun(s) == first) {
     return Some(format!("Multiple selections | {n}"));
   }
@@ -2888,11 +2898,12 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   let sum = |f: &dyn Fn(&Sel) -> Option<f64>| sel.iter().map(f).sum::<Option<f64>>();
   let u = app.s.design.units;
   let readout = match sel[0] {
-    // one face reads its area; two read only the count
+    // one face reads its area; two planar ones their angle, or their distance when parallel
     Sel::Face { body, face } if n == 1 => model
       .body(body)
       .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.area))
       .map(|a| format!("Area : {}", u.area(a, 2))),
+    Sel::Face { .. } if n == 2 => two_faces_readout(app, sel[0], sel[1]),
     Sel::Edge { .. } => sum(&|s| match s {
       Sel::Edge { body, edge } => model.body(*body)?.edges().iter().find(|e| e.id == *edge).map(|e| e.length),
       _ => None,
@@ -2944,6 +2955,113 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
     Some(r) => format!("{count} | {r}"),
     None => count,
   })
+}
+
+/// Where a kind comes in a mixed readout: Fusion lists a face before an edge
+/// ("1 Face 1 Edge") and a sketch point before a sketch line, whichever was picked first.
+fn kind_rank(s: &Sel) -> u8 {
+  match s {
+    Sel::Body { .. } => 0,
+    Sel::Face { .. } => 1,
+    Sel::Edge { .. } => 2,
+    Sel::Vertex { .. } => 3,
+    Sel::SketchPoint { .. } => 4,
+    Sel::SketchCurve { .. } => 5,
+    Sel::Profile { .. } => 6,
+    Sel::SketchConstraint { .. } => 7,
+    Sel::Feature { .. } => 8,
+  }
+}
+
+/// Two items of different kinds: each counted, then how close they come where that can be
+/// measured ("1 Face 1 Edge | Min Distance : 0.10 in", "1 Sketch Point 1 Sketch Line | Min
+/// Distance : 1.196 in"); sketch geometry reads at the document precision, a body's at two decimals.
+fn mixed_pair_text(app: &App, a: Sel, b: Sel, na: &str, nb: &str) -> String {
+  let ((a, na), (b, nb)) = if kind_rank(&b) < kind_rank(&a) { ((b, nb), (a, na)) } else { ((a, na), (b, nb)) };
+  let count = format!("1 {na} 1 {nb}");
+  let u = app.s.design.units;
+  let sketchy = |s: &Sel| matches!(s, Sel::SketchPoint { .. } | Sel::SketchCurve { .. });
+  let decimals = if sketchy(&a) || sketchy(&b) { crate::viewport::display_decimals(u) } else { 2 };
+  match pair_distance(app, a, b) {
+    Some(d) => format!("{count} | Min Distance : {}", u.fixed(d, decimals)),
+    None => count,
+  }
+}
+
+/// Two faces: planar ones read the angle between their normals ("Angle : 90.0 deg"), or, when
+/// parallel, how far apart they are; any other pair reads only the count.
+fn two_faces_readout(app: &App, a: Sel, b: Sel) -> Option<String> {
+  use fox_engine::kernel::SurfaceKind;
+  let normal = |s: Sel| match s {
+    Sel::Face { body, face } => app
+      .s
+      .model
+      .body(body)?
+      .faces()
+      .iter()
+      .find(|f| f.id == face && f.kind == SurfaceKind::Plane)
+      .map(|f| f.normal.normalize()),
+    _ => None,
+  };
+  let cos = normal(a)?.dot(normal(b)?).clamp(-1.0, 1.0);
+  let u = app.s.design.units;
+  if cos.abs() > 1.0 - 1e-9 {
+    return pair_distance(app, a, b).map(|d| format!("Min Distance : {}", u.fixed(d, 2)));
+  }
+  Some(format!("Angle : {:.1} deg", cos.acos().to_degrees()))
+}
+
+/// A least distance the readout measured: the model revision and the pair it was measured for.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct PairDistance {
+  revision: u64,
+  pair: (Sel, Sel),
+  mm: Option<f64>,
+}
+
+/// The least distance (mm) between two selected items, measured once per model revision.
+fn pair_distance(app: &App, a: Sel, b: Sel) -> Option<f64> {
+  let revision = app.s.revision;
+  if let Some(p) = app.readout_distance.get()
+    && p.revision == revision
+    && p.pair == (a, b)
+  {
+    return p.mm;
+  }
+  let mm = measure_pair(app, a, b);
+  app.readout_distance.set(Some(PairDistance { revision, pair: (a, b), mm }));
+  mm
+}
+
+/// The least distance between two items: a sketch point and a curve of its sketch in the sketch's
+/// plane, faces, edges, vertices and sketch points by the kernel.
+fn measure_pair(app: &App, a: Sel, b: Sel) -> Option<f64> {
+  for (p, c) in [(a, b), (b, a)] {
+    if let (Sel::SketchPoint { sketch, point }, Sel::SketchCurve { sketch: other, curve }) = (p, c)
+      && sketch == other
+    {
+      let s = app.s.design.sketch(sketch).ok()?;
+      return s.distance_to_curve(curve, s.pos(point)?);
+    }
+  }
+  let (sa, sb) = (sel_shape(app, a)?, sel_shape(app, b)?);
+  sa.distance_to(&sb).ok().map(|(d, ..)| d)
+}
+
+/// A selected face, edge, vertex or sketch point as a kernel shape to measure from.
+fn sel_shape(app: &App, s: Sel) -> Option<fox_engine::kernel::Shape> {
+  use fox_engine::kernel::Shape;
+  let model = &app.s.model;
+  match s {
+    Sel::Face { body, face } => model.body(body)?.shape.face_shape(face).ok(),
+    Sel::Edge { body, edge } => model.body(body)?.shape.edge_shape(edge).ok(),
+    Sel::Vertex { body, edge, end } => Shape::vertex(fox_engine::scene::vertex_pos(&app.s, body, edge, end)?).ok(),
+    Sel::SketchPoint { sketch, point } => {
+      let r = model.sketches.get(&sketch)?;
+      Shape::vertex(r.plane.to_world(r.sketch.pos(point)?)).ok()
+    }
+    _ => None,
+  }
 }
 
 /// Fusion's name for one sketch curve by its kind ("Sketch Line", "Sketch Circle"); several read
