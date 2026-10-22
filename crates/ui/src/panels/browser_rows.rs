@@ -426,7 +426,7 @@ pub(crate) fn surface_body_context_menu(app: &mut App, ui: &mut egui::Ui, row: e
 pub(crate) fn run_surface_body_cmd(app: &mut App, ctx: &egui::Context, bid: BodyId, cmd: RowCmd) {
   let only = vec![fox_engine::Sel::Body { body: bid }];
   let browser_edit::Dragged::Bodies(bodies) = browser_edit::dragged_bodies(app, bid) else { return };
-  let mut start = |app: &mut App, kind: Kind| {
+  let start = |app: &mut App, kind: Kind| {
     app.s.selection = only.clone();
     app.start(kind);
   };
