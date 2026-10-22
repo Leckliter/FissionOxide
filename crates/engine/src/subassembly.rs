@@ -542,6 +542,9 @@ pub(crate) fn bom(s: &Session, p: &Value) -> CmdResult {
   let body_volume = |b: &BodyId| s.model.body(*b).and_then(|b| b.shape.mass().ok()).map(|m| m.volume).unwrap_or(0.0);
   let material =
     |c: &fox_model::Component| if c.material.is_empty() { "Steel".to_string() } else { c.material.clone() };
+  // the BOM's part number: the component's, else its name (as in Fusion)
+  let part_number =
+    |c: &fox_model::Component| if c.part_number.is_empty() { c.name.clone() } else { c.part_number.clone() };
   let tree = tree(&s.design);
   let below = |c: ComponentId| -> Vec<ComponentId> {
     let at = tree.iter().position(|(x, _)| *x == c).unwrap_or(0);
@@ -569,6 +572,8 @@ pub(crate) fn bom(s: &Session, p: &Value) -> CmdResult {
       "grounded": c.grounded,
       "level": level,
       "parent": c.parent.map(|p| p.0),
+      "part_number": part_number(c),
+      "description": c.description,
     });
     if children > 0 {
       let (n, v, mass) = totals(c.id);
@@ -590,6 +595,7 @@ pub(crate) fn bom(s: &Session, p: &Value) -> CmdResult {
         json!({
           "component": c.id.0, "name": c.name, "bodies": n, "material": material(c),
           "volume_mm3": v, "mass_g": mass, "grounded": c.grounded, "level": 0, "parent": null,
+          "part_number": part_number(c), "description": c.description,
         })
       })
       .collect(),
@@ -617,6 +623,7 @@ pub(crate) fn bom(s: &Session, p: &Value) -> CmdResult {
           None => out.push(json!({
             "component": c.id.0, "components": [c.id.0], "name": r["name"], "material": r["material"],
             "bodies": r["bodies"], "volume_mm3": r["volume_mm3"], "mass_g": r["mass_g"], "quantity": 1,
+            "part_number": r["part_number"], "description": r["description"],
           })),
         }
       }

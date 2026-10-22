@@ -212,6 +212,9 @@ fn inserted_assemblies_keep_their_components_and_joints() {
   assert_eq!(rows[0]["sub_components"], 2);
   assert_eq!(rows[1]["level"], 1);
   assert_eq!(rows[1]["parent"].as_u64(), Some(top));
+  // no part number set: the BOM's is the name, as in Fusion
+  assert_eq!(rows[0]["part_number"], "Linkage");
+  assert_eq!(rows[0]["description"], "");
   let arm_row = rows.iter().find(|r| r["name"] == "Arm").unwrap();
   assert!((arm_row["mass_g"].as_f64().unwrap() - arm_vol * 2.70 / 1000.0).abs() < 1e-6);
   let total = rows[0]["total_mass_g"].as_f64().unwrap();

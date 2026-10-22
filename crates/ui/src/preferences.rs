@@ -302,6 +302,11 @@ pub struct Prefs {
   /// Sketch → the solver's "n degrees of freedom · m profiles" line at the foot of the Sketch
   /// Palette; off, the palette ends with its rows as Fusion's does.
   pub show_dof: bool,
+  /// The Bill of Materials palette's Column Settings: the columns unticked (by name, Fusion's
+  /// Material (Legacy) to begin with) and the order the columns were dragged into (empty =
+  /// Fusion's order). See [`crate::bom_ui`].
+  pub bom_hidden: Vec<String>,
+  pub bom_order: Vec<String>,
 }
 
 impl Default for Prefs {
@@ -328,6 +333,8 @@ impl Default for Prefs {
       camera_pivot: true,
       recovery_minutes: 5,
       show_dof: false,
+      bom_hidden: crate::bom_ui::DEFAULT_HIDDEN.iter().map(|c| c.to_string()).collect(),
+      bom_order: Vec::new(),
     }
   }
 }
@@ -375,6 +382,8 @@ impl Prefs {
       ("CameraPivot", flag(self.camera_pivot)),
       ("RecoveryMinutes", self.recovery_minutes.to_string()),
       ("SketchDegreesOfFreedom", flag(self.show_dof)),
+      ("BomHiddenColumns", self.bom_hidden.join("|")),
+      ("BomColumnOrder", self.bom_order.join("|")),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -412,6 +421,8 @@ impl Prefs {
         "camerapivot" => p.camera_pivot = b.unwrap_or(p.camera_pivot),
         "recoveryminutes" => p.recovery_minutes = v.trim().parse().unwrap_or(p.recovery_minutes),
         "sketchdegreesoffreedom" => p.show_dof = b.unwrap_or(p.show_dof),
+        "bomhiddencolumns" => p.bom_hidden = names(v),
+        "bomcolumnorder" => p.bom_order = names(v),
         _ => {}
       }
     }
@@ -589,6 +600,11 @@ impl Preferences {
       log::warn!("couldn't save {}: {e}", path.display());
     }
   }
+}
+
+/// A `|`-separated list of names.
+fn names(v: &str) -> Vec<String> {
+  v.split('|').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
 }
 
 /// Whether a preference differs from `before`; everything differs from no `before` (start).
@@ -1059,6 +1075,8 @@ mod tests {
       camera_pivot: false,
       recovery_minutes: 15,
       show_dof: true,
+      bom_hidden: vec!["Thumbnail".into(), "Change Order".into()],
+      bom_order: vec!["Description".into(), "Thumbnail".into()],
     };
     let ini = "[Updates]\nMode=notify\n\n[Window]\nMaximized=1\n";
     let text = p.write_into(ini);

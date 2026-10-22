@@ -6,6 +6,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
 mod assembly_forms;
+mod bom_ui;
+#[cfg(test)]
+mod bom_ui_tests;
 mod cam_ui;
 mod canvas_ui;
 mod capture;
@@ -317,6 +320,8 @@ pub struct App {
   pub(crate) plugins: plugins_ui::PluginsUi,
   /// Manage Materials' Material Browser, while open.
   pub(crate) material_browser: Option<material_ui::Browser>,
+  /// MANAGE ▸ Bill of Materials' palette, while open.
+  pub(crate) bom: Option<bom_ui::Bom>,
   /// Insert > Sketch Library: the part picker and placing parts with clicks.
   pub(crate) library_ui: library_ui::LibraryUi,
   /// View ▸ Render Components….
@@ -583,6 +588,7 @@ impl App {
       clipboard: None,
       plugins: plugins_ui::PluginsUi::default(),
       material_browser: None,
+      bom: None,
       library_ui: library_ui::LibraryUi::default(),
       render_components: explode_ui::RenderComponents::default(),
       render: render_ui::RenderUi::default(),
@@ -1427,6 +1433,11 @@ impl App {
       self.status = None;
     }
     self.note_cmd(panels::Cmd::Dialog(kind));
+    // Bill of Materials is a palette beside whatever runs, not a command dialog
+    if kind == dialogs::Kind::Bom {
+      bom_ui::open(self);
+      return;
+    }
     self.cancel_dialog();
     self.tool = Tool::Select;
     self.dialog = Some(Dialog::open(self, kind));
@@ -1856,6 +1867,7 @@ impl App {
       }
       panels::assistant_tab(self, &ctx);
       panels::sketch_palette(self, &ctx);
+      bom_ui::show(self, &ctx);
       marking::show(self, &ctx);
       sim_ui::show(self, &ctx);
       file_menu::perf_overlay(self, &ctx);

@@ -92,7 +92,7 @@ pub(crate) fn appearances(app: &mut App) -> Vec<Swatch> {
 }
 
 /// The colour of a physical material's default appearance (its thumbnail).
-fn material_color(name: &str) -> [u8; 3] {
+pub(crate) fn material_color(name: &str) -> [u8; 3] {
   match name {
     "Steel" => [205, 200, 190],
     "Stainless Steel" => [192, 194, 198],
