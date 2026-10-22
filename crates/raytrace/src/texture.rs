@@ -188,7 +188,7 @@ pub fn project(spec: &TextureSpec, p: Vec3, n: Vec3) -> Vec2 {
     _ => Vec2::new(p.x, p.y),
   };
   let raw = match spec.projection {
-    Projection::Box => {
+    Projection::Box | Projection::Automatic => {
       let a = n.abs();
       let axis = if a.x >= a.y && a.x >= a.z {
         0

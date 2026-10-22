@@ -1157,9 +1157,18 @@ Switch the workspace to **Render** for pictures of the design. The RENDER tab ha
   Sunset, Dark Sky, Plain White) or an HDRI image, its brightness and rotation; the background
   (the environment, a colour, a gradient or transparent); a ground plane that catches shadows
   and reflections; and the camera: perspective or orthographic, field of view, depth of field
-  (f-stop and focus distance), exposure and tone mapping.
+  (f-stop and focus distance), exposure and tone mapping. **Flatten Ground** projects the
+  environment's lower half onto the ground so the model stands on it. A new design starts, as
+  in Fusion, on a grey Solid Color background.
+- **Light**: NEW LIGHT places a photometric point light (lumens, colour) off the picked face,
+  edge, vertex or body, up to eight per design; both renderers light the model with them.
+- **Texture Map Controls**: a textured body's projection (Planar, Box, Spherical,
+  Cylindrical, Automatic), axis, size, turn and shift, and Reset.
+- **Dielectric Priority Control**: priorities 0, 1, 2 for transparent bodies; where they
+  overlap the higher one's glass fills the overlap (liquid in a glass).
 - **In-Canvas Render**: the GPU viewport shades the materials in real time, lit by the
-  environment, with the ground's shadows. Picking and selection work as usual.
+  environment, with the ground's shadows. Picking and selection work as usual. **In-canvas
+  Render Settings** sets where it stops (Quality: Excellent, Final, Infinite).
 - **Render**: the path tracer (CPU, every core) renders at a chosen size and quality
   (samples per pixel), progressively, with a denoiser. Renders are deterministic: the same
   design and settings give the same image. Finished renders go into the **Render Gallery**,
@@ -1167,7 +1176,7 @@ Switch the workspace to **Render** for pictures of the design. The RENDER tab ha
 
 The same from a script, the CLI or an agent (`render.materials`, `render.material.define`,
 `render.material.apply`, `render.environment`, `render.camera`, `render.settings`,
-`render.image`, `render.gallery*`):
+`render.light.*`, `render.priority`, `render.texture_map`, `render.image`, `render.gallery*`):
 
 ```sh
 fissionoxide-cli run examples/render_studio.jsonl --save studio.fox   # writes render_studio.png
@@ -1176,9 +1185,9 @@ fissionoxide-cli exec part.fox '{"cmd": "render.image", "path": "part.png", "res
 ```
 
 The denoiser is an edge-avoiding à-trous filter guided by albedo, normals and depth (no
-pure-Rust learned denoiser exists). Lighting comes from the environment only: there are no
-point or spot lights besides emissive materials, and the viewport's glass shows the
-environment rather than the model behind it.
+pure-Rust learned denoiser exists). Lights are points (no spots or area lights besides emissive
+materials) and cast no shadow on the ground's shadow catcher; the viewport's lights cast no
+shadows, and its glass shows the environment rather than the model behind it.
 
 ## Viewport renderer
 

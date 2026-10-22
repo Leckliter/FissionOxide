@@ -2868,7 +2868,7 @@ fn in_canvas_render_shows_its_progress() {
 }
 
 /// `ui:render:lights-dialog`: the sun opens a docked NEW LIGHT with Light Type and Target; OK
-/// stays greyed, Cancel closes it.
+/// stays greyed until a target is picked, Cancel closes it.
 #[test]
 fn lights_opens_the_new_light_dialog() {
   use crate::render_ui::RenderCmd;
@@ -3073,4 +3073,130 @@ fn escape_from_extrude_started_in_a_sketch_comes_back_to_the_sketch() {
   assert!(h.app.dialog.is_none());
   assert_eq!(h.app.s.edit_sketch, sketch, "back in the sketch");
   assert_eq!(h.app.tab, crate::panels::Tab::Sketch);
+}
+
+/// A box in the Render workspace, its top face selected.
+fn render_box(h: &mut Harness) -> (fox_engine::model::BodyId, u32) {
+  h.app.run("box", json!({"width": 40, "depth": 40, "height": 10})).unwrap();
+  crate::panels::switch_workspace(&mut h.app, "Render");
+  let b = &h.app.s.model.bodies[0];
+  let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  (b.id, top)
+}
+
+/// `ui:render:lights-in-scene`: with a target picked NEW LIGHT's OK places a light over it.
+#[test]
+fn new_light_places_a_light_over_its_target() {
+  use crate::render_ui::RenderCmd;
+  let mut h = Harness::new();
+  let (body, top) = render_box(&mut h);
+  RenderCmd::Lights.run(&mut h.app);
+  h.frame(vec![]);
+  assert!(crate::render_panels::light_blocked(&h.app).is_some(), "nothing to aim at yet");
+  h.app.s.selection = vec![fox_engine::Sel::Face { body, face: top }];
+  h.frame(vec![]);
+  assert_eq!(crate::render_panels::light_blocked(&h.app), None);
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  let lights = &h.app.s.design.render.lights;
+  assert_eq!(lights.len(), 1);
+  assert!(lights[0].position[2] > 10.0, "above the top face: {:?}", lights[0].position);
+  assert!(h.app.render.light.is_none(), "OK closes the dialog");
+}
+
+/// `ui:render:texture-map-controls`: SETUP > Texture Map Controls opens its dialog; with a
+/// textured body picked, OK changes how its texture is projected.
+#[test]
+fn texture_map_controls_change_the_projection() {
+  use crate::render_ui::RenderCmd;
+  use fox_engine::rendering::raytrace::Projection;
+  let mut h = Harness::new();
+  let (body, _) = render_box(&mut h);
+  assert!(crate::menus::offers(crate::panels::Tab::Render, crate::panels::Cmd::Render(RenderCmd::TextureMap)));
+  h.app.run("render.material.apply", json!({"material": "Wood - Oak", "body": body.0})).unwrap();
+  RenderCmd::TextureMap.run(&mut h.app);
+  h.frame(vec![]);
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  assert!(t.iter().any(|x| x == "TEXTURE MAP CONTROLS"), "{t:?}");
+  h.app.s.selection = vec![fox_engine::Sel::Body { body }];
+  h.frame(vec![]);
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  for s in ["Object", "Projection", "Scale", "Rotation", "Offset", "Reset"] {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+  h.app.render.texture_map.as_mut().unwrap().spec.as_mut().unwrap().projection = Projection::Cylindrical;
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  assert!(h.app.render.texture_map.is_none());
+  let spec = fox_engine::rendering::body_texture(&h.app.s, body).unwrap();
+  assert_eq!(spec.projection, Projection::Cylindrical);
+}
+
+/// `ui:render:dielectric-priority`: OPTICAL OVERRIDES > Dielectric Priority Control gives the
+/// picked bodies a priority.
+#[test]
+fn dielectric_priority_control_sets_a_priority() {
+  use crate::render_ui::RenderCmd;
+  let mut h = Harness::new();
+  let (body, _) = render_box(&mut h);
+  RenderCmd::Priority.run(&mut h.app);
+  h.app.s.selection = vec![fox_engine::Sel::Body { body }];
+  h.frame(vec![]);
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  for s in ["DIELECTRIC PRIORITY CONTROL", "Bodies", "Priority", "0"] {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+  h.app.render.priority = Some(crate::render_tools::PriorityForm { priority: Some(2) });
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  assert_eq!(h.app.s.design.render.priority(body), 2);
+  assert!(h.app.render.priority.is_none());
+}
+
+/// `ui:render:in-canvas-settings`: In-canvas Render Settings has Fast and Advanced tabs; a
+/// Quality of Excellent stops In-canvas Render at the Excellent mark.
+#[test]
+fn in_canvas_render_settings_set_where_it_stops() {
+  use crate::render_tools::Quality;
+  use crate::render_ui::RenderCmd;
+  let mut h = Harness::new();
+  render_box(&mut h);
+  RenderCmd::InCanvasSettings.run(&mut h.app);
+  h.frame(vec![]);
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  for s in ["IN-CANVAS RENDER SETTINGS", "Fast", "Advanced", "Quality", "Infinite", "OK", "Cancel"] {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+  h.app.render.in_canvas_settings.as_mut().unwrap().quality = Quality::Excellent;
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  assert_eq!(h.app.render.canvas_settings.quality, Quality::Excellent);
+  RenderCmd::InCanvas.run(&mut h.app);
+  h.frame(vec![]);
+  for _ in 0..40 {
+    render_texts(&mut h, 1.0);
+  }
+  assert_eq!(h.app.render.run.iterations(), 100);
+}
+
+/// `ui:render:flatten-ground`, `ui:render:default-background`: Flatten Ground can be ticked, and
+/// a new design's scene is Fusion's grey Solid Color.
+#[test]
+fn flatten_ground_is_live_and_a_new_scene_is_grey() {
+  use crate::render_ui::RenderCmd;
+  use fox_engine::rendering::raytrace::Background;
+  let mut h = Harness::new();
+  render_box(&mut h);
+  assert_eq!(h.app.s.design.render.environment.background, Background::Color);
+  RenderCmd::SceneSettings.run(&mut h.app);
+  h.frame(vec![]);
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  assert!(t.iter().any(|x| x == "Solid Color"), "{t:?}");
+  let label = h.find(vec![], "Flatten Ground").unwrap();
+  let reflections = h.find(vec![], "Reflections").unwrap();
+  // the checkbox sits in the second column, on the label's row
+  let x = reflections.left() + 106.0 + 9.0;
+  h.move_then_click(egui::pos2(x, label.center().y));
+  h.frame(vec![]);
+  assert!(h.app.s.design.render.environment.flatten_ground);
 }

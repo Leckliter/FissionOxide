@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 
-use fox_raytrace::{Background, EnvMap, Environment, Material, RenderCamera, Texture};
+use fox_raytrace::light::MAX_LIGHTS;
+use fox_raytrace::{Background, EnvMap, Environment, Light, Material, RenderCamera, Texture};
 use glam::{Mat4, Vec3};
 use glow::HasContext;
 
@@ -27,6 +28,8 @@ pub struct Look<'a> {
   pub origins: &'a [[f32; 3]],
   /// Bounds of the model (for the ground and the shadow map).
   pub bounds: ([f32; 3], [f32; 3]),
+  /// The scene's lights (those switched on light it, without shadows).
+  pub lights: &'a [Light],
 }
 
 /// Largest environment texture width uploaded.
@@ -125,6 +128,9 @@ uniform vec3 u_origin;
 uniform vec4 u_hl_color;
 uniform uint u_hl;
 uniform int u_has_hl;
+uniform int u_nlights;
+uniform vec3 u_lpos[MAX_LIGHTS];
+uniform vec3 u_lrad[MAX_LIGHTS];
 in vec3 v_nrm;
 in vec3 v_wpos;
 flat in uint v_id;
@@ -190,6 +196,25 @@ void main() {
   float shade = 1.0 - 0.6 * shadow_at(v_wpos + n * 0.01);
   vec3 diffuse = sh_irr(n) * base * (1.0 - metallic) * (1.0 - trans) * fd * shade;
   vec3 c = diffuse + spec * mix(1.0, shade, 0.5);
+  // the point lights: Lambert and GGX, as the path tracer's next-event estimate
+  float a2 = max(rough * rough, 1e-3);
+  a2 *= a2;
+  for (int i = 0; i < u_nlights; i++) {
+    vec3 to = u_lpos[i] - v_wpos;
+    float r2 = max(dot(to, to), 1e-6);
+    vec3 l = to * inversesqrt(r2);
+    float nl = dot(n, l);
+    if (nl <= 0.0) continue;
+    vec3 e = u_lrad[i] * nl / r2;
+    vec3 h = normalize(l + v);
+    float nh = max(dot(n, h), 0.0);
+    float dd = nh * nh * (a2 - 1.0) + 1.0;
+    float D = a2 / (PI * dd * dd);
+    vec3 F = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
+    float k = a2 / 2.0;
+    float G = nl / (nl * (1.0 - k) + k) * nv / (nv * (1.0 - k) + k);
+    c += e * (base * (1.0 - metallic) * (1.0 - trans) * fd / PI + D * F * G / (4.0 * nl * nv));
+  }
   if (trans > 0.0) {
     // light through the glass: the environment behind it, bent and tinted
     vec3 t = refract(-v, n, 1.0 / ior);
@@ -219,6 +244,8 @@ uniform vec3 u_bg_top;
 uniform vec3 u_bg_bottom;
 uniform float u_ground_z;
 uniform int u_ground;
+uniform int u_flat;
+uniform vec3 u_flat_eye;
 in vec2 v_uv;
 layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_id;
@@ -230,7 +257,12 @@ void main() {
   vec3 o = a.xyz / a.w;
   vec3 d = normalize(b.xyz / b.w - o);
   float t = 1.0 - (gl_FragCoord.y - 0.5) / max(u_size.y - 1.0, 1.0);
-  vec3 c = u_bg == 0 ? tone(env_at(d, 0.0)) : mix(u_bg_top, u_bg_bottom, u_bg == 2 ? clamp(t, 0.0, 1.0) : 0.0);
+  // Flatten Ground: below the horizon, the environment seen from its camera toward the ground
+  vec3 de = d;
+  if (u_flat == 1 && d.z < -1e-6 && o.z > u_ground_z) {
+    de = normalize(o + d * ((u_ground_z - o.z) / d.z) - u_flat_eye);
+  }
+  vec3 c = u_bg == 0 ? tone(env_at(de, 0.0)) : mix(u_bg_top, u_bg_bottom, u_bg == 2 ? clamp(t, 0.0, 1.0) : 0.0);
   if (u_ground == 1 && d.z < -1e-6 && o.z > u_ground_z) {
     vec3 p = o + d * ((u_ground_z - o.z) / d.z);
     c *= 1.0 - shadow_at(p) * SHADOW_STRENGTH;
@@ -289,6 +321,11 @@ pub struct Pbr {
   exposure: f32,
   tone: i32,
   ground_z: f32,
+  /// Flatten Ground's environment camera.
+  flat_eye: Vec3,
+  /// The lights that are on: positions and radiant intensities.
+  lights: Vec<[f32; 3]>,
+  light_rad: Vec<[f32; 3]>,
 }
 
 fn f16_bits(v: f32) -> u16 {
@@ -311,7 +348,10 @@ fn srgb_lin(c: [u8; 3]) -> [f32; 3] {
 impl Pbr {
   pub(crate) fn new(gl: &Gl, header: &str) -> Result<Pbr, String> {
     let common = COMMON.to_string();
-    let fs = PBR_FS.replace("COMMON", &common).replace("ID_COLOR", crate::gl::ID_COLOR);
+    let fs = PBR_FS
+      .replace("COMMON", &common)
+      .replace("ID_COLOR", crate::gl::ID_COLOR)
+      .replace("MAX_LIGHTS", &MAX_LIGHTS.to_string());
     let common_u =
       ["u_env", "u_env_levels", "u_env_rot", "u_sh", "u_exposure", "u_tone", "u_shadow", "u_light_vp", "u_shadow_on"];
     let mut mesh_u = vec![
@@ -332,11 +372,15 @@ impl Pbr {
       "u_hl_color",
       "u_hl",
       "u_has_hl",
+      "u_nlights",
+      "u_lpos",
+      "u_lrad",
     ];
     mesh_u.extend(common_u);
     let mesh = program(gl, header, PBR_VS, &fs, &mesh_u)?;
     let bg_fs = BG_FS.replace("COMMON", &common).replace("SHADOW_STRENGTH", &format!("{SHADOW_STRENGTH:.3}"));
-    let mut bg_u = vec!["u_inv_vp", "u_size", "u_bg", "u_bg_top", "u_bg_bottom", "u_ground_z", "u_ground"];
+    let mut bg_u =
+      vec!["u_inv_vp", "u_size", "u_bg", "u_bg_top", "u_bg_bottom", "u_ground_z", "u_ground", "u_flat", "u_flat_eye"];
     bg_u.extend(common_u);
     let background = program(gl, header, crate::gl::FULLSCREEN_VS, &bg_fs, &bg_u)?;
     let shadow = program(gl, header, SHADOW_VS, SHADOW_FS, &["u_vp"])?;
@@ -359,6 +403,9 @@ impl Pbr {
       exposure: 1.0,
       tone: 0,
       ground_z: 0.0,
+      flat_eye: Vec3::ZERO,
+      lights: Vec::new(),
+      light_rad: Vec::new(),
     })
   }
 
@@ -382,6 +429,12 @@ impl Pbr {
     self.tone = look.camera.tone_map.index();
     let (lo, hi) = (Vec3::from(look.bounds.0), Vec3::from(look.bounds.1));
     self.ground_z = lo.z - e.ground_offset.max(0.0);
+    // as the path tracer: the environment's camera over the model's middle, as high as it is wide
+    let c = (lo + hi) / 2.0;
+    self.flat_eye = Vec3::new(c.x, c.y, self.ground_z + (hi - lo).length().max(1e-3));
+    let on = look.lights.iter().filter(|l| l.on).take(MAX_LIGHTS);
+    self.lights = on.clone().map(|l| l.position).collect();
+    self.light_rad = on.map(|l| l.radiant().to_array()).collect();
     self.light_vp = light_matrix(self.key, lo, hi);
     self.shadow_dirty = true;
     self.materials.clear();
@@ -618,6 +671,8 @@ impl Pbr {
       gl.uniform_3_f32_slice(p.loc("u_bg_bottom"), &rgb(e.background_color2));
       gl.uniform_1_f32(p.loc("u_ground_z"), self.ground_z);
       gl.uniform_1_i32(p.loc("u_ground"), e.ground as i32);
+      gl.uniform_1_i32(p.loc("u_flat"), e.flatten_ground as i32);
+      gl.uniform_3_f32_slice(p.loc("u_flat_eye"), &self.flat_eye.to_array());
       gl.bind_vertex_array(Some(empty_vao));
       gl.draw_arrays(glow::TRIANGLES, 0, 3);
     }
@@ -659,6 +714,11 @@ impl Pbr {
         gl.uniform_4_f32_slice(p.loc("u_hl_color"), &hl_color.map(|c| c as f32 / 255.0));
         gl.uniform_1_u32(p.loc("u_hl"), hl.unwrap_or(0));
         gl.uniform_1_i32(p.loc("u_has_hl"), hl.is_some() as i32);
+        gl.uniform_1_i32(p.loc("u_nlights"), self.lights.len() as i32);
+        if !self.lights.is_empty() {
+          gl.uniform_3_f32_slice(p.loc("u_lpos"), self.lights.as_flattened());
+          gl.uniform_3_f32_slice(p.loc("u_lrad"), self.light_rad.as_flattened());
+        }
         gl.bind_vertex_array(Some(*vao));
         for r in runs {
           gl.draw_elements(glow::TRIANGLES, r.len() as i32, glow::UNSIGNED_INT, (r.start * 4) as i32);

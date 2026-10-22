@@ -176,7 +176,7 @@ cmds! {
   "render.material.delete" => "Delete one of the design's materials", "{name}";
   "render.material.apply" => "Put a render material on bodies or single faces (no material takes it off: they render as their appearance)", "{material?, body? | bodies? | component? | faces?: [{body, face} | {point}]}";
   "render.assignments" => "What every body and face renders as", "{}";
-  "render.environment" => "Scene settings: lighting environment (a preset or an HDRI image), background, ground plane with shadows and reflections; returns them", "{preset?: studio|soft|sky|sunset|dark|white, hdri?: path | null, intensity?, rotation?: deg, background?: environment|color|gradient|transparent, background_color?, background_color2?, ground?: bool, shadows?: bool, ground_reflection?: 0-1, ground_offset?: mm}";
+  "render.environment" => "Scene settings: lighting environment (a preset or an HDRI image), background, ground plane with shadows and reflections; returns them", "{preset?: studio|soft|sky|sunset|dark|white, hdri?: path | null, intensity?, rotation?: deg, background?: environment|color|gradient|transparent, background_color?, background_color2?, ground?: bool, shadows?: bool, ground_reflection?: 0-1, ground_offset?: mm, flatten_ground?: bool}";
   "render.camera" => "The render camera: framing (a named or standard view, or target/yaw/pitch/distance in degrees and mm), perspective or orthographic, depth of field (f-stop, focus distance), exposure (stops) and tone mapping; reset goes back to the viewport framing", "{view?, target?, yaw?, pitch?, roll?, distance?, fov?: deg | focal_length?: mm, ortho?, fstop?: 0 = no depth of field, focus_distance?: mm | null, exposure?, tone_map?: aces|reinhard|linear, reset?: bool}";
   "render.settings" => "Final render settings: resolution, samples per pixel, bounces, denoiser, seed", "{resolution?: 720p|1080p|4k|square|WxH, width?, height?, samples?, max_bounces?, denoise?: bool, seed?}";
   "render.image" => "Final render with the path tracer (CPU, every core, denoised): writes a PNG when given a path and keeps it in the render gallery unless gallery is false; settings and camera fields override the stored ones for this render", "{path?, name?, gallery?: bool, resolution? | width?, height?, samples?, max_bounces?, denoise?, seed?, threads?, bodies?: [id], view?, yaw?, pitch?, distance?, fov?, ortho?, fstop?, focus_distance?, exposure?, tone_map?}";
@@ -543,6 +543,13 @@ cmds! {
   "surface.loft" => "Surface body lofted through sections: a sketch's profile boundary or curves, in order", "{sections: [sketch id | {sketch, profile?: [x,y], curves?: [id]}], closed?}";
   "sketch.line3d" => "3D Sketch line: segments through world points, off the sketch plane (Fusion's 3D Sketch); they are sweep paths and rails, never part of a profile", "{sketch?, points: [[x,y,z], ...]}";
   "sketch.dimension_label" => "Move a placed sketch dimension's value (drag its text): where it sits sets its offset and side; null puts it back at the default", "{sketch?, constraint, at: [x,y] | null}";
+  "render.lights" => "The lights placed in the render scene", "{}";
+  "render.light.add" => "New Light: a photometric point light at a position (mm), flux in lumens (default 100), colour sRGB; a design takes up to eight", "{position: [x,y,z], intensity?: lm, color?, name?, on?: bool}";
+  "render.light.edit" => "Change a light: move it, its flux (lm), colour or name, or switch it off", "{name, position?, intensity?, color?, rename?, on?: bool}";
+  "render.light.delete" => "Delete a light", "{name}";
+  "render.priority" => "Dielectric Priority Control: give transparent bodies a priority 0, 1 or 2; where they overlap the higher one's glass fills the overlap", "{bodies: [id], priority: 0|1|2}";
+  "render.priorities" => "Bodies with a dielectric priority above 0", "{}";
+  "render.texture_map" => "Texture Map Controls: a body's texture projection (automatic|planar|box|spherical|cylindrical), axis, size (mm per repeat), turn (deg) and shift (repeats); reset puts it back. Changes the body's material (copied into the design when it's a library one)", "{body, projection?, axis?: x|y|z, scale?, rotation?, offset?: [u, v], reset?: bool}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

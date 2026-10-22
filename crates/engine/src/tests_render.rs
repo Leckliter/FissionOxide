@@ -169,3 +169,93 @@ fn the_example_script_runs() {
   let img = image::open(d.join("studio.png")).unwrap();
   assert_eq!((img.width(), img.height()), (640, 400));
 }
+
+/// `ui:render:default-background`: a new design's scene is Fusion's, a grey Solid Color, and it
+/// survives a save; a design without render data keeps the environment behind it.
+#[test]
+fn a_new_design_renders_on_grey() {
+  let mut s = part();
+  let e = run(&mut s, "render.environment", json!({}));
+  assert_eq!(e["background"], "color");
+  assert_eq!(e["background_color"], json!(fox_raytrace::env::NEW_DESIGN_GREY));
+  let d = temp_dir("grey");
+  let path = d.join("part.fox");
+  run(&mut s, "save", json!({"path": path}));
+  assert_eq!(Session::open(&path).unwrap().design.render.environment.background, fox_raytrace::Background::Color);
+  // a file written before render data existed reads back with the environment as background
+  let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+  v.as_object_mut().unwrap().remove("render");
+  std::fs::write(&path, v.to_string()).unwrap();
+  assert_eq!(Session::open(&path).unwrap().design.render.environment, fox_raytrace::Environment::default());
+}
+
+/// `ui:render:lights-in-scene`: lights go in the design (up to eight), light the render, and
+/// undo; `ui:render:flatten-ground` is an environment setting.
+#[test]
+fn lights_are_placed_edited_and_rendered() {
+  let mut s = part();
+  run(&mut s, "render.environment", json!({"preset": "dark", "background": "environment", "flatten_ground": true}));
+  assert!(s.design.render.environment.flatten_ground);
+  let (dark, ..) = rendering::render_with(&s, &tiny()).unwrap();
+  let l = run(&mut s, "render.light.add", json!({"position": [0, 0, 60], "intensity": 3000}));
+  assert_eq!(l["name"], "Light1");
+  assert_eq!(rendering::render_scene(&s, rendering::render_camera(&s), None).lights.len(), 1);
+  let (lit, ..) = rendering::render_with(&s, &tiny()).unwrap();
+  let sum = |img: &fox_raytrace::RenderImage| img.rgba.iter().map(|c| *c as u64).sum::<u64>();
+  assert!(sum(&lit) > sum(&dark), "the light brightens the render");
+  run(&mut s, "render.light.edit", json!({"name": "light1", "on": false, "rename": "Key"}));
+  let (off, ..) = rendering::render_with(&s, &tiny()).unwrap();
+  assert_eq!(off.rgba, dark.rgba);
+  for _ in 0..7 {
+    run(&mut s, "render.light.add", json!({"position": [10, 0, 60]}));
+  }
+  assert_eq!(s.design.render.lights.len(), 8);
+  assert!(s.execute("render.light.add", &json!({"position": [0, 0, 1]})).is_err(), "eight at most");
+  assert!(s.execute("render.light.add", &json!({})).is_err());
+  run(&mut s, "render.light.delete", json!({"name": "Key"}));
+  assert_eq!(s.design.render.lights.len(), 7);
+  s.undo();
+  assert_eq!(s.design.render.lights.len(), 8);
+}
+
+/// `ui:render:dielectric-priority`: bodies get priorities 0, 1 or 2, carried into the render scene.
+#[test]
+fn dielectric_priorities_reach_the_render_scene() {
+  let mut s = part();
+  let b = s.model.bodies[1].id.0;
+  run(&mut s, "render.priority", json!({"bodies": [b], "priority": 2}));
+  assert_eq!(run(&mut s, "render.priorities", json!({})), json!([{"body": b, "priority": 2}]));
+  let scene = rendering::render_scene(&s, rendering::render_camera(&s), None);
+  assert_eq!(scene.meshes.iter().map(|m| m.priority).max(), Some(2));
+  assert!(s.execute("render.priority", &json!({"bodies": [b], "priority": 3})).is_err());
+  run(&mut s, "render.priority", json!({"bodies": [b], "priority": 0}));
+  assert!(s.design.render.priorities.is_empty());
+}
+
+/// `ui:render:texture-map-controls`: a textured body's projection, size, turn and shift change
+/// (its library material copied into the design), Reset puts them back; an untextured body has
+/// nothing to map.
+#[test]
+fn texture_map_controls_change_a_bodys_mapping() {
+  let mut s = part();
+  let b = s.model.bodies[0].id.0;
+  assert!(s.execute("render.texture_map", &json!({"body": b, "projection": "planar"})).is_err());
+  run(&mut s, "render.material.apply", json!({"material": "Wood - Oak", "body": b}));
+  let t = run(
+    &mut s,
+    "render.texture_map",
+    json!({"body": b, "projection": "spherical", "axis": "x", "scale": 12, "rotation": 30, "offset": [0.5, 0]}),
+  );
+  assert_eq!((t["projection"].as_str(), t["scale"].as_f64()), (Some("spherical"), Some(12.0)));
+  let m = s.design.render.materials.iter().find(|m| m.name == "Wood - Oak").unwrap();
+  let spec = m.texture.clone().unwrap();
+  assert_eq!((spec.projection, spec.rotation, spec.offset), (fox_raytrace::Projection::Spherical, 30.0, [0.5, 0.0]));
+  run(&mut s, "render.texture_map", json!({"body": b, "projection": "automatic"}));
+  assert_eq!(
+    rendering::body_texture(&s, fox_model::BodyId(b)).unwrap().projection,
+    fox_raytrace::Projection::Automatic
+  );
+  run(&mut s, "render.texture_map", json!({"body": b, "reset": true}));
+  let lib = fox_raytrace::material::find("Wood - Oak").unwrap().texture.unwrap();
+  assert_eq!(rendering::body_texture(&s, fox_model::BodyId(b)).unwrap(), lib);
+}

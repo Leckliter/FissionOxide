@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use crate::App;
 use crate::icons::Icon;
 use crate::render_panels::{InCanvasRun, LightForm, SceneTab};
+use crate::render_tools::{InCanvasSettings, PriorityForm, TextureMapForm};
 
 /// The workspace's toolbar commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +38,12 @@ pub enum RenderCmd {
   /// Capture Image...: the Image Options window.
   CaptureImage,
   Render,
+  /// Texture Map Controls: the TEXTURE MAP CONTROLS dialog.
+  TextureMap,
+  /// Dielectric Priority Control.
+  Priority,
+  /// In-canvas Render Settings.
+  InCanvasSettings,
 }
 
 impl RenderCmd {
@@ -54,6 +61,19 @@ impl RenderCmd {
       RenderCmd::InCanvas => (Icon::Display, "In-canvas Render", "Render the design in the canvas"),
       RenderCmd::CaptureImage => (Icon::Camera, "Capture Image...", "Save an image of the canvas"),
       RenderCmd::Render => (Icon::Teapot, "Render", "Render an image of the design into the Rendering Gallery"),
+      RenderCmd::TextureMap => (
+        Icon::TextureMap,
+        "Texture Map Controls",
+        "Adjust how a texture is projected onto a body: its projection, size, turn and shift",
+      ),
+      RenderCmd::Priority => (
+        Icon::DielectricPriority,
+        "Dielectric Priority Control",
+        "Set which transparent body fills the space where transparent bodies overlap",
+      ),
+      RenderCmd::InCanvasSettings => {
+        (Icon::InCanvasSettings, "In-canvas Render Settings", "Set the in-canvas render's mode and quality")
+      }
     }
   }
 
@@ -68,6 +88,9 @@ impl RenderCmd {
       RenderCmd::InCanvas => false,
       RenderCmd::CaptureImage => app.capture.image.is_some(),
       RenderCmd::Render => r.render_open,
+      RenderCmd::TextureMap => r.texture_map.is_some(),
+      RenderCmd::Priority => r.priority.is_some(),
+      RenderCmd::InCanvasSettings => r.in_canvas_settings.is_some(),
     }
   }
 
@@ -78,15 +101,13 @@ impl RenderCmd {
       RenderCmd::SceneSettings => {
         let open = !app.render.scene_open;
         if open {
-          app.cancel_dialog();
-          app.render.light = None;
+          crate::render_tools::close_docked(app);
           app.render.scene_tab = SceneTab::Settings;
         }
         app.render.scene_open = open;
       }
       RenderCmd::Lights => {
-        app.cancel_dialog();
-        app.render.scene_open = false;
+        crate::render_tools::close_docked(app);
         app.render.light = Some(LightForm);
       }
       RenderCmd::InCanvas => set_in_canvas(app, !app.render.in_canvas),
@@ -94,6 +115,19 @@ impl RenderCmd {
       // Fusion keeps renderings with the saved design, so an unsaved one has to be saved first
       RenderCmd::Render if crate::panels::is_unsaved(app) => app.render.needs_save = true,
       RenderCmd::Render => app.render.render_open = true,
+      RenderCmd::TextureMap => {
+        crate::render_tools::close_docked(app);
+        app.render.texture_map = Some(TextureMapForm::default());
+      }
+      RenderCmd::Priority => {
+        crate::render_tools::close_docked(app);
+        app.render.priority = Some(PriorityForm::default());
+      }
+      RenderCmd::InCanvasSettings => {
+        let current = app.render.canvas_settings;
+        crate::render_tools::close_docked(app);
+        app.render.in_canvas_settings = Some(current);
+      }
     }
   }
 }
@@ -115,6 +149,9 @@ pub(crate) fn enter(app: &mut App) {
   r.scene_open = false;
   r.render_open = false;
   r.light = None;
+  r.texture_map = None;
+  r.priority = None;
+  r.in_canvas_settings = None;
   r.gallery_view = None;
 }
 
@@ -149,6 +186,12 @@ pub struct RenderUi {
   pub(crate) scene_tab: SceneTab,
   /// The docked NEW LIGHT dialog.
   pub(crate) light: Option<LightForm>,
+  /// The docked TEXTURE MAP CONTROLS, DIELECTRIC PRIORITY CONTROL and IN-CANVAS RENDER SETTINGS.
+  pub(crate) texture_map: Option<TextureMapForm>,
+  pub(crate) priority: Option<PriorityForm>,
+  pub(crate) in_canvas_settings: Option<InCanvasSettings>,
+  /// In-canvas Render's mode and quality.
+  pub(crate) canvas_settings: InCanvasSettings,
   pub render_open: bool,
   /// "You need to save your design before using the Render tool." shows.
   pub(crate) needs_save: bool,
@@ -194,6 +237,10 @@ impl Default for RenderUi {
       scene_open: false,
       scene_tab: SceneTab::Settings,
       light: None,
+      texture_map: None,
+      priority: None,
+      in_canvas_settings: None,
+      canvas_settings: InCanvasSettings::default(),
       render_open: false,
       needs_save: false,
       gallery_folded: false,
@@ -227,6 +274,7 @@ pub struct LookData {
   pub materials: Vec<Option<Material>>,
   pub origins: Vec<[f32; 3]>,
   pub bounds: ([f32; 3], [f32; 3]),
+  pub lights: Vec<raytrace::Light>,
 }
 
 impl LookData {
@@ -238,6 +286,7 @@ impl LookData {
       materials: &self.materials,
       origins: &self.origins,
       bounds: self.bounds,
+      lights: &self.lights,
     }
   }
 }
@@ -386,7 +435,8 @@ pub fn viewport_look(app: &mut App, scene: &mut Scene, picks: &PickTable) -> Opt
   let environment = app.render.environment(&s.design.render.environment);
   let camera = app.render.cam_edit.or(s.design.render.camera).unwrap_or_default();
   let env = app.render.env_map(&environment)?;
-  Some(LookData { env, environment, camera, materials, origins, bounds })
+  let lights = s.design.render.lights.clone();
+  Some(LookData { env, environment, camera, materials, origins, bounds, lights })
 }
 
 // ---------------------------------------------------------------- windows
@@ -399,12 +449,19 @@ pub fn windows(app: &mut App, ctx: &egui::Context) {
   }
   // a command dialog (Physical Material, Move/Copy) takes the docked dialogs' place
   if app.dialog.is_some() {
-    app.render.scene_open = false;
-    app.render.light = None;
+    let r = &mut app.render;
+    r.scene_open = false;
+    r.light = None;
+    r.texture_map = None;
+    r.priority = None;
+    r.in_canvas_settings = None;
   }
   appearance_window(app, ctx);
   crate::render_panels::scene_dialog(app, ctx);
   crate::render_panels::light_dialog(app, ctx);
+  crate::render_tools::texture_map_dialog(app, ctx);
+  crate::render_tools::priority_dialog(app, ctx);
+  crate::render_tools::in_canvas_settings_dialog(app, ctx);
   crate::render_panels::needs_save(app, ctx);
   crate::render_panels::in_canvas_bar(app, ctx);
   render_window(app, ctx);
@@ -643,12 +700,12 @@ fn material_editor(app: &mut App, ctx: &egui::Context) {
         }
         ui.label("Projection");
         egui::ComboBox::from_id_salt("mat-proj").selected_text(format!("{:?}", t.projection)).show_ui(ui, |ui| {
-          for p in [Projection::Box, Projection::Planar, Projection::Cylindrical, Projection::Spherical] {
+          for p in crate::render_tools::PROJECTIONS {
             ui.selectable_value(&mut t.projection, p, format!("{p:?}"));
           }
         });
         ui.end_row();
-        if t.projection != Projection::Box {
+        if !matches!(t.projection, Projection::Box | Projection::Automatic) {
           ui.label("Axis");
           ui.horizontal(|ui| {
             for (a, n) in [(raytrace::Axis::X, "X"), (raytrace::Axis::Y, "Y"), (raytrace::Axis::Z, "Z")] {

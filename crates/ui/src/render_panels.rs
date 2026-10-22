@@ -119,7 +119,7 @@ pub(crate) fn scene_dialog(app: &mut App, ctx: &egui::Context) {
       c.view = cam.view;
       c.view.fov = fov;
       c.view.ortho = ortho;
-      env = Environment::default();
+      env = Environment::new_design();
       cam = c;
     }
     None => {}
@@ -156,7 +156,7 @@ fn tab_row(ui: &mut egui::Ui, tab: &mut SceneTab, width: f32) {
 }
 
 /// The dialog's last row: a rule, then `buttons` at the right.
-fn footer<R>(ui: &mut egui::Ui, width: f32, buttons: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub(crate) fn footer<R>(ui: &mut egui::Ui, width: f32, buttons: impl FnOnce(&mut egui::Ui) -> R) -> R {
   let sep = ui.allocate_exact_size(vec2(width, 1.0), egui::Sense::hover()).0;
   ui.painter().rect_filled(sep, 0.0, theme::SEPARATOR);
   egui::Frame::new()
@@ -222,8 +222,8 @@ fn settings_tab(
       ui.checkbox(&mut env.ground, "");
       ui.end_row();
       ui.label("Flatten Ground");
-      ui.add_enabled(false, egui::Checkbox::without_text(&mut false))
-        .on_disabled_hover_text("FissionOxide's environments don't flatten onto the ground yet");
+      ui.checkbox(&mut env.flatten_ground, "")
+        .on_hover_text("Flattens the environment's lower half onto the ground, so the model stands on it");
       ui.end_row();
       ui.label("Reflections");
       let mut reflect = env.ground_reflection > 0.0;
@@ -349,7 +349,9 @@ fn library_tab(ui: &mut egui::Ui, env: &mut Environment) {
         ui.painter().line_segment([c + vec2(-4.0, -1.0), c + vec2(0.0, 3.0)], s);
         ui.painter().line_segment([c + vec2(4.0, -1.0), c + vec2(0.0, 3.0)], s);
         ui.painter().line_segment([c + vec2(-6.0, 6.0), c + vec2(6.0, 6.0)], s);
-        resp.on_hover_text("Downloadable environments aren't in FissionOxide yet");
+        resp.on_hover_text(
+          "FissionOxide can't download Fusion's environments: use a built-in one or attach an HDR image",
+        );
       });
     }
   });
@@ -381,14 +383,27 @@ pub(crate) fn light_targets(app: &App) -> usize {
     .count()
 }
 
-/// The docked NEW LIGHT dialog: Light Type and Target, OK and Cancel. FissionOxide's renderers
-/// light the scene from the environment only, so OK stays greyed.
+/// Why NEW LIGHT's OK is greyed, if it is: nothing to aim at, or the design's eight lights.
+pub(crate) fn light_blocked(app: &App) -> Option<&'static str> {
+  if app.s.design.render.lights.len() >= fox_engine::rendering::raytrace::light::MAX_LIGHTS {
+    Some("A design takes up to eight lights")
+  } else if light_targets(app) == 0 {
+    Some("Select a face, edge, vertex or body for the light to aim at")
+  } else {
+    None
+  }
+}
+
+/// The docked NEW LIGHT dialog: Light Type and Target, OK and Cancel. OK places a photometric
+/// light off the target (see [`fox_engine::rendering::light_target`]).
 pub(crate) fn light_dialog(app: &mut App, ctx: &egui::Context) {
   if app.render.light.is_none() {
     return;
   }
   let targets = light_targets(app);
+  let blocked = light_blocked(app);
   let mut cancel = false;
+  let mut ok = false;
   let width = 300.0;
   let accent = icons::accent_of(Icon::Sun);
   egui::Area::new(egui::Id::new("new-light"))
@@ -416,14 +431,25 @@ pub(crate) fn light_dialog(app: &mut App, ctx: &egui::Context) {
             ui.end_row();
           });
         });
-        cancel = footer(ui, width, |ui| {
+        (cancel, ok) = footer(ui, width, |ui| {
           let cancel = panels::secondary_button(ui, "Cancel").clicked();
-          dialogs::ok_button(ui, accent, false)
-            .on_disabled_hover_text("FissionOxide's renderers don't take lights yet: the environment lights the scene");
-          cancel
+          let resp = dialogs::ok_button(ui, accent, blocked.is_none());
+          match blocked {
+            None => (cancel, resp.clicked()),
+            Some(why) => {
+              resp.on_disabled_hover_text(why);
+              (cancel, false)
+            }
+          }
         });
       });
     });
+  if ok && let Some(at) = fox_engine::rendering::light_target(&app.s, &app.s.selection) {
+    if app.run("render.light.add", serde_json::json!({"position": at})).is_some() {
+      app.render.light = None;
+    }
+    return;
+  }
   if cancel {
     app.render.light = None;
   }
@@ -469,8 +495,8 @@ pub(crate) struct InCanvasRun {
 const ITERATIONS_PER_SEC: f64 = 7.0;
 
 /// The iterations at Fusion's quality marks, and where the marks sit on the bar.
-const EXCELLENT: (u32, f32) = (100, 0.5);
-const FINAL: (u32, f32) = (500, 0.8);
+pub(crate) const EXCELLENT: (u32, f32) = (100, 0.5);
+pub(crate) const FINAL: (u32, f32) = (500, 0.8);
 
 impl InCanvasRun {
   /// Counts the time since the last frame, unless paused.
@@ -487,6 +513,16 @@ impl InCanvasRun {
 
   pub(crate) fn iterations(&self) -> u32 {
     (self.elapsed * ITERATIONS_PER_SEC) as u32
+  }
+
+  /// Stops at `n` iterations (In-canvas Render Settings' Quality); true once there.
+  pub(crate) fn stop_at(&mut self, n: Option<u32>) -> bool {
+    let Some(n) = n else { return false };
+    if self.iterations() < n {
+      return false;
+    }
+    self.elapsed = (n as f64 + 0.5) / ITERATIONS_PER_SEC;
+    true
   }
 }
 
@@ -519,8 +555,11 @@ pub(crate) fn in_canvas_bar(app: &mut App, ctx: &egui::Context) {
   }
   let now = ctx.input(|i| i.time);
   app.render.run.tick(now);
+  let st = app.render.canvas_settings;
+  let limit = if st.mode == crate::render_tools::InCanvasMode::Advanced { st.quality.iterations() } else { None };
+  let done = app.render.run.stop_at(limit);
   let run = app.render.run;
-  if !run.paused {
+  if !run.paused && !done {
     ctx.request_repaint_after(std::time::Duration::from_millis(250));
   }
   let mut toggle = false;

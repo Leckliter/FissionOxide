@@ -129,18 +129,21 @@ impl Pattern {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Projection {
-  /// Planar along whichever axis the face's normal is closest to (Fusion's Automatic/box).
+  /// Planar along whichever axis the face's normal is closest to (Fusion's Box: six planes).
   #[default]
   Box,
   Planar,
   Cylindrical,
   Spherical,
+  /// Chosen by the software (Fusion's Automatic): mapped as [`Projection::Box`].
+  Automatic,
 }
 
 impl Projection {
   pub fn parse(s: &str) -> Option<Projection> {
     Some(match s.to_ascii_lowercase().as_str() {
-      "box" | "automatic" | "auto" | "triplanar" => Projection::Box,
+      "box" | "triplanar" => Projection::Box,
+      "automatic" | "auto" => Projection::Automatic,
       "planar" | "plane" => Projection::Planar,
       "cylindrical" | "cylinder" => Projection::Cylindrical,
       "spherical" | "sphere" => Projection::Spherical,
@@ -148,8 +151,23 @@ impl Projection {
     })
   }
 
+  /// The shader's number for it (Automatic maps as Box).
   pub fn index(self) -> i32 {
-    self as i32
+    match self {
+      Projection::Automatic => Projection::Box as i32,
+      p => p as i32,
+    }
+  }
+
+  /// Fusion's name for it.
+  pub fn label(self) -> &'static str {
+    match self {
+      Projection::Box => "Box",
+      Projection::Planar => "Planar",
+      Projection::Cylindrical => "Cylindrical",
+      Projection::Spherical => "Spherical",
+      Projection::Automatic => "Automatic",
+    }
   }
 }
 

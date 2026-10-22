@@ -10,11 +10,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use fox_model::render::{BodyMaterial, FaceMaterial, RenderDoc};
+use fox_model::render::{BodyMaterial, BodyPriority, FaceMaterial, RenderDoc};
 use fox_model::{BodyId, Design};
 use fox_raytrace::{
-  Axis, Background, Environment, GalleryImage, Material, Pattern, Png, Preset, Progressive, Projection, RenderCamera,
-  RenderImage, RenderMesh, RenderScene, RenderSettings, TextureSource, TextureSpec, ToneMap,
+  Axis, Background, Environment, GalleryImage, Light, Material, Pattern, Png, Preset, Progressive, Projection,
+  RenderCamera, RenderImage, RenderMesh, RenderScene, RenderSettings, TextureSource, TextureSpec, ToneMap,
 };
 use fox_render::{Camera, StandardView};
 use serde_json::{Value, json};
@@ -41,6 +41,13 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "render.gallery.export" => gallery_export(s, p),
     "render.gallery.rename" => gallery_rename(s, p),
     "render.gallery.delete" => gallery_delete(s, p),
+    "render.lights" => Ok(json!(s.design.render.lights)),
+    "render.light.add" => light_add(s, p),
+    "render.light.edit" => light_edit(s, p),
+    "render.light.delete" => light_delete(s, p),
+    "render.priority" => priority(s, p),
+    "render.priorities" => Ok(priorities_json(s)),
+    "render.texture_map" => texture_map(s, p),
     _ => return None,
   })
 }
@@ -176,8 +183,9 @@ fn texture_spec(mut t: TextureSpec, p: &Value) -> Result<TextureSpec, CmdError> 
     t.color2 = parse_color(c)?;
   }
   if let Some(pr) = opt_str(p, "projection") {
-    t.projection = Projection::parse(pr)
-      .ok_or_else(|| CmdError::new(format!("unknown projection '{pr}' (box, planar, cylindrical, spherical)")))?;
+    t.projection = Projection::parse(pr).ok_or_else(|| {
+      CmdError::new(format!("unknown projection '{pr}' (automatic, box, planar, cylindrical, spherical)"))
+    })?;
   }
   if let Some(a) = opt_str(p, "axis") {
     t.axis = Axis::parse(a).ok_or_else(|| CmdError::new(format!("unknown axis '{a}' (x, y, z)")))?;
@@ -434,6 +442,9 @@ fn environment(s: &mut Session, p: &Value) -> CmdResult {
   if let Some(v) = unit_num(p, "ground_offset", 0.0, 1e6)? {
     e.ground_offset = v;
   }
+  if let Some(v) = flag(p, "flatten_ground")? {
+    e.flatten_ground = v;
+  }
   if e != s.design.render.environment {
     let e2 = e.clone();
     edit(s, "Environment", |r| {
@@ -665,7 +676,12 @@ fn settings(s: &mut Session, p: &Value) -> CmdResult {
 /// What the bodies render as: one mesh per body and material, faces with their own material
 /// split out. `only` limits it to some bodies.
 pub fn render_scene(s: &Session, camera: RenderCamera, only: Option<&[BodyId]>) -> RenderScene {
-  let mut scene = RenderScene { environment: s.design.render.environment.clone(), camera, ..RenderScene::default() };
+  let mut scene = RenderScene {
+    environment: s.design.render.environment.clone(),
+    camera,
+    lights: s.design.render.lights.clone(),
+    ..RenderScene::default()
+  };
   let face_mats = face_materials(s);
   for body in &s.model.bodies {
     let shown = match only {
@@ -715,7 +731,8 @@ pub fn render_scene(s: &Session, camera: RenderCamera, only: Option<&[BodyId]>) 
     }
     for (mi, tris) in groups {
       let mut remap: HashMap<u32, u32> = HashMap::new();
-      let mut rm = RenderMesh { material: mi, origin, ..RenderMesh::default() };
+      let priority = s.design.render.priority(body.id);
+      let mut rm = RenderMesh { material: mi, origin, priority, ..RenderMesh::default() };
       for t in tris {
         for k in 0..3 {
           let v = m.indices[t * 3 + k];
@@ -890,4 +907,261 @@ fn gallery_delete(s: &mut Session, p: &Value) -> CmdResult {
 /// The design's render data with the gallery left out (what the viewport's look depends on).
 pub fn look_of(d: &Design) -> RenderDoc {
   RenderDoc { gallery: Vec::new(), ..d.render.clone() }
+}
+
+// ---------------------------------------------------------------- lights
+
+fn light_index(s: &Session, name: &str) -> Result<usize, CmdError> {
+  s.design
+    .render
+    .lights
+    .iter()
+    .position(|l| l.name.eq_ignore_ascii_case(name))
+    .ok_or_else(|| CmdError::new(format!("no light '{name}' (see 'render.lights')")))
+}
+
+fn vec3_f32(p: &Value, k: &str) -> Result<[f32; 3], CmdError> {
+  Ok(crate::commands::req_vec3(p, k)?.map(|v| v as f32))
+}
+
+/// Applies the light fields present in `p` to `l`.
+fn set_light_fields(l: &mut Light, p: &Value) -> Result<(), CmdError> {
+  if p.get("position").is_some_and(|v| !v.is_null()) {
+    l.position = vec3_f32(p, "position")?;
+  }
+  if let Some(v) = unit_num(p, "intensity", 0.0, 1e7)? {
+    l.intensity = v;
+  }
+  if let Some(c) = p.get("color").filter(|c| !c.is_null()) {
+    l.color = parse_color(c)?;
+  }
+  if let Some(v) = flag(p, "on")? {
+    l.on = v;
+  }
+  Ok(())
+}
+
+/// `{position, intensity?, color?, name?, on?}`: places a light; returns it.
+fn light_add(s: &mut Session, p: &Value) -> CmdResult {
+  if s.design.render.lights.len() >= fox_raytrace::light::MAX_LIGHTS {
+    return Err(CmdError::new(format!("a design takes up to {} lights", fox_raytrace::light::MAX_LIGHTS)));
+  }
+  if p.get("position").is_none_or(Value::is_null) {
+    return Err(CmdError::new("a light needs a 'position' [x, y, z]"));
+  }
+  let lights = &s.design.render.lights;
+  let name = match opt_str(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
+    Some(n) if lights.iter().any(|l| l.name.eq_ignore_ascii_case(n)) => {
+      return Err(CmdError::new(format!("there is already a light '{n}'")));
+    }
+    Some(n) => n.to_string(),
+    None => (1..)
+      .map(|i| format!("Light{i}"))
+      .find(|n| !lights.iter().any(|l| l.name.eq_ignore_ascii_case(n)))
+      .unwrap_or_default(),
+  };
+  let mut l = Light { name, ..Light::default() };
+  set_light_fields(&mut l, p)?;
+  let out = json!(l);
+  edit(s, "New Light", |r| {
+    r.lights.push(l);
+    Ok(())
+  })?;
+  Ok(out)
+}
+
+fn light_edit(s: &mut Session, p: &Value) -> CmdResult {
+  let i = light_index(s, req_str(p, "name")?)?;
+  let mut l = s.design.render.lights[i].clone();
+  set_light_fields(&mut l, p)?;
+  if let Some(n) = opt_str(p, "rename").map(str::trim) {
+    if n.is_empty() {
+      return Err(CmdError::new("a light needs a name"));
+    }
+    if s.design.render.lights.iter().enumerate().any(|(j, x)| j != i && x.name.eq_ignore_ascii_case(n)) {
+      return Err(CmdError::new(format!("there is already a light '{n}'")));
+    }
+    l.name = n.to_string();
+  }
+  let out = json!(l);
+  if l != s.design.render.lights[i] {
+    edit(s, "Edit Light", |r| {
+      r.lights[i] = l;
+      Ok(())
+    })?;
+  }
+  Ok(out)
+}
+
+fn light_delete(s: &mut Session, p: &Value) -> CmdResult {
+  let i = light_index(s, req_str(p, "name")?)?;
+  let name = s.design.render.lights[i].name.clone();
+  edit(s, "Delete Light", |r| {
+    r.lights.remove(i);
+    Ok(())
+  })?;
+  Ok(json!({"deleted": name}))
+}
+
+// ---------------------------------------------------------------- dielectric priority
+
+/// Fusion's priorities.
+const PRIORITIES: [u8; 3] = [0, 1, 2];
+
+fn priorities_json(s: &Session) -> Value {
+  json!(
+    s.design.render.priorities.iter().map(|p| json!({"body": p.body.0, "priority": p.priority})).collect::<Vec<_>>()
+  )
+}
+
+/// `{bodies, priority}`: the bodies' dielectric priority (0 takes it off).
+fn priority(s: &mut Session, p: &Value) -> CmdResult {
+  let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
+  if bodies.is_empty() {
+    return Err(CmdError::new("pass the 'bodies' to give a priority"));
+  }
+  for b in &bodies {
+    if s.model.body(*b).is_none() {
+      return Err(CmdError::new(format!("no body {}", b.0)));
+    }
+  }
+  let prio = match num(p, "priority")? {
+    Some(v) if PRIORITIES.contains(&(v as u8)) && v.fract() == 0.0 => v as u8,
+    _ => return Err(CmdError::new("'priority' is 0, 1 or 2")),
+  };
+  edit(s, "Dielectric Priority", |r| {
+    r.priorities.retain(|x| !bodies.contains(&x.body));
+    if prio > 0 {
+      r.priorities.extend(bodies.iter().map(|b| BodyPriority { body: *b, priority: prio }));
+    }
+    Ok(())
+  })?;
+  Ok(priorities_json(s))
+}
+
+// ---------------------------------------------------------------- texture map controls
+
+/// The texture a body's material projects, if it has one.
+pub fn body_texture(s: &Session, body: BodyId) -> Option<TextureSpec> {
+  body_material(s, body).texture
+}
+
+/// `{body, projection?, axis?, scale?, rotation?, offset?, reset?}`: changes how the body's
+/// texture is mapped. The body's material becomes a design material (a library one is copied in
+/// under its name) and is put on the body, so the change stays with the design.
+fn texture_map(s: &mut Session, p: &Value) -> CmdResult {
+  let body = BodyId(req_u32(p, "body")?);
+  if s.model.body(body).is_none() {
+    return Err(CmdError::new(format!("no body {}", body.0)));
+  }
+  let mut m = body_material(s, body);
+  let Some(old) = m.texture.clone() else {
+    return Err(CmdError::new(format!("{}'s appearance '{}' has no texture to map", s.body_name(body), m.name)));
+  };
+  let mut t = if p.get("reset").and_then(Value::as_bool) == Some(true) {
+    // where the library material had it, else Fusion's default: automatic, at the body's box
+    let lib = fox_raytrace::material::find(&m.name).and_then(|l| l.texture).unwrap_or_default();
+    TextureSpec {
+      projection: lib.projection,
+      axis: lib.axis,
+      scale: lib.scale,
+      rotation: lib.rotation,
+      offset: lib.offset,
+      ..old.clone()
+    }
+  } else {
+    old.clone()
+  };
+  // only the mapping changes here, never the image or pattern
+  let mut q = p.clone();
+  if let Some(o) = q.as_object_mut() {
+    for k in ["image", "pattern", "color2", "roughness_variation"] {
+      o.remove(k);
+    }
+  }
+  t = texture_spec(t, &q)?;
+  m.texture = Some(t.clone());
+  let own = s.design.render.materials.iter().position(|x| x.name.eq_ignore_ascii_case(&m.name));
+  if own.is_none() {
+    m.category = "Design".into();
+  }
+  let assigned = s.design.render.body_material(body).is_some_and(|n| n.eq_ignore_ascii_case(&m.name));
+  let out = json!({
+    "body": body.0, "material": m.name, "projection": t.projection, "axis": t.axis, "scale": t.scale,
+    "rotation": t.rotation, "offset": t.offset,
+  });
+  if t != old || own.is_none() || !assigned {
+    edit(s, "Texture Map Controls", |r| {
+      let name = m.name.clone();
+      match own {
+        Some(i) => r.materials[i] = m,
+        None => r.materials.push(m),
+      }
+      if !assigned {
+        r.bodies.retain(|x| x.body != body);
+        r.bodies.push(BodyMaterial { body, material: name });
+      }
+      Ok(())
+    })?;
+  }
+  Ok(out)
+}
+
+/// Where NEW LIGHT puts a light aimed at the selection: off the picked faces along their
+/// normals, or above picked edges, vertices and bodies, a quarter of the model's size away.
+pub fn light_target(s: &Session, sel: &[crate::Sel]) -> Option<[f32; 3]> {
+  use crate::Sel;
+  use fox_kernel::glam::DVec3;
+  let (lo, hi) = s.model.bounds()?;
+  let off = (hi - lo).length().max(1.0) * 0.25;
+  let mut points = Vec::new();
+  for x in sel {
+    let p = match *x {
+      Sel::Face { body, face } => {
+        let m = s.model.body(body)?.mesh()?;
+        let (mut c, mut n, mut area) = (DVec3::ZERO, DVec3::ZERO, 0.0);
+        for (t, f) in m.tri_face.iter().enumerate() {
+          if *f != face {
+            continue;
+          }
+          let v = |k: usize| DVec3::from(m.positions[m.indices[t * 3 + k] as usize].map(f64::from));
+          let (a, b, cc) = (v(0), v(1), v(2));
+          let cr = (b - a).cross(cc - a);
+          let w = cr.length() / 2.0;
+          c += (a + b + cc) / 3.0 * w;
+          n += cr;
+          area += w;
+        }
+        if area <= 0.0 {
+          continue;
+        }
+        c / area + n.normalize_or_zero() * off
+      }
+      Sel::Edge { body, edge } => {
+        let e = s.model.body(body)?.edges().iter().find(|e| e.id == edge)?;
+        e.mid + DVec3::Z * off
+      }
+      Sel::Vertex { body, edge, end } => {
+        let e = s.model.body(body)?.edges().iter().find(|e| e.id == edge)?;
+        (if end { e.end } else { e.start }) + DVec3::Z * off
+      }
+      Sel::Body { body } => {
+        let m = s.model.body(body)?.mesh()?;
+        let (mut blo, mut bhi) = (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY));
+        for p in &m.positions {
+          let p = DVec3::from(p.map(f64::from));
+          blo = blo.min(p);
+          bhi = bhi.max(p);
+        }
+        DVec3::new((blo.x + bhi.x) / 2.0, (blo.y + bhi.y) / 2.0, bhi.z + off)
+      }
+      _ => continue,
+    };
+    points.push(p);
+  }
+  if points.is_empty() {
+    return None;
+  }
+  let c = points.iter().sum::<DVec3>() / points.len() as f64;
+  Some(c.as_vec3().to_array())
 }

@@ -161,7 +161,7 @@ pub struct Design {
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub exploded_view: Option<explode::ExplodedView>,
   /// The Render workspace: materials, environment, camera, settings and the render gallery.
-  #[serde(default, skip_serializing_if = "render::RenderDoc::is_empty")]
+  #[serde(default = "render::RenderDoc::saved", skip_serializing_if = "render::RenderDoc::is_empty")]
   pub render: render::RenderDoc,
   /// Simulation studies (the Simulation workspace).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]

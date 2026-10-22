@@ -35,6 +35,9 @@ pub struct Environment {
   pub ground_reflection: f32,
   /// Gap between the model's lowest point and the ground (mm).
   pub ground_offset: f32,
+  /// The environment's lower half projected onto the ground plane (Fusion's Flatten Ground), so
+  /// the model stands on the environment's own ground instead of floating in a sphere.
+  pub flatten_ground: bool,
 }
 
 impl Default for Environment {
@@ -51,7 +54,20 @@ impl Default for Environment {
       shadows: true,
       ground_reflection: 0.0,
       ground_offset: 0.0,
+      flatten_ground: false,
     }
+  }
+}
+
+/// The grey of a new design's Solid Color background (Fusion's).
+pub const NEW_DESIGN_GREY: [u8; 3] = [204, 204, 204];
+
+impl Environment {
+  /// What a new design's scene starts with, as Fusion's: the Photo Booth light over a Solid
+  /// Color grey background. [`Environment::default`] (the environment as the background) is what
+  /// designs saved before kept, and what their files leave out.
+  pub fn new_design() -> Environment {
+    Environment { background: Background::Color, background_color: NEW_DESIGN_GREY, ..Environment::default() }
   }
 }
 
@@ -222,6 +238,13 @@ impl EnvMap {
     a.lerp(b, fy)
   }
 
+  /// What's seen along `d` from `o` with the lower half flattened onto the ground at height
+  /// `ground_z`: below the horizon the ray meets the ground, and the map is looked up from a
+  /// point `height` above `centre` (the environment's camera) toward that spot.
+  pub fn lookup_flat(&self, o: Vec3, d: Vec3, ground_z: f32, centre: Vec3, height: f32) -> Vec3 {
+    self.lookup(flat_dir(o, d, ground_z, centre, height))
+  }
+
   /// Draws a direction proportionally to the map's brightness: (direction, radiance, pdf per
   /// solid angle).
   pub fn sample(&self, u1: f32, u2: f32) -> (Vec3, Vec3, f32) {
@@ -324,6 +347,17 @@ impl EnvMap {
     }
     best.1.normalize_or_zero()
   }
+}
+
+/// The direction [`EnvMap::lookup_flat`] looks up. Mirrored in the GPU background shader.
+pub fn flat_dir(o: Vec3, d: Vec3, ground_z: f32, centre: Vec3, height: f32) -> Vec3 {
+  if d.z >= -1e-6 || o.z <= ground_z {
+    return d;
+  }
+  let p = o + d * ((ground_z - o.z) / d.z);
+  let eye = Vec3::new(centre.x, centre.y, ground_z + height.max(1e-3));
+  let v = (p - eye).normalize_or_zero();
+  if v == Vec3::ZERO { d } else { v }
 }
 
 fn sh_basis(d: Vec3) -> [f32; 9] {
@@ -504,6 +538,27 @@ mod tests {
       }
     }
     assert!(hits > 300, "{hits}");
+  }
+
+  #[test]
+  fn a_new_design_has_a_grey_solid_background() {
+    let e = Environment::new_design();
+    assert_eq!((e.background, e.background_color, e.preset), (Background::Color, NEW_DESIGN_GREY, Preset::Studio));
+    assert!(!e.flatten_ground);
+  }
+
+  #[test]
+  fn flattening_bends_only_the_lower_half() {
+    let o = Vec3::new(0.0, -100.0, 50.0);
+    let up = Vec3::new(0.0, 1.0, 0.2).normalize();
+    assert_eq!(flat_dir(o, up, 0.0, Vec3::ZERO, 40.0), up);
+    // a ray reaching the ground right under the environment's camera looks straight down
+    let d = (Vec3::new(0.0, 0.0, 0.0) - o).normalize();
+    let f = flat_dir(o, d, 0.0, Vec3::ZERO, 40.0);
+    assert!((f - Vec3::new(0.0, 0.0, -1.0)).length() < 1e-5, "{f}");
+    // far away on the ground it nears the horizon
+    let far = Vec3::new(0.0, 1.0, -0.01).normalize();
+    assert!(flat_dir(o, far, 0.0, Vec3::ZERO, 40.0).z > -0.02);
   }
 
   #[test]

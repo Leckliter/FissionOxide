@@ -1217,13 +1217,14 @@ const RENDER_SETUP: &[E] = &[
   c("Scene Settings", Icon::EnvMap, Cmd::Render(RenderCmd::SceneSettings)),
   c("Light", Icon::Sun, Cmd::Render(RenderCmd::Lights)),
   c("Decal", Icon::Decal, Cmd::Insert(Target::Decal)),
-  x("Texture Map Controls", Icon::TextureMap),
+  c("Texture Map Controls", Icon::TextureMap, Cmd::Render(RenderCmd::TextureMap)),
   c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
 ];
-const RENDER_OPTICAL: &[E] = &[x("Dielectric Priority Control", Icon::DielectricPriority)];
+const RENDER_OPTICAL: &[E] =
+  &[c("Dielectric Priority Control", Icon::DielectricPriority, Cmd::Render(RenderCmd::Priority))];
 const RENDER_IN_CANVAS: &[E] = &[
   c("In-canvas Render", Icon::Display, Cmd::Render(RenderCmd::InCanvas)),
-  x("In-canvas Render Settings", Icon::InCanvasSettings),
+  c("In-canvas Render Settings", Icon::InCanvasSettings, Cmd::Render(RenderCmd::InCanvasSettings)),
   c("Capture Image...", Icon::Camera, Cmd::Render(RenderCmd::CaptureImage)),
 ];
 const RENDER_RENDER: &[E] = &[c("Render", Icon::Teapot, Cmd::Render(RenderCmd::Render))];

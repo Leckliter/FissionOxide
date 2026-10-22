@@ -32,6 +32,7 @@ fn sphere(center: [f32; 3], r: f32, id: u32) -> (Mesh, RenderMesh) {
     indices: m.indices.clone(),
     material: 0,
     origin: center,
+    priority: 0,
   };
   (m, rm)
 }
@@ -63,6 +64,7 @@ fn setup() -> Setup {
       materials: mats.clone(),
       environment: Environment::default(),
       camera: RenderCamera { view: cam, ..RenderCamera::default() },
+      lights: Vec::new(),
     },
     materials: mats.into_iter().map(Some).collect(),
     origins: vec![[-14.0, 0.0, 12.0], [14.0, 0.0, 12.0]],
@@ -98,6 +100,7 @@ fn preview_resembles_the_path_traced_render() {
     materials: &s.materials,
     origins: &s.origins,
     bounds: ([-26.0, -12.0, 0.0], [26.0, 12.0, 24.0]),
+    lights: &[],
   };
   r.set_look(gl, Some(&look)).unwrap();
   r.draw(gl, &s.cam, w, hgt).unwrap();

@@ -80,6 +80,7 @@ pub fn showcase() -> RenderScene {
     materials: vec![lib("Gold - Polished"), lib("Glass - Clear"), lib("Wood - Oak")],
     environment: Environment::default(),
     camera: camera(),
+    lights: Vec::new(),
   }
 }
 
@@ -203,4 +204,73 @@ fn big_preview() {
   s.environment.preset = Preset::Sky;
   s.materials = vec![lib("Paint - Metallic Red"), lib("Carbon Fiber"), lib("Steel - Brushed")];
   render(&s, st).unwrap().save_png(&PathBuf::from(&dir).join("b.png")).unwrap();
+}
+
+fn mean_luminance(img: &RenderImage) -> f32 {
+  img.rgba.chunks(4).map(|p| (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0).sum::<f32>() / (img.rgba.len() / 4) as f32
+}
+
+/// A matte block on a dark environment, with and without a light over it.
+fn lit_block(lights: Vec<Light>) -> RenderImage {
+  let s = RenderScene {
+    meshes: vec![cuboid([-20.0, -20.0, 0.0], [20.0, 20.0, 10.0], 0)],
+    materials: vec![Material { color: [200, 200, 200], roughness: 0.9, ..Material::default() }],
+    environment: Environment { preset: Preset::Dark, ground: false, ..Environment::default() },
+    camera: camera(),
+    lights,
+  };
+  render(&s, settings(4)).unwrap()
+}
+
+#[test]
+fn a_light_brightens_what_it_shines_on() {
+  let dark = lit_block(Vec::new());
+  let light = Light { position: [0.0, 0.0, 40.0], intensity: 2000.0, ..Light::default() };
+  let lit = lit_block(vec![light.clone()]);
+  assert!(mean_luminance(&lit) > mean_luminance(&dark) + 5.0, "{} {}", mean_luminance(&lit), mean_luminance(&dark));
+  // switched off, it's as if it weren't there
+  assert_eq!(lit_block(vec![Light { on: false, ..light }]).rgba, dark.rgba);
+}
+
+/// A glass block holding a block of water that reaches into its walls.
+fn glass_and_water(water_priority: u8, glass_priority: u8) -> RenderImage {
+  let mut glass = cuboid([-15.0, -15.0, 0.0], [15.0, 15.0, 30.0], 0);
+  glass.priority = glass_priority;
+  let mut water = cuboid([-13.0, -13.0, 1.0], [13.0, 13.0, 20.0], 1);
+  water.priority = water_priority;
+  let water_mat =
+    Material { color: [120, 170, 255], transmission: 1.0, roughness: 0.0, ior: 1.33, ..Material::default() };
+  let s = RenderScene {
+    meshes: vec![glass, water],
+    materials: vec![lib("Glass - Clear"), water_mat],
+    environment: Environment::default(),
+    camera: camera(),
+    lights: Vec::new(),
+  };
+  render(&s, settings(4)).unwrap()
+}
+
+#[test]
+fn dielectric_priorities_change_how_overlapping_glass_renders() {
+  // equal priorities trace as before; a higher-priority glass hides the water's faces inside it
+  let same = glass_and_water(0, 0);
+  assert_eq!(glass_and_water(1, 1).rgba, same.rgba);
+  assert_ne!(glass_and_water(0, 2).rgba, same.rgba);
+}
+
+#[test]
+fn flatten_ground_changes_only_the_background_below_the_horizon() {
+  let mut s = showcase();
+  s.environment.preset = Preset::Sky;
+  s.environment.ground = false;
+  // a level camera: the top row sees the sky, the bottom one the ground
+  s.camera.view.pitch = 0.0;
+  let plain = render(&s, settings(2)).unwrap();
+  s.environment.flatten_ground = true;
+  let flat = render(&s, settings(2)).unwrap();
+  let row =
+    |img: &RenderImage, y: u32| img.rgba[(y * img.width * 4) as usize..((y + 1) * img.width * 4) as usize].to_vec();
+  // the top row looks at the sky; the bottom one at the ground
+  assert_eq!(row(&plain, 0), row(&flat, 0));
+  assert_ne!(row(&plain, plain.height - 1), row(&flat, flat.height - 1));
 }

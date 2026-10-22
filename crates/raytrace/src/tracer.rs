@@ -14,6 +14,7 @@ use crate::bsdf::Surface;
 use crate::bvh::Bvh;
 use crate::camera::{Lens, RenderCamera};
 use crate::env::{Background, EnvMap, Environment};
+use crate::light::Light;
 use crate::material::Material;
 use crate::sampling::{Rng, basis, luminance, power_heuristic, srgb3};
 use crate::texture::{Texture, project};
@@ -28,6 +29,9 @@ pub struct RenderMesh {
   pub material: usize,
   /// Where texture projections are centred (the body's bounding-box centre).
   pub origin: [f32; 3],
+  /// Dielectric priority (Fusion's 0, 1, 2): where transparent bodies overlap, the higher one's
+  /// glass fills the overlap and the lower one's surfaces inside it are ignored.
+  pub priority: u8,
 }
 
 /// Everything a render needs.
@@ -37,6 +41,8 @@ pub struct RenderScene {
   pub materials: Vec<Material>,
   pub environment: Environment,
   pub camera: RenderCamera,
+  /// Lights placed in the scene, beside the environment's light.
+  pub lights: Vec<Light>,
 }
 
 /// Image size and quality.
@@ -89,6 +95,13 @@ pub struct Prepared {
   camera: RenderCamera,
   /// Height of the ground plane (`None`: no ground).
   ground: Option<f32>,
+  /// Flatten Ground: the ground's height, the environment camera's spot and its height.
+  flat: Option<(f32, Vec3, f32)>,
+  /// The lights that are on: position and radiant intensity.
+  lights: Vec<(Vec3, Vec3)>,
+  /// Each mesh's dielectric priority, and whether any differ (nested glass is tracked then).
+  mesh_priority: Vec<u8>,
+  nested: bool,
   /// Scale of the scene (for ray offsets).
   eps: f32,
   /// Problems that didn't stop the render (an unreadable texture).
@@ -146,6 +159,14 @@ impl Prepared {
     let size = if verts.is_empty() { 100.0 } else { (hi - lo).length().max(1e-3) };
     let ground =
       (scene.environment.ground && !verts.is_empty()).then(|| lo.z - scene.environment.ground_offset.max(0.0));
+    // the environment's camera stands over the model's middle, as high as the model is wide
+    let flat = (scene.environment.flatten_ground && !verts.is_empty()).then(|| {
+      let c = (lo + hi) / 2.0;
+      (lo.z - scene.environment.ground_offset.max(0.0), Vec3::new(c.x, c.y, 0.0), size)
+    });
+    let lights = scene.lights.iter().filter(|l| l.on).map(|l| (Vec3::from(l.position), l.radiant())).collect();
+    let mesh_priority: Vec<u8> = scene.meshes.iter().map(|m| m.priority).collect();
+    let nested = mesh_priority.iter().any(|p| Some(p) != mesh_priority.first());
     Ok(Prepared {
       bvh,
       normals,
@@ -159,6 +180,10 @@ impl Prepared {
       environment: scene.environment.clone(),
       camera: scene.camera,
       ground,
+      flat,
+      lights,
+      mesh_priority,
+      nested,
       eps: size * EPS,
       warnings,
     })
@@ -222,12 +247,34 @@ impl Prepared {
     // every bounce so far was a mirror or glass one: the camera sees through them as through air
     let mut chain = true;
     let mut via_ground = false;
+    // the glass bodies the path is inside (tracked while dielectric priorities differ)
+    let mut media = Media::default();
     for bounce in 0..=max_bounces {
-      let hit = self.bvh.intersect(o, d, f32::INFINITY);
+      let mut hit = self.bvh.intersect(o, d, f32::INFINITY);
+      if self.nested {
+        // a lower-priority glass's surfaces inside a higher-priority one aren't there
+        for _ in 0..32 {
+          let Some(h) = hit else { break };
+          let mesh = self.tri_mesh[h.tri as usize] as usize;
+          let Some(ior) = self.glass_ior(mesh) else { break };
+          let prio = self.mesh_priority[mesh];
+          if !media.outranked(mesh, prio) {
+            break;
+          }
+          let [a, b, c] = self.verts[h.tri as usize];
+          if d.dot((b - a).cross(c - a)) < 0.0 {
+            media.enter(mesh, prio, ior);
+          } else {
+            media.leave(mesh);
+          }
+          o += d * (h.t + self.eps);
+          hit = self.bvh.intersect(o, d, f32::INFINITY);
+        }
+      }
       let g = self.ground_hit(o, d).filter(|t| hit.is_none_or(|h| *t < h.t));
       if hit.is_none() && g.is_none() {
-        // the environment
-        let rad = self.env.lookup(d);
+        // the environment: what's seen of it is flattened, the light it gives isn't
+        let rad = if bounce == 0 || chain { self.env_seen(o, d) } else { self.env.lookup(d) };
         if bounce == 0 {
           if env_bg {
             out.radiance += rad;
@@ -260,7 +307,7 @@ impl Prepared {
               0.0
             };
           if env_bg {
-            self.add(&mut out, throughput * self.env.lookup(d) * (1.0 - shadow), bounce);
+            self.add(&mut out, throughput * self.env_seen(o, d) * (1.0 - shadow), bounce);
           } else if bounce == 0 {
             out.background += 1.0 - shadow;
             out.shadow += shadow;
@@ -328,8 +375,13 @@ impl Prepared {
       }
       let mesh = self.tri_mesh[tri] as usize;
       let mi = self.mesh_material[mesh];
-      let s = self.surface(mi, p - self.mesh_origin[mesh], ns);
+      let mut s = self.surface(mi, p - self.mesh_origin[mesh], ns);
       let entering = d.dot(ng) < 0.0;
+      let glass = self.nested && self.glass_ior(mesh).is_some();
+      if glass {
+        // the glass meets the medium on its other side, not air
+        s.ior = (s.ior / media.outside(mesh)).clamp(0.25, 4.0);
+      }
       if s.transmission <= 0.0 || s.metallic >= 1.0 {
         // opaque surfaces are two-sided
         if !entering {
@@ -350,6 +402,7 @@ impl Prepared {
       if s.emission != Vec3::ZERO {
         self.add(&mut out, throughput * s.emission, bounce);
       }
+      let d_in = d;
       if !self.shade(
         &mut out,
         &s,
@@ -367,6 +420,14 @@ impl Prepared {
       ) {
         break;
       }
+      if glass && (d.dot(ng) < 0.0) == (d_in.dot(ng) < 0.0) {
+        // went through the surface
+        if entering {
+          media.enter(mesh, self.mesh_priority[mesh], self.glass_ior(mesh).unwrap_or(1.5));
+        } else {
+          media.leave(mesh);
+        }
+      }
       chain &= last_delta;
       if bounce >= 3 {
         let q = throughput.max_element().clamp(0.05, 0.95);
@@ -377,6 +438,20 @@ impl Prepared {
       }
     }
     out
+  }
+
+  /// The environment as seen along `d` from `o` (flattened onto the ground with Flatten Ground).
+  fn env_seen(&self, o: Vec3, d: Vec3) -> Vec3 {
+    match self.flat {
+      Some((z, c, h)) => self.env.lookup_flat(o, d, z, c, h),
+      None => self.env.lookup(d),
+    }
+  }
+
+  /// The index of refraction of a mesh that light passes through, `None` for an opaque one.
+  fn glass_ior(&self, mesh: usize) -> Option<f32> {
+    let m = self.materials.get(*self.mesh_material.get(mesh)?)?;
+    (m.transmission > 0.0 && m.metallic < 1.0).then(|| m.ior.clamp(1.0, 3.0))
   }
 
   fn add(&self, out: &mut PathResult, c: Vec3, bounce: u32) {
@@ -426,6 +501,25 @@ impl Prepared {
           self.add(out, *throughput * f * rad * (cos * w / pdf_l), bounce + 1);
         }
       }
+      // and toward each light (points: nothing to weigh against)
+      for (lp, li) in &self.lights {
+        let to = *lp - p;
+        let r2 = to.length_squared();
+        if r2 <= self.eps * self.eps {
+          continue;
+        }
+        let r = r2.sqrt();
+        let wi = to / r;
+        if wi.dot(ng) <= 0.0 || self.ground.is_some_and(|z| lp.z < z) {
+          continue;
+        }
+        let (f, _) = s.eval(wo, to_local(wi));
+        if f == Vec3::ZERO || self.bvh.occluded(p + ng * self.eps, wi, r - 2.0 * self.eps) {
+          continue;
+        }
+        let cos = wi.dot(ns).max(0.0);
+        self.add(out, *throughput * f * *li * (cos / r2), bounce + 1);
+      }
     }
     let Some(smp) = s.sample(wo, entering, rng) else { return false };
     let wi = to_world(smp.wi);
@@ -440,6 +534,46 @@ impl Prepared {
     *last_pdf = smp.pdf;
     *last_delta = smp.delta;
     true
+  }
+}
+
+/// The glass bodies a path is inside, with their priorities and indices of refraction.
+#[derive(Debug, Clone, Copy, Default)]
+struct Media {
+  n: usize,
+  inside: [(u32, u8, f32); 8],
+}
+
+impl Media {
+  fn enter(&mut self, mesh: usize, prio: u8, ior: f32) {
+    if self.n < self.inside.len() {
+      self.inside[self.n] = (mesh as u32, prio, ior);
+      self.n += 1;
+    }
+  }
+
+  fn leave(&mut self, mesh: usize) {
+    if let Some(i) = self.inside[..self.n].iter().rposition(|m| m.0 == mesh as u32) {
+      self.inside.copy_within(i + 1..self.n, i);
+      self.n -= 1;
+    }
+  }
+
+  /// Whether another body the path is in has a higher priority than `prio`.
+  fn outranked(&self, mesh: usize, prio: u8) -> bool {
+    self.inside[..self.n].iter().any(|m| m.0 != mesh as u32 && m.1 > prio)
+  }
+
+  /// The index of refraction on the far side of `mesh`'s surface: the highest-priority other
+  /// body the path is in (the latest of equals), else air.
+  fn outside(&self, mesh: usize) -> f32 {
+    let mut best: Option<(u8, f32)> = None;
+    for m in &self.inside[..self.n] {
+      if m.0 != mesh as u32 && best.is_none_or(|b| m.1 >= b.0) {
+        best = Some((m.1, m.2));
+      }
+    }
+    best.map_or(1.0, |b| b.1)
   }
 }
 
