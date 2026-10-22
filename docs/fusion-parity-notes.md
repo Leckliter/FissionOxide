@@ -422,3 +422,13 @@ sentences, its fifth button is Fit where Fusion's is Zoom Window, its mouse pres
 PowerMill and Tinkercad, its default orientation is Z up, and Escape closes its whole Preferences
 window. 5 rows in one batch (`parity/batches/map-wave19.json`), four match rows, one verified
 (`display-settings-2`).
+
+## 2026-10-21, prober 7 (continued): display settings
+
+Every Display Settings submenu in both apps (report
+`parity/reports/2026-10-21-display-settings.md`). The menu structure, the Camera rows and full
+screen match; FissionOxide's Visual Style has eight unordered rows without the Ctrl+4..9 keys,
+its Environment is a flat list of sixteen names without Fusion's Theme row and headers, its
+Effects has three unchecked boxes against Fusion's seven with a preset row, Object Visibility has
+five rows against fourteen, and Ground Plane Offset is a large window without the Adaptive
+checkbox. 5 rows in one batch (`parity/batches/map-wave20.json`), two match rows.

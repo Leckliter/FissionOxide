@@ -19,8 +19,8 @@ user meets them. Add areas when you find ones that are missing; never delete one
 - [done (2026-10-21); not exercised: middle-button gestures of each preset, Free Orbit, Zoom Window drags, zoom speed per notch, Reverse zoom direction] Camera: orbit/pan/zoom with every mouse preset, Fit, Look At, zoom-to-cursor, animation timing, orthographic/perspective switch
 - [done (2026-10-21); not exercised: Body/Edge priority behaviour, Freeform and Paint selection, Select Through] Selection: hover/selected colours for face, edge, vertex, body, sketch curve, sketch point, construction plane, axis; window and crossing boxes; Select Other; selection filters and priority; Escape and empty-click
 - [done (2026-10-21)] Marking menus on empty canvas, face, edge; todo: body, vertex, sketch point, construction geometry, timeline feature, in-sketch
-- [in progress (2026-10-21, prober 7)] Display settings: every visual style, environment, effects, object visibility, ground plane, full screen
-- [todo] Grid and snaps: layout grid in 3D and sketch, lock, snap, grid settings, incremental move
+- [done (2026-10-21); not exercised: the look of each visual style and environment, each effect toggled, object visibility toggles, the ground plane offset value] Display settings: every visual style, environment, effects, object visibility, ground plane, full screen
+- [in progress (2026-10-21, prober 7)] Grid and snaps: layout grid in 3D and sketch, lock, snap, grid settings, incremental move
 - [todo] Origin planes/axes visibility, construction geometry display, sketch visibility
 
 ## Design workspace: sketch

@@ -1,0 +1,7 @@
+{
+  "ui:navbar:visual-style-list": "ui-display-settings-3",
+  "ui:navbar:environment-list": "ui-display-settings-3",
+  "ui:navbar:effects-list": "ui-display-settings-3",
+  "ui:navbar:object-visibility-list": "ui-display-settings-3",
+  "ui:navbar:ground-plane-offset-dialog": "ui-display-settings-3"
+}
