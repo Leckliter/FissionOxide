@@ -182,40 +182,49 @@ pub fn is_dark(ctx: &egui::Context) -> bool {
   ctx.theme() == egui::Theme::Dark
 }
 
-/// The dark theme's colour for a light one painted as a fill, from the brand's dark palette:
+/// The dark theme's colour for each light one painted as a fill, from the brand's dark palette:
 /// bars and panels go dark, borders and separators dim, hover and selection turn deep blue.
-/// Colours not in the light palette stay (the timeline's strip is the floating headers' colour).
-fn dark_fill(c: Color32) -> Option<Color32> {
+/// Looked up in order (several light tokens share a colour); colours not listed stay.
+fn dark_fills() -> [(Color32, Color32); 13] {
   use fox_brand::{BLUE, dark, neutral};
-  Some(match c {
-    APP_BAR | FLOAT_HEADER | DIALOG_HEADER => color(dark::SURFACE),
-    TOOLBAR | PANEL | DIALOG_BODY => color(dark::SURFACE_RAISED),
-    PILL => Color32::from_rgba_premultiplied(neutral::GRAPHITE.0, neutral::GRAPHITE.1, neutral::GRAPHITE.2, 230),
-    BORDER | SEPARATOR => color(neutral::GRAPHITE),
-    HOVER | CONTEXT_TAB => color(BLUE.deep),
-    SELECTED => color(BLUE.dark),
-    _ => return None,
-  })
+  let pill = Color32::from_rgba_premultiplied(neutral::GRAPHITE.0, neutral::GRAPHITE.1, neutral::GRAPHITE.2, 230);
+  [
+    (APP_BAR, color(dark::SURFACE)),
+    (FLOAT_HEADER, color(dark::SURFACE)),
+    (TIMELINE, color(dark::SURFACE)),
+    (DIALOG_HEADER, color(dark::SURFACE)),
+    (TOOLBAR, color(dark::SURFACE_RAISED)),
+    (PANEL, color(dark::SURFACE_RAISED)),
+    (DIALOG_BODY, color(dark::SURFACE_RAISED)),
+    (PILL, pill),
+    (BORDER, color(neutral::GRAPHITE)),
+    (SEPARATOR, color(neutral::GRAPHITE)),
+    (HOVER, color(BLUE.deep)),
+    (CONTEXT_TAB, color(BLUE.deep)),
+    (SELECTED, color(BLUE.dark)),
+  ]
+}
+
+fn lookup(table: &[(Color32, Color32)], c: Color32) -> Option<Color32> {
+  table.iter().find(|(light, _)| *light == c).map(|(_, dark)| *dark)
+}
+
+fn dark_fill(c: Color32) -> Option<Color32> {
+  lookup(&dark_fills(), c)
 }
 
 /// The dark theme's colour for a light-theme line: as a fill, and dark ink (outlines, icon
 /// strokes, the active tab's underline) light.
 fn dark_line(c: Color32) -> Option<Color32> {
-  use fox_brand::dark;
-  match c {
-    TEXT | ICON_INK | Color32::BLACK => Some(color(dark::TEXT_MUTED)),
-    c => dark_fill(c),
-  }
+  let ink = color(fox_brand::dark::TEXT_MUTED);
+  lookup(&[(TEXT, ink), (ICON_INK, ink), (Color32::BLACK, ink)], c).or_else(|| dark_fill(c))
 }
 
 /// The dark theme's colour for light-theme text: dark ink reads light on the dark panels.
 fn dark_text(c: Color32) -> Option<Color32> {
   use fox_brand::dark;
-  Some(match c {
-    TEXT | GROUP_LABEL | Color32::BLACK => color(dark::TEXT),
-    MUTED => color(dark::TEXT_MUTED),
-    _ => return None,
-  })
+  let (text, muted) = (color(dark::TEXT), color(dark::TEXT_MUTED));
+  lookup(&[(TEXT, text), (GROUP_LABEL, text), (Color32::BLACK, text), (MUTED, muted)], c)
 }
 
 /// Layers painted directly (not through an egui area), which the area order doesn't list.
