@@ -117,7 +117,7 @@
 {"name": "ui-marking-menu-targets", "items": 8, "status": "done", "pr": "f4ed9f7", "fixer": "cloud task_af4df33d (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-preferences-pages", "items": 9, "status": "done", "pr": "4006204", "fixer": "cloud task_9f140052 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-sketch", "items": 8, "status": "done", "pr": "e74fc0d", "fixer": "cloud task_83e62b33 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-leftovers-dialogs", "items": 9, "status": "fixing", "pr": null, "fixer": "cloud task_d7c5cd94 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-leftovers-dialogs", "items": 9, "status": "done", "pr": "8c31284", "fixer": "cloud session_015cid5owDZKhxtxMUdeoFLo (2026-10-22)"}
 {"name": "ui-leftovers-chrome", "items": 8, "status": "done", "pr": "01e9e36", "fixer": "cloud task_730cf83a (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-display-handles", "items": 8, "status": "done", "pr": "bcc62f8", "fixer": "cloud task_cc33cf04 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-leftovers-render", "items": 7, "status": "done", "pr": "4fd4cdc", "fixer": "cloud task_169f7654 (requested 2026-10-22 by the coordinator)"}
