@@ -1,6 +1,31 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 16:45, session "Re-verification sweep, verifier 1"
+## Last stop: 2026-10-22, 18:05, session "Re-verification sweep, verifier 2"
+
+Swept the dialogs area of the re-verification line (kept `in progress` in `coverage.md`). `main` did not
+build on Windows (`far` is a Windows header macro in `crates/kernel/cpp/surface3.cpp`); fixed in
+`b399613d`, then rebuilt. Of the 56 dialogs keys that were `fixing-merged`: 40 `verified`, 16 reopened
+(`mismatch`), plus one new row `ui:dialogs:preview-checkbox-extra` (FissionOxide's Preview checkbox,
+which Fusion's Chamfer and Replace with Primitives do not have; seen in Fusion). New wave-38 batches,
+all `ready` with no fixer: `ui-reverify-dialogs-1` (8: Thicken does not open from CREATE (P1), Hole,
+Chamfer, Move/Copy, Extrude-from-face, Draft rows, the Preview checkbox, Boundary Fill layout),
+`ui-reverify-dialogs-2` (6: Edit Mirror's old layout (P1), body chips lighting only a face (P1),
+mirror originals, Edit Combine, Edit Draft, Edit Hole) and `ui-reverify-dialogs-3` (3: Split Face
+types, Remove Features types, Replace with Primitives rows from Fusion). `map-wave38.json` holds the keys.
+
+Where the documents stand: FissionOxide (rebuilt, PID changes on relaunch) has one "Untitled*" mm Part
+Design: Sketch1 on XY (rectangle, circle), Body1 (extruded, chamfered, filleted, moved 5 mm, a hole, a
+cylinder primitive Body4 on its top), Body3 (the mirror, combined with Body1 as a disjoint Join, drafted,
+press-pulled). Fusion: untouched apart from Replace with Primitives and Chamfer opened and cancelled on
+the PLASTIC tab of "Untitled*(3)".
+
+Traps found this session:
+- `open_application` on "Fissionoxide" starts a second instance: bring FissionOxide forward with its
+  taskbar button instead (kill the newer PID if it happens).
+- The first ribbon-menu click after Escape or a dialog's close is often dropped: click the menu, zoom to
+  check it is open, then click the entry in the next call.
+
+## Previous stop: 2026-10-22, 16:45, session "Re-verification sweep, verifier 1"
 
 Swept the sketch area of the re-verification line in `coverage.md` (kept `in progress`). On the rebuilt
 binary (`main` at `ef887079`) 85 sketch keys were `fixing-merged`: 74 now `verified`, 7 reopened
@@ -23,10 +48,11 @@ documents 3, manage 2, viewcube 1, plastic 1).
 
 ## Next verifier: start here
 
-1. Keep the sweep line `in progress` and take the dialogs area next (56 keys; list them with
-   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='dialogs' and r['status']=='fixing-merged']"`),
-   then chrome, canvas and the rest in `coverage.md`'s order. Most dialog keys are "open the dialog and
-   read its rows", so a body (one extrude) and a sketch cover most of them in one pass.
+1. Keep the sweep line `in progress`. Sketch and dialogs are swept; take chrome next (31 keys after
+   the fixers' latest merges; list them with
+   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='chrome' and r['status']=='fixing-merged']"`),
+   then canvas and the rest in `coverage.md`'s order. Fixers keep merging: sketch is back to 12
+   `fixing-merged` keys (new fixes), so recount each area before starting it.
 2. Pick up the four sketch keys above when a body crosses a sketch plane (draw on XY, extrude, sketch on
    XZ through the body for Intersect and Slice; Look At on XZ and YZ in both apps).
 3. Rebuild first (kill `fissionoxide.exe`, `cargo build --release -p fissionoxide`, about 3 min).

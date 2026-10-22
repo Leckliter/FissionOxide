@@ -1,0 +1,19 @@
+{
+  "ui:dialogs:hole-fields-2": "ui-reverify-dialogs-1",
+  "ui:dialogs:chamfer-fields-2": "ui-reverify-dialogs-1",
+  "ui:dialogs:move-set-pivot": "ui-reverify-dialogs-1",
+  "ui:dialogs:extrude-body-face-pick": "ui-reverify-dialogs-1",
+  "ui:dialogs:draft-rows": "ui-reverify-dialogs-1",
+  "ui:dialogs:preview-checkbox-extra": "ui-reverify-dialogs-1",
+  "ui:dialogs:boundary-fill-rows": "ui-reverify-dialogs-1",
+  "ui:dialogs:thicken-rows": "ui-reverify-dialogs-1",
+  "ui:dialogs:edit-hole": "ui-reverify-dialogs-2",
+  "ui:dialogs:draft-edit": "ui-reverify-dialogs-2",
+  "ui:dialogs:edit-mirror": "ui-reverify-dialogs-2",
+  "ui:dialogs:edit-combine": "ui-reverify-dialogs-2",
+  "ui:dialogs:body-pick-highlight": "ui-reverify-dialogs-2",
+  "ui:dialogs:copy-ghost-preview": "ui-reverify-dialogs-2",
+  "ui:dialogs:split-face-rows": "ui-reverify-dialogs-3",
+  "ui:dialogs:remove-features-dialog": "ui-reverify-dialogs-3",
+  "ui:dialogs:replace-with-primitives": "ui-reverify-dialogs-3"
+}
