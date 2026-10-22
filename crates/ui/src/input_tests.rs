@@ -1429,10 +1429,10 @@ fn escape_on_an_open_preferences_drop_down_closes_only_the_drop_down() {
   for _ in 0..3 {
     h.frame(vec![]);
   }
-  let id = crate::preferences::combo_rect_id("prefs-nav-preset");
-  let combo = h.ctx.data(|d| d.get_temp::<Rect>(id)).expect("the Mouse setup drop-down is drawn");
+  let id = crate::preferences::combo_rect_id("prefs-theme");
+  let combo = h.ctx.data(|d| d.get_temp::<Rect>(id)).expect("the Theme drop-down is drawn");
   h.move_then_click(combo.center());
-  assert!(egui::Popup::is_any_open(&h.ctx), "the Mouse setup list opens");
+  assert!(egui::Popup::is_any_open(&h.ctx), "the Theme list opens");
   h.app.preferences.draft.space_repeats = false;
   h.frame(vec![escape_key()]);
   h.frame(vec![]);
@@ -1466,6 +1466,70 @@ fn cancel_and_ok_sit_at_the_bottom_right_of_the_preferences() {
   h.move_then_click(Pos2::new(r.right() - 8.0 - 48.0 - 6.0 - 16.0, row_y));
   assert!(!h.app.preferences.open, "OK closes");
   assert!(!h.app.preferences.values.show_prompt, "OK applies the edit");
+}
+
+fn prefs_tree_row(h: &Harness, page: crate::preferences::Page) -> Option<Rect> {
+  h.ctx.data(|d| d.get_temp::<Rect>(crate::preferences::tree_row_id(page)))
+}
+
+#[test]
+fn the_preferences_tree_starts_collapsed_and_opens_like_fusions() {
+  use crate::preferences::Page;
+  let mut h = Harness::new();
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!(prefs_tree_row(&h, Page::Api).is_none(), "General's children are hidden");
+  assert!(prefs_tree_row(&h, Page::GraphicsRdp).is_none());
+  let general = prefs_tree_row(&h, Page::General).expect("General is drawn");
+  let tokens = prefs_tree_row(&h, Page::Tokens).expect("Tokens is drawn");
+  assert!((tokens.top() - general.bottom()).abs() < 1.0, "Tokens sits right under the collapsed General");
+  // General's arrow opens the branch without changing the page
+  h.app.preferences.page = Page::Tokens;
+  h.move_then_click(Pos2::new(general.left() + 9.0, general.center().y));
+  assert!(h.app.preferences.expanded.contains(&Page::General));
+  assert_eq!(h.app.preferences.page, Page::Tokens);
+  let design = prefs_tree_row(&h, Page::Design).expect("General's children show");
+  assert!(prefs_tree_row(&h, Page::DesignAssembly).is_none(), "Design's own children stay hidden");
+  // a click on a row shows its page
+  h.move_then_click(design.center());
+  assert_eq!(h.app.preferences.page, Page::Design);
+  h.frame(vec![]);
+  // the arrow again closes the branch
+  let general = prefs_tree_row(&h, Page::General).unwrap();
+  h.move_then_click(Pos2::new(general.left() + 9.0, general.center().y));
+  assert!(!h.app.preferences.expanded.contains(&Page::General));
+}
+
+#[test]
+fn the_preferences_x_cancels_and_labels_line_up_against_their_controls() {
+  let mut h = Harness::new();
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  // one column: the controls start at one x, and the labels end just before it
+  let combo =
+    |h: &Harness, id: &str| h.ctx.data(|d| d.get_temp::<Rect>(crate::preferences::combo_rect_id(id))).unwrap();
+  let theme = combo(&h, "prefs-theme");
+  let driver = combo(&h, "prefs-driver");
+  assert!((theme.left() - driver.left()).abs() < 0.5, "{theme:?} {driver:?}");
+  let label = h.find(vec![], "Theme").expect("the Theme label");
+  let longer = h.find(vec![], "Graphics driver").expect("the Graphics driver label");
+  assert!((label.right() - longer.right()).abs() < 1.0, "right-aligned: {label:?} {longer:?}");
+  assert!(label.right() < theme.left() && theme.left() - label.right() < 16.0);
+  // a greyed row says why
+  let row = h.find(vec![], "Offline cache period").expect("Fusion's Offline cache period row");
+  let tips = h.rest(Pos2::new(theme.center().x, row.center().y), 1.5);
+  assert!(tips.iter().any(|t| t.starts_with("Not in FissionOxide yet")), "{tips:?}");
+  // the title bar's X cancels
+  h.app.preferences.draft.show_prompt = false;
+  let x = h.ctx.data(|d| d.get_temp::<Rect>(crate::preferences::close_rect_id())).expect("the X is drawn");
+  assert!(x.right() > prefs_rect(&h).right() - 20.0, "at the top right");
+  h.move_then_click(x.center());
+  assert!(!h.app.preferences.open);
+  assert!(h.app.preferences.values.show_prompt, "nothing applied");
 }
 
 /// Extrude with a profile shows the floating value box at its arrow, focused: typing goes into

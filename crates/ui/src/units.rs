@@ -52,6 +52,39 @@ pub fn pin(ui: &egui::Ui, r: &mut egui::Response, text: &mut String) {
   }
 }
 
+thread_local! {
+  /// Preferences → Unit and Value Display: the general precision (`None`: the unit's own) and the
+  /// angular precision, in decimals. The UI runs on one thread, which sets these at start and on
+  /// OK or Apply.
+  static PRECISION: std::cell::Cell<(Option<u8>, u8)> = const { std::cell::Cell::new((None, 1)) };
+}
+
+/// Sets the precisions lengths and angles are shown with (see [`length_decimals`]).
+pub fn set_precision(general: Option<u8>, angular: u8) {
+  PRECISION.with(|p| p.set((general, angular)));
+}
+
+/// The decimals a length in `unit` is shown with: Preferences' General precision, else Fusion's
+/// default display precision for the unit (Document Settings → Units).
+pub fn length_decimals(unit: LengthUnit) -> usize {
+  PRECISION.with(|p| p.get().0).map_or_else(|| unit_decimals(unit), usize::from)
+}
+
+/// Fusion's default display precision for a unit: two decimals in millimetres and centimetres,
+/// three in inches, four in metres and feet.
+pub fn unit_decimals(unit: LengthUnit) -> usize {
+  match unit {
+    LengthUnit::Mm | LengthUnit::Cm => 2,
+    LengthUnit::In => 3,
+    LengthUnit::M | LengthUnit::Ft => 4,
+  }
+}
+
+/// The decimals an angle is shown with (Preferences' Angular precision, one by default).
+pub fn angle_decimals() -> usize {
+  PRECISION.with(|p| p.get().1).into()
+}
+
 /// The Units row's label, as Fusion's: the length unit, then the mass unit ("Units: in, ouncemass").
 pub(crate) fn row_label(unit: LengthUnit) -> String {
   format!("Units: {}, {}", unit.symbol(), unit.mass_symbol())

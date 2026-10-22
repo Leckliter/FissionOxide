@@ -1066,6 +1066,7 @@ impl App {
     if !ty.is_part() {
       set |= self.s.execute("design.type", &json!({"type": ty.key()})).is_ok();
     }
+    set |= preferences::seed_new_design(&self.preferences.values, &mut self.s);
     if set {
       self.s = Session::new(self.s.design.clone());
     }

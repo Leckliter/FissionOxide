@@ -155,3 +155,32 @@ fn overall_size_planar_and_box() {
   assert!(std::fs::read_to_string(&txt).unwrap().contains("Width: 40 mm"));
   let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_root_material_makes_root_bodies() {
+  let mut s = Session::default();
+  let b = plate(&mut s);
+  assert_eq!(run(&mut s, "design.material", json!({}))["material"], "Steel", "steel until named");
+  let r = run(&mut s, "inspect.properties", json!({"items": [{"body": b}]}));
+  assert!(r["items"][0]["mass_g"].is_null(), "no material named: no mass, as before");
+  run(&mut s, "design.material", json!({"material": "aluminum"}));
+  assert_eq!(s.design.material, "Aluminum");
+  let r = run(&mut s, "inspect.properties", json!({"items": [{"body": b}]}));
+  assert!(near(&r["items"][0]["mass_g"], 2400.0 * 2.70 / 1000.0), "{r}");
+  let bom = run(&mut s, "assembly.bom", json!({}));
+  let root = bom.as_array().unwrap().iter().find(|r| r["name"] == "(root bodies)").cloned().unwrap();
+  assert_eq!(root["material"], "Aluminum");
+  assert!(near(&root["mass_g"], 2400.0 * 2.70 / 1000.0), "{root}");
+  // a component naming its own material keeps it
+  run(&mut s, "component.create", json!({"name": "Plate", "bodies": [b]}));
+  let comp = s.design.components[0].id.0;
+  run(&mut s, "component.material", json!({"component": comp, "material": "Brass"}));
+  let r = run(&mut s, "inspect.properties", json!({"items": [{"body": b}]}));
+  assert!(near(&r["items"][0]["mass_g"], 2400.0 * 8.50 / 1000.0), "{r}");
+  assert!(s.execute("design.material", &json!({"material": "unobtainium"})).is_err());
+  // undoable, and saved with the design
+  s.undo();
+  s.undo();
+  s.undo();
+  assert_eq!(s.design.material, "");
+}

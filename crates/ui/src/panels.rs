@@ -3384,7 +3384,7 @@ fn two_faces_readout(app: &App, a: Sel, b: Sel) -> Option<String> {
   if cos.abs() > 1.0 - 1e-9 {
     return pair_distance(app, a, b).map(|d| format!("Min Distance : {}", u.fixed(d, 2)));
   }
-  Some(format!("Angle : {:.1} deg", cos.acos().to_degrees()))
+  Some(format!("Angle : {:.*} deg", crate::units::angle_decimals(), cos.acos().to_degrees()))
 }
 
 /// A least distance the readout measured: the model revision and the pair it was measured for.

@@ -173,6 +173,10 @@ pub struct Design {
   /// The sheet metal flat pattern (Create Flat Pattern; the browser's Flat Pattern row).
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub flat_pattern: Option<FlatPatternDef>,
+  /// The root component's physical material (Preferences > Material's default for new designs):
+  /// what bodies with no material of their own or of their component are made of; empty = steel.
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub material: String,
   #[serde(default)]
   next_id: u32,
 }
@@ -2663,6 +2667,7 @@ impl Design {
       sim: Vec::new(),
       design_type: DesignType::Part,
       flat_pattern: None,
+      material: String::new(),
       next_id: 1,
     }
   }
@@ -2990,6 +2995,11 @@ impl Design {
 
   pub fn component_mut(&mut self, id: ComponentId) -> Option<&mut Component> {
     self.components.iter_mut().find(|c| c.id == id)
+  }
+
+  /// The root component's physical material: [`Design::material`], steel when it names none.
+  pub fn root_material(&self) -> &str {
+    if self.material.is_empty() { "Steel" } else { &self.material }
   }
 
   /// The component a body belongs to.

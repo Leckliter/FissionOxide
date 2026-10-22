@@ -11,6 +11,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
   Some(match name {
     "design.units" => units(s, p),
     "design.type" => design_type(s, p),
+    "design.material" => design_material(s, p),
     "param.model" => Ok(model_list(s)),
     "param.model_set" => model_set(s, p),
     "param.favorite" => favorite(s, p),
@@ -56,6 +57,24 @@ fn design_type(s: &mut Session, p: &Value) -> CmdResult {
     }
   }
   Ok(json!({"type": s.design.design_type.key(), "name": s.design.design_type.label()}))
+}
+
+/// `design.material`: sets or reads the root component's physical material.
+fn design_material(s: &mut Session, p: &Value) -> CmdResult {
+  if let Some(m) = opt_str(p, "material") {
+    let (name, _) =
+      fox_model::assembly::MATERIALS.iter().find(|(n, _)| n.eq_ignore_ascii_case(m)).ok_or_else(|| {
+        let all: Vec<&str> = fox_model::assembly::MATERIALS.iter().map(|(n, _)| *n).collect();
+        CmdError::new(format!("unknown material '{m}' ({})", all.join(", ")))
+      })?;
+    if *name != s.design.root_material() {
+      s.edit(|d| {
+        d.material = name.to_string();
+        Ok(())
+      })?;
+    }
+  }
+  Ok(json!({"material": s.design.root_material()}))
 }
 
 fn kind_name(k: ParamKind) -> &'static str {

@@ -562,7 +562,8 @@ fn overlap_shapes(
   out
 }
 
-/// Density (g/mm³) of a body: its component's physical material, steel for root bodies.
+/// Density (g/mm³) of a body: its component's physical material, the root component's for root
+/// bodies.
 pub(crate) fn density_of(s: &Session, body: BodyId) -> f64 {
   let material = s
     .design
@@ -570,6 +571,6 @@ pub(crate) fn density_of(s: &Session, body: BodyId) -> f64 {
     .iter()
     .find(|c| c.bodies.contains(&body) && !c.material.is_empty())
     .map(|c| c.material.as_str())
-    .unwrap_or("Steel");
+    .unwrap_or(s.design.root_material());
   assembly::density(material) / 1000.0
 }

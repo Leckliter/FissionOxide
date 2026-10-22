@@ -1928,21 +1928,17 @@ fn hud_sides_live(app: &App) -> usize {
 /// is ("6"). Each is also a valid expression to type back.
 fn hud_display(unit: fox_engine::model::LengthUnit, field: Field, v: f64) -> String {
   match field {
-    Field::Angle => format!("{v:.1} deg"),
+    Field::Angle => format!("{v:.p$} deg", p = crate::units::angle_decimals()),
     Field::Sides => format!("{}", v.round() as i64),
     Field::Rho => format!("{v:.2}"),
     _ => unit.fixed(v, display_decimals(unit)),
   }
 }
 
-/// Fusion's default display precision for a unit (Document Settings → Units).
+/// The decimals lengths are shown with: Preferences' General precision, else Fusion's default
+/// display precision for the unit (see [`crate::units::length_decimals`]).
 pub(crate) fn display_decimals(unit: fox_engine::model::LengthUnit) -> usize {
-  use fox_engine::model::LengthUnit;
-  match unit {
-    LengthUnit::Mm | LengthUnit::Cm => 2,
-    LengthUnit::In => 3,
-    LengthUnit::M | LengthUnit::Ft => 4,
-  }
+  crate::units::length_decimals(unit)
 }
 
 /// Adds the driving dimensions that lock the typed values of a shape just drawn (`made` is the
@@ -2758,7 +2754,7 @@ fn dim_place_preview(app: &mut App, painter: &egui::Painter, resp: &egui::Respon
     (_, None) => String::new(),
     (ConstraintKind::Radius { .. }, Some(v)) => format!("R{}", fixed_number(unit, v)),
     (ConstraintKind::Diameter { .. }, Some(v)) => format!("⌀{}", fixed_number(unit, v)),
-    (ConstraintKind::Angle { .. }, Some(v)) => format!("{v:.1}°"),
+    (ConstraintKind::Angle { .. }, Some(v)) => format!("{v:.p$}°", p = crate::units::angle_decimals()),
     (_, Some(v)) => fixed_number(unit, v),
   };
   let font = egui::FontId::proportional(12.0);
@@ -3723,7 +3719,7 @@ fn dim_label(
   let numeric = fox_engine::expr::eval_raw(&dim.expr, &fox_engine::expr::Empty).is_ok();
   let val = if k.is_angle() {
     // one decimal with the degree sign, as Fusion reads an angle ("17.2°")
-    format!("{:.1}°", dim.value.to_degrees())
+    format!("{:.*}°", crate::units::angle_decimals(), dim.value.to_degrees())
   } else {
     // in the design's unit at the document precision, without the unit (as Fusion labels
     // sketch dimensions: "0.479", "12.00")

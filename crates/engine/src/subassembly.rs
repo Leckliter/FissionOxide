@@ -636,8 +636,9 @@ pub(crate) fn bom(s: &Session, p: &Value) -> CmdResult {
   if !loose.is_empty() {
     let volume: f64 = loose.iter().map(body_volume).sum();
     rows.push(json!({
-      "component": null, "name": "(root bodies)", "bodies": loose.len(), "material": "Steel",
-      "volume_mm3": volume, "mass_g": volume * fox_model::assembly::density("Steel") / 1000.0, "grounded": true,
+      "component": null, "name": "(root bodies)", "bodies": loose.len(), "material": s.design.root_material(),
+      "volume_mm3": volume, "mass_g": volume * fox_model::assembly::density(s.design.root_material()) / 1000.0,
+      "grounded": true,
       "level": 0, "parent": null,
     }));
   }
