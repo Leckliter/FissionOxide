@@ -315,3 +315,20 @@ both patterns, on FissionOxide rebuilt at `ef41107` (report
 Mirror's line pick lands in Objects; tangent circles get an unasked radius dimension and no
 heads-up box; the diameter dimension ignores its placement click. 10 rows in two batches
 (`parity/batches/map-wave10.json`), five match rows, the diameter glyph verified.
+
+## 2026-10-21, prober 5: sketch constraints, Sketch Palette options, Line heads-up
+
+Every CONSTRAINTS entry run in both apps on fresh test geometry (report
+`parity/reports/2026-10-21-sketch-constraints.md`). The big one: Fusion's constraints are pick
+commands with prompts and a lit ribbon icon, FissionOxide's are one-shot actions on a
+pre-selection that print "'coincident' needs 2 point(s)" in red. The solver moves the wrong
+things (both coincident points to their midpoint, both lines stretched for Perpendicular, both
+dropped to horizontal for Collinear, the constrained circles dragged for Concentric), glyphs are
+one per constraint above-right instead of Fusion's per-line placement, Fix paints black with
+padlocks where Fusion paints green, six palette rows are greyed, the palette chevron is inert, and
+the Line heads-up draws two plain boxes and leaves only the length dimension where Fusion draws a
+dimension-style length box, an angle arc from a dashed reference, and both dimensions. 21 rows
+in five batches (`parity/batches/map-wave11.json`), five match rows, three verified
+(`heads-up-units-and-lock`, `glyph-style-create-tools`, `palette-linetype`), two reopened
+(`constraint-tool-flow`, `constraint-glyphs`). Trap: the Claude overlay swallowed FissionOxide's
+palette checkbox clicks at x >= 1040 until the window was dragged left.

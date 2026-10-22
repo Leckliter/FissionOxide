@@ -1,0 +1,23 @@
+{
+  "ui:sketch:constraint-pick-command": "ui-sketch-constraint-flow",
+  "ui:sketch:constraint-stale-error": "ui-sketch-constraint-flow",
+  "ui:sketch:fix-unfix-flow": "ui-sketch-constraint-flow",
+  "ui:sketch:curvature-polygon-refusal": "ui-sketch-constraint-flow",
+  "ui:sketch:constraint-menu-icons": "ui-sketch-constraint-flow",
+  "ui:sketch:coincident-motion": "ui-sketch-constraint-solver",
+  "ui:sketch:parallel-perpendicular-motion": "ui-sketch-constraint-solver",
+  "ui:sketch:collinear-motion": "ui-sketch-constraint-solver",
+  "ui:sketch:concentric-motion": "ui-sketch-constraint-solver",
+  "ui:sketch:tangent-line-circle-motion": "ui-sketch-constraint-solver",
+  "ui:sketch:constraint-glyph-placement": "ui-sketch-constraint-glyphs",
+  "ui:sketch:constraint-glyph-hover": "ui-sketch-constraint-glyphs",
+  "ui:sketch:constraint-selected-status": "ui-sketch-constraint-glyphs",
+  "ui:sketch:constraint-glyph-context-menu": "ui-sketch-constraint-glyphs",
+  "ui:sketch:constraint-menu-tooltips": "ui-sketch-constraint-glyphs",
+  "ui:sketch:palette-disabled-rows": "ui-sketch-palette-options",
+  "ui:sketch:palette-collapse-chevron": "ui-sketch-palette-options",
+  "ui:sketch:palette-dof-footer": "ui-sketch-palette-options",
+  "ui:sketch:palette-tooltips": "ui-sketch-palette-options",
+  "ui:sketch:line-heads-up-layout": "ui-sketch-line-heads-up",
+  "ui:sketch:line-typed-values-dimensions": "ui-sketch-line-heads-up"
+}
