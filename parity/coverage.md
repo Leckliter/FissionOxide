@@ -43,7 +43,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 
 ## Other tabs and workspaces
 - [todo] ASSEMBLY tab of an Assembly Design: joints (every type), As-Built Joint, Joint Origin, Rigid Group, constraints, Drive Joints, Motion Link, Motion Study, contact sets, Insert Component (needs two saved designs)
-- [todo] SURFACE tab: every create/modify command and dialog
+- [in progress (2026-10-22, Parity prober 13)] SURFACE tab: every create/modify command and dialog
 - [todo] MESH tab: every command
 - [todo] SHEET METAL tab: rules, flange, bend, unfold, flat pattern
 - [todo] PLASTIC tab
