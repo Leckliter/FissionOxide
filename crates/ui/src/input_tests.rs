@@ -1018,10 +1018,10 @@ fn create_sketch_picks_infinite_planes_and_previews_their_grid() {
   assert_eq!(h.app.grid_preview, None, "no preview once the sketch is open");
 }
 
-/// The File button (after the logo and the data panel button) and the Help (?) button (left of
+/// The File button (after the Home and data panel buttons) and the Help (?) button (left of
 /// the avatar at the right end) of the application bar.
-const FILE: Pos2 = Pos2::new(88.0, 19.0);
-const HELP: Pos2 = Pos2::new(1386.0, 19.0);
+const FILE: Pos2 = Pos2::new(78.0, 17.0);
+const HELP: Pos2 = Pos2::new(1387.0, 17.0);
 
 #[test]
 fn app_bar_menus_close_on_escape() {

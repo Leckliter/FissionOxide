@@ -9,6 +9,7 @@ mod analyses;
 mod anim_ui;
 mod asm_component;
 mod assembly_forms;
+mod bar_icons;
 mod bom_ui;
 #[cfg(test)]
 mod bom_ui_tests;
@@ -841,6 +842,10 @@ impl App {
       self.trace_image(p.to_path_buf());
       return;
     }
+    if documents::show_open_file(self, p) {
+      self.status = Some((format!("{} is already open", p.display()), false));
+      return;
+    }
     self.opened(p, Session::open(p));
   }
 
@@ -860,8 +865,8 @@ impl App {
 
   /// Switches to another session, keeping the hub location.
   fn replace_session(&mut self, mut s: Session) {
-    // an open design with unsaved changes keeps its tab; this one opens in a new tab
-    documents::keep_unsaved(self);
+    // the design opens in a tab of its own (a blank design's tab is reused), as in Fusion
+    documents::make_room(self);
     s.store_root = self.s.store_root.clone();
     let revision = self.s.revision;
     self.s = s;
@@ -900,7 +905,10 @@ impl App {
   /// Opens a design (latest or a given version) from the data panel.
   pub fn open_hub_item(&mut self, item: &str, version: Option<u32>) {
     self.cancel_dialog();
-    let kept = documents::keep_unsaved(self);
+    if documents::show_open_item(self, item, version) {
+      return;
+    }
+    let kept = documents::make_room(self);
     let revision = self.s.revision;
     let opened = self.run("hub.open", json!({"item": item, "version": version}));
     if opened.is_none()

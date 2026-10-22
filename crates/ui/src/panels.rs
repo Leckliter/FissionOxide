@@ -8,9 +8,9 @@ use fox_engine::render::StandardView;
 use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
+use crate::bar_icons::{self, Glyph};
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon};
-use crate::logo;
 use crate::marking;
 use crate::theme;
 use crate::viewport::NavMode;
@@ -98,35 +98,43 @@ const WORKSPACES: [&str; 8] =
 
 // ---------------------------------------------------------------- application bar
 
-fn bar_icon(ui: &mut egui::Ui, icon: Icon, hint: &str, enabled: bool) -> egui::Response {
-  let color = if enabled { None } else { Some(Color32::from_gray(175)) };
-  let r = icons::icon_button(ui, icon, 28.0, hint, false, color);
-  if enabled { r } else { r.on_hover_cursor(egui::CursorIcon::NotAllowed) }
+fn bar_icon(ui: &mut egui::Ui, g: Glyph, hint: &str, enabled: bool) -> egui::Response {
+  bar_icons::button(ui, g, BAR_BUTTON, hint, enabled)
 }
 
+/// The application bar's height, as Fusion's.
+pub(crate) const APP_BAR_H: f32 = 34.0;
+/// A bar button's square.
+const BAR_BUTTON: f32 = 26.0;
+
+/// Fusion's application bar: Home, the Data Panel, File, Save, Undo and Redo as solid grey
+/// glyphs on the grey bar, the document tabs (the shown one lighter, joined to the toolbar), the
+/// "+", and the account icons at the right. The fox stays in the window's title bar, where
+/// Fusion's own logo is.
 pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
   egui::Panel::top("app_bar")
-    .exact_size(38.0)
-    .frame(egui::Frame::NONE.fill(theme::APP_BAR).inner_margin(egui::Margin { left: 6, right: 8, top: 0, bottom: 0 }))
+    .exact_size(APP_BAR_H)
+    .frame(egui::Frame::NONE.fill(theme::APP_BAR).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 }))
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        let (r, _) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::hover());
-        logo::paint(ui.painter(), r.shrink(2.0));
+        if bar_icon(ui, Glyph::Home, crate::data_panel::HOME_TIP, true).clicked() {
+          app.data.home();
+        }
         ui.add_space(4.0);
-        if bar_icon(ui, Icon::DataPanel, crate::data_panel::BUTTON_TIP, true).clicked() {
+        if bar_icon(ui, Glyph::DataPanel, crate::data_panel::BUTTON_TIP, true).clicked() {
           app.data.toggle();
         }
-        ui.add_space(6.0);
-        let file = caret_button(ui, Icon::File, "File", true);
+        ui.add_space(4.0);
+        let file = caret_button(ui, Glyph::File, "File", true);
         egui::Popup::menu(&file).show(|ui| file_menu(app, ui));
         ui.add_space(2.0);
-        if bar_icon(ui, Icon::Save, "Save (Ctrl+S)", true).clicked() {
+        if bar_icon(ui, Glyph::Save, "Save (Ctrl+S)", true).clicked() {
           app.save(false);
         }
-        ui.add_space(6.0);
+        ui.add_space(4.0);
         // the icon undoes one step; the caret lists the steps to jump back (or forward) to
-        let undo = caret_button(ui, Icon::Undo, "Undo (Ctrl+Z)", app.s.can_undo());
+        let undo = caret_button(ui, Glyph::Undo, "Undo (Ctrl+Z)", app.s.can_undo());
         let undo_list = caret_hit(&undo);
         if undo.clicked() && !undo_list && app.s.can_undo() {
           app.cancel_dialog();
@@ -135,7 +143,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         egui::Popup::menu(&undo)
           .open_memory(undo_list.then_some(egui::SetOpenCommand::Toggle))
           .show(|ui| history_menu(app, ui, true));
-        let redo = caret_button(ui, Icon::Redo, "Redo (Ctrl+Y)", app.s.can_redo());
+        let redo = caret_button(ui, Glyph::Redo, "Redo (Ctrl+Y)", app.s.can_redo());
         let redo_list = caret_hit(&redo);
         if redo.clicked() && !redo_list && app.s.can_redo() {
           app.s.redo();
@@ -143,18 +151,18 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         egui::Popup::menu(&redo)
           .open_memory(redo_list.then_some(egui::SetOpenCommand::Toggle))
           .show(|ui| history_menu(app, ui, false));
-        ui.add_space(10.0);
-        // the document tabs fill the middle of the bar, a title centred in each, as in Fusion
-        let right_w = 250.0;
+        ui.add_space(14.0);
+        // the document tabs fill the middle of the bar, each as wide as Fusion's
+        let right_w = 230.0;
         let tab_w = (ui.available_width() - right_w - 40.0).max(160.0);
         crate::documents::tab_strip(app, ui, tab_w);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
           ui.spacing_mut().item_spacing.x = 4.0;
           avatar(app, ui);
-          let help = bar_icon(ui, Icon::Help, "Help", true);
+          let help = bar_icon(ui, Glyph::Help, "Help", true);
           egui::Popup::menu(&help).show(|ui| crate::help::menu(app, ui));
           // the bell opens the Notifications panel under it; the dot shows while there is news
-          let bell = bar_icon(ui, Icon::Bell, "Notifications", true);
+          let bell = bar_icon(ui, Glyph::Bell, "Notifications", true);
           if bell.clicked() {
             crate::notifications::toggle(app);
           }
@@ -162,16 +170,16 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           if crate::notifications::unread(app) {
             ui.painter().circle_filled(bell.rect.center() + vec2(6.0, -7.0), 3.5, theme::ICON_ORANGE);
           }
-          let _ = bar_icon(ui, Icon::Clock, "Recent activity", true);
-          let _ = bar_icon(ui, Icon::Gauge, "Job Status: all changes are local", true);
-          // the Autodesk Assistant button, shown pressed as in Fusion
-          let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::click());
-          ui.painter().rect(r, 3.0, theme::CONTEXT_TAB, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
-          icons::draw_color(ui.painter(), r.shrink(5.0), Icon::Assistant);
-          if resp.on_hover_text("Autodesk Assistant").clicked() {
+          let _ = bar_icon(ui, Glyph::Recent, "Recent activity", true);
+          let _ = bar_icon(ui, Glyph::JobStatus, "Job Status: all changes are local", true);
+          if bar_icon(ui, Glyph::Assistant, "Autodesk Assistant", true).clicked() {
             crate::help::assistant(app);
           }
-          if icons::icon_button(ui, Icon::Configure, 28.0, "Plugins", app.plugins.open, None).clicked() {
+          let plugins = bar_icon(ui, Glyph::Plugins, "Plugins", true);
+          if app.plugins.open {
+            ui.painter().rect_stroke(plugins.rect, 3.0, Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
+          }
+          if plugins.clicked() {
             crate::plugins_ui::open_window(app);
           }
         });
@@ -236,20 +244,15 @@ pub(crate) fn step_icon(name: &str) -> Icon {
 }
 
 /// An application bar icon with a drop-down caret (File, Undo, Redo).
-fn caret_button(ui: &mut egui::Ui, icon: Icon, hint: &str, enabled: bool) -> egui::Response {
-  let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 28.0), egui::Sense::click());
-  if resp.hovered() && enabled {
-    ui.painter().rect(rect, 2.0, theme::HOVER, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
-  }
-  let ink = if enabled { theme::ICON_INK } else { Color32::from_gray(175) };
-  let ir = Rect::from_center_size(rect.center() - vec2(5.0, 0.0), Vec2::splat(19.0));
-  if enabled && icon == Icon::File {
-    icons::draw_color(ui.painter(), ir, icon);
-  } else {
-    icons::draw(ui.painter(), ir, icon, ink);
-  }
+fn caret_button(ui: &mut egui::Ui, g: Glyph, hint: &str, enabled: bool) -> egui::Response {
+  let (rect, resp) = ui.allocate_exact_size(vec2(34.0, BAR_BUTTON), egui::Sense::click());
+  let bg = bar_icons::hover_fill(ui, rect, &resp, enabled);
+  let ink = if enabled { bar_icons::INK } else { bar_icons::INK_OFF };
+  let ir = Rect::from_center_size(rect.center() - vec2(6.0, 0.0), Vec2::splat(bar_icons::GLYPH));
+  bar_icons::draw(ui.painter(), ir, g, ink, bg);
   icons::chevron(ui.painter(), rect.right_center() - vec2(7.0, 0.0), ink);
-  resp.on_hover_text(hint)
+  let resp = resp.on_hover_text(hint);
+  if enabled { resp } else { resp.on_hover_cursor(egui::CursorIcon::NotAllowed) }
 }
 
 /// Fusion's File menu entries, in its order. The ones that need a Fusion Team cloud project are

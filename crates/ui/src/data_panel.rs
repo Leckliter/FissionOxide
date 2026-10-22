@@ -33,6 +33,9 @@ const TILE: f32 = 96.0;
 /// The application bar button's tooltip, as Fusion's.
 pub(crate) const BUTTON_TIP: &str = "Data Panel";
 
+/// The Home button's tooltip.
+pub(crate) const HOME_TIP: &str = "Home";
+
 /// The hub drop-down's tooltip.
 const HUB_TIP: &str = "FissionOxide Hub with Collaborative Editing";
 
@@ -271,6 +274,20 @@ impl DataPanel {
 
   pub fn toggle(&mut self) {
     self.open = !self.open;
+    self.stale = true;
+  }
+
+  /// The application bar's Home button, as Fusion's: shows your recent designs (closes the panel
+  /// when it already shows them).
+  pub fn home(&mut self) {
+    if self.open && self.view == View::Recent {
+      self.open = false;
+      return;
+    }
+    self.open = true;
+    self.view = View::Recent;
+    self.picked = None;
+    self.searching = false;
     self.stale = true;
   }
 

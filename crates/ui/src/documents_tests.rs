@@ -275,6 +275,33 @@ fn opening_a_design_over_unsaved_work_opens_it_in_a_new_tab() {
 }
 
 #[test]
+fn every_opened_design_gets_its_own_tab_as_in_fusion() {
+  let mut h = Harness::new("tabs-open");
+  // two saved designs
+  h.app.run("param.add", json!({"name": "a", "expr": "1 mm"})).unwrap();
+  let a = h.app.run("hub.save", json!({"name": "A"})).unwrap()["item"].as_str().unwrap().to_string();
+  h.app.new_design();
+  h.app.run("param.add", json!({"name": "b", "expr": "2 mm"})).unwrap();
+  let b = h.app.run("hub.save", json!({"name": "B"})).unwrap()["item"].as_str().unwrap().to_string();
+  // the blank start-up design is replaced by the first design opened
+  h.app.new_design();
+  assert_eq!(h.app.docs.count(), 1);
+  h.app.open_hub_item(&a, None);
+  assert_eq!(h.app.docs.count(), 1, "a blank design's tab is reused");
+  assert_eq!(h.app.s.design.parameters[0].name, "a");
+  // a saved, unchanged design stays open: the next one gets a new tab
+  h.app.open_hub_item(&b, None);
+  assert_eq!(h.app.docs.count(), 2, "the open design keeps its tab");
+  assert_eq!(h.app.s.design.parameters[0].name, "b");
+  // opening a design that is already open shows its tab
+  h.app.open_hub_item(&a, None);
+  assert_eq!(h.app.docs.count(), 2);
+  assert_eq!(h.app.docs.active(), 0);
+  assert_eq!(h.app.s.design.parameters[0].name, "a");
+  h.frame(vec![]);
+}
+
+#[test]
 fn the_chooser_has_fusions_six_tiles() {
   let labels: Vec<&str> = NewKind::ALL.iter().map(|k| k.label()).collect();
   assert_eq!(
