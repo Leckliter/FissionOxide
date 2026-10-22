@@ -53,6 +53,8 @@ pub struct SaveForm {
   pub as_new: bool,
   pub project: Option<String>,
   pub folder: Option<String>,
+  /// The name is selected the first time the window shows, as in Fusion.
+  pub first: bool,
 }
 
 #[derive(Default)]
@@ -96,6 +98,22 @@ impl DataPanel {
   /// Where a new design is saved: the folder the panel shows.
   pub fn location(&self) -> (Option<String>, Option<String>) {
     (self.project.clone(), self.folder.clone())
+  }
+
+  /// Whether one of the panel's prompts (New project, New folder, Rename...) shows.
+  pub(crate) fn prompt_open(&self) -> bool {
+    self.open && self.prompt.is_some()
+  }
+
+  /// Closes the prompt, as its Cancel does (Escape).
+  pub(crate) fn close_prompt(&mut self) {
+    self.prompt = None;
+  }
+
+  /// Shows the New folder prompt (tests).
+  #[cfg(test)]
+  pub(crate) fn ask_new_folder(&mut self) {
+    self.prompt = Some(Prompt::NewFolder(String::new()));
   }
 }
 
@@ -839,7 +857,8 @@ fn prompt_window(app: &mut App, ctx: &egui::Context) {
       }
       ui.horizontal(|ui| {
         done |= ui.button("OK").clicked();
-        cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
+        // Escape closes it too ([`crate::file_dialogs::escape`])
+        cancel = ui.button("Cancel").clicked();
       });
     },
   );
@@ -1019,77 +1038,75 @@ fn download_dialog(app: &mut App, item: &str, version: Option<u32>, name: &str, 
   }
 }
 
-/// The Save dialog (Ctrl+S): name and location for a new design, a description and optional
-/// milestone for every version.
+/// The Save dialog (Ctrl+S), as Fusion's white modal "Save": the first save (and Save As) asks
+/// for the name and location only; a later save asks for a description and an optional
+/// milestone. It closes with Cancel or its X, not Escape, as in Fusion.
 pub fn save_window(app: &mut App, ctx: &egui::Context) {
   let Some(mut f) = app.data.save.clone() else { return };
   let linked = app.s.hub.is_some() && !f.as_new;
   let title = if linked { "Save version" } else { "Save" };
   let mut done = false;
-  let mut cancel = false;
-  egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, -80.0]).show(
-    ctx,
-    |ui| {
-      egui::Grid::new("save-form").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        if !linked {
-          ui.label("Name");
-          let r = ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(260.0));
-          if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            done = true;
-          }
-          ui.end_row();
-          ui.label("Location");
-          let pname = app
-            .data
-            .projects
-            .iter()
-            .find(|p| Some(s(p, "id")) == f.project)
-            .map(|p| s(p, "name"))
-            .unwrap_or_else(|| "Default Project".into());
-          egui::ComboBox::from_id_salt("save-project").selected_text(pname).width(260.0).show_ui(ui, |ui| {
-            for p in app.data.projects.clone() {
-              if ui.selectable_label(f.project.as_deref() == Some(&s(&p, "id")), s(&p, "name")).clicked() {
-                if f.project.as_deref() != Some(&s(&p, "id")) {
-                  f.folder = None;
-                }
-                f.project = Some(s(&p, "id"));
-              }
+  let projects = app.data.projects.clone();
+  let version = app.s.hub.as_ref().map(|h| h.version);
+  let (cancel, closed) = crate::file_dialogs::modal(ctx, "save", title, 440.0, |ui| {
+    if !linked {
+      ui.label("Name:");
+      let r = crate::file_dialogs::name_field(ui, &mut f.name, &mut f.first);
+      if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        done = true;
+      }
+      ui.add_space(4.0);
+      ui.label("Location:");
+      let pname = projects
+        .iter()
+        .find(|p| Some(s(p, "id")) == f.project)
+        .map(|p| s(p, "name"))
+        .unwrap_or_else(|| "Default Project".into());
+      egui::ComboBox::from_id_salt("save-project").selected_text(pname).width(ui.available_width()).show_ui(ui, |ui| {
+        for p in &projects {
+          if ui.selectable_label(f.project.as_deref() == Some(&s(p, "id")), s(p, "name")).clicked() {
+            if f.project.as_deref() != Some(&s(p, "id")) {
+              f.folder = None;
             }
-          });
-          ui.end_row();
+            f.project = Some(s(p, "id"));
+          }
         }
-        ui.label("Description");
-        let r = ui.add(
-          egui::TextEdit::singleline(&mut f.description).hint_text("What changed (optional)").desired_width(260.0),
-        );
-        if linked {
-          r.request_focus();
-        }
-        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-          done = true;
-        }
-        ui.end_row();
-        ui.label("Milestone");
-        ui.add(
-          egui::TextEdit::singleline(&mut f.milestone)
-            .hint_text("Name it to mark a milestone (optional)")
-            .desired_width(260.0),
-        );
-        ui.end_row();
       });
-      if linked && let Some(h) = &app.s.hub {
+    } else {
+      ui.label("Description:");
+      let r = ui.add(
+        egui::TextEdit::singleline(&mut f.description)
+          .hint_text("What changed (optional)")
+          .desired_width(f32::INFINITY)
+          .margin(egui::vec2(6.0, 5.0)),
+      );
+      if std::mem::take(&mut f.first) {
+        r.request_focus();
+      }
+      if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        done = true;
+      }
+      ui.add_space(4.0);
+      ui.label("Milestone:");
+      ui.add(
+        egui::TextEdit::singleline(&mut f.milestone)
+          .hint_text("Name it to mark a milestone (optional)")
+          .desired_width(f32::INFINITY)
+          .margin(egui::vec2(6.0, 5.0)),
+      );
+      if let Some(v) = version {
         ui.label(
-          RichText::new(format!("Saves a new version after v{} — earlier versions are kept.", h.version))
+          RichText::new(format!("Saves a new version after v{v} — earlier versions are kept."))
             .small()
             .color(theme::MUTED),
         );
       }
-      ui.horizontal(|ui| {
-        done |= ui.button(RichText::new("Save").strong()).clicked();
-        cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
-      });
-    },
-  );
+    }
+    let b = crate::file_dialogs::footer(ui, None, "Save", true);
+    done |= b.primary;
+    b.cancel
+  });
+  let cancel = cancel || closed;
   if cancel {
     app.data.save = None;
     return;
@@ -1187,8 +1204,10 @@ mod tests {
     w.app.save(false);
     w.frame(true, vec![]);
     w.frame(true, vec![]);
-    let dialog = w.ctx.memory(|m| m.area_rect(egui::Id::new(Some("Save")))).expect("the Save dialog shows");
-    let save = dialog.left_bottom() + vec2(22.0, -16.0);
+    let dialog = w.ctx.memory(|m| m.area_rect(crate::file_dialogs::modal_id("save"))).expect("the Save dialog shows");
+    // Save is the blue button at the lower right, as in Fusion
+    use crate::file_dialogs::{BUTTON, MARGIN};
+    let save = dialog.right_bottom() - vec2(MARGIN + BUTTON.x / 2.0, MARGIN + BUTTON.y / 2.0);
 
     // the window goes to the back, then a click on the dialog's Save brings it to the front
     w.frame(false, vec![]);

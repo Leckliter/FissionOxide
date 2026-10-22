@@ -604,10 +604,10 @@ fn ctrl_s_in_a_test_saves_to_a_scratch_hub() {
   h.frame(vec![ctrl_s]);
   h.frame(vec![]);
   assert!(h.app.data.save.is_some(), "Ctrl+S opens the Save window");
-  // egui ids a window by its title
-  let w = h.ctx.memory(|m| m.area_rect(egui::Id::new(Some("Save")))).expect("the Save window is shown");
-  // Save is the first button on the window's bottom row
-  h.move_then_click(w.left_bottom() + vec2(30.0, -18.0));
+  let w = h.ctx.memory(|m| m.area_rect(crate::file_dialogs::modal_id("save"))).expect("the Save window is shown");
+  // Save is the blue button at the window's lower right, as in Fusion
+  use crate::file_dialogs::{BUTTON, MARGIN};
+  h.move_then_click(w.right_bottom() - vec2(MARGIN + BUTTON.x / 2.0, MARGIN + BUTTON.y / 2.0));
   assert!(h.app.data.save.is_none() && h.app.s.hub.is_some(), "saved: {:?}", h.app.status);
   let index = std::fs::read_to_string(root.join("hub.json")).expect("the scratch hub has the design");
   assert!(index.contains("Untitled"), "{index}");

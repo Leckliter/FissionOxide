@@ -20,6 +20,10 @@ mod data_panel;
 mod dialogs;
 mod ecad_ui;
 mod explode_ui;
+mod file_dialogs;
+#[cfg(test)]
+mod file_dialogs_tests;
+mod file_menu;
 mod form_ui;
 mod forms;
 mod gen_ui;
@@ -288,6 +292,12 @@ pub struct App {
   pub render: render_ui::RenderUi,
   /// The sketch Fillet, Chamfer and Blend Curve tools' last values (they have no dialog).
   pub modify: sketch_modify::Prefs,
+  /// File ▸ View ▸ Hide / Show Command Toolbar.
+  pub show_toolbar: bool,
+  /// File ▸ View ▸ Show Performance Overlay.
+  pub show_perf: bool,
+  /// File ▸ Open... and File ▸ Export..., while open.
+  pub files: file_dialogs::Files,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -515,6 +525,9 @@ impl App {
       render_components: explode_ui::RenderComponents::default(),
       render: render_ui::RenderUi::default(),
       modify: sketch_modify::Prefs::default(),
+      show_toolbar: true,
+      show_perf: false,
+      files: file_dialogs::Files::default(),
     }
   }
 
@@ -662,6 +675,8 @@ impl App {
     self.ctx_menu.peek_sketches.clear();
     self.ctx_menu.isolate = None;
     self.data.save = None;
+    // the Export window was for the old design
+    self.files.export = None;
   }
 
   /// Opens a design (latest or a given version) from the data panel.
@@ -783,8 +798,14 @@ impl App {
     self.fitted_once = false;
   }
 
-  /// Open from this computer: designs, or any importable file as a new design.
+  /// File ▸ Open... (Ctrl+O): Fusion's Open window, with the projects and "Open from my
+  /// computer...".
   pub fn open_dialog(&mut self) {
+    file_dialogs::open(self);
+  }
+
+  /// Open from this computer: designs, or any importable file as a new design.
+  pub fn open_from_computer(&mut self) {
     if let Some(p) = data_panel::pick_importable("Open", false).into_iter().next() {
       self.open_path(&p);
     }
@@ -804,7 +825,7 @@ impl App {
     } else {
       self.s.design.name.clone()
     };
-    self.data.save = Some(data_panel::SaveForm { name, as_new, project, folder, ..Default::default() });
+    self.data.save = Some(data_panel::SaveForm { name, as_new, project, folder, first: true, ..Default::default() });
   }
 
   /// Save to a file on this computer (.fox, or .foxz archive).
@@ -968,8 +989,9 @@ impl App {
       return;
     }
     use egui::{Key, Modifiers};
-    // commands with two or more modifiers first: Ctrl+S would take Ctrl+Alt+S too
-    if self.command_keys(ctx, true) {
+    // File ▸ View's Ctrl+Alt keys, then commands with two or more modifiers: Ctrl+S would take
+    // Ctrl+Alt+S too
+    if file_menu::view_keys(self, ctx) || self.command_keys(ctx, true) {
       return;
     }
     let pressed = |k: Key, m: Modifiers| ctx.input_mut(|i| i.consume_key(m, k));
@@ -1675,7 +1697,9 @@ impl App {
       self.draw_busy(ui, &ctx);
       return;
     }
-    if self.data.save.is_none() && self.electronics.is_none() {
+    // Escape closes the 3D PRINT dialog, Image Options and the data panel's prompts first
+    let escaped = file_dialogs::escape(self, &ctx);
+    if !escaped && !file_dialogs::modal_open(self) && self.electronics.is_none() {
       // typed values go to the heads-up box or dialog before shortcuts see the keys
       viewport::route_typing(self, &ctx);
       self.shortcuts(&ctx);
@@ -1691,7 +1715,9 @@ impl App {
     plugins_ui::sync(self);
     preferences::recovery_tick(self, now());
     panels::app_bar(self, ui);
-    panels::toolbar(self, ui);
+    if self.show_toolbar {
+      panels::toolbar(self, ui);
+    }
     if self.drawing.is_none() && self.electronics.is_none() {
       panels::timeline(self, ui);
     }
@@ -1729,6 +1755,7 @@ impl App {
       panels::sketch_palette(self, &ctx);
       marking::show(self, &ctx);
       sim_ui::show(self, &ctx);
+      file_menu::perf_overlay(self, &ctx);
     }
     toolbox::show(self, &ctx);
     panels::canvas_status(self, &ctx);
@@ -1749,6 +1776,7 @@ impl App {
       params_ui::window(self, &ctx);
     }
     data_panel::save_window(self, &ctx);
+    file_dialogs::windows(self, &ctx);
     updates::window(self, &ctx);
     capture::windows(self, &ctx);
     navbar::ground_offset_window(self, &ctx);
@@ -1782,7 +1810,9 @@ impl App {
   /// viewport image dimmed with a progress note, and a cover that takes all input.
   fn draw_busy(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
     panels::app_bar(self, ui);
-    panels::toolbar(self, ui);
+    if self.show_toolbar {
+      panels::toolbar(self, ui);
+    }
     if self.drawing.is_none() {
       panels::timeline(self, ui);
     }

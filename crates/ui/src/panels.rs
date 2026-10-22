@@ -260,54 +260,29 @@ pub(crate) const FILE_MENU: [(&str, &str, bool); 15] = [
   ("View", "", true),
 ];
 
-/// Why a greyed File menu entry is greyed.
-const CLOUD_ONLY: &str = "Needs a design saved to a Fusion Team cloud project; FissionOxide keeps designs locally";
+/// The File menu entries Fusion draws a separator above: Save, Create Version, 3D Print and View
+/// Details on Web.
+pub(crate) const FILE_MENU_BREAKS: [usize; 4] = [5, 9, 10, 13];
 
 fn file_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(240.0);
-  let item = |ui: &mut egui::Ui, label: &str, key: &str, enabled: bool| -> bool {
-    let mut b = egui::Button::new(label).min_size(vec2(220.0, 0.0));
-    if !key.is_empty() {
-      b = b.shortcut_text(key);
-    }
-    let r = ui.add_enabled(enabled, b);
-    if enabled { r.clicked() } else { r.on_disabled_hover_text(CLOUD_ONLY).clicked() }
-  };
   for (i, (label, key, enabled)) in FILE_MENU.iter().enumerate() {
-    // the groups Fusion separates
-    if matches!(i, 2 | 5 | 8 | 12 | 14) {
+    if FILE_MENU_BREAKS.contains(&i) {
       ui.separator();
     }
-    match *label {
-      "Export..." => {
-        ui.menu_button("Export...", |ui| {
-          for f in fox_engine::exchange::FORMATS.iter().filter(|f| f.export) {
-            let label = format!("{} (*.{})", f.name, f.extensions.join(", *."));
-            if ui.button(label).on_hover_text(f.note).clicked() {
-              ui.close();
-              app.export(f.id);
-            }
-          }
-        });
-        continue;
-      }
-      "View" => {
-        ui.menu_button("View", |ui| {
-          ui.checkbox(&mut app.browser_open, "Show Browser");
-          ui.checkbox(&mut app.show_comments, "Show Comments");
-          ui.checkbox(&mut app.show_navbar, "Show Navigation Bar");
-          ui.checkbox(&mut app.show_viewcube, "Show ViewCube");
-          crate::explode_ui::view_menu(app, ui);
-        });
-        continue;
-      }
-      _ => {}
-    }
-    if !item(ui, label, key, *enabled) {
+    if *label == "View" {
+      ui.menu_button("View", |ui| crate::file_menu::view_menu(app, ui));
       continue;
     }
-    ui.close();
-    file_menu_action(app, label);
+    let enabled = crate::file_menu::enabled(app, label, *enabled);
+    let mut b = egui::Button::new(*label).min_size(vec2(220.0, 0.0));
+    if !key.is_empty() {
+      b = b.shortcut_text(*key);
+    }
+    if crate::file_menu::tip(ui.add_enabled(enabled, b), label).clicked() {
+      ui.close();
+      file_menu_action(app, label);
+    }
   }
 }
 
@@ -319,6 +294,7 @@ pub(crate) fn file_menu_action(app: &mut App, label: &str) {
     "Upload..." => crate::data_panel::upload_dialog(app),
     "Save" => app.save(false),
     "Save As" => app.save(true),
+    "Export..." => crate::file_dialogs::open_export(app),
     "3D Print" => crate::capture::open_print(app),
     "Capture Image..." => crate::capture::open_image(app),
     _ => {}
