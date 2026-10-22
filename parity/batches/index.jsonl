@@ -53,7 +53,7 @@
 {"name": "ui-sketch-palette-look-slice-3d", "items": 5, "status": "done", "pr": "aeafc3d", "fixer": "cloud task_0872a0e8 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-browser-sketch-rows", "items": 7, "status": "done", "pr": "4f46dbe", "fixer": "cloud task_1a110320 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-sketch-project-colors", "items": 3, "status": "done", "pr": "9d41058", "fixer": "cloud task_e06e801d (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-sketch-redefine-and-dxf", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_37cf27b7 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-sketch-redefine-and-dxf", "items": 2, "status": "done", "pr": "6d42942", "fixer": "cloud task_37cf27b7 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-toolbar-customize-2", "items": 3, "status": "done", "pr": "60b9401", "fixer": "cloud session_013deoDbni63hVWKoKpKdXKY (requested 2026-10-22)"}
 {"name": "ui-toolbar-tooltips", "items": 3, "status": "done", "pr": "5ae8f57", "fixer": "cloud task_06de807d (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-data-panel-2", "items": 8, "status": "done", "pr": "27f64a9", "fixer": "cloud task_31b67b87 (requested 2026-10-22 by the coordinator)"}
