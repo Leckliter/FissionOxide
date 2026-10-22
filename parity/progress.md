@@ -1,39 +1,49 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 11:25, session "Parity prober 13"
+## Last stop: 2026-10-22, 11:45, session "Parity prober 14"
 
-Finished this session: "SURFACE tab: every create/modify command and dialog" (done, with a
-not-exercised list in `coverage.md`). Report `parity/reports/2026-10-22-surface-tab.md`,
-`map-wave28.json`, batches `ui-surface-menus` (5), `ui-surface-create-dialogs` (6),
-`ui-surface-modify-dialogs` (5) and `ui-surface-results` (4), all `ready` in `index.jsonl` with no
-fixer yet. Prober 12's wave-27 batches (`ui-construct-methods`, `ui-inspect-measure-section`,
-`ui-inspect-analyses`, `ui-insert-new-design`) were assigned to cloud fixers by the coordinator
-during this session. Re-verified: `ui:sketch:horizontal-conflict`,
-`ui:sketch:tangent-arc-snap-marker` and `ui:sketch:dimension-label-and-hover` (verified; the
-dimension tooltip's light box is the new key `ui:sketch:dimension-hover-tooltip-style`).
+Finished this session: "MESH tab: every command" (done, with a not-exercised list in `coverage.md`).
+Report `parity/reports/2026-10-22-mesh-tab.md`, `map-wave29.json`, batches `ui-mesh-body-and-insert`
+(5), `ui-mesh-modify-dialogs` (5), `ui-mesh-new-modify` (5) and `ui-mesh-prepare-create` (5), all
+`ready` in `index.jsonl` with no fixer yet. `ui-mesh-body-and-insert` (a real mesh body kind) is the
+base of the other three; a coordinator may start it first or tell the others to work on the faceted
+bodies until it lands. Re-verified: `ui:navbar:tooltips`, `ui:navbar:zoom-window-button`,
+`ui:chrome:preferences-mouse-setup`, `ui:chrome:preferences-default-orientation`,
+`ui:chrome:preferences-escape`, `ui:dialogs:primitive-plane-pick-flow`, `ui:dialogs:primitive-rows`,
+`ui:dialogs:primitive-manipulators` (all verified). Still `fixing-merged` and not re-probed:
+`ui:dialogs:coil-rows`, `ui:dialogs:pipe-rows`, `ui:dialogs:edit-feature-title`,
+`ui:browser:redefine-sketch-plane`, `ui:browser:export-dxf-dialog`.
 
 ## Next prober: start here
 
-1. Take the next `todo` in `coverage.md`: "MESH tab: every command" (Design workspace, MESH tab in
-   both apps). Compare the tab's panels and dropdowns, every command's dialog as it opens and after
-   its first pick (Fusion needs a mesh body: Insert Mesh of an .stl/.obj, or Convert a body), the
-   result's browser row, timeline icon and right-click menu.
-2. Re-verify in the app any key in the MESH area marked `fixing-merged`, and any wave-27/28 key a
-   fixer has set to `fixing-merged` since (`python -c` over `ui-features.jsonl`, status
-   `fixing-merged`, history entries dated after 2026-10-22 11:00).
-3. Rebuild before probing: the running binary is `main` at `de1a1c5a`; kill `fissionoxide.exe`
-   first, `cargo build --release -p fissionoxide` took 2m 12s this time.
+1. Take the next `todo` in `coverage.md` after the ASSEMBLY row (which needs two saved designs):
+   "SHEET METAL tab: rules, flange, bend, unfold, flat pattern". Compare the tab's panels and
+   dropdowns, Sheet Metal Rules, every CREATE/MODIFY dialog as it opens and after its first pick
+   (Fusion needs a sheet metal body: Create Sketch, a rectangle, Flange; or Convert to Sheet Metal on a
+   box), Create Flat Pattern and its environment, and the results' browser rows, timeline icons and
+   menus.
+2. Re-verify the five keys above, and any wave-27/28/29 key a fixer has set to `fixing-merged` since
+   (`python -c` over `ui-features.jsonl`, status `fixing-merged`, history entries dated after
+   2026-10-22 16:45 UTC).
+3. Rebuild before probing: the running binary is `main` at `25d185b8`; kill `fissionoxide.exe`
+   first, `cargo build --release -p fissionoxide` took about 2 minutes.
 
 Where the documents stand: Fusion has three tabs: "Untitled*" (older), "Untitled*(1)" (Part Design,
-inches, active, on the SURFACE tab: plate, cylinder with a failed Chamfer1, spheres, coil, torus,
-Plane1, Point1, an Analysis folder, and now Body8, a patch on the disc from SurfacePatch1) and
-"Untitled(2)" (an empty Assembly Design); window at screenshot x 0..907, y 82..733. FissionOxide
-(built `de1a1c5a`) holds one design on the SURFACE tab: Sketch1 (circle), a surface Extrude (Body1),
-a Patch (Body2) and Sketch2 open on the patch face (circle, a line, a diameter dimension); its window
-was snapped with Win+Left and widened to x 0..850, y 0..790. Fusion's taskbar button at (497,803),
-FissionOxide's at (572,803).
+inches, active, on the MESH tab: the earlier plate, cylinder, spheres, coil, torus, Plane1, Point1,
+Analysis folder and Body8, plus the inserted mesh "lprism" (now hidden), "lprism_Edited" (a solid
+from Convert Mesh), two Direct Edit base features and GenerateFaceGroups1) and "Untitled(2)" (an empty
+Assembly Design); window at screenshot x 0..907, y 82..733. FissionOxide (built `25d185b8`) holds one
+design: Body1, the faceted STL (Import1), on the SOLID tab; its window was dragged to x 0..1000,
+y 92..795 (Data Panel closed). Fusion's taskbar button at (497,803), FissionOxide's at (572,803).
+The test meshes are in `tests/reference/464-stl-millimeter/lprism.stl`, `465-obj-inch/lprism.obj`
+and `466-3mf-file/lprism.3mf`; type the full path into the file dialog's File name box.
 
 ## Traps
+- Clicking a selected browser row again starts a rename in Fusion; press Escape.
+- FissionOxide's "<name> isn't in FissionOxide yet" stays at the lower left and hides other lower-left
+  labels (Zoom Window's).
+- Dragging FissionOxide's title bar up past the top of the screen lands on Explorer (click tier) and
+  stops the batch with the button held: `left_mouse_up` at once, then drag sideways only.
 - FissionOxide's sketch shortcut "D" twice did nothing after the Coincident and Horizontal/Vertical
   toolbar flows (CREATE > Sketch Dimension worked); unrecorded, check whether shortcuts die after a
   constraint command.

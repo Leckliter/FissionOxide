@@ -522,3 +522,15 @@ surface Sweep and Loft are missing, surface bodies and features get solid icons,
 rows Fusion does not, and Finish Sketch drops back to SOLID. 20 rows in four batches
 (`parity/batches/map-wave28.json`), three match rows, three sketch keys verified (the dimension
 tooltip's light box split out). The area is done.
+
+## 2026-10-22, prober 14: MESH tab
+
+The MESH tab's dropdowns, tooltips and every command's dialog in Fusion with an inserted STL mesh,
+against FissionOxide's MESH tab with the same file inserted (report
+`parity/reports/2026-10-22-mesh-tab.md`). The dropdown lists and the tooltip text match. FissionOxide
+has no mesh body: the STL becomes a faceted solid, so the browser row, menus, picking and Convert
+Mesh result differ, Insert Mesh skips Fusion's INSERT MESH placement dialog, Plane Cut opens Split
+Body, Reduce and Smooth have other rows (and their previews collapse or shrink the body), and twelve
+entries (Tessellate, Remesh, Repair, face groups, Direct Edit and others) are stubs. 20 rows in four
+batches (`parity/batches/map-wave29.json`), two match rows, 18 command-ledger rows set, eight
+fixing-merged keys verified. The area is done; SHEET METAL is next.
