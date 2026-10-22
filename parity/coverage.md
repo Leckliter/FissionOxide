@@ -44,7 +44,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 ## Other tabs and workspaces
 - [todo] ASSEMBLY tab of an Assembly Design: joints (every type), As-Built Joint, Joint Origin, Rigid Group, constraints, Drive Joints, Motion Link, Motion Study, contact sets, Insert Component (needs two saved designs)
 - [done (2026-10-22); dialogs as they open, Fusion's after the first pick, Patch and surface Extrude results; not exercised: completing Revolve, Ruled, Offset, Extend, Stitch, Unstitch, Reverse Normal, Untrim or a cutting Trim, their timeline icons and menus, Edit Feature of surface features, the Analysis tabs, Create Form, Derive; Thicken, Boundary Fill, Pattern and Mirror share the SOLID dialogs] SURFACE tab: every create/modify command and dialog
-- [todo] MESH tab: every command
+- [in progress (2026-10-22, parity prober 14)] MESH tab: every command
 - [todo] SHEET METAL tab: rules, flange, bend, unfold, flat pattern
 - [todo] PLASTIC tab
 - [todo] MANAGE (BOM) and UTILITIES tabs (make, add-ins, scripts, inspect)
