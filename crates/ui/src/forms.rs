@@ -3058,6 +3058,9 @@ pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static st
     ("joint_origin", "mode", "between" | "two_edge") => {
       Some("Only the Simple mode is in FissionOxide yet: a joint origin sits on one picked face")
     }
+    ("mesh.convert", "method", "organic") => {
+      Some("Organic conversion isn't in FissionOxide yet: the kernel can't fit smooth surfaces to a mesh")
+    }
     _ => None,
   }
 }
@@ -3147,16 +3150,6 @@ pub fn no_preview(form: &Form) -> bool {
 fn initial_choice(form: &Form, key: &str) -> Option<&'static str> {
   match (form.cmd, key) {
     ("mesh.reduce", "type") => Some("proportion"),
-    _ => None,
-  }
-}
-
-/// Why one value of an icon row can't be picked yet, when it can't.
-pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static str> {
-  match (form.cmd, key, option) {
-    ("mesh.convert", "method", "organic") => {
-      Some("Organic conversion isn't in FissionOxide yet: the kernel can't fit smooth surfaces to a mesh")
-    }
     _ => None,
   }
 }

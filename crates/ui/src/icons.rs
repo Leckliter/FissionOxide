@@ -1445,7 +1445,18 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.thick((0.0, 0.3), (0.42, 0.3), Blue, 1.4);
       k.arrow_head((0.54, 0.3), (1.0, 0.0), 0.16, Blue);
     }
-    _ if mesh::paint(&k, icon) => {}
+    Icon::InsertMesh
+    | Icon::Tessellate
+    | Icon::Remesh
+    | Icon::Reduce
+    | Icon::RemeshAdaptive
+    | Icon::RemeshUniform
+    | Icon::FillNone
+    | Icon::FillUniform
+    | Icon::FillMinimal
+    | Icon::ConvertFaceted
+    | Icon::ConvertPrismatic
+    | Icon::ConvertOrganic => mesh::paint(&k, icon),
     Icon::BaseMesh
     | Icon::DirectEdit
     | Icon::Repair

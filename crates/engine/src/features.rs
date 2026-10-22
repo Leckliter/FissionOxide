@@ -2,7 +2,7 @@
 //! split/remove faces, thicken, surfaces, mesh tools and appearances.
 
 use fox_kernel::glam::DVec3;
-use fox_model::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use fox_model::construct::{AxisDef, CoilSection, LineRef, PipeSection, PlaneDef, PointDef, PointRef};
 use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
 use fox_sketch::{CurveId, CurveKind};
 use serde_json::{Value, json};

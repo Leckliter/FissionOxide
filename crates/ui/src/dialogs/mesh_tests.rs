@@ -51,9 +51,10 @@ fn reduce_and_smooth_open_as_fusions() {
   assert!((s.model.bodies[0].shape.mass().unwrap().volume - 1000.0).abs() < 1e-6, "a box stays whole");
 
   let f = &MESH_SMOOTH;
-  let d = Dialog::blank(Kind::Form(f));
+  let mut d = Dialog::blank(Kind::Form(f));
   assert!(!d.live.on);
   assert_eq!(value(&d, f, "smoothness"), json!("1.00"));
+  d.form.sync(f, &s, None);
   assert_eq!(d.prompt(true).as_deref(), Some("Adjust smoothness"));
 }
 

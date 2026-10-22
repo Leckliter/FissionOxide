@@ -60,8 +60,8 @@ impl Ctx<'_> {
             }
             MeshOp::Smooth => {
               let k = value.clone()?;
-              let p = meshtools::smooth_volume(&pos, &tris, k);
-              let s = shape(&p, &tris, false)?;
+              let (p, t) = meshtools::smooth_volume(&pos, &tris, k);
+              let s = shape(&p, &t, false)?;
               self.state.bodies[bi] = self.state.bodies[bi].with_shape(s, id);
             }
             // a new solid body; the mesh body stays (the command hides it)

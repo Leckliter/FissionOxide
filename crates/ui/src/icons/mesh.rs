@@ -35,8 +35,8 @@ fn blue(k: &Pen) -> Color32 {
   k.mono.unwrap_or(theme::ICON_BLUE)
 }
 
-/// Draws `icon` if it is one of these; false otherwise.
-pub(super) fn paint(k: &Pen, icon: Icon) -> bool {
+/// Draws one of these icons.
+pub(super) fn paint(k: &Pen, icon: Icon) {
   match icon {
     Icon::InsertMesh => {
       mesh_block(k, 0.34, 0.42, 0.86, 0.94, 0.12, 2);
@@ -127,9 +127,8 @@ pub(super) fn paint(k: &Pen, icon: Icon) -> bool {
       k.ellipse((0.5, 0.56), 0.38, 0.32, Some(BlueLight), Blue);
       k.ellipse((0.4, 0.44), 0.12, 0.07, Some(Light), BlueLight);
     }
-    _ => return false,
+    _ => {}
   }
-  true
 }
 
 /// The facet lines of a grey solid.

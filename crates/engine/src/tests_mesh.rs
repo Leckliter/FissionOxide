@@ -22,7 +22,10 @@ fn volume(s: &Session) -> f64 {
 fn meshed(name: &str, make: impl FnOnce(&mut Session)) -> Session {
   let mut s = Session::default();
   make(&mut s);
-  let dir = std::env::temp_dir().join(format!("fox-mesh-tools-{}-{name}", std::process::id()));
+  // a file of its own each time: the tests run side by side
+  static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+  let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+  let dir = std::env::temp_dir().join(format!("fox-mesh-tools-{}-{name}-{n}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let stl = dir.join(format!("{name}.stl"));
   run(&mut s, "export", json!({"path": stl}));
@@ -77,8 +80,11 @@ fn smooth_rounds_a_box_off_and_keeps_its_volume() {
   let r = run(&mut s, "mesh.smooth", json!({"body": b, "smoothness": 1}));
   assert_eq!(r["name"], "Smooth1");
   assert!((volume(&s) - 1000.0).abs() < 10.0, "no shrinking: {}", volume(&s));
-  let (lo, hi) = s.model.bodies[0].bounds().unwrap();
-  assert!((hi - lo).max_element() < 10.0 - 1e-3, "the corners come in: {lo} {hi}");
+  let m = s.model.bodies[0].mesh().unwrap();
+  // the corners come in towards the centre
+  let reach =
+    m.positions.iter().map(|p| p.iter().map(|c| (c - 5.0).powi(2)).sum::<f32>().sqrt()).fold(0.0f32, f32::max);
+  assert!(reach < 75f32.sqrt() - 0.1, "{reach}");
 }
 
 #[test]

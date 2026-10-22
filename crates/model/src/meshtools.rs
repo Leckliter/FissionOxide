@@ -261,45 +261,73 @@ fn neighbour_lists(n: usize, tris: &[u32]) -> Vec<Vec<u32>> {
   nb
 }
 
-/// Fusion's Smooth: `smoothness` (0–1) of Taubin's shrink-free smoothing, after which a closed
-/// mesh is scaled about its centre back to the volume it had. An open mesh's boundary stays.
-pub fn smooth_volume(pos: &[DVec3], tris: &[u32], smoothness: f64) -> Vec<DVec3> {
+/// Splits every triangle in four at its edges' middles.
+pub fn subdivide(pos: &[DVec3], tris: &[u32]) -> (Vec<DVec3>, Vec<u32>) {
+  let mut p = pos.to_vec();
+  let mut mid: HashMap<(u32, u32), u32> = HashMap::new();
+  let mut at = |p: &mut Vec<DVec3>, u: u32, w: u32| {
+    *mid.entry((u.min(w), u.max(w))).or_insert_with(|| {
+      p.push((p[u as usize] + p[w as usize]) / 2.0);
+      (p.len() - 1) as u32
+    })
+  };
+  let mut out = Vec::with_capacity(tris.len() * 4);
+  for t in tris.chunks_exact(3) {
+    let (a, b, c) = (t[0], t[1], t[2]);
+    let (ab, bc, ca) = (at(&mut p, a, b), at(&mut p, b, c), at(&mut p, c, a));
+    out.extend([a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca]);
+  }
+  (p, out)
+}
+
+/// Fusion's Smooth: `smoothness` (0–1) of Laplacian smoothing, each pass followed (on a closed
+/// mesh) by scaling about the centre back to the volume it had, so the mesh rounds off without
+/// shrinking. A coarse mesh is subdivided first (a box's eight corners have nothing to round
+/// between them). An open mesh's boundary stays.
+pub fn smooth_volume(pos: &[DVec3], tris: &[u32], smoothness: f64) -> (Vec<DVec3>, Vec<u32>) {
   let passes = (smoothness.clamp(0.0, 1.0) * 10.0).round() as usize;
   if passes == 0 || pos.is_empty() {
-    return pos.to_vec();
+    return (pos.to_vec(), tris.to_vec());
   }
-  let nb = neighbour_lists(pos.len(), tris);
+  let (lo, hi) = pos.iter().fold((pos[0], pos[0]), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+  let fine = (hi - lo).length() / 16.0;
+  let longest = |p: &[DVec3], t: &[u32]| {
+    t.chunks_exact(3)
+      .flat_map(|t| [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])])
+      .map(|(u, w)| (p[u as usize] - p[w as usize]).length())
+      .fold(0.0, f64::max)
+  };
+  let (mut p, mut tris) = (pos.to_vec(), tris.to_vec());
+  while tris.len() / 3 < 20_000 && longest(&p, &tris) > fine {
+    (p, tris) = subdivide(&p, &tris);
+  }
+  let nb = neighbour_lists(p.len(), &tris);
   let mut edge_uses: HashMap<(u32, u32), u32> = HashMap::new();
   for t in tris.chunks_exact(3) {
     for (u, w) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
       *edge_uses.entry((u.min(w), u.max(w))).or_default() += 1;
     }
   }
-  let mut fixed = vec![false; pos.len()];
+  let mut fixed = vec![false; p.len()];
   for (&(u, w), &k) in &edge_uses {
     if k == 1 {
       fixed[u as usize] = true;
       fixed[w as usize] = true;
     }
   }
-  let mut p = pos.to_vec();
-  let step = |p: &mut Vec<DVec3>, f: f64| {
+  let closed = edge_uses.values().all(|&k| k == 2);
+  let v0 = volume(&p, &tris);
+  for _ in 0..passes {
     let prev = p.clone();
     for (i, n) in nb.iter().enumerate() {
       if n.is_empty() || fixed[i] {
         continue;
       }
       let avg = n.iter().map(|&j| prev[j as usize]).sum::<DVec3>() / n.len() as f64;
-      p[i] = prev[i] + (avg - prev[i]) * f;
+      p[i] = prev[i] * 0.5 + avg * 0.5;
     }
-  };
-  for _ in 0..passes {
-    step(&mut p, 0.5);
-    step(&mut p, -0.53);
-  }
-  if is_closed(tris) {
-    let (v0, v1) = (volume(pos, tris), volume(&p, tris));
-    if v0.abs() > 1e-12 && v1.abs() > 1e-12 && v0.signum() == v1.signum() {
+    let v1 = volume(&p, &tris);
+    if closed && v0.abs() > 1e-12 && v1.abs() > 1e-12 && v0.signum() == v1.signum() {
       let k = (v0 / v1).cbrt();
       let c = p.iter().sum::<DVec3>() / p.len() as f64;
       for v in &mut p {
@@ -307,7 +335,7 @@ pub fn smooth_volume(pos: &[DVec3], tris: &[u32], smoothness: f64) -> Vec<DVec3>
       }
     }
   }
-  p
+  (p, tris)
 }
 
 /// A mesh cut by the plane through `origin` with unit `normal`: the shared positions (the cut
@@ -421,7 +449,7 @@ pub fn fill_cut(
       l.push(w);
       v = w;
     }
-    if l.len() >= 3 && next.get(l.last().unwrap()) == Some(&s) {
+    if l.len() >= 3 && next.get(&v) == Some(&s) {
       loops.push(l);
     }
   }
@@ -686,10 +714,14 @@ mod tests {
   #[test]
   fn smoothing_keeps_the_volume() {
     let (pos, tris) = cube(10.0);
-    let p = smooth_volume(&pos, &tris, 1.0);
-    assert!((volume(&p, &tris) - 1000.0).abs() < 1e-6, "{}", volume(&p, &tris));
-    assert!(p.iter().zip(&pos).any(|(a, b)| (*a - *b).length() > 0.1), "the box rounds off");
-    assert_eq!(smooth_volume(&pos, &tris, 0.0), pos);
+    let (p, t) = smooth_volume(&pos, &tris, 1.0);
+    assert!(is_closed(&t));
+    assert!((volume(&p, &t) - 1000.0).abs() < 1e-6, "{}", volume(&p, &t));
+    // rounded: the corners come in, the faces' middles stay out
+    let r: Vec<f64> = p.iter().map(|v| (*v - DVec3::splat(5.0)).length()).collect();
+    let (near, far) = (r.iter().copied().fold(f64::MAX, f64::min), r.iter().copied().fold(0.0, f64::max));
+    assert!(far < 75f64.sqrt() - 0.5 && near > 4.0, "{near} {far}");
+    assert_eq!(smooth_volume(&pos, &tris, 0.0), (pos, tris));
   }
 
   #[test]
