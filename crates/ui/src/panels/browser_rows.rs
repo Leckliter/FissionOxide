@@ -387,7 +387,7 @@ pub(crate) fn run_origin_folder_cmd(app: &mut App, cmd: RowCmd) {
     RowCmd::ShowHide => origin_show_hide(app),
     RowCmd::ShowAll => {
       app.origin_shown = true;
-      app.objects.origins = true;
+      app.objects.show_origin();
       for item in OriginItem::ALL {
         origin::set_eye(app, item, true);
       }
@@ -694,9 +694,15 @@ mod tests {
     assert_eq!(labels(&origin_item_menu(&app, OriginItem::Z)), ["Show/Hide"]);
     run_origin_item_cmd(&mut app, OriginItem::Z, RowCmd::ShowHide);
     assert!(origin::eye(&app, OriginItem::Z) && !origin::eye(&app, OriginItem::X));
-    app.objects.origins = false;
+    app.objects.origin_planes = false;
+    app.objects.origin_points = false;
     run_origin_folder_cmd(&mut app, RowCmd::ShowAll);
-    assert!(app.origin_shown && app.objects.origins && OriginItem::ALL.iter().all(|i| origin::visible(&app, *i)));
+    assert!(
+      app.origin_shown
+        && app.objects.origin_planes
+        && app.objects.origin_points
+        && OriginItem::ALL.iter().all(|i| origin::visible(&app, *i))
+    );
     run_origin_folder_cmd(&mut app, RowCmd::FindInWindow);
     assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "{:?}", app.status);
   }

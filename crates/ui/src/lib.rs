@@ -457,7 +457,7 @@ impl App {
       sheet_view: (1.0, egui::Vec2::ZERO),
       visual_style: Default::default(),
       objects: Default::default(),
-      effects: Default::default(),
+      effects: navbar::default_effects(),
       show_grid: true,
       grid: Default::default(),
       increments: Default::default(),
@@ -1050,6 +1050,8 @@ impl App {
     if pressed(Key::F, Modifiers::COMMAND | Modifiers::SHIFT) {
       navbar::toggle_full_screen(ctx);
     }
+    // Display Settings ▸ Visual Style: Ctrl+4 to Ctrl+9
+    navbar::visual_style_keys(self, ctx);
     if pressed(Key::S, Modifiers::COMMAND) {
       self.save(false);
     }
@@ -1290,7 +1292,10 @@ impl App {
   /// Escape over the canvas: ends whatever is open, innermost first (a pop-up list, a tool's
   /// unfinished shape, the tool, the dialog, the selection).
   pub(crate) fn escape(&mut self) {
-    if self.doc_dialog.is_some() {
+    if self.display.ground_offset_form.is_some() {
+      // the GROUND PLANE OFFSET dialog closes, changing nothing
+      self.display.ground_offset_form = None;
+    } else if self.doc_dialog.is_some() {
       // Change Active Units or Convert Design Type closes, changing nothing
       doc_dialogs::close(self);
     } else if self.other.is_some() {

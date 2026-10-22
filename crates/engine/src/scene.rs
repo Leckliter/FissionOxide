@@ -219,6 +219,12 @@ pub struct ViewOptions {
   pub show_vertices: bool,
   /// Draw no construction planes, axes or points (Object Visibility).
   pub hide_construction: bool,
+  /// Draw no construction planes (Object Visibility ▸ Construction Planes).
+  pub hide_construction_planes: bool,
+  /// Draw no construction axes (Object Visibility ▸ Construction Axes).
+  pub hide_construction_axes: bool,
+  /// Draw no construction points (Object Visibility ▸ Construction Points).
+  pub hide_construction_points: bool,
   /// Draw the grid without the origin axes (Object Visibility ▸ Origins).
   pub hide_origin: bool,
   /// The grid's spacing; `None` adapts it to the model's size (see [`grid_step`]).
@@ -569,7 +575,10 @@ impl SceneBuilder {
 
     // construction planes
     for (id, pl) in &s.model.planes {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) || opts.hide_planes.contains(id)
+      if opts.hide_construction
+        || opts.hide_construction_planes
+        || s.design.feature(*id).is_some_and(|f| f.suppressed)
+        || opts.hide_planes.contains(id)
       {
         continue;
       }
@@ -595,7 +604,7 @@ impl SceneBuilder {
     // construction axes (dashed, through the model), points and cosmetic threads
     let reach = scene_size(s) * 0.4;
     for (id, (o, d)) in &s.model.axes {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || opts.hide_construction_axes || s.design.feature(*id).is_some_and(|f| f.suppressed) {
         continue;
       }
       scene.lines.push(Polyline {
@@ -610,7 +619,8 @@ impl SceneBuilder {
       });
     }
     for (id, p) in &s.model.points {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || opts.hide_construction_points || s.design.feature(*id).is_some_and(|f| f.suppressed)
+      {
         continue;
       }
       scene.markers.push(Marker {

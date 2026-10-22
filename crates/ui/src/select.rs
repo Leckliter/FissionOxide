@@ -1003,7 +1003,10 @@ pub(crate) fn joint_glyphs(
   if app.s.edit_sketch.is_some() {
     return false;
   }
-  let marks = fox_engine::scene::joint_marks(&app.s);
+  // Object Visibility ▸ Joints and Joint Origins
+  let (joints, origins) = (app.objects.joints, app.objects.joint_origins);
+  let mut marks = fox_engine::scene::joint_marks(&app.s);
+  marks.retain(|m| if m.joint { joints } else { origins });
   if marks.is_empty() {
     return false;
   }
@@ -1031,15 +1034,17 @@ pub(crate) fn joint_glyphs(
     } else {
       egui::Color32::from_gray(60)
     };
-    // the frame's axes, as short stubs (X red, Y green, Z blue)
+    // the frame's axes, as short stubs (X red, Y green, Z blue); a joint origin's only with
+    // Object Visibility ▸ Joint Origin Axes on
     let o = m.frame.w_axis.truncate();
     let len = joint_axis_len(project, o);
+    let stubs = m.joint || app.objects.joint_origin_axes;
     for (axis, col) in [
       (m.frame.x_axis.truncate(), egui::Color32::from_rgb(220, 70, 60)),
       (m.frame.y_axis.truncate(), egui::Color32::from_rgb(70, 170, 70)),
       (m.frame.z_axis.truncate(), egui::Color32::from_rgb(50, 100, 230)),
     ] {
-      if let Some(t) = project(o + axis * len) {
+      if let Some(t) = project(o + axis * len).filter(|_| stubs) {
         painter.line_segment([*c, t], egui::Stroke::new(1.5, col));
       }
     }

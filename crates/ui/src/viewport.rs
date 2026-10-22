@@ -478,7 +478,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= crate::form_ui::overlay(app, &resp, &painter, &ctx, &project, &ray);
   consumed |= crate::handles::show(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
-  if app.objects.joints {
+  if app.objects.joints || app.objects.joint_origins {
     consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   }
   dim_editor(app, &ctx);
@@ -777,7 +777,9 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     origin_axis_len: Some(origin_plane_half_size(app) * ORIGIN_AXIS_REACH),
     // the Sketches folder's eye off draws no sketch but the one being edited
     hide_sketches: !vis.sketches || analysis.hide_sketches || app.sketch_rows.folder_hidden,
-    hide_construction: !vis.construction,
+    hide_construction_planes: !vis.construction_planes,
+    hide_construction_axes: !vis.construction_axes,
+    hide_construction_points: !vis.construction_points,
     grid_step: app.grid.step(),
     // the Layout Grid carries Fusion's red X and green Y axis lines across it
     grid_axes: app.s.edit_sketch.is_none() && vis.origins,
@@ -785,15 +787,11 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hide_profiles_of: app.hidden_profiles.clone(),
     hide_projected_of: app.sketch_rows.hidden_projected.clone(),
     hide_construction_of: app.sketch_rows.hidden_construction.clone(),
-    show_vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none() && vis.bodies,
+    show_vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek,
     peek_faces: app.ctx_menu.peek_faces.clone(),
     peek_sketches: app.ctx_menu.peek_sketches.clone(),
-    only_bodies: if vis.bodies {
-      app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone())
-    } else {
-      Some(Vec::new())
-    },
+    only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
     opacity: app.ctx_menu.opacity.clone(),
     // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
     hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),

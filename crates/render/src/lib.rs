@@ -347,7 +347,10 @@ pub struct Marker {
 }
 
 /// Fusion's visual styles (Display Settings ▸ Visual Style): how body surfaces and their edges
-/// are drawn, plus two line-drawing styles.
+/// are drawn, plus two line-drawing styles (`view.render` only; Fusion's menu has six rows).
+///
+/// Fusion's default, Shaded, draws the bodies' edges in light grey and lets them be picked, so
+/// [`VisualStyle::Shaded`] draws them too; Shaded with Visible Edges Only looks the same here.
 ///
 /// Body surfaces are the meshes marked [`Mesh::analyze`]; their edges are the depth-tested lines
 /// with a pick id (sketch profiles, the grid and construction geometry draw as they always do).
@@ -356,8 +359,8 @@ pub struct Marker {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VisualStyle {
-  Shaded,
   #[default]
+  Shaded,
   ShadedVisibleEdges,
   ShadedHiddenEdges,
   /// Every edge, nothing hidden: the surfaces aren't drawn at all.
@@ -424,9 +427,9 @@ impl VisualStyle {
     matches!(self, VisualStyle::HiddenLine | VisualStyle::VisibleLine)
   }
 
-  /// Body edges are drawn.
+  /// Body edges are drawn (in every style, as Fusion's Shaded draws them too).
   pub fn edges(self) -> bool {
-    self != VisualStyle::Shaded
+    true
   }
 
   /// Body silhouettes are drawn as edges: in every style that doesn't shade the surfaces.
@@ -679,16 +682,28 @@ impl Frame {
 pub struct Effects {
   /// The bodies' outline cast onto the ground by a light high above, darkened.
   pub ground_shadow: bool,
-  /// The bodies mirrored under a glossy ground.
+  /// The bodies mirrored under a glossy ground (Fusion's Ground Reflection).
   pub reflections: bool,
   /// A see-through ground plane.
   pub ground_plane: bool,
+  /// The environment's image behind the model. Kept, not drawn yet.
+  #[serde(default)]
+  pub environment_dome: bool,
+  /// Bodies casting shadows onto each other. Kept, not drawn yet.
+  #[serde(default)]
+  pub object_shadow: bool,
+  /// Ambient occlusion. Kept, not drawn yet.
+  #[serde(default)]
+  pub ambient_occlusion: bool,
+  /// Anti-aliasing. Kept, not drawn yet.
+  #[serde(default)]
+  pub anti_aliasing: bool,
 }
 
 impl Effects {
   /// Adds the ground, shadow and reflections to a built scene. They have no pick id.
   pub fn apply(self, scene: &mut Scene) {
-    if self == Effects::default() {
+    if !(self.ground_shadow || self.reflections || self.ground_plane) {
       return;
     }
     let bodies: Vec<&Mesh> = scene.meshes.iter().filter(|m| m.analyze).collect();
@@ -1622,8 +1637,8 @@ mod tests {
       assert_eq!(s.label().starts_with("Shaded"), s.shaded());
       assert_eq!(s.label().contains("Hidden"), s.hidden_edges());
     }
-    assert!(!VisualStyle::Shaded.edges() && !VisualStyle::Wireframe.occludes());
-    assert_eq!(VisualStyle::default(), VisualStyle::ShadedVisibleEdges);
+    assert!(VisualStyle::Shaded.edges() && !VisualStyle::Wireframe.occludes());
+    assert_eq!(VisualStyle::default(), VisualStyle::Shaded);
     for s in VisualStyle::ALL {
       assert_eq!(VisualStyle::parse(s.name()), Some(s));
       assert_eq!(s.silhouettes(), !s.shaded());
@@ -1672,7 +1687,7 @@ mod tests {
     assert_eq!(scene.meshes.len(), 2, "no effects, nothing added");
 
     let mut scene = base.clone();
-    Effects { ground_shadow: true, reflections: true, ground_plane: true }.apply(&mut scene);
+    Effects { ground_shadow: true, reflections: true, ground_plane: true, ..Default::default() }.apply(&mut scene);
     let added = &scene.meshes[2..];
     assert_eq!(added.len(), 3, "reflection, ground, shadow");
     let (refl, ground, shadow) = (&added[0], &added[1], &added[2]);
