@@ -399,15 +399,7 @@ fn icon_sheet() {
 #[ignore = "writes target/icon-sheet-surface.png for review"]
 fn surface_icon_sheet() {
   let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
-  let surface = [
-    Icon::Patch,
-    Icon::Extrude,
-    Icon::Revolve,
-    Icon::Sweep,
-    Icon::Stitch,
-    Icon::Unstitch,
-    Icon::Trim,
-    Icon::Extend,
-  ];
+  let surface =
+    [Icon::Patch, Icon::Extrude, Icon::Revolve, Icon::Sweep, Icon::Stitch, Icon::Unstitch, Icon::Trim, Icon::Extend];
   render(&surface, Some(Tint::Orange), 40.0, 27.0, 8, 4.0).save(dir.join("icon-sheet-surface.png")).unwrap();
 }

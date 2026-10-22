@@ -572,16 +572,8 @@ const SOLID: [Group; 2] = [
 ];
 
 const SURFACE: [Group; 2] = [
-  Group {
-    label: "CREATE",
-    quick: &["Create Sketch", "Patch", "Extrude", "Revolve", "Sweep"],
-    menu: SURFACE_CREATE,
-  },
-  Group {
-    label: "MODIFY",
-    quick: &["Stitch", "Unstitch", "Trim", "Extend"],
-    menu: SURFACE_MODIFY,
-  },
+  Group { label: "CREATE", quick: &["Create Sketch", "Patch", "Extrude", "Revolve", "Sweep"], menu: SURFACE_CREATE },
+  Group { label: "MODIFY", quick: &["Stitch", "Unstitch", "Trim", "Extend"], menu: SURFACE_MODIFY },
 ];
 
 use Cmd::SketchTool as T;
@@ -1266,7 +1258,8 @@ fn rich_tip(resp: egui::Response, scope: Scope, it: &Item, key: &str) -> egui::R
 /// Options): its name, description line and shortcut, expanding like a ribbon button's.
 pub(crate) fn sketch_tool_tip(resp: egui::Response, prefs: &Prefs, tool: Tool) -> egui::Response {
   let (icon, label, _) = Cmd::SketchTool(tool).info();
-  let it = Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(Cmd::SketchTool(tool)), disabled: false, surface: false };
+  let it =
+    Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(Cmd::SketchTool(tool)), disabled: false, surface: false };
   let key = key_of(prefs, Scope::Sketch, label);
   rich_tip(resp, Scope::Sketch, &it, key)
 }
@@ -2021,7 +2014,7 @@ mod tests {
   }
 
   /// A menu's rows as `label` / `label (key)`, `|` for a separator and `name >` for a submenu.
-  fn rows(tab: Tab, menu: &[E]) -> Vec<String> {
+  fn menu_rows(tab: Tab, menu: &[E]) -> Vec<String> {
     let prefs = Prefs::default();
     let at = At { prefs: &prefs, tab, group: "", quick: &[] };
     menu
@@ -2040,18 +2033,18 @@ mod tests {
   #[test]
   fn surface_menus_are_fusions() {
     assert_eq!(
-      rows(Tab::Surface, SURFACE_CREATE).join(", "),
+      menu_rows(Tab::Surface, SURFACE_CREATE).join(", "),
       "Create Sketch, Create Form, Derive, |, Extrude, Revolve, Sweep, Loft, Patch, Ruled, Offset, |, Pattern >, \
        Mirror, |, Thicken, Boundary Fill, Joint Origin"
     );
     assert_eq!(
-      rows(Tab::Surface, SURFACE_MODIFY).join(", "),
+      menu_rows(Tab::Surface, SURFACE_MODIFY).join(", "),
       "Press Pull (Q), Fillet (F), Chamfer, |, Trim, Untrim, Extend, Stitch, Unstitch, Reverse Normal, Scale, \
        Split Face, Split Body, |, Move/Copy (M), Align, Delete (Del), Remove, |, Physical Material, Appearance (A), \
        Manage Materials, |, Change Parameters, Compute All (Ctrl+B), |, Bill of Materials"
     );
     // the SOLID Extrude keeps its E
-    assert!(rows(Tab::Solid, SOLID_CREATE).contains(&"Extrude (E)".to_string()));
+    assert!(menu_rows(Tab::Solid, SOLID_CREATE).contains(&"Extrude (E)".to_string()));
   }
 
   /// Fusion's SURFACE ribbon: five CREATE buttons and four MODIFY ones, the surface commands
@@ -2062,7 +2055,8 @@ mod tests {
     let shown = |g: &Group| quick_items(&prefs, Tab::Surface, g).iter().map(|i| i.label).collect::<Vec<_>>();
     assert_eq!(shown(&SURFACE[0]), ["Create Sketch", "Patch", "Extrude", "Revolve", "Sweep"]);
     assert_eq!(shown(&SURFACE[1]), ["Stitch", "Unstitch", "Trim", "Extend"]);
-    for it in quick_items(&prefs, Tab::Surface, &SURFACE[0]).iter().skip(1).chain(&quick_items(&prefs, Tab::Surface, &SURFACE[1])) {
+    let modify = quick_items(&prefs, Tab::Surface, &SURFACE[1]);
+    for it in quick_items(&prefs, Tab::Surface, &SURFACE[0]).iter().skip(1).chain(&modify) {
       assert_eq!(it.tint, Tint::Orange, "{}", it.label);
     }
   }

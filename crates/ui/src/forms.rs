@@ -1253,6 +1253,9 @@ pub static PATCH: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Patch's boundary pick
+// (batch ui-surface-create-dialogs)
+#[allow(dead_code)]
 pub static PATCH_SKETCH: Form = Form {
   title: "PATCH",
   name: "Patch (Sketch)",
@@ -2317,6 +2320,9 @@ pub static UNTRIM: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Trim's Trim Tool pick
+// (batch ui-surface-modify-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static TRIM_BODY: Form = Form {
   title: "TRIM",
   name: "Trim with Body",
@@ -2333,6 +2339,9 @@ pub static TRIM_BODY: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Trim's Trim Tool pick
+// (batch ui-surface-modify-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static TRIM_SKETCH: Form = Form {
   title: "TRIM",
   name: "Trim with Sketch",
@@ -2382,6 +2391,9 @@ pub static REPLACE_FACE: Form = Form {
   picks_model: true,
 };
 
+// not on the SURFACE menus, as in Fusion: to fold into Offset's Offset Type
+// (batch ui-surface-create-dialogs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub static VARIABLE_OFFSET: Form = Form {
   title: "OFFSET",
   name: "Variable Offset",
