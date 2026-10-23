@@ -12,9 +12,13 @@ side-by-side of sketch, rectangle, extrude, fillet and a timeline edit in a new 
 `ui:sketch:rectangle-heads-up-layout`; `ui:manip:value-box-covers-arrow`). Report
 `parity/reports/2026-10-23-workflow-side-by-side.md`. New wave-46 batches, all `ready` with no fixer
 (keys in `map-wave46.json`): `ui-workflow-dialogs-1` (5, P1), `ui-workflow-sketch-1` (5),
-`ui-workflow-chrome-1` (3).
+`ui-workflow-chrome-1` (3). Late: `ui-legacy-leftovers` merged during the pass (3f4db5c); rebuilt at
+`cc41b56d`: `no-phantom-saves`, `context-menus:sketch-curve`, `undo-history` verified;
+`ui:browser:drag-reorder` (needs a component) and `ui:insert:canvas-calibrate` (needs an image) left
+`fixing-merged` for the next verifier; 2 more new rows (`ui:sketch:escape-ends-line-chain` P1 into
+`ui-workflow-sketch-1`, now 6; `ui:data:recent-dates-local-time` into `ui-workflow-chrome-1`, now 4).
 
-Next verifier: re-check what the wave-42..46 fixers mark `fixing-merged`; with fewer than five waiting,
+Next verifier: first `ui:browser:drag-reorder` and `ui:insert:canvas-calibrate`, then re-check what the wave-42..46 fixers mark `fixing-merged`; with fewer than five waiting,
 continue the workflow side-by-side (revolve, chamfer, shell, arrow drags, Edit Sketch from the browser,
 undo names, marking menus on the results), or take the ASSEMBLY row in `coverage.md`.
 
@@ -22,7 +26,7 @@ Where the documents stand: Fusion at x 0..1215 on "Untitled*(4)" (mm, never save
 rectangle), Extrude1 (now 15 mm), Fillet1 (2 mm, top front edge), Sketch2 on the top face with two 8 mm
 circles; tabs Untitled*(1), Untitled(2) (Assembly Design), Untitled*(3) untouched. FissionOxide
 (`4e1c9667`, PID 13788) at x 0..1215, 705 screenshot px tall (a bottom-edge drag would not resize it),
-Data Panel closed, one tab "Untitled*" (mm): Sketch1, Extrude1 (15 mm), Fillet1 (2 mm).
+relaunched on `cc41b56d` (PID 11080) at x 18..1110 (right edge under the overlay: keep clicks left of 1040 screenshot px), Data Panel closed, one tab "Untitled*" (mm) with Sketch1 open (two lines). Fusion's Untitled*(4) has Sketch2 open for editing with an extra line.
 
 ## Earlier stop: 2026-10-23, 10:10, session "Open-row pass, verifier 8"
 

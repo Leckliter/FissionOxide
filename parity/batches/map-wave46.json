@@ -11,5 +11,7 @@
   "ui:chrome:assistant-side-tab": "ui-workflow-chrome-1",
   "ui:dialogs:extrude-auto-profile": "ui-workflow-dialogs-1",
   "ui:sketch:rectangle-heads-up-layout": "ui-workflow-sketch-1",
-  "ui:manip:value-box-covers-arrow": "ui-workflow-dialogs-1"
+  "ui:manip:value-box-covers-arrow": "ui-workflow-dialogs-1",
+  "ui:sketch:escape-ends-line-chain": "ui-workflow-sketch-1",
+  "ui:data:recent-dates-local-time": "ui-workflow-chrome-1"
 }

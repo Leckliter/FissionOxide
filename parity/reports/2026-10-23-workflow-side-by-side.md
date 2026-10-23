@@ -83,13 +83,29 @@ P2
 - FissionOxide's window did not take a bottom-edge resize drag (height stayed 705 screenshot px);
   not a Fusion parity item, not chased.
 
+## Late arrivals: ui-legacy-leftovers (3f4db5c, merged during the pass)
+
+Rebuilt at `cc41b56d` and checked its five keys:
+- verified `ui:chrome:no-phantom-saves` (My Recent Data lists only items saved before today; the
+  unsaved designs of verifiers 8 and 9 left nothing; `hub.json` last written 2026-10-22 21:45),
+  `ui:context-menus:sketch-curve` (list OK, Cancel, Normal/Construction X, Fix/UnFix, Dimension D,
+  Trim T, Create Selection Set, Find in Browser, Find in Window; Delete on the ring),
+  `ui:chrome:undo-history` ("Undo Line", "Undo Line", "Undo Create Sketch" with icons).
+- left `fixing-merged`: `ui:browser:drag-reorder` (needs a component and a body to drag) and
+  `ui:insert:canvas-calibrate` (needs an image file to insert).
+
+Two new rows from the same run: `ui:sketch:escape-ends-line-chain` (P1: Fusion's one Escape during a
+line chain ends the Line tool; FissionOxide stays at "Place first point" until a second Escape) and
+`ui:data:recent-dates-local-time` (the Data Panel cards print the save time in UTC; Fusion's cards not
+compared on screen).
+
 ## Batches (wave 46, `map-wave46.json`, all `ready`)
 
 | batch | items |
 |---|---|
 | ui-workflow-dialogs-1 (P1) | extrude-auto-profile, extrude-start-distance, fillet-before-pick, title-case-labels, value-box-covers-arrow |
-| ui-workflow-sketch-1 (P2) | axis-lines-in-sketch, entry-scale-grid-steps, heads-up-mm-decimals, rectangle-heads-up-layout, vertical-dimension-text |
-| ui-workflow-chrome-1 (P2) | folders-stay-collapsed, status-in-command-picks, assistant-side-tab |
+| ui-workflow-sketch-1 (P1) | escape-ends-line-chain, axis-lines-in-sketch, entry-scale-grid-steps, heads-up-mm-decimals, rectangle-heads-up-layout, vertical-dimension-text |
+| ui-workflow-chrome-1 (P2) | folders-stay-collapsed, status-in-command-picks, assistant-side-tab, recent-dates-local-time |
 
 ## Not covered
 

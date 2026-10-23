@@ -26,3 +26,8 @@ design in both apps. Every row is already in `parity/ui-features.jsonl` (do not 
 - Fusion: In FILLET the status bar stays empty while edges are only hovered, and reads "Edge" once one is picked.
 - FissionOxide: Hovering an edge in FILLET writes "1 Edge | Length : 40.00 mm", and the picked edge keeps that readout.
 - Start here: `crates/ui/src/panels.rs`
+
+- key: `ui:data:recent-dates-local-time` (P2)
+- Fusion: The Data Panel's item cards show the date and time of the save.
+- FissionOxide: The cards show the save time in UTC: Untitled saved 2026-10-22 12:39 local (file time, -05:00) reads "10/22/2026 5:39 PM", External1 saved 2026-10-22 21:45 local reads "10/23/2026 2:45 AM". Fusion's own cards were not compared on screen (no item with a known save time); the readout is off by the machine's UTC offset whatever Fusion shows.
+- Start here: `crates/ui/src/data_panel.rs:1142`

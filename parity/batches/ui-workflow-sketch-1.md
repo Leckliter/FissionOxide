@@ -40,3 +40,8 @@ today.
 - Fusion: A typed-size rectangle (first corner lower left, drawn to the upper right) gets its height dimension on the left side, on the first corner's vertical edge, with the value "30.00" rotated 90 degrees to read upward along the dimension line; the width "40.00" sits under the bottom edge.
 - FissionOxide: The height dimension goes on the right side and its value "30.00" is written horizontally beside the dimension line; the width sits under the bottom edge as in Fusion.
 - Start here: `crates/ui/src/viewport.rs`
+
+- key: `ui:sketch:escape-ends-line-chain` (P1)
+- Fusion: With the Line tool chaining (two clicks made, the rubber band following the pointer), one Escape ends the tool: the palette drops Feature Options and the pointer is back to selection.
+- FissionOxide: One Escape only ends the chain: the palette keeps Feature Options / Line, the prompt reads "Place first point" and the next click starts a new line; a second Escape ends the tool.
+- Start here: `crates/ui/src/viewport.rs`
