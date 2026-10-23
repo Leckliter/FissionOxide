@@ -1,5 +1,31 @@
 # Prober progress
 
+## Last stop: 2026-10-22, 22:10, session "Re-verification sweep, verifier 6"
+
+Built `main` at `dadbcad3` (no build fix needed), then `d2202676` after twelve merges arrived. Re-checked mesh 21,
+dialogs 18, navbar 3, sketch 1, render 2 and 4 singles: 35 verified, 14 reopened, 4 new rows (report
+`parity/reports/2026-10-22-reverify-mesh-dialogs-render.md`). The "Re-verification sweep" line in `coverage.md` is
+now `done`. New wave-42 batches, all `ready` with no fixer (keys in `map-wave42.json`): `ui-reverify-mesh-1` (5: the
+Preview row ce56bfa took off Remesh, Reduce, Smooth, Shell and mesh Combine; Remesh's melted preview (P1); Smooth's
+freeze), `ui-reverify-mesh-2` (5: Convert Mesh icons, Scale Mesh arrow, face-group pick outline, mesh menu greyed
+entries (new), mesh shading across sharp edges (new)), `ui-reverify-dialogs-6` (5: Mirror originals, Remove on a
+component, Chamfer status and start value, Measure into a dimension box, angle decimals (new)) and
+`ui-reverify-render-2` (3: applied appearance not drawn (P1, new), Texture Map Controls handles, environment
+background / Flatten Ground).
+
+Left `fixing-merged` (none checkable here): `ui:marking-menu:flick`, `ui:chrome:comments-expand`,
+`ui:sketch:vertical-on-horizontal-line`, `ui:timeline:feature-owner-component`. Next verifier: re-check whatever the
+wave-38..42 fixers mark `fixing-merged` after `d2202676` (several wave-38..41 batches are still `fixing` in
+`index.jsonl`), area by area; otherwise the next prober area is the ASSEMBLY row in `coverage.md` (needs two saved
+designs; never in Fusion's cloud).
+
+Where the documents stand: FissionOxide (`d2202676`) at x 0..728 (1456 frame) with the Data Panel closed, tabs
+"Untitled*" (lprism mesh) and "Untitled(1)*" (box, a sketch with two lines, Ground Plane Offset 20 mm with Adaptive
+off). STL test files are in `C:/Users/Leckliter/Documents/fox-mesh/` (lprism.stl, twoboxes.stl). Fusion is untouched
+apart from Convert Mesh opened and cancelled and the lprism menus opened on Untitled*(1) (now on its MESH tab).
+Trap: when FissionOxide stops responding Windows puts a ghost window in front and clicks are refused; open Fusion
+with open_application, Cancel its "Multiple instances" prompt, then click FissionOxide's taskbar button.
+
 ## Last stop: 2026-10-22, 21:20, session "Re-verification sweep, verifier 5"
 
 Rebuilt `main` at `c6232d9f` (built on Windows as is) and re-checked toolbar 9, shortcuts 10, documents 7,

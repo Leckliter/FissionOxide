@@ -655,3 +655,13 @@ reopened, 3 new rows (in-canvas render's black ground slab, the grey ground quad
 asks to save). Four wave-41 batches (`ui-reverify-render-1`, `ui-reverify-workspaces-1`,
 `ui-reverify-toolbar-1`, `ui-reverify-dialogs-5`); report `parity/reports/2026-10-22-reverify-toolbar-tabs.md`.
 38 keys remain fixing-merged: mesh 21, seven new dialogs merges, two render, eight singles.
+
+## 2026-10-22, verifier 6: re-verification sweep, mesh, dialogs, render and the singles
+Built `dadbcad3`, then `d2202676` after twelve more merges, and re-checked 53 keys with an inserted STL, a box,
+an Assembly Design and the RENDER workspace: 35 verified, 14 reopened, 4 new rows, 4 left (flick, comments on a
+saved design, Vertical on a horizontal line, component-owned features). The sweep line is done. Open: mesh
+dialogs lost their Preview row with ce56bfa, Remesh melts the prism, Smooth freezes on opening, Convert Mesh's
+extra icon, no Scale Mesh arrow, mesh menus and shading, Mirror originals, Remove on components, Chamfer status,
+Measure into a dimension box, angle decimals, an applied appearance not drawn (P1), texture handles, the
+environment background. Four wave-42 batches (`ui-reverify-mesh-1`, `ui-reverify-mesh-2`,
+`ui-reverify-dialogs-6`, `ui-reverify-render-2`); report `parity/reports/2026-10-22-reverify-mesh-dialogs-render.md`.
