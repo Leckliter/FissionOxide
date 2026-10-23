@@ -537,6 +537,36 @@ fn yes() -> bool {
   true
 }
 
+fn is_yes(b: &bool) -> bool {
+  *b
+}
+
+/// Split Face's Split Type: how sketch curves split the faces.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SplitFaceType {
+  /// Split with Surface: the curves swept along their sketch's normal.
+  #[default]
+  Surface,
+  /// Along Vector: the curves swept along a direction.
+  AlongVector,
+  /// Closest Point: each point of the curves dropped onto the nearest point of the faces.
+  ClosestPoint,
+}
+
+impl SplitFaceType {
+  fn is_surface(&self) -> bool {
+    *self == SplitFaceType::Surface
+  }
+}
+
+/// Sketch curves a Split Face splits with.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SplitCurves {
+  pub sketch: FeatureId,
+  pub curves: Vec<fox_sketch::CurveId>,
+}
+
 /// What an [`Attribute`] is attached to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1578,10 +1608,29 @@ pub enum FeatureKind {
     #[serde(default)]
     factors: Option<[String; 3]>,
   },
-  /// Splits faces along a plane; the body stays one piece.
+  /// Splits faces with splitting tools (a plane, faces of bodies or sketch curves); the body stays
+  /// one piece (Fusion's Split Face).
   SplitFace {
     faces: Vec<FaceRef>,
-    tool: PlaneRef,
+    /// A construction or origin plane to split with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool: Option<PlaneRef>,
+    /// Faces of bodies, flat or curved, to split with.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    surfaces: Vec<FaceRef>,
+    /// Sketch curves to split with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    curves: Option<SplitCurves>,
+    /// How curves split the faces (faces and planes always split with their surface).
+    #[serde(default, skip_serializing_if = "SplitFaceType::is_surface")]
+    split_type: SplitFaceType,
+    /// Along Vector's direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    direction: Option<AxisRef>,
+    /// Extend Splitting Tool: grow tool faces past their edges and lines past their ends until
+    /// they cross the faces.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    extend: bool,
   },
   /// Removes faces and heals the body around them (Simplify > Remove Faces).
   RemoveFaces {
@@ -2551,8 +2600,13 @@ impl FeatureKind {
       FeatureKind::PlaneBy { def } => def.depends_on(),
       FeatureKind::ConstructionAxis { def } => def.depends_on(),
       FeatureKind::ConstructionPoint { def } => def.depends_on(),
+      FeatureKind::SplitFace { tool, curves, direction, .. } => tool
+        .iter()
+        .flat_map(plane_dep)
+        .chain(curves.iter().map(|c| c.sketch))
+        .chain(direction.iter().flat_map(axis_dep))
+        .collect(),
       FeatureKind::Coil { plane, .. }
-      | FeatureKind::SplitFace { tool: plane, .. }
       | FeatureKind::Trim { tool: plane, .. }
       | FeatureKind::MeshPlaneCut { plane, .. } => plane_dep(plane),
       FeatureKind::Pipe { path_sketch, .. } => vec![*path_sketch],

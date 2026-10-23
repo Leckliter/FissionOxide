@@ -3306,6 +3306,21 @@ impl Dialog {
         ui.end_row();
         continue;
       }
+      // Replace with Primitives: Object type shows its icon; the Primitive Size group folds
+      if f.cmd == "replace_with_primitives" {
+        match input.key() {
+          "object_type" => {
+            ui.label(input.label());
+            let mut sel: &'static str = "bodies";
+            choice::combo(ui, "form-object-type", crate::forms::PRIMITIVE_OBJECTS, &mut sel, |_| Some(Icon::Body));
+            self.form.values[i] = json!(sel);
+            ui.end_row();
+            continue;
+          }
+          "offset" if !section_header(ui, egui::Id::new("primitive-size"), "Primitive Size") => continue,
+          _ => {}
+        }
+      }
       // Coil's and Pipe's Operation shows each value's icon, as Fusion's
       if let Input::Choice { key: "operation", label, options } = input
         && matches!(f.cmd, "coil.form" | "pipe.form")
@@ -7185,7 +7200,7 @@ mod tests {
     assert_eq!(d.rf_types(), ["hole", "chamfer", "extrude", "revolve", "other"]);
     d.rf_tick("all", true);
     assert_eq!(d.rf_types(), REMOVE_FEATURE_TYPES);
-    assert!(greyed(&REMOVE_FEATURES, "chamfer").is_some() && greyed(&REMOVE_FEATURES, "hole").is_none());
+    assert!(REMOVE_FEATURES.inputs.iter().all(|i| greyed(&REMOVE_FEATURES, i.key()).is_none()), "every type is live");
     let body = s.model.bodies[0].id;
     let mut d = form(&mut s, &REMOVE_FEATURES, vec![Sel::Body { body }], &[]);
     // picking the body applies nothing; the hole is found and Remove takes it off
@@ -7204,15 +7219,21 @@ mod tests {
     d.cancel(&mut s);
     assert!((s.model.bodies[0].shape.mass().unwrap().volume - after).abs() < 1e-9);
 
-    // Replace with Primitives: Bodies and the primitive; OK swaps the body for a box
+    // Replace with Primitives: Object type, Selection, Primitive Shape and the Primitive Size
+    // group, no Preview box; OK swaps the body for a box
     let mut s = Session::default();
     s.execute("cylinder", &json!({"radius": 5, "height": 20})).unwrap();
     let body = s.model.bodies[0].id;
+    let labels: Vec<&str> = REPLACE_PRIMITIVES.inputs.iter().map(Input::label).collect();
+    assert_eq!(labels, ["Object type", "Selection", "Primitive Shape", "Offset"]);
+    assert!(crate::forms::always_previews(&REPLACE_PRIMITIVES), "no Preview check box");
     let d = form(&mut s, &REPLACE_PRIMITIVES, vec![], &[]);
     assert!(!d.ok_enabled());
-    assert_eq!(d.prompt(false).as_deref(), Some("Select solid bodies"));
+    assert_eq!(d.prompt(false).as_deref(), Some("Select Bodies"));
+    assert_eq!((d.form.values[0].clone(), d.form.values[2].clone()), (json!("bodies"), json!("box")));
     let mut d = form(&mut s, &REPLACE_PRIMITIVES, vec![Sel::Body { body }], &[]);
-    assert_eq!(d.command().unwrap().0, "replace_with_primitives");
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, p["offset"].clone()), ("replace_with_primitives", json!("0 mm")));
     apply(&mut s, &mut d);
     assert_eq!(s.model.bodies.len(), 1);
     assert!((s.model.bodies[0].shape.mass().unwrap().volume - 2000.0).abs() < 1e-6);

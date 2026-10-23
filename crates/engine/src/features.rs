@@ -3,7 +3,7 @@
 
 use fox_kernel::glam::DVec3;
 use fox_model::construct::{AxisDef, CoilSection, LineRef, PipeSection, PlaneDef, PointDef, PointRef};
-use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
+use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef, SplitCurves, SplitFaceType};
 use fox_sketch::{CurveId, CurveKind};
 use serde_json::{Value, json};
 
@@ -163,17 +163,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       let center = if p.get("center").is_some() { req_vec3(p, "center")? } else { [0.0; 3] };
       add_feature(s, FeatureKind::Scale { bodies: body_sel(p), center, factor, factors })
     })(),
-    "split_face" => (|| {
-      // Fusion's Chain Selection: faces that continue the picked ones smoothly split too
-      let faces = if p.get("chain").and_then(Value::as_bool).unwrap_or(false) {
-        let picked = p.get("faces").and_then(Value::as_array).cloned().unwrap_or_default();
-        faces(s, &json!({"faces": crate::solid::tangent_faces(s, picked)}))?
-      } else {
-        faces(s, p)?
-      };
-      let tool = plane_ref(s, p.get("tool").or(p.get("plane")).ok_or(CmdError::new("missing 'tool' (a plane)"))?)?;
-      add_feature(s, FeatureKind::SplitFace { faces, tool })
-    })(),
+    "split_face" => split_face(s, p),
     "silhouette_split" => crate::silhouette::split(s, p),
     "remove_faces" => (|| {
       let faces = faces(s, p)?;
@@ -578,4 +568,70 @@ fn point(s: &mut Session, p: &Value) -> CmdResult {
     }
   };
   add_feature(s, FeatureKind::ConstructionPoint { def })
+}
+
+/// Split Face: faces split by a construction or origin plane, by faces of bodies (`{body,
+/// face}`), or by sketch curves (`{sketch, curve}`), one tool or a list; curves split with
+/// their surface (swept along their sketch's normal), along a vector or at the closest point.
+fn split_face(s: &mut Session, p: &Value) -> CmdResult {
+  // Fusion's Chain Selection: faces that continue the picked ones smoothly split too
+  let faces = if p.get("chain").and_then(Value::as_bool).unwrap_or(false) {
+    let picked = p.get("faces").and_then(Value::as_array).cloned().unwrap_or_default();
+    faces(s, &json!({"faces": crate::solid::tangent_faces(s, picked)}))?
+  } else {
+    faces(s, p)?
+  };
+  let tools = match p.get("tool").or(p.get("plane")) {
+    Some(Value::Array(a)) => a.clone(),
+    Some(v) => vec![v.clone()],
+    None => Vec::new(),
+  };
+  let (mut tool, mut surfaces, mut curves) = (None, Vec::new(), None::<SplitCurves>);
+  let mut add_curve = |sketch: FeatureId, c: CurveId| -> Result<(), CmdError> {
+    match &mut curves {
+      Some(sc) if sc.sketch != sketch => return Err(CmdError::new("the splitting curves must be in one sketch")),
+      Some(sc) => sc.curves.push(c),
+      None => curves = Some(SplitCurves { sketch, curves: vec![c] }),
+    }
+    Ok(())
+  };
+  for v in &tools {
+    if let (Some(sk), Some(c)) = (v.get("sketch").and_then(Value::as_u64), v.get("curve").and_then(Value::as_u64)) {
+      add_curve(FeatureId(sk as u32), CurveId(c as u32))?;
+    } else if v.get("body").is_some() && v.get("face").is_some() || v.get("point").is_some() {
+      surfaces.push(face_ref(s, v)?);
+    } else if tool.is_none() {
+      tool = Some(plane_ref(s, v)?);
+    } else {
+      return Err(CmdError::new("split with one plane at a time"));
+    }
+  }
+  if let Some(sk) = p.get("sketch").and_then(Value::as_u64) {
+    for c in ids(p, "curves") {
+      add_curve(FeatureId(sk as u32), CurveId(c))?;
+    }
+  }
+  if let Some(c) = &curves {
+    let Some(FeatureKind::Sketch { .. }) = s.design.feature(c.sketch).map(|f| &f.kind) else {
+      return Err(CmdError::new(format!("feature {} is not a sketch", c.sketch.0)));
+    };
+  }
+  if tool.is_none() && surfaces.is_empty() && curves.is_none() {
+    return Err(CmdError::new("missing 'tool' (a plane, faces or sketch curves)"));
+  }
+  let split_type = match opt_str(p, "split_type").unwrap_or("surface") {
+    "surface" => SplitFaceType::Surface,
+    "vector" | "along_vector" => SplitFaceType::AlongVector,
+    "closest" | "closest_point" => SplitFaceType::ClosestPoint,
+    o => return Err(CmdError::new(format!("unknown split_type '{o}' (surface, along_vector, closest_point)"))),
+  };
+  let direction = match p.get("direction") {
+    Some(d) if !d.is_null() => Some(axis_ref(s, d)?),
+    _ => None,
+  };
+  if split_type == SplitFaceType::AlongVector && curves.is_some() && direction.is_none() {
+    return Err(CmdError::new("Along Vector needs a 'direction' (x, y, z or an axis)"));
+  }
+  let extend = p.get("extend").and_then(Value::as_bool).unwrap_or(true);
+  add_feature(s, FeatureKind::SplitFace { faces, tool, surfaces, curves, split_type, direction, extend })
 }

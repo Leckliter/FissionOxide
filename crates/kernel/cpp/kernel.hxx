@@ -94,6 +94,8 @@ std::unique_ptr<Shape> thicken(const Shape &s, double d);
 std::unique_ptr<Shape> scale(const Shape &s, double cx, double cy, double cz, double sx, double sy, double sz);
 std::unique_ptr<Shape> remove_faces(const Shape &s, rust::Slice<const uint32_t> faces);
 std::unique_ptr<Shape> split_faces(const Shape &s, rust::Slice<const uint32_t> faces, const Shape &tool);
+std::unique_ptr<Shape> split_faces_by_edges(const Shape &s, const Shape &edges);
+rust::Vec<int32_t> face_edge_loops(const Shape &s);
 std::unique_ptr<Shape> patch(const Shape &boundary);
 EdgeData face_loops(const Shape &s, double deflection);
 std::unique_ptr<Shape> reversed(const Shape &s);

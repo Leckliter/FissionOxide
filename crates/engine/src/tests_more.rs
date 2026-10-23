@@ -1043,6 +1043,161 @@ fn replace_with_primitives_swaps_each_body_for_a_box_or_cylinder() {
   assert!(s.execute("replace_with_primitives", &json!({"bodies": [s.model.bodies[0].id.0], "shape": "cone"})).is_err());
 }
 
+/// A sketch on the plane `z` up (sketch x along world X) with the polylines `lines`, finished:
+/// the sketch's id and its curves'.
+fn lines_at(s: &mut Session, z: f64, lines: &[Value]) -> (u32, Vec<u32>) {
+  run(s, "sketch.create", json!({"plane": {"origin": [0, 0, z], "normal": [0, 0, 1], "x": [1, 0, 0]}}));
+  let sk = s.design.features.last().unwrap().id;
+  for pts in lines {
+    run(s, "sketch.line", json!({ "points": pts }));
+  }
+  run(s, "sketch.finish", json!({}));
+  (sk.0, s.design.sketch(sk).unwrap().curves.iter().map(|c| c.id.0).collect())
+}
+
+/// Did the command run, with its feature regenerating?
+fn works(s: &mut Session, cmd: &str, p: Value) -> bool {
+  s.execute(cmd, &p).is_ok_and(|v| v.get("error").is_none_or(Value::is_null))
+}
+
+/// Fusion's Split Face: a face of another body splits as its surface, extended across the face
+/// or (Extend Splitting Tool off) as it is; sketch curves split with their surface, along a
+/// vector or at the closest point, and lines that stop short reach the edges when extended.
+#[test]
+fn split_face_with_surfaces_and_curves_by_each_split_type() {
+  let top = json!([{"point": [15, 15, 10]}]);
+  let faces = |s: &Session| s.model.bodies[0].faces().len();
+  let fresh = || {
+    let mut s = Session::default();
+    block(&mut s, 30.0, 30.0, 10.0);
+    s
+  };
+  // a face of another body standing off the block, square to the top along x = 10
+  let mut s = fresh();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10, 40], "corner2": [20, 50]}));
+  run(&mut s, "extrude", json!({"distance": 10, "operation": "new_body"}));
+  let wall = json!({"point": [10, 45, 5]});
+  let n = faces(&s);
+  assert!(!works(&mut s, "split_face", json!({"faces": top, "tool": [wall], "extend": false})), "it doesn't reach");
+  s.undo();
+  run(&mut s, "split_face", json!({"faces": top, "tool": [wall]}));
+  assert_eq!(faces(&s), n + 1);
+  assert_eq!(s.model.bodies.len(), 2, "the block stays one body");
+
+  // a sketch line above the top, across it
+  let across = || json!([[10, -10], [10, 40]]);
+  for (how, dir, splits) in [
+    ("surface", Value::Null, true),
+    ("along_vector", json!("z"), true),
+    // swept along x the line's sheet lies flat above the top
+    ("along_vector", json!("x"), false),
+  ] {
+    let mut s = fresh();
+    let (sk, c) = lines_at(&mut s, 20.0, &[across()]);
+    let tool = json!([{"sketch": sk, "curve": c[0]}]);
+    let p = json!({"faces": top, "tool": tool, "split_type": how, "direction": dir});
+    assert_eq!(works(&mut s, "split_face", p), splits, "{how} {dir}");
+    if splits {
+      assert_eq!(faces(&s), 7, "{how}");
+      assert!((volume(&s) - 9000.0).abs() < 1e-6);
+    }
+  }
+  // Along Vector with curves needs its direction
+  let mut s = fresh();
+  let (sk, c) = lines_at(&mut s, 20.0, &[across()]);
+  assert!(
+    s.execute(
+      "split_face",
+      &json!({"faces": top, "tool": [{"sketch": sk, "curve": c[0]}], "split_type": "along_vector"})
+    )
+    .is_err()
+  );
+
+  // a short line: as drawn it stops inside the top; extended it reaches the edges
+  let mut s = fresh();
+  let (sk, c) = lines_at(&mut s, 20.0, &[json!([[10, 10], [10, 20]])]);
+  let tool = json!([{"sketch": sk, "curve": c[0]}]);
+  assert!(!works(&mut s, "split_face", json!({"faces": top, "tool": tool, "extend": false})));
+  s.undo();
+  run(&mut s, "split_face", json!({"faces": top, "tool": tool}));
+  assert_eq!(faces(&s), 7);
+  // an L of two lines extends at its open ends only: the top splits in two, not three
+  let mut s = fresh();
+  let (sk, c) = lines_at(&mut s, 20.0, &[json!([[10, 5], [10, 20], [20, 20]])]);
+  let tool: Vec<Value> = c.iter().map(|c| json!({"sketch": sk, "curve": c})).collect();
+  run(&mut s, "split_face", json!({"faces": top, "tool": tool}));
+  assert_eq!(faces(&s), 7);
+
+  // Closest Point: a line from edge to edge, dropped onto the top
+  let mut s = fresh();
+  let (sk, c) = lines_at(&mut s, 20.0, &[json!([[10, 0], [10, 30]])]);
+  let tool = json!([{"sketch": sk, "curve": c[0]}]);
+  run(&mut s, "split_face", json!({"faces": top, "tool": tool, "split_type": "closest_point"}));
+  assert_eq!(faces(&s), 7);
+  assert!((volume(&s) - 9000.0).abs() < 1e-6);
+  // ... and it follows a saved design
+  let kind = &s.design.features.last().unwrap().kind;
+  let saved: fox_model::FeatureKind = serde_json::from_str(&serde_json::to_string(kind).unwrap()).unwrap();
+  assert_eq!(&saved, kind);
+
+  // a design saved before the tool could be faces or curves still reads
+  let old: fox_model::FeatureKind =
+    serde_json::from_value(json!({"type": "split_face", "faces": [], "tool": {"type": "origin", "plane": "yz"}}))
+      .unwrap_or_else(|e| panic!("{e}"));
+  let fox_model::FeatureKind::SplitFace { tool: Some(_), extend: true, split_type, .. } = old else {
+    panic!("{old:?}")
+  };
+  assert_eq!(split_type, fox_model::SplitFaceType::Surface);
+}
+
+/// Remove Features finds chamfers, extruded bosses and pockets, revolved bumps and other ones
+/// as well as fillets and holes, and removes the ticked types.
+#[test]
+fn remove_features_finds_chamfers_extrudes_revolves_and_others() {
+  let mut s = Session::default();
+  block(&mut s, 60.0, 40.0, 10.0);
+  let plain = volume(&s);
+  let on_top = json!({"origin": [0, 0, 10], "normal": [0, 0, 1], "x": [1, 0, 0]});
+  // a 2 mm chamfer on the front top edge
+  run(&mut s, "chamfer", json!({"edges": [{"point": [30, 0, 10]}], "distance": 2}));
+  // a square boss 5 tall and a square pocket 4 deep
+  run(&mut s, "sketch.create", json!({ "plane": on_top }));
+  run(&mut s, "sketch.rect", json!({"corner1": [5, 10], "corner2": [15, 20]}));
+  run(&mut s, "extrude", json!({"distance": 5, "operation": "join"}));
+  run(&mut s, "sketch.create", json!({ "plane": on_top }));
+  run(&mut s, "sketch.rect", json!({"corner1": [20, 10], "corner2": [30, 20]}));
+  run(&mut s, "extrude", json!({"distance": 4, "flip": true, "operation": "cut"}));
+  // a dome (half a ball standing on the top)
+  run(&mut s, "sphere", json!({"plane": on_top, "at": [45, 20], "radius": 4, "operation": "join"}));
+  // a wedge lying along x
+  run(&mut s, "sketch.create", json!({"plane": {"origin": [40, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]}}));
+  run(&mut s, "sketch.line", json!({"points": [[25, 10], [35, 10], [25, 16]], "closed": true}));
+  run(&mut s, "extrude", json!({"distance": 10, "operation": "join"}));
+  let b = s.model.bodies[0].id.0;
+  let found = run(&mut s, "remove_features", json!({"bodies": [b], "dry_run": true}))["features"].clone();
+  let count = |t: &str| found.as_array().unwrap().iter().filter(|f| f["type"] == t).count();
+  assert_eq!(["fillet", "hole", "chamfer", "extrude", "revolve", "other"].map(count), [0, 0, 1, 2, 1, 1], "{found}");
+  // the extrudes go: the boss's volume off, the pocket's back
+  let before = volume(&s);
+  run(&mut s, "remove_features", json!({"bodies": [b], "types": ["extrude"]}));
+  assert!((volume(&s) - (before - 500.0 + 400.0)).abs() < 1e-3, "{} {before}", volume(&s));
+  // then the rest: the block is whole again
+  run(&mut s, "remove_features", json!({"bodies": [b], "types": ["chamfer", "revolve", "other"]}));
+  assert!((volume(&s) - plain).abs() < 1e-3, "{} {plain}", volume(&s));
+  assert_eq!(s.model.bodies[0].faces().len(), 6);
+}
+
+/// Replace with Primitives' Primitive Size: the box stands `offset` off the body.
+#[test]
+fn replace_with_primitives_offsets_the_primitive() {
+  let mut s = Session::default();
+  block(&mut s, 10.0, 10.0, 4.0);
+  let b = s.model.bodies[0].id.0;
+  run(&mut s, "replace_with_primitives", json!({"bodies": [b], "offset": "1 mm", "object_type": "bodies"}));
+  assert!((volume(&s) - 12.0 * 12.0 * 6.0).abs() < 1e-6, "{}", volume(&s));
+}
+
 /// Fusion's Plane at Angle Offset row moves the plane along its normal (an older plane, with no
 /// offset, keeps its place); Point At Center takes a circular edge as well as a round face.
 #[test]

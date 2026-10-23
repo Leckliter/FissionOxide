@@ -406,20 +406,22 @@ mod tests {
   }
 
   /// SPLIT FACE: Fusion's rows (no preset plane), Faces to Split stays active, the tool is
-  /// picked once its chip is clicked; Split Type and Extend show greyed.
+  /// picked once its chip is clicked; Split Type and Extend are live, and Along Vector asks for
+  /// a direction.
   #[test]
   fn split_face_rows_and_tool_pick() {
     let f = &SPLIT_FACE;
     assert_eq!(
       labels(f),
-      ["Faces to Split", "Splitting Tool(s)", "Chain Selection", "Split Type", "Extend Splitting Tool"]
+      ["Faces to Split", "Splitting Tool(s)", "Chain Selection", "Split Type", "Direction", "Extend Splitting Tool"]
     );
     let mut app = two_boxes();
     let mut d = Dialog::open(&mut app, Kind::Form(f));
     frame(&mut d, &mut app);
-    assert!(d.form.values[1].is_null(), "no preset splitting tool");
+    assert!(d.form.values[1].as_array().is_some_and(Vec::is_empty), "no preset splitting tool");
     assert_eq!((d.form.values[2].clone(), d.form.values[3].clone()), (json!(true), json!("surface")));
-    assert!(crate::forms::greyed(f, "split_type").is_some() && crate::forms::greyed(f, "extend").is_some());
+    assert!(crate::forms::greyed(f, "split_type").is_none() && crate::forms::greyed(f, "extend").is_none());
+    assert!(!d.form.shown(f, 4), "Direction waits for Along Vector");
     assert_eq!(d.prompt(false).as_deref(), Some("Select Face to split"));
     let side = face(&app, 0, [1.0, 0.0, 0.0]);
     app.s.selection.push(side);
@@ -430,9 +432,62 @@ mod tests {
     assert_eq!(d.prompt(false).as_deref(), Some("Select splitting tool(s)"));
     let mut d = pick_origin(d, &mut app, OriginItem::Xz);
     frame(&mut d, &mut app);
-    assert_eq!(d.form.values[1], json!("xz"));
+    assert_eq!(d.form.values[1], json!(["xz"]));
     assert!(d.ok_enabled());
     let faces = app.s.model.bodies[0].faces().len();
+    d.preview(&mut app.s);
+    assert!(d.error.is_none(), "{:?}", d.error);
+    assert_eq!(app.s.model.bodies[0].faces().len(), faces + 1);
+  }
+
+  /// SPLIT FACE with sketch curves: a sketch line picked for the tool splits the face with its
+  /// surface; Along Vector waits for a direction; Extend Splitting Tool off leaves a line that
+  /// stops short of the edges unable to split.
+  #[test]
+  fn split_face_with_a_sketch_line() {
+    let f = &SPLIT_FACE;
+    let mut app = two_boxes();
+    // a line across the first box's top, 5 mm above it, and a short one inside it
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 25], "normal": [0, 0, 1], "x": [1, 0, 0]}})).unwrap();
+    let sk = app.s.design.features.last().unwrap().id;
+    app.run("sketch.line", json!({"points": [[0, -30], [0, 30]]})).unwrap();
+    app.run("sketch.line", json!({"points": [[5, -5], [5, 5]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let curves: Vec<_> = app.s.design.sketch(sk).unwrap().curves.iter().map(|c| c.id).collect();
+    let top = face(&app, 0, [0.0, 0.0, 1.0]);
+    let open = |app: &mut App, curve| {
+      app.s.selection.clear();
+      let mut d = Dialog::open(app, Kind::Form(f));
+      app.s.selection.push(top);
+      frame(&mut d, app);
+      d.form.row = 1;
+      app.s.selection.push(Sel::SketchCurve { sketch: sk, curve });
+      frame(&mut d, app);
+      d
+    };
+    let mut d = open(&mut app, curves[0]);
+    assert_eq!(d.form.values[1], json!([{"sketch": sk.0, "curve": curves[0].0}]));
+    assert!(d.ok_enabled());
+    let faces = app.s.model.bodies[0].faces().len();
+    d.preview(&mut app.s);
+    assert!(d.error.is_none(), "{:?}", d.error);
+    assert_eq!(app.s.model.bodies[0].faces().len(), faces + 1);
+    // Along Vector: OK waits for the direction, then Z splits as the surface did
+    d.form.values[3] = json!("vector");
+    assert!(d.form.shown(f, 4) && !d.ready());
+    assert_eq!(d.form.missing(f), Some("Select direction"));
+    d.form.values[4] = json!("z");
+    assert!(d.ready());
+    assert_eq!(d.command().unwrap().1["direction"], json!("z"));
+    d.cancel(&mut app.s);
+    assert_eq!(app.s.model.bodies[0].faces().len(), faces);
+    // the short line: extended it splits the top, as drawn it can't
+    let mut d = open(&mut app, curves[1]);
+    d.form.values[5] = json!(false);
+    d.preview(&mut app.s);
+    assert!(d.error.is_some(), "a line inside the face doesn't split it");
+    d.cancel(&mut app.s);
+    let mut d = open(&mut app, curves[1]);
     d.preview(&mut app.s);
     assert!(d.error.is_none(), "{:?}", d.error);
     assert_eq!(app.s.model.bodies[0].faces().len(), faces + 1);
