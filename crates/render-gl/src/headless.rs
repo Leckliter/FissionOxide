@@ -53,6 +53,16 @@ impl Headless {
     unsafe { glow::HasContext::finish(&self.gl) }
   }
 
+  /// Leaves the state egui's painter leaves for a paint callback, which the viewport draws in:
+  /// the scissor test on, clipped to `rect` (x, y, width, height in pixels).
+  pub fn scissor_like_egui(&self, rect: [i32; 4]) {
+    // SAFETY: as above.
+    unsafe {
+      glow::HasContext::enable(&self.gl, glow::SCISSOR_TEST);
+      glow::HasContext::scissor(&self.gl, rect[0], rect[1], rect[2], rect[3]);
+    }
+  }
+
   /// The driver's name for the renderer, e.g. `llvmpipe (LLVM 20.1.2, 256 bits)`.
   pub fn renderer_name(&self) -> String {
     // SAFETY: as above.

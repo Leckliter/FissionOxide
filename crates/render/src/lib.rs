@@ -795,6 +795,11 @@ impl Frame {
   }
 }
 
+/// Ground Shadow's layers, each a little wider than the one before, so its edge is soft.
+const GROUND_SHADOW_LAYERS: usize = 4;
+/// Each layer's opacity: where all of them overlap the shadow darkens the ground by about a fifth.
+const GROUND_SHADOW_ALPHA: u8 = 14;
+
 /// Display Settings ▸ Effects: a ground under the body surfaces (the meshes marked
 /// [`Mesh::analyze`]) at their lowest point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -803,7 +808,7 @@ pub struct Effects {
   pub ground_shadow: bool,
   /// The bodies mirrored under a glossy ground (Fusion's Ground Reflection).
   pub reflections: bool,
-  /// A see-through ground plane.
+  /// The ground the shadow and reflections lie on; not drawn itself, as in Fusion.
   pub ground_plane: bool,
   /// The environment's dome behind the model (see [`Post`]).
   #[serde(default)]
@@ -879,23 +884,36 @@ impl Effects {
         added.push(r);
       }
     }
-    if self.ground_plane || self.reflections {
+    // as in Fusion the ground plane itself isn't drawn: it is what the shadow and reflections lie
+    // on, and only the reflections give it a surface, nearly opaque so they read as a sheen
+    if self.reflections {
       let (c, e) = ((lo + hi) / 2.0, size * 1.5);
       let z = z0 - lift;
       let corners = vec![[c.x - e, c.y - e, z], [c.x + e, c.y - e, z], [c.x + e, c.y + e, z], [c.x - e, c.y + e, z]];
-      // over the reflections the ground is nearly opaque, so they read as a sheen
-      let color = if self.reflections { [222, 226, 232, 190] } else { [190, 196, 205, 100] };
-      added.push(flat(corners, vec![0, 1, 2, 0, 2, 3], color));
+      added.push(flat(corners, vec![0, 1, 2, 0, 2, 3], [222, 226, 232, 190]));
     }
     if self.ground_shadow {
       // the light leans a little, so a body's sides cast some shadow beside its footprint
       let [sx, sy] = SHADOW_LEAN;
       let hull = convex_hull(pts().map(|p| [p[0] + (p[2] - z0) * sx, p[1] + (p[2] - z0) * sy]).collect());
       if hull.len() >= 3 {
-        let z = z0 - lift * 0.5;
-        let positions: Vec<[f32; 3]> = hull.iter().map(|p| [p[0], p[1], z]).collect();
-        let indices = (1..hull.len() as u32 - 1).flat_map(|i| [0, i, i + 1]).collect();
-        added.push(flat(positions, indices, [40, 44, 52, 90]));
+        // a faint, soft shadow: layers of a light tint, each a little wider than the last
+        let n = hull.len() as f32;
+        let (cx, cy) = hull.iter().fold((0.0, 0.0), |(x, y), p| (x + p[0] / n, y + p[1] / n));
+        for k in 0..GROUND_SHADOW_LAYERS {
+          let grow = size * 0.025 * k as f32;
+          let z = z0 - lift * 0.5;
+          let positions: Vec<[f32; 3]> = hull
+            .iter()
+            .map(|p| {
+              let (dx, dy) = (p[0] - cx, p[1] - cy);
+              let r = (dx * dx + dy * dy).sqrt().max(1e-6);
+              [p[0] + dx / r * grow, p[1] + dy / r * grow, z]
+            })
+            .collect();
+          let indices = (1..hull.len() as u32 - 1).flat_map(|i| [0, i, i + 1]).collect();
+          added.push(flat(positions, indices, [40, 44, 52, GROUND_SHADOW_ALPHA]));
+        }
       }
     }
     scene.meshes.extend(added);
@@ -1875,18 +1893,22 @@ mod tests {
     let mut scene = base.clone();
     Effects { ground_shadow: true, reflections: true, ground_plane: true, ..Default::default() }.apply(&mut scene);
     let added = &scene.meshes[2..];
-    assert_eq!(added.len(), 3, "reflection, ground, shadow");
-    let (refl, ground, shadow) = (&added[0], &added[1], &added[2]);
+    assert_eq!(added.len(), 2 + GROUND_SHADOW_LAYERS, "reflection, the ground under it, the shadow's layers");
+    let (refl, ground, shadow) = (&added[0], &added[1], &added[2..]);
     // the lowest body point (z = 2) is the ground: the profile at z = -50 doesn't count
     assert!(ground.positions.iter().all(|p| (p[2] - 2.0).abs() < 0.1) && ground.transparent());
     assert!(refl.positions.iter().any(|p| p[2] < 0.0) && !refl.transparent() && refl.id == NO_ID);
-    assert!(shadow.transparent() && shadow.positions.iter().all(|p| p[2] > ground.positions[0][2]));
-    // the shadow is the square's outline: the inner point isn't on it
-    assert_eq!(shadow.positions.len(), 4);
-    assert_eq!(shadow.indices.len(), 6);
+    for s in shadow {
+      assert!(s.transparent() && s.positions.iter().all(|p| p[2] > ground.positions[0][2]));
+      // the shadow is the square's outline: the inner point isn't on it
+      assert_eq!((s.positions.len(), s.indices.len()), (4, 6));
+    }
+    // each layer a little wider than the last: a soft edge
+    let width = |m: &Mesh| m.positions.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
+    assert!(shadow.windows(2).all(|w| width(&w[1]) > width(&w[0])));
     assert!(added.iter().all(|m| !m.analyze), "the effects aren't body surfaces");
 
-    // the shaded image shows the ground's tint beside the body
+    // as in Fusion the ground plane alone draws nothing beside the body; the shadow is faint
     let mut cam = Camera::default();
     cam.set_view(StandardView::Top);
     cam.distance = 100.0;
@@ -1894,9 +1916,20 @@ mod tests {
     plain.meshes.truncate(1);
     let mut grounded = plain.clone();
     Effects { ground_plane: true, ..Default::default() }.apply(&mut grounded);
-    let at = |f: &Frame| f.rgba[(50 * 200 + 60) * 4];
-    assert_eq!(at(&render(&plain, &cam, 200, 100)), 255);
-    assert!(at(&render(&grounded, &cam, 200, 100)) < 250);
+    assert_eq!(grounded.meshes.len(), 1);
+    let at = |f: &Frame, x: usize, y: usize| f.rgba[(y * 200 + x) * 4];
+    assert_eq!(at(&render(&grounded, &cam, 200, 100), 60, 50), 255);
+    let mut shadowed = plain.clone();
+    Effects { ground_plane: true, ground_shadow: true, ..Default::default() }.apply(&mut shadowed);
+    let f = render(&shadowed, &cam, 200, 100);
+    // the grey pixels (not the red body)
+    let darkest = (0..200 * 100)
+      .map(|i| &f.rgba[i * 4..i * 4 + 3])
+      .filter(|c| c[0].abs_diff(c[1]) < 12)
+      .map(|c| c[0])
+      .min()
+      .unwrap();
+    assert!((190..250).contains(&darkest), "a faint shadow, not a dark one: {darkest}");
   }
 
   #[test]

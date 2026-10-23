@@ -35,8 +35,10 @@ pub struct Look<'a> {
 /// Largest environment texture width uploaded.
 const ENV_WIDTH: u32 = 512;
 const SHADOW_SIZE: i32 = 2048;
-/// How dark the ground's shadow gets (as in the path tracer).
-const SHADOW_STRENGTH: f32 = 0.85;
+/// How dark the ground's shadow gets. The path tracer darkens a ground point by 0.85 for each of
+/// the environment's light directions the model blocks; this map holds only the key light's, so it
+/// takes about the part of the light that comes from there, for the same soft grey shadow.
+const SHADOW_STRENGTH: f32 = 0.5;
 
 const PBR_VS: &str = r#"
 uniform mat4 u_vp;
@@ -630,6 +632,12 @@ impl Pbr {
       gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
       gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
       gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+      // egui's paint callback leaves its scissor on: clipped to it, the clear would leave most of
+      // the map as whatever the driver had there (zero depth on some, all ground in shadow)
+      gl.disable(glow::SCISSOR_TEST);
+      gl.disable(glow::BLEND);
+      gl.disable(glow::CULL_FACE);
+      gl.color_mask(true, true, true, true);
       gl.enable(glow::DEPTH_TEST);
       gl.depth_func(glow::LESS);
       gl.depth_mask(true);

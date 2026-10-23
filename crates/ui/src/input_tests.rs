@@ -3014,6 +3014,19 @@ fn scene_settings_is_a_docked_dialog_with_two_tabs() {
     assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
   }
   assert!(t.iter().any(|x| x == "Viewport aspect ratio") && t.iter().any(|x| x == "Restore Defaults"));
+  // Fusion's default camera reads 90 mm
+  assert!(t.iter().any(|x| x == "90") && t.iter().any(|x| x == " mm"), "{t:?}");
+  // Position is only the move icon, without a degrees field; dragging the icon turns the light
+  assert!(!t.iter().any(|x| x.contains("deg")), "{t:?}");
+  let position = h.find(vec![], "Position").unwrap();
+  let background = h.find(vec![], "Background").unwrap();
+  let solid = h.find(vec![], "Solid Color").unwrap();
+  assert!((position.top() - background.top()).abs() > 10.0);
+  let icon = egui::pos2(solid.left() + 4.0, position.center().y);
+  let before = h.app.render.environment(&h.app.s.design.render.environment).rotation;
+  h.drag(icon, icon + vec2(40.0, 0.0));
+  let after = h.app.render.environment(&h.app.s.design.render.environment).rotation;
+  assert!((after - before).abs() > 10.0, "{before} -> {after}");
   // docked at the right, like a command dialog
   let title = h.find(vec![], "SCENE SETTINGS").unwrap();
   assert!(title.left() > h.app.canvas.center().x, "{title:?}");
@@ -3033,6 +3046,44 @@ fn scene_settings_is_a_docked_dialog_with_two_tabs() {
   let close = h.find(vec![], "Close").unwrap();
   h.move_then_click(close.center());
   assert!(!h.app.render.scene_open);
+}
+
+/// `ui:render:design-ground-look`: with the default effects (Ground Plane and Ground Shadow on) a
+/// body in the DESIGN workspace sits on the plain canvas, as in Fusion: no ground quad around it,
+/// at most a faint shadow, and a click on the canvas beside it clears the selection.
+#[test]
+fn the_design_canvas_draws_no_ground_plane() {
+  use fox_engine::kernel::glam::DVec3;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+  h.settle();
+  assert_eq!(h.app.effects, crate::navbar::default_effects());
+  assert!(h.app.effects.ground_plane && h.app.effects.ground_shadow);
+  let (lo, _) = h.app.s.model.bounds().unwrap();
+  // beside the box, away from where the shadow leans, inside where a ground plane would reach
+  let beside = DVec3::new(lo.x - 12.0, lo.y - 12.0, lo.z);
+  let opts = crate::viewport::scene_options(&mut h.app);
+  let (bare, _) = h.app.scene.build(&h.app.s, &opts);
+  let mut dressed = bare.clone();
+  crate::navbar::dress(&h.app, &mut dressed);
+  let [w, ht] = h.app.canvas_px;
+  let (x, y, _) = h.app.cam.project(beside, w, ht).unwrap();
+  let px = |s: &fox_engine::render::Scene| {
+    let f = fox_engine::render::render(s, &h.app.cam, w, ht);
+    let i = (y as usize * w as usize + x as usize) * 4;
+    [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2]]
+  };
+  let mut plain = dressed.clone();
+  plain.meshes.truncate(bare.meshes.len());
+  assert_eq!(px(&dressed), px(&plain), "nothing drawn on the canvas beside the body");
+  // the shadow is faint: no effect mesh is more than lightly tinted
+  assert!(dressed.meshes[bare.meshes.len()..].iter().all(|m| m.color[3] < 40));
+  // a click beside the body clears the selection
+  let body = h.app.s.model.bodies[0].id;
+  h.app.s.selection = vec![fox_engine::Sel::Body { body }];
+  let at = h.screen(beside);
+  h.move_then_click(at);
+  assert!(h.app.s.selection.is_empty(), "{:?}", h.app.s.selection);
 }
 
 /// `ui:render:in-canvas-progress`: In-canvas Render hides sketches and planes and shows its

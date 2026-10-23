@@ -38,17 +38,23 @@ pub(crate) const LUX: f32 = 1000.0;
 /// giving a darker picture as on a real camera.
 pub(crate) const EV0: f32 = 9.5;
 
-/// The frame height that focal lengths are measured against (35 mm film).
-const FRAME_H: f64 = 24.0;
+/// The focal length Fusion's Scene Settings shows for the default camera.
+const DEFAULT_FOCAL: f64 = 90.0;
+
+/// Half the frame height that focal lengths are measured against: the one that makes the default
+/// camera's field of view read [`DEFAULT_FOCAL`].
+fn frame_half() -> f64 {
+  DEFAULT_FOCAL * (RenderCamera::default().view.fov / 2.0).tan()
+}
 
 /// The focal length (mm) of a vertical field of view (radians).
 pub(crate) fn focal_length(fov: f64) -> f64 {
-  FRAME_H / 2.0 / (fov / 2.0).tan()
+  frame_half() / (fov / 2.0).tan()
 }
 
 /// The vertical field of view (radians) of a focal length (mm).
 pub(crate) fn fov_of(focal: f64) -> f64 {
-  2.0 * (FRAME_H / 2.0 / focal).atan()
+  2.0 * (frame_half() / focal).atan()
 }
 
 /// The environment's name as the library lists it, or the custom image's file name.
@@ -198,10 +204,13 @@ fn settings_tab(
       }
       ui.end_row();
       ui.label("Position");
-      ui.horizontal(|ui| {
-        icons::icon_button(ui, Icon::Move, 22.0, "Turns the environment about the vertical", false, None);
-        ui.add(egui::DragValue::new(&mut env.rotation).range(0.0..=360.0).speed(1.0).suffix(" deg"));
-      });
+      // only the move icon, as in Fusion: dragging it turns the environment about the vertical
+      let icon =
+        icons::icon_button(ui, Icon::Move, 22.0, "Drag to turn the environment about the vertical", false, None);
+      let turn = ui.interact(icon.rect, icon.id.with("turn"), egui::Sense::drag());
+      if turn.dragged() {
+        env.rotation = (env.rotation + turn.drag_delta().x).rem_euclid(360.0);
+      }
       ui.end_row();
       ui.label("Background");
       egui::ComboBox::from_id_salt("scene-bg").selected_text(background_name(env.background)).width(150.0).show_ui(

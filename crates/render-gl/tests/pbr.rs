@@ -145,3 +145,57 @@ fn preview_resembles_the_path_traced_render() {
   let plain = r.read_rgba(gl).unwrap();
   assert_eq!(&plain[0..3], &[250, 250, 251]);
 }
+
+/// `ui:render:in-canvas-ground-slab`: In-canvas Render on a new design's scene (Solid Color grey)
+/// draws an empty design as plain grey and a body on that grey with a soft shadow, even though
+/// the viewport draws inside egui's paint callback, which leaves its scissor test on.
+#[test]
+fn the_ground_is_the_background_not_a_dark_slab() {
+  let Ok(h) = fox_render_gl::headless::context() else {
+    eprintln!("skipped: no OpenGL context");
+    return;
+  };
+  let gl = &h.gl;
+  let Ok(mut r) = Renderer::new(gl) else { return };
+  let environment = Environment::new_design();
+  let grey = environment.background_color;
+  let env = EnvMap::build(&environment).unwrap();
+  let camera = RenderCamera::default();
+  let (w, hgt) = (160, 100);
+  let cam = Camera { distance: 300.0, ..Camera::default() };
+  for body in [false, true] {
+    let mut scene = Scene::default();
+    let mut materials = Vec::new();
+    let mut bounds = ([-50.0; 3], [50.0; 3]);
+    if body {
+      scene.meshes.push(sphere([0.0, 0.0, 10.0], 10.0, 5).0);
+      materials.push(Some(Material::default()));
+      bounds = ([-10.0, -10.0, 0.0], [10.0, 10.0, 20.0]);
+    }
+    let origins = vec![[0.0; 3]; materials.len()];
+    r.set_scene(gl, &scene, false).unwrap();
+    let look = Look {
+      env: &env,
+      environment: &environment,
+      camera: &camera,
+      materials: &materials,
+      origins: &origins,
+      bounds,
+      lights: &[],
+    };
+    r.set_look(gl, Some(&look)).unwrap();
+    h.scissor_like_egui([10, 10, 100, 60]);
+    r.draw(gl, &cam, w, hgt).unwrap();
+    let gpu = r.read_rgba(gl).unwrap();
+    let ids = r.read_ids(gl).unwrap();
+    let ground: Vec<&[u8]> = gpu.chunks(4).zip(&ids.ids).filter(|(_, id)| **id == 0).map(|(c, _)| &c[..3]).collect();
+    if !body {
+      assert!(ground.iter().all(|c| *c == grey), "an empty design is plain grey");
+      continue;
+    }
+    let plain = ground.iter().filter(|c| **c == grey).count();
+    assert!(plain * 10 > ground.len() * 9, "the ground away from the body is the background");
+    let darkest = ground.iter().map(|c| c[0]).min().unwrap();
+    assert!(darkest > 80, "a soft grey shadow, not a black one: {darkest}");
+  }
+}
