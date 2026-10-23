@@ -96,6 +96,8 @@ fn chamfer_corner_type_and_prompt() {
     assert_eq!(d.prompt(hovering).as_deref(), Some("Specify chamfer distance"));
   }
   assert!(d.command().unwrap().1.get("corner").is_none(), "Chamfer is the default");
+  // (Chamfer starts at 0.00, which previews nothing)
+  d.radius = "1 mm".into();
   d.solid.chamfer_corner = "miter";
   d.dirty = true;
   assert_eq!(d.command().unwrap().1["corner"], "miter");

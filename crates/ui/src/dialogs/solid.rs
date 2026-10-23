@@ -586,6 +586,12 @@ impl Dialog {
     if self.solid.no_chain { picked } else { super::with_tangent_chain(s, &picked) }
   }
 
+  /// The status bar while Chamfer has edges picked with Tangent Chain on: "Chain", as Fusion
+  /// reads it out.
+  pub(super) fn chamfer_status(&self) -> Option<&'static str> {
+    (self.kind == super::Kind::Chamfer && !self.edges.is_empty() && !self.solid.no_chain).then_some("Chain")
+  }
+
   /// Fusion's Chamfer dialog: the selection-set table (the edges with their distances, + and ✕),
   /// Type, the Edges chip, Tangent Chain and Corner Type.
   pub(super) fn chamfer_rows(&mut self, app: &mut App, ui: &mut egui::Ui, creating: bool) {

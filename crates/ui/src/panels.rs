@@ -1972,7 +1972,9 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
       Some(true) => format!("{label}  (flexible)"),
       _ => label,
     };
-    let selected = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
+    // (an empty component REMOVE picked is lit too)
+    let selected = (!bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b })))
+      || app.dialog.as_ref().is_some_and(|d| d.removes_component(cid));
     let row = id.with(cid);
     let ev = tree_row(ui, row, 2 + depth, Some(false), None, Icon::Component, &label, selected, theme::TEXT);
     let target = RenameTarget::Component(cid);
@@ -1980,7 +1982,11 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
     if ev.double_clicked {
       browser_edit::begin(ui, row, target, &name);
     } else if ev.clicked {
-      app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
+      // REMOVE picks an empty component as itself; otherwise the row picks its bodies
+      let s = &app.s;
+      if !app.dialog.as_mut().is_some_and(|d| d.take_remove_component(s, cid)) {
+        app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
+      }
     }
     let now = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
     browser_edit::slow_click_due(ui, row, now);

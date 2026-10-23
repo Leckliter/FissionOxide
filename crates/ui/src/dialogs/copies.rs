@@ -93,6 +93,31 @@ impl Dialog {
     if self.applied && copies { self.ghosts.clone() } else { Vec::new() }
   }
 
+  /// Mirror's and the patterns' picked bodies stay selected, so they draw blue beside the grey
+  /// ghosts the whole time, as Fusion keeps them: when the selection has lost all of them (an
+  /// undo withdrawing the preview clears it), they are put back.
+  pub(super) fn keep_originals_selected(&self, s: &mut Session) {
+    let bodies = match self.kind {
+      Kind::Mirror => self.choice != "features",
+      Kind::CircPattern => true,
+      Kind::RectPattern => self.pattern_kind() == "bodies",
+      _ => false,
+    };
+    if !bodies || self.picks_fixed() {
+      return;
+    }
+    let picked: Vec<Sel> = self
+      .bodies
+      .iter()
+      .map(|b| BodyId(*b))
+      .filter(|b| s.model.body(*b).is_some())
+      .map(|body| Sel::Body { body })
+      .collect();
+    if !picked.is_empty() && !picked.iter().any(|x| s.selection.contains(x)) {
+      s.selection.extend(picked);
+    }
+  }
+
   /// The origin plane Mirror mirrors about, drawn selected (blue) and shown while the dialog is
   /// open, as Fusion draws the picked plane.
   pub(crate) fn mirror_origin_plane(&self) -> Option<OriginItem> {
@@ -521,6 +546,19 @@ mod tests {
     frame(&ctx, &mut app, &mut d);
     assert_eq!(d.plane, json!({"body": cube.0, "face": top}));
     assert_eq!(d.bodies, vec![cube.0], "the plane's face doesn't add an object");
+    // re-previewed on the new plane, the original stays picked (blue); and when the selection
+    // loses it (an undo withdrawing the preview clears the selection) the next frame puts it
+    // back (ui:dialogs:copy-ghost-preview)
+    frame(&ctx, &mut app, &mut d);
+    assert!(d.applied && app.s.selection.contains(&Sel::Body { body: cube }), "{:?}", app.s.selection);
+    app.s.selection.clear();
+    frame(&ctx, &mut app, &mut d);
+    assert!(d.applied && d.bodies == vec![cube.0] && d.plane == json!({"body": cube.0, "face": top}));
+    assert!(app.s.selection.contains(&Sel::Body { body: cube }), "{:?}", app.s.selection);
+    let o = crate::viewport::scene_options(&mut app);
+    let (scene, _) = app.scene.build(&app.s, &o);
+    let blue = fox_engine::scene::SELECT_COLOR;
+    assert!(scene.meshes.iter().any(|m| m.color == blue), "the original draws blue");
     d.cancel(&mut app.s);
     assert_eq!(app.s.model.bodies.len(), 2);
   }

@@ -58,6 +58,16 @@ pub fn typed_angle(text: &str) -> String {
   }
 }
 
+/// An angle as Fusion's angle boxes show it: a plain number of degrees at the angular precision
+/// (`118 deg` → `118.0 deg`). An expression is kept as it is.
+pub fn shown_angle(text: &str) -> String {
+  let t = text.trim();
+  match t.strip_suffix("deg").map(str::trim).and_then(|n| n.parse::<f64>().ok()) {
+    Some(v) => format!("{v:.*} deg", angle_decimals()),
+    None => text.to_string(),
+  }
+}
+
 /// A dialog value box that took a length or an angle: when editing ends, a bare number typed in
 /// a length box means the design's unit and is pinned to it (`2` → `2 in`), and one typed in an
 /// angle box is degrees (`5` → `5.0 deg`), as Fusion fills in the unit. What the box takes is

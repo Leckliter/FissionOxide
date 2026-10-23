@@ -178,7 +178,7 @@ impl Dialog {
     let face = s.selection.iter().any(|x| matches!(x, Sel::Face { body, face } if is_planar(s, *body, *face)));
     self.solid.hp.single = face || self.sketch.is_none_or(|sk| free_points(s, sk) == 0);
     self.solid.hp.tap = "simple";
-    self.solid.hp.tip = "118 deg".into();
+    self.solid.hp.tip = "118.0 deg".into();
     // a face picked before Hole opened is taken (and previewed) at once
     self.solid.hp.face_at = self.face_at(s);
   }
@@ -362,7 +362,7 @@ impl Dialog {
     // a flat bottom is a 180° tip
     let angle = |e: &str| fox_engine::expr::eval(e, fox_engine::expr::Kind::Angle, &s.model.params).ok();
     hp.flat = angle(tip_angle).zip(angle("180 deg")).is_some_and(|(a, f)| (a - f).abs() < 1e-9);
-    hp.tip = if hp.flat { "118 deg".into() } else { tip_angle.clone() };
+    hp.tip = crate::units::shown_angle(if hp.flat { "118 deg" } else { tip_angle });
     if !*placed {
       return;
     }

@@ -977,7 +977,6 @@ impl Dialog {
       // Fusion starts a fillet's radius and a shell's thickness at 0.00, previewing nothing until
       // a value is typed or the arrow dragged
       Kind::Fillet => d.radius = "0 mm".into(),
-      Kind::Chamfer => d.radius = "1 mm".into(),
       Kind::Shell => d.radius = "0 mm".into(),
       // Fusion's defaults for the values not drawn (0.10 in high, a 0.40 in sphere, a 0.20 in
       // tube); the drawing sets the rest
@@ -1011,7 +1010,7 @@ impl Dialog {
       }
       // Move turns by nothing until asked (the blank dialog's angle is a full turn)
       Kind::Move => {
-        d.angle = "0 deg".into();
+        d.angle = "0.0 deg".into();
         // in an open sketch the sketch objects move (as SKETCH > MODIFY > Move/Copy), unless
         // bodies are picked
         if s.edit_sketch.is_some() && (!sel_curves(s).is_empty() || sel_bodies(s).is_empty()) {
@@ -1285,9 +1284,13 @@ impl Dialog {
     if kind == Kind::PressPull {
       d.sync_press_owner(&app.s);
     }
-    // Fusion's Offset Face starts at 0.00 in the document unit, as do Move/Copy's distances
+    // Fusion's Offset Face starts at 0.00 in the document unit, as do Move/Copy's distances and
+    // Chamfer's ("1 Edge | 0.00 in | 0.00 in"), previewing nothing until a value is set
     if kind == Kind::OffsetFace {
       d.distance = d.unit.fixed(0.0, 2);
+    }
+    if kind == Kind::Chamfer {
+      d.radius = d.unit.fixed(0.0, 2);
     }
     if kind == Kind::Move {
       d.translate = std::array::from_fn(|_| d.unit.fixed(0.0, 2));
@@ -2184,6 +2187,8 @@ impl Dialog {
     }
     match self.kind {
       k if surface::is_surface(k) => self.surf_ready(),
+      // REMOVE with only an empty component picked (no bodies to pick it by)
+      Kind::Form(_) if self.is_remove() && !self.comps.is_empty() => true,
       Kind::Form(f) => self.form.missing(f).is_none(),
       Kind::Extrude => (self.sketch.is_some() && !self.profiles.is_empty()) || self.extrudes_faces(),
       // as Extrude: nothing revolves until a profile is picked (Fusion previews no region unasked)
@@ -2612,6 +2617,7 @@ impl Dialog {
   pub fn show(&mut self, app: &mut App, ctx: &egui::Context) -> bool {
     self.body_pick_priority(app);
     self.sync_selection(&app.s);
+    self.keep_originals_selected(&mut app.s);
     // an origin plane or axis picked in the browser: Mirror's plane, Circular Pattern's axis
     if let Some(item) = crate::origin::picked(app)
       && self.take_origin(item)
@@ -3100,8 +3106,8 @@ impl Dialog {
   }
 
   /// Is the dialog's value still at 0.00 (or half typed), where Fusion previews nothing and OK
-  /// waits: Sketch Offset's and Offset Face's distance, Draft's angle, a new fillet's radius or
-  /// shell's thickness.
+  /// waits: Sketch Offset's and Offset Face's distance, Draft's angle, a new fillet's radius,
+  /// chamfer's distance or shell's thickness.
   fn waits_for_value(&self) -> bool {
     match self.kind {
       Kind::SkOffset | Kind::OffsetFace => !self.offset_set(),
@@ -3112,6 +3118,7 @@ impl Dialog {
       Kind::Draft => !self.draft_angle_set(),
       Kind::Fillet if self.editing.is_none() && self.solid.fillet_type != "full_round" => !length_set(&self.radius),
       Kind::Shell if self.editing.is_none() => !length_set(&self.radius),
+      Kind::Chamfer if self.editing.is_none() => !length_set(&self.radius),
       Kind::Flange => self.flange_waits(),
       _ => false,
     }
@@ -3397,7 +3404,9 @@ impl Dialog {
         }
         Input::Bodies { label, .. } => {
           ui.label(*label);
-          let n = v.as_array().map(Vec::len).unwrap_or(0);
+          // REMOVE's empty components, picked from the browser, count with its bodies
+          let empty = self.removed_empty_components(s);
+          let n = v.as_array().map(Vec::len).unwrap_or(0) + empty.len();
           // Boundary Fill's tools: bodies and construction planes alike
           let planes = f
             .inputs
@@ -3415,6 +3424,9 @@ impl Dialog {
             0 => "Select".to_string(),
             // a mesh dialog's chip counts, as Fusion's "1 selected"
             1 if crate::forms::mesh_form(f) => "1 selected".to_string(),
+            1 if !empty.is_empty() => {
+              s.design.component(fox_engine::model::ComponentId(empty[0])).map(|c| c.name.clone()).unwrap_or_default()
+            }
             1 => v[0].as_u64().map(|b| s.body_name(BodyId(b as u32))).unwrap_or_default(),
             n => format!("{n} bodies"),
           };
@@ -8147,6 +8159,27 @@ mod tests {
     app.s.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
     assert_eq!(Dialog::open(&mut app, Kind::PressPull).kind, Kind::Extrude);
     assert_eq!(press_pull_kind(&Session::default()), Kind::PressPull);
+  }
+
+  /// `ui:dialogs:chamfer-fields-2`: Chamfer starts at 0.00 in the document unit, previewing
+  /// nothing and OK waiting until a distance is set; with an edge picked (Tangent Chain on) the
+  /// status bar reads "Chain".
+  #[test]
+  fn chamfer_starts_at_zero_and_reads_chain() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 20, "depth": 20, "height": 20}));
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    let b = app.s.model.bodies[0].id;
+    let e = app.s.model.bodies[0].edges()[0].id;
+    app.s.selection = vec![Sel::Edge { body: b, edge: e }];
+    let mut d = Dialog::open(&mut app, Kind::Chamfer);
+    assert_eq!(d.radius, "0.00 in");
+    assert!(!d.edges.is_empty() && !d.ok_enabled(), "0.00: OK waits");
+    assert_eq!(d.profile_status(&app.s).as_deref(), Some("Chain"));
+    d.radius = "0.04 in".into();
+    assert!(d.ok_enabled());
+    d.solid.no_chain = true;
+    assert_eq!(d.profile_status(&app.s), None, "Chain only with Tangent Chain on");
   }
 
   #[test]

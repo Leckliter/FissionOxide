@@ -93,7 +93,7 @@ impl Default for MoveForm {
       object: "bodies",
       mtype: "free",
       copy: false,
-      rotate: zeros("deg"),
+      rotate: zeros("deg").map(|z| crate::units::shown_angle(&z)),
       position: zeros("mm"),
       points: Vec::new(),
       sketch: None,
@@ -217,7 +217,7 @@ impl Dialog {
     self.mv.adds = true;
     self.mv.mtype = "free";
     self.translate = [0, 1, 2].map(|_| mm(self.unit, 0.0));
-    self.angle = "0 deg".into();
+    self.angle = "0.0 deg".into();
   }
 
   /// Edit Move: the stored move as one turn about a point and a shift after it,
@@ -907,7 +907,7 @@ impl Dialog {
           if sketch {
             for (i, l) in ANGLE.iter().enumerate() {
               if i < 2 {
-                Self::greyed_value(ui, l, "0 deg", FLAT);
+                Self::greyed_value(ui, l, "0.0 deg", FLAT);
               } else {
                 self.move_value(ui, l, (1, 2));
               }
@@ -1026,7 +1026,7 @@ mod tests {
     assert!(close(t.origin, p) && (t.angles[2] - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
     // the X ring then adds its own angle (the Z one stays)
     d.set_triad(&s, TriadEdit::Rotate(0, std::f64::consts::FRAC_PI_2));
-    assert_eq!(d.mv.rotate, ["90 deg", "0 deg", "90 deg"]);
+    assert_eq!(d.mv.rotate, ["90 deg", "0.0 deg", "90 deg"]);
     apply(&mut s, &mut d);
     let (lo, hi) = bbox(&s, 0);
     assert!(((hi - lo) - DVec3::new(30.0, 10.0, 20.0)).length() < 1e-6, "{lo:?} {hi:?}");
@@ -1043,7 +1043,7 @@ mod tests {
     let FeatureKind::Move { rotate: Some(r), pivot: Some(pv), copy: false, .. } = &f.kind else {
       panic!("{:?}", f.kind)
     };
-    assert_eq!(r, &["90 deg".to_string(), "0 deg".into(), "90 deg".into()]);
+    assert_eq!(r, &["90 deg".to_string(), "0.0 deg".into(), "90 deg".into()]);
     assert!(close(DVec3::from(*pv), c));
     let mut e = Dialog::blank(Kind::Move);
     e.load_move(&s, &f.kind);

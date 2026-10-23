@@ -1503,14 +1503,18 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     place_text_corner(app, view, pos);
     return;
   }
+  // Measure (from a dimension box's menu, say) picks what is clicked, whatever sketch tool is
+  // still active under it
+  let measuring = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::Inspect);
   // a constraint command picks the hovered point, curve or profile
   if let Tool::Constrain(kind) = app.tool
     && sketching
+    && !measuring
   {
     crate::constrain::click(app, kind);
     return;
   }
-  if !sketching || app.tool == Tool::Select {
+  if !sketching || app.tool == Tool::Select || measuring {
     // with a command dialog open, picks add to (or toggle out of) its selection, as in Fusion
     select_click(app, add || app.dialog.is_some() || app.sel_tool.is_some());
     // double-clicking an edge selects its loop
@@ -7443,11 +7447,12 @@ mod tests {
     let other = fox_engine::sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32);
     let ctx = egui::Context::default();
     let mut t = 0.0;
-    let mut frame = |app: &mut App| {
+    let mut events = |app: &mut App, events: Vec<egui::Event>| {
       t += 0.05;
       let input = egui::RawInput {
         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 800.0))),
         time: Some(t),
+        events,
         ..Default::default()
       };
       ctx.run_ui(input, |ui| app.draw(ui)).drop_without_applying_deltas();
@@ -7463,10 +7468,48 @@ mod tests {
       let mut d = app.dialog.take().expect("Measure is open");
       d.leave(app);
     };
+    // as the verifier did it: the Dimension tool is still active under MEASURE, and a click on
+    // the other line picks it for MEASURE (not for a new dimension); Close writes its length
+    measure(&mut app, true, Vec::new());
+    events(&mut app, Vec::new());
+    let c = app.canvas;
+    let view = View { rect: c, ppp: 1.0, w: c.width() as u32, h: c.height() as u32 };
+    // a point of the other line (not an end) clear of MEASURE's window, which grows downwards
+    // once it reads out what the pointer is over
+    // (the view pans until it is)
+    let window = ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog"))).expect("MEASURE shows");
+    let column = Rect::from_x_y_ranges(window.x_range(), window.top()..=c.bottom()).expand(10.0);
+    let mut at = None;
+    for _ in 0..20 {
+      at = view.to_screen(&app.cam, DVec3::new(5.0, 4.0, 0.0)).filter(|p| !column.contains(*p) && c.contains(*p));
+      if at.is_some() {
+        break;
+      }
+      app.cam.target[0] += app.cam.distance * 0.1;
+    }
+    let at = at.expect("the line shows beside MEASURE");
+    events(&mut app, Vec::new());
+    let press = |pressed| egui::Event::PointerButton {
+      pos: at,
+      button: egui::PointerButton::Primary,
+      pressed,
+      modifiers: Default::default(),
+    };
+    events(&mut app, vec![egui::Event::PointerMoved(at)]);
+    events(&mut app, vec![egui::Event::PointerMoved(at), press(true)]);
+    events(&mut app, vec![egui::Event::PointerMoved(at), press(false)]);
+    for _ in 0..3 {
+      events(&mut app, Vec::new());
+    }
+    assert_eq!(app.tool, Tool::Dimension);
+    assert_eq!(app.s.selection, [Sel::SketchCurve { sketch: sk, curve: other }]);
+    assert_eq!(app.tstate.measured, Some(10.0), "MEASURE reads the picked line, not the hover");
+    close(&mut app);
+    assert_eq!(app.dim_edit.as_ref().unwrap().1, "10 mm");
     // one sketch line: MEASURE reads its length, and Close writes it into the box
     measure(&mut app, true, vec![Sel::SketchCurve { sketch: sk, curve: line }]);
     for _ in 0..3 {
-      frame(&mut app);
+      events(&mut app, Vec::new());
     }
     assert_eq!(app.tstate.measured, Some(10.0), "MEASURE has a result");
     assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
@@ -7480,7 +7523,7 @@ mod tests {
       vec![Sel::SketchCurve { sketch: sk, curve: line }, Sel::SketchCurve { sketch: sk, curve: other }],
     );
     for _ in 0..3 {
-      frame(&mut app);
+      events(&mut app, Vec::new());
     }
     assert!(app.tstate.measured.is_some_and(|d| (d - 4.0).abs() < 1e-6), "{:?}", app.tstate.measured);
     assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
@@ -7489,7 +7532,7 @@ mod tests {
     // Measure from the toolbar doesn't touch it
     measure(&mut app, false, vec![Sel::SketchCurve { sketch: sk, curve: line }]);
     for _ in 0..3 {
-      frame(&mut app);
+      events(&mut app, Vec::new());
     }
     assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
     close(&mut app);

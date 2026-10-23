@@ -409,7 +409,7 @@ mod tests {
     assert_eq!((d.mv.object, d.mv.mtype, d.bodies.clone()), ("bodies", "free", vec![b.0]));
     // all six boxes start at zero
     assert_eq!(d.translate, ["0 mm", "0 mm", "0 mm"]);
-    assert_eq!(d.mv.rotate, ["0 deg", "0 deg", "0 deg"]);
+    assert_eq!(d.mv.rotate, ["0.0 deg", "0.0 deg", "0.0 deg"]);
     d.refresh_manip(&app.s);
     let t = d.triad(&app.s).expect("the triad on the body");
     assert!(close(t.origin, DVec3::new(10.0, 0.0, 5.0)), "{:?}", t.origin);

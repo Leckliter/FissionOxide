@@ -166,13 +166,19 @@ impl Dialog {
     let two_sides = self.extent == "two_sides";
     let ext = &mut self.solid.ext;
     if has_profile {
+      // an empty taper reads as Fusion's "0.0 deg", in the box's own colour rather than a grey hint
+      let ink = ui.visuals().text_color();
+      let shown = |t: &str| egui::RichText::new(t).color(ink);
       ui.label(if two_sides { "Taper angle 1" } else { "Taper angle" });
-      dirty |= ui.add(egui::TextEdit::singleline(&mut ext.taper).hint_text("0 deg").desired_width(140.0)).changed();
+      let zero = crate::units::shown_angle("0 deg");
+      dirty |=
+        ui.add(egui::TextEdit::singleline(&mut ext.taper).hint_text(shown(&zero)).desired_width(140.0)).changed();
       ui.end_row();
       if two_sides {
         ui.label("Taper angle 2");
-        let hint = if ext.taper.trim().is_empty() { "0 deg".to_string() } else { ext.taper.trim().to_string() };
-        dirty |= ui.add(egui::TextEdit::singleline(&mut ext.taper2).hint_text(hint).desired_width(140.0)).changed();
+        let hint = if ext.taper.trim().is_empty() { zero } else { ext.taper.trim().to_string() };
+        dirty |=
+          ui.add(egui::TextEdit::singleline(&mut ext.taper2).hint_text(shown(&hint)).desired_width(140.0)).changed();
         ui.end_row();
       }
     }
@@ -312,10 +318,13 @@ impl Dialog {
   }
 
   /// "N Profiles | Area : …" for the status bar while an extrude has profiles picked, in the
-  /// design's unit as Fusion shows it ("1 Profile | Area : 1.24 in^2"); Thread's face radius.
+  /// design's unit as Fusion shows it ("1 Profile | Area : 1.24 in^2"); Thread's face radius; Chamfer's "Chain".
   pub fn profile_status(&self, s: &Session) -> Option<String> {
     if let Some(t) = self.thread_status(s) {
       return Some(t);
+    }
+    if let Some(t) = self.chamfer_status() {
+      return Some(t.into());
     }
     if !matches!(self.kind, super::Kind::Extrude | super::Kind::Revolve) || self.profiles.is_empty() {
       return None;
