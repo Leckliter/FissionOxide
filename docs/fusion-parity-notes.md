@@ -674,3 +674,13 @@ not running their tool after the plane pick, the waiting OFFSET's Distance row, 
 from the canvas, surface Loft rails, Manufacture's navbar CAM icons. Four wave-44 batches
 (`ui-reverify-chrome-3`, `ui-reverify-shortcuts-1`, `ui-reverify-dialogs-7`, `ui-reverify-workspaces-2`);
 report `parity/reports/2026-10-23-reverify-incremental.md`.
+
+## 2026-10-23, verifier 8: open-row pass
+Built `6c5c8b6b`. Nothing checkable was waiting as fixing-merged, so the 13 open rows that had no batch were
+confirmed in both apps and batched, with Fusion's side recorded where it was missing: every unrecorded
+Preferences page, the mm length display (12.3456 shows "12.346", 10 shows "10.00"; FissionOxide "12.35"), Lights
+with its glyph, Lights folder and EDIT LIGHT, and MANAGE > Solid Holder's "Milling Tool Holder". Two new rows: 3D
+MOVE/COPY hides its value rows until a pick, and the dimension edit box tooltip is dark in Fusion.
+`reference_parts` passes on Windows (its failing rows are cloud-container only). Five wave-45 batches
+(`ui-reverify-prefs-1`, `ui-reverify-dialogs-8`, `ui-reverify-workspaces-3`, `ui-animation-actions-1`,
+`ui-kernel-tests-1`); report `parity/reports/2026-10-23-reverify-open-rows.md`.

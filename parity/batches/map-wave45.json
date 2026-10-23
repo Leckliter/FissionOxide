@@ -1,0 +1,17 @@
+{
+  "ui:chrome:unit-display-hide-trailing-zeroes": "ui-reverify-prefs-1",
+  "ui:chrome:preferences-unrecorded-pages": "ui-reverify-prefs-1",
+  "ui:dialogs:checkbox-label-column": "ui-reverify-dialogs-8",
+  "ui:surface:patch-interior-rails": "ui-reverify-dialogs-8",
+  "ui:render:light-editing": "ui-reverify-workspaces-3",
+  "ui:manufacture:solid-holder-submenu": "ui-reverify-workspaces-3",
+  "ui:manufacture:show-tool-on-cursor": "ui-reverify-workspaces-3",
+  "ui:animation:commands": "ui-animation-actions-1",
+  "ui:navbar:user-coordinate-systems": "ui-reverify-workspaces-3",
+  "ui:dialogs:chamfer-corner-geometry": "ui-kernel-tests-1",
+  "ui:sheet:butt-corner-relief-flat": "ui-kernel-tests-1",
+  "ui:sketch:text-reference-parts-font": "ui-kernel-tests-1",
+  "ui:sketch:reference-parts-other-failures": "ui-kernel-tests-1",
+  "ui:dialogs:move-rows-after-pick": "ui-reverify-dialogs-8",
+  "ui:sketch:dim-edit-tooltip-style": "ui-reverify-dialogs-8"
+}

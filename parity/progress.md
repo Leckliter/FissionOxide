@@ -1,6 +1,30 @@
 # Prober progress
 
-## Last stop: 2026-10-23, 09:45, session "Incremental re-verification, verifier 7"
+## Last stop: 2026-10-23, 10:10, session "Open-row pass, verifier 8"
+
+Built `main` at `6c5c8b6b` (no build fix needed). No checkable key was `fixing-merged` (the usual four are left:
+`ui:marking-menu:flick`, `ui:chrome:comments-expand`, `ui:sketch:vertical-on-horizontal-line`,
+`ui:timeline:feature-owner-component`) and no open mismatch had a `done` batch, so the pass took the 13 open rows
+with no batch: confirmed what could be confirmed in both apps, recorded Fusion's side where it was missing (all
+the unrecorded Preferences pages, the length display rule, Lights and EDIT LIGHT, the Solid Holder submenu), added
+2 new rows (3D MOVE/COPY rows before a pick, the dimension edit box tooltip style) and batched all 15 (report
+`parity/reports/2026-10-23-reverify-open-rows.md`). New wave-45 batches, all `ready` with no fixer (keys in
+`map-wave45.json`): `ui-reverify-prefs-1` (2), `ui-reverify-dialogs-8` (4), `ui-reverify-workspaces-3` (4),
+`ui-animation-actions-1` (1, P1), `ui-kernel-tests-1` (4). `reference_parts` passes on Windows; its rows are
+cloud-container failures.
+
+Next verifier: re-check whatever the wave-42..45 fixers mark `fixing-merged`; otherwise the next prober area is the
+ASSEMBLY row in `coverage.md` (needs two saved designs; never in Fusion's cloud; `ui:assemble:joint-glyphs` is
+`untested` there).
+
+Where the documents stand: Fusion at x 0..1215 on "Untitled*(1)" in DESIGN; "Untitled*" switched to mm (Set as
+default unticked) with Sketch6 (a 12.3 mm line); a light was placed and undone on "Untitled*(1)"; Preferences
+cancelled. FissionOxide (`6c5c8b6b`, PID 5756) at x 0..727 with the Data Panel closed, one tab "Untitled*" (mm):
+Sketch1 (a 10 mm dimensioned line, open for editing when the pass ended), Body1 (a 22.5 x 20.5 x 10 box), a light
+placed on Body1. Trap: `open_application` on FissionOxide starts a second instance; bring it forward from the
+taskbar instead.
+
+## Earlier stop: 2026-10-23, 09:45, session "Incremental re-verification, verifier 7"
 
 Built `main` at `905a4701` (no build fix needed) and re-checked the 36 checkable `fixing-merged` keys from
 the wave-38..42 fixers: 29 verified, 7 reopened, 1 new row (report
