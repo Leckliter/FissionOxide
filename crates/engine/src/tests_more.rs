@@ -65,6 +65,31 @@ fn measure_between_faces_and_selection_tools() {
   assert!((cm[0].as_f64().unwrap() - 20.0).abs() < 1e-6 && (cm[2].as_f64().unwrap() - 5.0).abs() < 1e-6, "{c}");
 }
 
+/// Measure takes sketch curves and sketch points while a sketch is open: a line reads as an edge
+/// with its length, two lines give the distance and angle between them.
+#[test]
+fn measure_sketch_curves_and_points() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  let sk = s.edit_sketch.unwrap().0;
+  let a = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}))["curves"][0].clone();
+  let b = run(&mut s, "sketch.line", json!({"points": [[0, 4], [10, 4]]}))["curves"][0].clone();
+  let curve = |c: &Value| json!({"type": "sketch_curve", "sketch": sk, "curve": c});
+  let one = run(&mut s, "measure", json!({"a": curve(&a)}));
+  assert_eq!(one["kind"], "edge", "{one}");
+  assert!((one["length"].as_f64().unwrap() - 10.0).abs() < 1e-9, "{one}");
+  let two = run(&mut s, "measure", json!({"a": curve(&a), "b": curve(&b)}));
+  assert!((two["distance"].as_f64().unwrap() - 4.0).abs() < 1e-6, "{two}");
+  assert!(two["angle_deg"].as_f64().unwrap().abs() < 1e-6, "parallel lines: {two}");
+  // a sketch point measures as a point in space (on the XZ plane)
+  let sketch = s.design.sketch(fox_model::FeatureId(sk)).unwrap();
+  let p = sketch.curve_points(fox_sketch::CurveId(b.as_u64().unwrap() as u32))[1];
+  let pt = run(&mut s, "measure", json!({"a": {"type": "sketch_point", "sketch": sk, "point": p.0}}));
+  assert_eq!(pt["kind"], "point", "{pt}");
+  let to = run(&mut s, "measure", json!({"a": curve(&a), "b": {"type": "sketch_point", "sketch": sk, "point": p.0}}));
+  assert!((to["distance"].as_f64().unwrap() - 4.0).abs() < 1e-6, "{to}");
+}
+
 #[test]
 fn construction_planes_axes_and_points() {
   let mut s = Session::default();
@@ -906,6 +931,38 @@ fn project_to_surface_drapes_curves_a_pipe_follows() {
   assert!(v["error"].is_string(), "{v}");
 }
 
+/// Fusion's Projection Link unticked: Project To Surface and Intersection Curve copy their curves
+/// into the sketch as plain 3D curves, with no timeline feature, in one undo step.
+#[test]
+fn unlinked_project_to_surface_and_intersection_curve_are_plain_sketch_curves() {
+  let mut s = Session::new(fox_model::Design::new("t"));
+  run(&mut s, "cylinder", json!({"radius": 10, "height": 30}));
+  let plane = json!({"origin": [20, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]});
+  run(&mut s, "sketch.create", json!({"plane": plane}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 15], "radius": 5}));
+  run(&mut s, "sketch.finish", json!({}));
+  let side = json!([{"point": [-10, 0, 5]}]);
+  let features = s.design.features.len();
+  let steps = s.undo_history().len();
+  let r = run(&mut s, "sketch.project_to_surface", json!({"sketch": 2, "faces": side, "associative": false}));
+  assert_eq!(s.design.features.len(), features, "no feature: {r}");
+  assert!(s.model.curves3d.is_empty());
+  assert_eq!(s.undo_history().len(), steps + 1, "one undo step");
+  let sk = s.design.sketch(fox_model::FeatureId(2)).unwrap();
+  let made: Vec<u32> = r["curves"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
+  assert!(!made.is_empty() && made.iter().all(|c| sk.curve3d(fox_sketch::CurveId(*c)).is_some()), "{r}");
+  // on the cylinder's side: every point 10 from its axis
+  for c in &sk.curves3d {
+    let fox_sketch::Curve3dKind::Polyline { points } = &c.kind else { panic!("{c:?}") };
+    assert!(points.iter().all(|p| (p[0].hypot(p[1]) - 10.0).abs() < 0.05), "{points:?}");
+  }
+  assert!(s.undo());
+  assert!(s.design.sketch(fox_model::FeatureId(2)).unwrap().curves3d.is_empty());
+  let r = run(&mut s, "sketch.intersection_curve", json!({"sketch": 2, "faces": side, "associative": false}));
+  assert_eq!(s.design.features.len(), features, "{r}");
+  assert!(!s.design.sketch(fox_model::FeatureId(2)).unwrap().curves3d.is_empty());
+}
+
 /// SELECT > Selection Tools: Select By Name (wildcards), Select By Size, Select By Boundary and
 /// Seed And Boundary.
 #[test]
@@ -1041,6 +1098,161 @@ fn replace_with_primitives_swaps_each_body_for_a_box_or_cylinder() {
   assert!((volume(&s) - std::f64::consts::PI * r2 * 4.0).abs() < 1e-3, "{}", volume(&s));
   assert!(s.execute("replace_with_primitives", &json!({"bodies": []})).is_err());
   assert!(s.execute("replace_with_primitives", &json!({"bodies": [s.model.bodies[0].id.0], "shape": "cone"})).is_err());
+}
+
+/// A sketch on the plane `z` up (sketch x along world X) with the polylines `lines`, finished:
+/// the sketch's id and its curves'.
+fn lines_at(s: &mut Session, z: f64, lines: &[Value]) -> (u32, Vec<u32>) {
+  run(s, "sketch.create", json!({"plane": {"origin": [0, 0, z], "normal": [0, 0, 1], "x": [1, 0, 0]}}));
+  let sk = s.design.features.last().unwrap().id;
+  for pts in lines {
+    run(s, "sketch.line", json!({ "points": pts }));
+  }
+  run(s, "sketch.finish", json!({}));
+  (sk.0, s.design.sketch(sk).unwrap().curves.iter().map(|c| c.id.0).collect())
+}
+
+/// Did the command run, with its feature regenerating?
+fn works(s: &mut Session, cmd: &str, p: Value) -> bool {
+  s.execute(cmd, &p).is_ok_and(|v| v.get("error").is_none_or(Value::is_null))
+}
+
+/// Fusion's Split Face: a face of another body splits as its surface, extended across the face
+/// or (Extend Splitting Tool off) as it is; sketch curves split with their surface, along a
+/// vector or at the closest point, and lines that stop short reach the edges when extended.
+#[test]
+fn split_face_with_surfaces_and_curves_by_each_split_type() {
+  let top = json!([{"point": [15, 15, 10]}]);
+  let faces = |s: &Session| s.model.bodies[0].faces().len();
+  let fresh = || {
+    let mut s = Session::default();
+    block(&mut s, 30.0, 30.0, 10.0);
+    s
+  };
+  // a face of another body standing off the block, square to the top along x = 10
+  let mut s = fresh();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10, 40], "corner2": [20, 50]}));
+  run(&mut s, "extrude", json!({"distance": 10, "operation": "new_body"}));
+  let wall = json!({"point": [10, 45, 5]});
+  let n = faces(&s);
+  assert!(!works(&mut s, "split_face", json!({"faces": top, "tool": [wall], "extend": false})), "it doesn't reach");
+  s.undo();
+  run(&mut s, "split_face", json!({"faces": top, "tool": [wall]}));
+  assert_eq!(faces(&s), n + 1);
+  assert_eq!(s.model.bodies.len(), 2, "the block stays one body");
+
+  // a sketch line above the top, across it
+  let across = || json!([[10, -10], [10, 40]]);
+  for (how, dir, splits) in [
+    ("surface", Value::Null, true),
+    ("along_vector", json!("z"), true),
+    // swept along x the line's sheet lies flat above the top
+    ("along_vector", json!("x"), false),
+  ] {
+    let mut s = fresh();
+    let (sk, c) = lines_at(&mut s, 20.0, &[across()]);
+    let tool = json!([{"sketch": sk, "curve": c[0]}]);
+    let p = json!({"faces": top, "tool": tool, "split_type": how, "direction": dir});
+    assert_eq!(works(&mut s, "split_face", p), splits, "{how} {dir}");
+    if splits {
+      assert_eq!(faces(&s), 7, "{how}");
+      assert!((volume(&s) - 9000.0).abs() < 1e-6);
+    }
+  }
+  // Along Vector with curves needs its direction
+  let mut s = fresh();
+  let (sk, c) = lines_at(&mut s, 20.0, &[across()]);
+  assert!(
+    s.execute(
+      "split_face",
+      &json!({"faces": top, "tool": [{"sketch": sk, "curve": c[0]}], "split_type": "along_vector"})
+    )
+    .is_err()
+  );
+
+  // a short line: as drawn it stops inside the top; extended it reaches the edges
+  let mut s = fresh();
+  let (sk, c) = lines_at(&mut s, 20.0, &[json!([[10, 10], [10, 20]])]);
+  let tool = json!([{"sketch": sk, "curve": c[0]}]);
+  assert!(!works(&mut s, "split_face", json!({"faces": top, "tool": tool, "extend": false})));
+  s.undo();
+  run(&mut s, "split_face", json!({"faces": top, "tool": tool}));
+  assert_eq!(faces(&s), 7);
+  // an L of two lines extends at its open ends only: the top splits in two, not three
+  let mut s = fresh();
+  let (sk, c) = lines_at(&mut s, 20.0, &[json!([[10, 5], [10, 20], [20, 20]])]);
+  let tool: Vec<Value> = c.iter().map(|c| json!({"sketch": sk, "curve": c})).collect();
+  run(&mut s, "split_face", json!({"faces": top, "tool": tool}));
+  assert_eq!(faces(&s), 7);
+
+  // Closest Point: a line from edge to edge, dropped onto the top
+  let mut s = fresh();
+  let (sk, c) = lines_at(&mut s, 20.0, &[json!([[10, 0], [10, 30]])]);
+  let tool = json!([{"sketch": sk, "curve": c[0]}]);
+  run(&mut s, "split_face", json!({"faces": top, "tool": tool, "split_type": "closest_point"}));
+  assert_eq!(faces(&s), 7);
+  assert!((volume(&s) - 9000.0).abs() < 1e-6);
+  // ... and it follows a saved design
+  let kind = &s.design.features.last().unwrap().kind;
+  let saved: fox_model::FeatureKind = serde_json::from_str(&serde_json::to_string(kind).unwrap()).unwrap();
+  assert_eq!(&saved, kind);
+
+  // a design saved before the tool could be faces or curves still reads
+  let old: fox_model::FeatureKind =
+    serde_json::from_value(json!({"type": "split_face", "faces": [], "tool": {"type": "origin", "plane": "yz"}}))
+      .unwrap_or_else(|e| panic!("{e}"));
+  let fox_model::FeatureKind::SplitFace { tool: Some(_), extend: true, split_type, .. } = old else {
+    panic!("{old:?}")
+  };
+  assert_eq!(split_type, fox_model::SplitFaceType::Surface);
+}
+
+/// Remove Features finds chamfers, extruded bosses and pockets, revolved bumps and other ones
+/// as well as fillets and holes, and removes the ticked types.
+#[test]
+fn remove_features_finds_chamfers_extrudes_revolves_and_others() {
+  let mut s = Session::default();
+  block(&mut s, 60.0, 40.0, 10.0);
+  let plain = volume(&s);
+  let on_top = json!({"origin": [0, 0, 10], "normal": [0, 0, 1], "x": [1, 0, 0]});
+  // a 2 mm chamfer on the front top edge
+  run(&mut s, "chamfer", json!({"edges": [{"point": [30, 0, 10]}], "distance": 2}));
+  // a square boss 5 tall and a square pocket 4 deep
+  run(&mut s, "sketch.create", json!({ "plane": on_top }));
+  run(&mut s, "sketch.rect", json!({"corner1": [5, 10], "corner2": [15, 20]}));
+  run(&mut s, "extrude", json!({"distance": 5, "operation": "join"}));
+  run(&mut s, "sketch.create", json!({ "plane": on_top }));
+  run(&mut s, "sketch.rect", json!({"corner1": [20, 10], "corner2": [30, 20]}));
+  run(&mut s, "extrude", json!({"distance": 4, "flip": true, "operation": "cut"}));
+  // a dome (half a ball standing on the top)
+  run(&mut s, "sphere", json!({"plane": on_top, "at": [45, 20], "radius": 4, "operation": "join"}));
+  // a wedge lying along x
+  run(&mut s, "sketch.create", json!({"plane": {"origin": [40, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]}}));
+  run(&mut s, "sketch.line", json!({"points": [[25, 10], [35, 10], [25, 16]], "closed": true}));
+  run(&mut s, "extrude", json!({"distance": 10, "operation": "join"}));
+  let b = s.model.bodies[0].id.0;
+  let found = run(&mut s, "remove_features", json!({"bodies": [b], "dry_run": true}))["features"].clone();
+  let count = |t: &str| found.as_array().unwrap().iter().filter(|f| f["type"] == t).count();
+  assert_eq!(["fillet", "hole", "chamfer", "extrude", "revolve", "other"].map(count), [0, 0, 1, 2, 1, 1], "{found}");
+  // the extrudes go: the boss's volume off, the pocket's back
+  let before = volume(&s);
+  run(&mut s, "remove_features", json!({"bodies": [b], "types": ["extrude"]}));
+  assert!((volume(&s) - (before - 500.0 + 400.0)).abs() < 1e-3, "{} {before}", volume(&s));
+  // then the rest: the block is whole again
+  run(&mut s, "remove_features", json!({"bodies": [b], "types": ["chamfer", "revolve", "other"]}));
+  assert!((volume(&s) - plain).abs() < 1e-3, "{} {plain}", volume(&s));
+  assert_eq!(s.model.bodies[0].faces().len(), 6);
+}
+
+/// Replace with Primitives' Primitive Size: the box stands `offset` off the body.
+#[test]
+fn replace_with_primitives_offsets_the_primitive() {
+  let mut s = Session::default();
+  block(&mut s, 10.0, 10.0, 4.0);
+  let b = s.model.bodies[0].id.0;
+  run(&mut s, "replace_with_primitives", json!({"bodies": [b], "offset": "1 mm", "object_type": "bodies"}));
+  assert!((volume(&s) - 12.0 * 12.0 * 6.0).abs() < 1e-6, "{}", volume(&s));
 }
 
 /// Fusion's Plane at Angle Offset row moves the plane along its normal (an older plane, with no

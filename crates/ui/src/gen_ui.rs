@@ -585,7 +585,7 @@ fn explorer(app: &mut App, ui: &mut egui::Ui, calls: &mut Vec<(&'static str, Val
       if o["meets_limits"] == true {
         ui.colored_label(Color32::from_rgb(60, 160, 80), "✔");
       } else {
-        ui.colored_label(Color32::from_rgb(220, 80, 60), "✘");
+        ui.colored_label(Color32::from_rgb(220, 80, 60), "✖");
       }
       match o["verified"].as_object() {
         Some(v) => {

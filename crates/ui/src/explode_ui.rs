@@ -1,5 +1,6 @@
-//! View ▸ Explode (a toggle with a spacing slider) and View ▸ Render Components…, over the
-//! engine's `view.explode` and `view.render_components`.
+//! The Render Components window over the engine's `view.render_components`. Fusion's File ▸ View
+//! has neither it nor an Explode toggle, so nothing in the menus opens it: the engine's
+//! `view.explode` and `view.render_components` run from TEXT COMMANDS.
 
 use egui::RichText;
 use serde_json::{Value, json};
@@ -65,46 +66,6 @@ impl RenderComponents {
       p["label"] = json!(self.label.trim());
     }
     Some(p)
-  }
-}
-
-/// The spacing the slider shows when nothing is exploded yet.
-const DEFAULT_FACTOR: f64 = 1.0;
-
-/// Turns the exploded view on (with `factor`) or off.
-pub fn set_exploded(app: &mut App, on: bool, factor: f64) {
-  let p = if on { json!({"factor": factor}) } else { json!({"off": true}) };
-  app.run("view.explode", p);
-}
-
-/// The View menu's entries: Explode, its spacing, and Render Components….
-pub fn view_menu(app: &mut App, ui: &mut egui::Ui) {
-  ui.separator();
-  let has_components = !app.s.design.components.is_empty();
-  let current = app.s.design.exploded_view.as_ref().map(|v| v.factor);
-  let mut on = current.is_some();
-  let toggle = ui
-    .add_enabled(has_components, egui::Checkbox::new(&mut on, "Explode"))
-    .on_hover_text("Pull the components apart along Z, for display and renders only (not a timeline feature)")
-    .on_disabled_hover_text("Explode moves components apart: this design has none");
-  if toggle.changed() {
-    set_exploded(app, on, current.unwrap_or(DEFAULT_FACTOR));
-  }
-  if let Some(mut f) = current {
-    let r = ui
-      .add(egui::Slider::new(&mut f, 0.0..=25.0).logarithmic(true).text("Spacing"))
-      .on_hover_text("The i-th of N components moves i × the assembly's height × spacing / N");
-    if r.changed() {
-      set_exploded(app, true, f);
-    }
-  }
-  if ui
-    .add_enabled(has_components, egui::Button::new("Render Components..."))
-    .on_hover_text("One image per component on its own, and a part list with areas for powder coat")
-    .clicked()
-  {
-    ui.close();
-    app.render_components.open = true;
   }
 }
 
@@ -216,9 +177,9 @@ mod tests {
   #[test]
   fn explode_toggles_and_renders_components_to_a_folder() {
     let mut app = app_with_layers();
-    set_exploded(&mut app, true, 4.0);
+    app.run("view.explode", json!({"factor": 4.0}));
     assert_eq!(app.s.design.exploded_view.as_ref().map(|v| v.factor), Some(4.0));
-    set_exploded(&mut app, false, 4.0);
+    app.run("view.explode", json!({"off": true}));
     assert!(app.s.design.exploded_view.is_none());
 
     let dir = std::env::temp_dir().join(format!("fox-ui-render-components-{}", std::process::id()));

@@ -65,6 +65,9 @@ impl Live {
 enum Was {
   Edge(BodyId, EdgeInfo),
   Face(BodyId, FaceInfo),
+  /// A face Draft tilts: on the preview it is the face of its kind nearest to where it was,
+  /// turned by less than 60°.
+  Drafted(BodyId, FaceInfo),
 }
 
 /// Is `x` the edge `e` was, on a body a preview may have changed: the same curve, within `tol`?
@@ -119,6 +122,15 @@ fn find_now(s: &Session, was: Was) -> Option<Pick> {
         .min_by(|x, y| (x.center - f.center).length().total_cmp(&(y.center - f.center).length()))
         .map(|x| Pick::Face { body, face: x.id })
     }
+    Was::Drafted(body, f) => find_now(s, Was::Face(body, f)).or_else(|| {
+      s.model
+        .body(body)?
+        .faces()
+        .iter()
+        .filter(|x| x.kind == f.kind && x.normal.dot(f.normal) > 0.5)
+        .min_by(|x, y| (x.center - f.center).length().total_cmp(&(y.center - f.center).length()))
+        .map(|x| Pick::Face { body, face: x.id })
+    }),
   }
 }
 
@@ -151,11 +163,14 @@ impl Dialog {
       let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
       // (Draft's pull face stays picked too)
       let pull = (self.kind == Kind::Draft).then_some(&self.plane);
-      for f in self.faces.iter().chain(pull) {
+      let n = self.faces.len();
+      for (i, f) in self.faces.iter().chain(pull).enumerate() {
         if let (Some(b), Some(id)) = (get(f, "body"), get(f, "face"))
           && let Some(x) = s.model.body(BodyId(b)).and_then(|x| x.faces().iter().find(|x| x.id == id))
         {
-          self.live.picked.push(Was::Face(BodyId(b), *x));
+          // Draft's faces to draft tilt under the preview; its pull face stays put
+          let drafted = self.kind == Kind::Draft && i < n;
+          self.live.picked.push(if drafted { Was::Drafted(BodyId(b), *x) } else { Was::Face(BodyId(b), *x) });
         }
       }
       for e in &self.edges {
@@ -189,25 +204,20 @@ impl Dialog {
       .collect();
   }
 
-  /// The Preview checkbox of a model-picking dialog. Fillet, Draft, Offset Face, Hem, Thread,
-  /// Emboss, Thicken and Boundary Fill have none: they always preview, as in Fusion. Fold,
-  /// Convert to Sheet Metal, Rip and Corner Closure show theirs once something is picked (they
-  /// open with their one selection row).
+  /// The Preview checkbox of a model-picking dialog: only Fold, Convert to Sheet Metal, Rip and
+  /// Corner Closure have one, shown once something is picked (they open with their one selection
+  /// row). Fusion's other command dialogs (Extrude, Fillet, Chamfer, Hole, Combine, Draft, Offset
+  /// Face, Replace Face, Split Face, Pattern on Path, Replace with Primitives, ...) end with the (i)
+  /// and OK / Cancel: they always preview.
   pub(super) fn live_checkbox(&mut self, ui: &mut egui::Ui, s: &mut Session) {
-    if matches!(self.kind, Kind::Fillet | Kind::Draft | Kind::OffsetFace | Kind::Hem)
-      || matches!(self.kind, Kind::Form(f) if crate::forms::always_previews(f)
-        || crate::mesh_ui::is_mesh_form(f)
-        || !crate::forms::preview_box(f)
-        || crate::forms::no_preview(f))
-    {
+    if !self.has_preview_box() {
       return;
     }
     let picked = match self.kind {
       Kind::Form(f) => self.form.missing(f).is_none(),
       _ => !self.faces.is_empty() || !self.bodies.is_empty() || !self.edges.is_empty(),
     };
-    let sheet = matches!(self.kind, Kind::Form(f) if std::ptr::eq(f, &crate::forms::CORNER_CLOSURE));
-    if (sheet || matches!(self.kind, Kind::Fold | Kind::ConvertSheet | Kind::Rip)) && !picked {
+    if !picked {
       return;
     }
     if ui.checkbox(&mut self.live.on, "Preview").changed() {
@@ -217,6 +227,12 @@ impl Dialog {
         self.withdraw(s);
       }
     }
+  }
+
+  /// Is this one of the dialogs with a Preview check box (see [`Self::live_checkbox`])?
+  pub(super) fn has_preview_box(&self) -> bool {
+    matches!(self.kind, Kind::Fold | Kind::ConvertSheet | Kind::Rip)
+      || matches!(self.kind, Kind::Form(f) if std::ptr::eq(f, &crate::forms::CORNER_CLOSURE))
   }
 
   /// Bodies the showing preview added (the browser leaves them out until OK).

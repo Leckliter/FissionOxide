@@ -116,6 +116,39 @@ impl Dialog {
     }
   }
 
+  /// Hole: the shapes of the bodies a new hole may cut (the picked face's body, or every body
+  /// for holes at sketch points), taken before it previews.
+  pub(super) fn hole_before(&self, s: &Session) -> Vec<(BodyId, fox_engine::kernel::Shape)> {
+    if self.kind != Kind::Hole || self.editing.is_some() {
+      return Vec::new();
+    }
+    let on: Vec<u32> =
+      self.faces.iter().filter_map(|f| f.get("body").and_then(Value::as_u64)).map(|b| b as u32).collect();
+    s.model.bodies.iter().filter(|b| on.is_empty() || on.contains(&b.id.0)).map(|b| (b.id, b.shape.clone())).collect()
+  }
+
+  /// After a hole previews: what it took out of each body (`before` from [`Self::hole_before`])
+  /// becomes the red ghost, as Fusion previews a hole in red.
+  pub(super) fn hole_ghost(&mut self, s: &Session, before: &[(BodyId, fox_engine::kernel::Shape)]) {
+    if before.is_empty() {
+      return;
+    }
+    let mut ghost = Vec::new();
+    for (id, was) in before {
+      let Some(now) = s.model.body(*id) else { continue };
+      let Ok(gone) = was.boolean(&now.shape, BoolOp::Subtract) else { continue };
+      if gone.mass().is_ok_and(|m| m.volume > 1e-9)
+        && let Ok(m) = gone.tessellate((now.diagonal() * 0.002).max(1e-3))
+      {
+        ghost.push(m);
+      }
+    }
+    if !(ghost.is_empty() && self.solid.cut.ghost.is_empty()) {
+      self.solid.cut.ghost = ghost;
+      self.solid.cut.ghost_rev += 1;
+    }
+  }
+
   /// After the first preview of a new body: when it overlaps a body that was there before,
   /// Operation turns to Cut with those bodies to cut, and the preview is withdrawn. True when it
   /// switched (the caller previews again).

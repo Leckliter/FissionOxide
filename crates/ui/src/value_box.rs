@@ -87,7 +87,7 @@ impl Takes {
   fn pin(self, unit: fox_engine::model::LengthUnit, typed: &str) -> String {
     match self {
       Takes::Length => unit.labelled(typed),
-      Takes::Angle if typed.trim().parse::<f64>().is_ok() => format!("{} deg", typed.trim()),
+      Takes::Angle => crate::units::typed_angle(typed),
       _ => typed.to_string(),
     }
   }
@@ -365,12 +365,13 @@ mod tests {
   }
 
   /// `ui:manip:typed-value-units`: a bare number typed into a length's box gets the unit written
-  /// out in the field (the box itself keeps what was typed); an angle's gets "deg"; a count's
+  /// out in the field (the box itself keeps what was typed); an angle's is shown in degrees
+  /// ("5.0 deg"); a count's
   /// stays a bare number.
   #[test]
   fn typed_numbers_get_their_fields_unit() {
     for (start, typed, field) in
-      [("10 mm", "25", "25 mm"), ("0.0 deg", "5", "5 deg"), ("3", "4", "4"), ("10 mm", "w", "w")]
+      [("10 mm", "25", "25 mm"), ("0.0 deg", "5", "5.0 deg"), ("3", "4", "4"), ("10 mm", "w", "w")]
     {
       let ctx = egui::Context::default();
       let mut state = State::default();

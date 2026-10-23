@@ -139,6 +139,146 @@ fn glb_is_well_formed() {
   assert_eq!(doc["buffers"][0]["byteLength"].as_u64().unwrap() as usize, blen);
 }
 
+/// A binary FBX node as read back: its name, properties and children.
+#[derive(Debug)]
+struct FbxNode {
+  name: String,
+  props: Vec<FbxProp>,
+  children: Vec<FbxNode>,
+}
+
+#[derive(Debug, PartialEq)]
+enum FbxProp {
+  Int(i64),
+  F64(f64),
+  Str(String),
+  Bytes(Vec<u8>),
+  F64s(Vec<f64>),
+  I32s(Vec<i32>),
+}
+
+impl FbxNode {
+  fn child(&self, name: &str) -> &FbxNode {
+    self.children.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("{} has no {name}", self.name))
+  }
+}
+
+/// Reads the node list starting at `at` up to its empty record; checks every end offset.
+fn fbx_nodes(b: &[u8], at: &mut usize, end: usize) -> Vec<FbxNode> {
+  let u32_at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap()) as usize;
+  let mut out = Vec::new();
+  while *at < end {
+    let (node_end, n, _len, name_len) = (u32_at(*at), u32_at(*at + 4), u32_at(*at + 8), b[*at + 12] as usize);
+    if node_end == 0 {
+      *at += 13;
+      break;
+    }
+    let name = String::from_utf8(b[*at + 13..*at + 13 + name_len].to_vec()).unwrap();
+    *at += 13 + name_len;
+    let mut props = Vec::new();
+    for _ in 0..n {
+      let code = b[*at];
+      *at += 1;
+      let take = |at: &mut usize, k: usize| {
+        let v = b[*at..*at + k].to_vec();
+        *at += k;
+        v
+      };
+      let p = match code {
+        b'C' => FbxProp::Int(i64::from(take(at, 1)[0])),
+        b'I' => FbxProp::Int(i64::from(i32::from_le_bytes(take(at, 4).try_into().unwrap()))),
+        b'L' => FbxProp::Int(i64::from_le_bytes(take(at, 8).try_into().unwrap())),
+        b'D' => FbxProp::F64(f64::from_le_bytes(take(at, 8).try_into().unwrap())),
+        b'S' | b'R' => {
+          let k = u32_at(*at);
+          *at += 4;
+          let v = take(at, k);
+          if code == b'S' { FbxProp::Str(String::from_utf8(v).unwrap()) } else { FbxProp::Bytes(v) }
+        }
+        b'd' | b'i' => {
+          let (count, encoding, bytes) = (u32_at(*at), u32_at(*at + 4), u32_at(*at + 8));
+          assert_eq!(encoding, 0);
+          *at += 12;
+          let v = take(at, bytes);
+          if code == b'd' {
+            assert_eq!(bytes, 8 * count);
+            FbxProp::F64s(v.chunks(8).map(|c| f64::from_le_bytes(c.try_into().unwrap())).collect())
+          } else {
+            assert_eq!(bytes, 4 * count);
+            FbxProp::I32s(v.chunks(4).map(|c| i32::from_le_bytes(c.try_into().unwrap())).collect())
+          }
+        }
+        c => panic!("property type {}", c as char),
+      };
+      props.push(p);
+    }
+    let children = fbx_nodes(b, at, node_end);
+    assert_eq!(*at, node_end, "{name}'s end offset");
+    out.push(FbxNode { name, props, children });
+  }
+  out
+}
+
+#[test]
+fn fbx_is_binary_7400_with_a_mesh_per_body() {
+  let mut second = cube(2.0);
+  second.name = "Body2".into();
+  let fbx = write_mesh("fbx", &[cube(1.0), second]).unwrap();
+  assert_eq!(&fbx[..23], b"Kaydara FBX Binary  \0\x1a\0");
+  assert_eq!(u32::from_le_bytes(fbx[23..27].try_into().unwrap()), 7400);
+  // the footer ends with its fixed block, the version 120 bytes before it
+  assert_eq!(
+    fbx[fbx.len() - 16..],
+    [0xf8, 0x5a, 0x8c, 0x6a, 0xde, 0xf5, 0xd9, 0x7e, 0xec, 0xe9, 0x0c, 0xe3, 0x75, 0x8f, 0x29, 0x0b]
+  );
+  let at_version = fbx.len() - 16 - 120 - 4;
+  assert_eq!(u32::from_le_bytes(fbx[at_version..at_version + 4].try_into().unwrap()), 7400);
+  let mut at = 27;
+  let top = fbx_nodes(&fbx, &mut at, fbx.len());
+  let names: Vec<&str> = top.iter().map(|n| n.name.as_str()).collect();
+  assert_eq!(
+    names,
+    [
+      "FBXHeaderExtension",
+      "FileId",
+      "CreationTime",
+      "Creator",
+      "GlobalSettings",
+      "Definitions",
+      "Objects",
+      "Connections"
+    ]
+  );
+  assert_eq!(top[0].child("FBXVersion").props, [FbxProp::Int(7400)]);
+  let objects = &top[6];
+  let geometries: Vec<&FbxNode> = objects.children.iter().filter(|n| n.name == "Geometry").collect();
+  assert_eq!(geometries.len(), 2);
+  let g = geometries[0];
+  assert_eq!(g.props[1], FbxProp::Str("Cube\0\x01Geometry".into()));
+  let FbxProp::F64s(v) = &g.child("Vertices").props[0] else { panic!() };
+  let FbxProp::I32s(corners) = &g.child("PolygonVertexIndex").props[0] else { panic!() };
+  let c = cube(1.0);
+  assert_eq!(v.len(), 3 * c.positions.len());
+  assert_eq!(corners.len(), c.indices.len());
+  // every third corner closes its triangle
+  assert!(corners.chunks(3).all(|t| t[0] >= 0 && t[1] >= 0 && t[2] < 0));
+  // Z-up to Y-up: a vertex's z is the file's y
+  let top_z = c.positions.iter().map(|p| p[2]).fold(f32::MIN, f32::max);
+  let file_y = v.chunks(3).map(|p| p[1]).fold(f64::MIN, f64::max);
+  assert!((file_y - f64::from(top_z)).abs() < 1e-6);
+  let FbxProp::F64s(n) = &g.child("LayerElementNormal").child("Normals").props[0] else { panic!() };
+  assert_eq!(n.len(), 3 * corners.len());
+  // each model hangs from the root, its geometry and the material from it
+  let links = &top[7].children;
+  assert_eq!(links.len(), 6);
+  assert!(links.iter().all(|l| l.props[0] == FbxProp::Str("OO".into())));
+  assert_eq!(links.iter().filter(|l| l.props[2] == FbxProp::Int(0)).count(), 2);
+  let units =
+    top[4].child("Properties70").children.iter().find(|p| p.props[0] == FbxProp::Str("UnitScaleFactor".into()));
+  assert_eq!(units.unwrap().props[4], FbxProp::F64(0.1), "millimetres");
+  assert!(write_fbx(&[Mesh::default()]).is_err(), "an empty mesh");
+}
+
 #[test]
 fn usdz_first_entry_is_aligned_usd() {
   let bytes = write_usdz(&[cube(1.0)]).unwrap();

@@ -221,6 +221,9 @@ pub enum Fits {
   /// An axis to turn about: a straight or circular edge (`{body, edge}`), a construction axis
   /// (`{axis}`), an origin axis or a sketch line (`{sketch, curve}`).
   Axis,
+  /// Split Face's splitting tools: a face, flat or curved, a plane (as [`Fits::Surface`]), or a
+  /// sketch curve (`{sketch, curve}`).
+  SplitTool,
 }
 
 /// What a construction pick ([`Input::Construct`]) takes.
@@ -631,6 +634,10 @@ impl State {
           ne += 1;
           edges.get(ne - 1).cloned().unwrap_or(Value::Null)
         }
+        // Thicken takes surface bodies: a solid picked (or selected before it opened) isn't one
+        Input::Bodies { .. } if form.cmd == "thicken" => {
+          json!(bodies.iter().filter(|b| s.body_is_surface(BodyId(**b))).collect::<Vec<_>>())
+        }
         Input::Bodies { .. } => json!(bodies),
         Input::Curves { .. } => json!(curves.iter().map(|c| c.1).collect::<Vec<_>>()),
         Input::Sketch { .. } => {
@@ -809,12 +816,20 @@ impl State {
   pub fn origin_pick(&mut self, form: &Form, plane: Option<&'static str>, axis: Option<&'static str>) -> bool {
     let row = self.row;
     let v = match form.inputs.get(row) {
-      Some(Input::Pick { fits: Fits::Plane | Fits::Surface, .. }) => plane,
+      Some(Input::Pick { fits: Fits::Plane | Fits::Surface | Fits::SplitTool, .. }) => plane,
       Some(Input::Pick { fits: Fits::Direction, .. }) => plane.or(axis),
       Some(Input::Pick { fits: Fits::Axis, .. }) => axis,
       _ => None,
     };
     let Some(v) = v.map(|v| json!(v)).filter(|v| *v != self.values[row]) else { return false };
+    // (a row that takes several adds it to its picks and stays active)
+    if let Some(a) = self.values[row].as_array_mut() {
+      if a.contains(&v) {
+        return false;
+      }
+      a.push(v);
+      return true;
+    }
     self.values[row] = v;
     self.row = (row + 1..form.inputs.len()).find(|&j| matches!(form.inputs[j], Input::Pick { .. })).unwrap_or(row);
     true
@@ -858,6 +873,8 @@ impl State {
         ["moving", "fixed"].iter().all(|k| get(k).is_some_and(|v| !v.is_null()))
       }
       "sketch.project_to_surface" if key == "direction" => get("type").and_then(Value::as_str) == Some("along_vector"),
+      // Split Face asks for Along Vector's direction
+      "split_face" if key == "direction" => get("split_type").and_then(Value::as_str) == Some("vector"),
       // the SURFACE tab's Create dialogs: value rows wait for the first pick, as in Fusion
       "surface.ruled.form" | "surface.offset.form" | "surface.patch.form" => {
         crate::dialogs::surface::form_row_shown(form.cmd, key, &get)
@@ -1238,7 +1255,7 @@ impl State {
         Input::Curves { label, key } | Input::Profiles { label, key } if empty && required(form, key) => {
           return Some((key, label));
         }
-        Input::Pick { key, prompt, .. } if empty => return Some((key, prompt)),
+        Input::Pick { key, prompt, .. } if empty && self.shown(form, i) => return Some((key, prompt)),
         Input::DrawingView { key, label } | Input::Component { key, label } if empty => return Some((key, label)),
         Input::TrimTool { key, label } if empty => return Some((key, label)),
         // picking pieces: nothing to preview until one is clicked (Trim previews its tool's cut)
@@ -1378,6 +1395,10 @@ fn fit_value(fits: Fits, sel: &Sel, s: &Session) -> Option<Value> {
     },
     Fits::Plane => plane(),
     Fits::Surface => plane().or_else(|| fit_value(Fits::Faces, sel, s)),
+    Fits::SplitTool => match *sel {
+      Sel::SketchCurve { sketch, curve } => Some(json!({"sketch": sketch.0, "curve": curve.0})),
+      _ => fit_value(Fits::Surface, sel, s),
+    },
     Fits::Direction => plane().or_else(|| match *sel {
       Sel::Edge { body, edge } => {
         let e = s.model.body(body)?.edges().iter().find(|e| e.id == edge)?;
@@ -1653,7 +1674,7 @@ pub static WEB: Form = Form {
 pub static SPLIT_FACE: Form = Form {
   title: "SPLIT FACE",
   name: "Split Face",
-  hint: "Split faces along a plane; the body stays in one piece",
+  hint: "Split faces with a plane, a surface or sketch curves; the body stays in one piece",
   icon: Icon::SplitFace,
   cmd: "split_face",
   fixed: &[],
@@ -1668,12 +1689,19 @@ pub static SPLIT_FACE: Form = Form {
     Input::Pick {
       key: "tool",
       label: "Splitting Tool(s)",
-      fits: Fits::Plane,
-      multi: false,
+      fits: Fits::SplitTool,
+      multi: true,
       prompt: "Select splitting tool(s)",
     },
     Input::CheckOn { key: "chain", label: "Chain Selection" },
     Input::Choice { key: "split_type", label: "Split Type", options: SPLIT_TYPES },
+    Input::Pick {
+      key: "direction",
+      label: "Direction",
+      fits: Fits::Direction,
+      multi: false,
+      prompt: "Select direction",
+    },
     Input::CheckOn { key: "extend", label: "Extend Splitting Tool" },
   ],
   picks_model: true,
@@ -1704,7 +1732,7 @@ pub static SILHOUETTE_SPLIT: Form = Form {
   picks_model: true,
 };
 
-/// Split Face's Split Type, as Fusion lists it (the engine splits with the surface).
+/// Split Face's Split Type, as Fusion lists it: how sketch curves split the faces.
 const SPLIT_TYPES: &[(&str, &str)] =
   &[("surface", "Split with Surface"), ("vector", "Along Vector"), ("closest", "Closest Point")];
 
@@ -3291,7 +3319,7 @@ pub static DRAWING_FCF: Form = Form {
     Input::Choice {
       key: "modifier",
       label: "Material condition",
-      options: &[("none", "None"), ("mmc", "MMC Ⓜ"), ("lmc", "LMC Ⓛ")],
+      options: &[("none", "None"), ("mmc", "MMC (M)"), ("lmc", "LMC (L)")],
     },
     Input::Text { key: "datums", label: "Datums", default: "A" },
     Input::Check { key: "composite", label: "Composite (lower tier)" },
@@ -3299,7 +3327,7 @@ pub static DRAWING_FCF: Form = Form {
     Input::Choice {
       key: "lower_modifier",
       label: "  Lower material condition",
-      options: &[("none", "None"), ("mmc", "MMC Ⓜ"), ("lmc", "LMC Ⓛ")],
+      options: &[("none", "None"), ("mmc", "MMC (M)"), ("lmc", "LMC (L)")],
     },
     Input::Text { key: "lower_datums", label: "  Lower datums", default: "A" },
     Input::Expr { key: "offset_x", label: "Frame offset X (sheet mm)", default: "12" },
@@ -3959,8 +3987,8 @@ pub static SK_INTERSECT: Form = Form {
 };
 
 /// Project / Include > Spun Profile, with Fusion's rows: Geometry and Axis are Select rows that
-/// take the picks in turn (Project Axis and Tolerance are greyed: the engine draws the outline
-/// exactly and adds the axis as a centre line).
+/// take the picks in turn, Project Axis and Add Centerline draw the axis, Tolerance is how far the
+/// outline's lines and arcs may stray, Flip Result an icon toggle.
 pub static SK_SPUN_PROFILE: Form = Form {
   title: "SPUN PROFILE",
   name: "Spun Profile",
@@ -3975,8 +4003,8 @@ pub static SK_SPUN_PROFILE: Form = Form {
     Input::Pick { key: "axis", label: "Axis", fits: Fits::Axis, multi: false, prompt: "Select axis" },
     Input::CheckOn { key: "project_axis", label: "Project Axis" },
     Input::CheckOn { key: "centerline", label: "Add Centerline" },
-    Input::Expr { key: "tolerance", label: "Tolerance", default: "0 mm" },
-    Input::Check { key: "flip", label: "Flip Result" },
+    Input::Expr { key: "tolerance", label: "Tolerance", default: "0.01 mm" },
+    Input::Flip { key: "flip", label: "Flip Result" },
   ],
   picks_model: true,
 };
@@ -4111,43 +4139,12 @@ pub fn preview_off(form: &Form) -> bool {
   mesh_form(form)
 }
 
-/// Forms with no Preview check box that don't preview (Convert Mesh; Isoparametric Curve, whose
-/// OK is live, as Fusion's is, and reports that FissionOxide can't make one yet): OK applies them.
-pub fn no_preview(form: &Form) -> bool {
-  matches!(form.cmd, "mesh.convert" | "sketch.isoparametric_curve")
-}
-
 /// A drop-down's first value when it isn't the first in the list (Reduce's Type: Proportion).
 fn initial_choice(form: &Form, key: &str) -> Option<&'static str> {
   match (form.cmd, key) {
     ("mesh.reduce", "type") => Some("proportion"),
     _ => None,
   }
-}
-
-/// Forms whose Fusion dialog has no Preview check box: they always preview (the surface MODIFY
-/// dialogs and the sketch's Project / Include dialogs among them).
-pub fn always_previews(form: &Form) -> bool {
-  matches!(
-    form.cmd,
-    "thread"
-      | "emboss"
-      | "thicken"
-      | "boundary_fill"
-      | "rib"
-      | "web"
-      | TRIM_CMD
-      | EXTEND_CMD
-      | "surface.untrim"
-      | "surface.stitch"
-      | UNSTITCH_CMD
-      | REVERSE_CMD
-      | "sketch.intersect.form"
-      | "sketch.spun_profile.form"
-      | "sketch.include"
-      | "sketch.project_to_surface"
-      | "sketch.intersection_curve"
-  )
 }
 
 /// Forms whose drop-downs show an icon before each value, as Fusion's Extent Type, Direction
@@ -4162,13 +4159,6 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
     ("emboss", "tangent_chain") => Some("Emboss goes on one face in FissionOxide: a tangent chain isn't picked yet"),
     ("thicken", "chain") => Some("Thicken picks whole surface bodies in FissionOxide: chains of faces aren't yet"),
     ("thread", "remember") => Some("Each Thread starts from the picked face's size in FissionOxide"),
-    ("sketch.project_to_surface" | "sketch.intersection_curve", "associative") => {
-      Some("These curves always follow the model in FissionOxide")
-    }
-    ("sketch.spun_profile.form", "project_axis") => Some("Projecting the axis isn't in FissionOxide yet"),
-    ("sketch.spun_profile.form", "tolerance") => {
-      Some("The outline is drawn exactly; a tolerance isn't in FissionOxide yet")
-    }
     ("coil.form", "angle") => Some("Tapered coils aren't in FissionOxide yet"),
     ("cam.setup", "stock_bottom") => Some("The stock's bottom is the part's in FissionOxide: no bottom offset yet"),
     ("cam.setup", "round_up") => Some("FissionOxide doesn't round the stock's size up yet"),
@@ -4176,11 +4166,6 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
       Some("A setup's accessibility analysis isn't in FissionOxide yet (INSPECT > Accessibility Analysis is)")
     }
     ("pipe.form", "distance2") => Some("A pipe runs from its path's start in FissionOxide"),
-    ("split_face", "split_type") => Some("FissionOxide splits faces with the surface only"),
-    ("split_face", "extend") => Some("A splitting plane always extends across the faces in FissionOxide"),
-    ("remove_features.form", "chamfer" | "extrude" | "revolve" | "other") => {
-      Some("Recognising these features isn't in FissionOxide yet: it finds fillets and holes")
-    }
     _ => None,
   }
 }
@@ -4227,7 +4212,7 @@ pub static REMOVE: Form = Form {
 pub static REMOVE_FEATURES: Form = Form {
   title: "REMOVE FEATURES",
   name: "Remove Features",
-  hint: "Find fillets, holes and other features on bodies and remove them",
+  hint: "Find fillets, holes, chamfers, extrudes, revolves and other features on bodies and remove them",
   icon: Icon::RemoveFeatures,
   cmd: "remove_features.form",
   fixed: &[],
@@ -4249,7 +4234,11 @@ pub const REMOVE_FEATURE_TYPES: [&str; 6] = ["fillet", "hole", "chamfer", "extru
 
 const PRIMITIVES: &[(&str, &str)] = &[("box", "Box"), ("cylinder", "Cylinder")];
 
-/// Replace with Primitives (Simplify): each body swapped for a box or cylinder around it.
+/// Replace with Primitives' Object type (Fusion's drop-down shows Bodies).
+pub const PRIMITIVE_OBJECTS: &[(&str, &str)] = &[("bodies", "Bodies")];
+
+/// Replace with Primitives (Simplify), as Fusion's: Object type, Selection, Primitive Shape and
+/// the Primitive Size group; each body swapped for a box or cylinder around it.
 pub static REPLACE_PRIMITIVES: Form = Form {
   title: "REPLACE WITH PRIMITIVES",
   name: "Replace with Primitives",
@@ -4258,8 +4247,11 @@ pub static REPLACE_PRIMITIVES: Form = Form {
   cmd: "replace_with_primitives",
   fixed: &[],
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Bodies", required: true },
-    Input::Choice { key: "shape", label: "Primitive Type", options: PRIMITIVES },
+    Input::Choice { key: "object_type", label: "Object type", options: PRIMITIVE_OBJECTS },
+    Input::Bodies { key: "bodies", label: "Selection", required: true },
+    Input::Choice { key: "shape", label: "Primitive Shape", options: PRIMITIVES },
+    // the Primitive Size group: how far the primitive stands off the body
+    Input::Expr { key: "offset", label: "Offset", default: "0 mm" },
   ],
   picks_model: true,
 };
@@ -4270,15 +4262,10 @@ pub fn prompt(form: &Form, key: &str) -> Option<&'static str> {
   match (form.cmd, key) {
     ("align.form", "moving" | "fixed") => Some("Select geometry or snap point on alignable object"),
     ("body.remove", "bodies") => Some("Select bodies or components to remove"),
-    ("remove_features.form" | "replace_with_primitives", "bodies") => Some("Select solid bodies"),
+    ("remove_features.form", "bodies") => Some("Select solid bodies"),
+    ("replace_with_primitives", "bodies") => Some("Select Bodies"),
     _ => None,
   }
-}
-
-/// Does a form's dialog show the Preview box? Fusion's Align and Remove show their result
-/// without one.
-pub fn preview_box(form: &Form) -> bool {
-  !matches!(form.cmd, "align.form" | "body.remove")
 }
 
 /// Forms whose dialog has only a Close button: what they do is applied from the dialog itself.

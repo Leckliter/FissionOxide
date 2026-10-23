@@ -1,0 +1,11 @@
+{
+  "ui:browser:drag-reorder": "ui-legacy-leftovers",
+  "ui:timeline:context-menu": "ui-legacy-leftovers",
+  "ui:chrome:no-phantom-saves": "ui-legacy-leftovers",
+  "ui:context-menus:sketch-curve": "ui-legacy-leftovers",
+  "ui:dialogs:fillet-fields": "ui-legacy-leftovers",
+  "ui:dialogs:chamfer-fields": "ui-legacy-leftovers",
+  "ui:sketch:sketch-text": "ui-legacy-leftovers",
+  "ui:chrome:undo-history": "ui-legacy-leftovers",
+  "ui:insert:canvas-calibrate": "ui-legacy-leftovers"
+}

@@ -1,6 +1,6 @@
 //! The ui-leftovers-chrome batch, driven headlessly: the marking menu's right-drag flick, the
 //! Viewports fly-out's Multiple Views, Theme: Dark over the painted chrome, the status bar's
-//! sketch curve readout and the arrow glyph the UI font lacks.
+//! sketch curve readout and the glyphs the UI font lacks.
 
 use egui::{Color32, Event, Pos2, RawInput, Rect, vec2};
 use fox_engine::{Sel, Session};
@@ -65,6 +65,19 @@ impl Harness {
       self.frame(vec![Event::PointerMoved(a + (b - a) * i as f32 / 6.0)]);
     }
     self.press(egui::PointerButton::Secondary, b, false);
+    self.frame(vec![]);
+  }
+
+  /// A quick click: the move, the press and the release in one frame, as a window that was idle
+  /// gets them.
+  fn quick_click(&mut self, pos: Pos2) {
+    let b = |pressed| Event::PointerButton {
+      pos,
+      button: egui::PointerButton::Primary,
+      pressed,
+      modifiers: Default::default(),
+    };
+    self.frame(vec![Event::PointerMoved(pos), b(true), b(false)]);
     self.frame(vec![]);
   }
 
@@ -203,31 +216,167 @@ fn a_sketch_curve_reads_its_kind_and_size_in_the_document_unit() {
 }
 
 #[test]
-fn no_ui_string_uses_the_arrow_the_font_lacks() {
-  // the UI font has no U+2192: it would draw a box (comments and tests aside)
-  fn scan(dir: &std::path::Path, found: &mut Vec<String>) {
+fn every_ui_string_uses_glyphs_the_ui_font_has() {
+  // a character none of the UI font's faces has draws as a box (comments and tests aside); the
+  // proportional faces are also the monospace family's fallbacks. (egui's own has_glyph says no
+  // for whatever its replacement glyph's face holds, so the faces' character maps are read.)
+  let fonts = egui::FontDefinitions::default();
+  let faces: Vec<ttf_parser::Face> = fonts.families[&egui::FontFamily::Proportional]
+    .iter()
+    .map(|name| {
+      let data = &fonts.font_data[name];
+      ttf_parser::Face::parse(&data.font, data.index).unwrap()
+    })
+    .collect();
+  let has = |c: char| faces.iter().any(|f| f.glyph_index(c).is_some());
+  fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
     for e in std::fs::read_dir(dir).unwrap().flatten() {
       let p = e.path();
       if p.is_dir() {
-        scan(&p, found);
-        continue;
-      }
-      let name = p.file_name().unwrap().to_string_lossy().to_string();
-      if !name.ends_with(".rs") || name.ends_with("_tests.rs") {
-        continue;
-      }
-      let text = std::fs::read_to_string(&p).unwrap();
-      let code = text.split("#[cfg(test)]\nmod tests").next().unwrap_or("");
-      for (n, l) in code.lines().enumerate() {
-        let before_comment = l.split("//").next().unwrap_or("");
-        // plugins_ui::drawable is what swaps a plugin's arrows for ">"
-        if before_comment.contains('\u{2192}') && !l.contains(".replace([") {
-          found.push(format!("{}:{}: {}", p.display(), n + 1, l.trim()));
-        }
+        files(&p, out);
+      } else if p.extension().is_some_and(|x| x == "rs") && !p.to_string_lossy().ends_with("_tests.rs") {
+        out.push(p);
       }
     }
   }
+  let mut paths = Vec::new();
+  files(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut paths);
   let mut found = Vec::new();
-  scan(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut found);
+  for p in paths {
+    let text = std::fs::read_to_string(&p).unwrap();
+    let code = text.split("#[cfg(test)]\nmod tests").next().unwrap_or("");
+    let viewport = p.ends_with("viewport.rs");
+    for (n, l) in code.lines().enumerate() {
+      // plugins_ui::drawable swaps a plugin's arrows for ">"
+      if l.contains(".replace([") {
+        continue;
+      }
+      let before_comment = l.split("//").next().unwrap_or("");
+      for c in before_comment.chars().filter(|c| !c.is_ascii()) {
+        // a dimension's diameter sign is painted (viewport::DimText), not taken from the font
+        if (viewport && c == '\u{2300}') || has(c) {
+          continue;
+        }
+        found.push(format!("{}:{}: U+{:04X} {c} in {}", p.display(), n + 1, c as u32, l.trim()));
+      }
+    }
+  }
   assert!(found.is_empty(), "{found:#?}");
+}
+
+/// The text shapes among `shapes`: the string and where it was drawn.
+fn texts(shapes: &[egui::Shape]) -> Vec<(String, Rect)> {
+  shapes
+    .iter()
+    .filter_map(|s| match s {
+      egui::Shape::Text(t) => Some((t.galley.text().to_string(), t.visual_bounding_rect())),
+      _ => None,
+    })
+    .collect()
+}
+
+#[test]
+fn the_open_windows_tree_lists_new_project_and_the_samples_down_its_left_pane() {
+  let root = std::env::temp_dir().join(format!("fox-ui-open-tree-{}", std::process::id()));
+  let _ = std::fs::remove_dir_all(&root);
+  let mut app = boxed();
+  app.s.store_root = Some(root.clone());
+  app.run("hub.save", json!({"name": "Bracket", "new": true, "explicit": true}));
+  let mut h = Harness::new(app);
+  crate::file_dialogs::open(&mut h.app);
+  h.frame(vec![]);
+  let drawn = texts(&h.frame(vec![]));
+  let window = h.ctx.memory(|m| m.area_rect(crate::file_dialogs::modal_id("open"))).expect("the Open window");
+  let at = |label: &str| drawn.iter().find(|(t, _)| t == label).map(|(_, r)| *r).unwrap_or_else(|| panic!("{label}"));
+  let mut tree = vec![at("Default Project"), at("+  New Project"), at("Samples")];
+  tree.extend(crate::file_dialogs::SAMPLES.iter().map(|s| at(s)));
+  for pair in tree.windows(2) {
+    assert!(pair[1].top() >= pair[0].bottom() - 1.0, "one under the other: {pair:?}");
+  }
+  for r in &tree {
+    assert!(r.left() > window.left() && r.right() < window.left() + 260.0, "in the tree's pane: {r:?} in {window:?}");
+  }
+  let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn text_commands_is_a_bar_under_the_timeline_that_a_click_expands() {
+  let mut h = Harness::new(boxed());
+  let drawn = texts(&h.frame(vec![]));
+  let (_, bar) = drawn.iter().find(|(t, _)| t == "TEXT COMMANDS").expect("the bar shows at start, as in Fusion");
+  assert!(bar.bottom() > 900.0 - crate::text_commands::BAR_H, "along the bottom of the window: {bar:?}");
+  assert!(h.app.canvas.bottom() < bar.top(), "under the canvas and the timeline");
+  assert!(!drawn.iter().any(|(t, _)| t == "Txt"), "collapsed: no input line yet");
+  h.click(bar.center());
+  assert!(h.app.text_commands.expanded);
+  for _ in 0..10 {
+    h.frame(vec![]);
+  }
+  let drawn = texts(&h.frame(vec![]));
+  let (_, txt) = drawn.iter().find(|(t, _)| t == "Txt").expect("expanded: the input line and Txt / Py / TS");
+  let (_, bar) = drawn.iter().find(|(t, _)| t == "TEXT COMMANDS").unwrap();
+  assert!(txt.bottom() <= 900.0 && txt.top() > bar.bottom(), "the input line under the bar: {bar:?} {txt:?}");
+  let height = 900.0 - bar.top();
+  assert!(height > 130.0 && height < 170.0, "Fusion's height, kept frame after frame: {bar:?}");
+  assert!(h.app.canvas.height() > 400.0, "the canvas keeps its room: {:?}", h.app.canvas);
+  // File > View > Hide Text Commands takes it away
+  crate::file_menu::view_action(&mut h.app, 3);
+  let drawn = texts(&h.frame(vec![]));
+  assert!(!drawn.iter().any(|(t, _)| t == "TEXT COMMANDS"));
+}
+
+#[test]
+fn theme_dark_from_preferences_darkens_the_chrome_and_light_brings_it_back() {
+  let mut h = Harness::new(boxed());
+  let find = |h: &mut Harness, label: &str| {
+    let drawn = texts(&h.frame(vec![]));
+    drawn.iter().rev().find(|(t, _)| t == label).map(|(_, r)| r.center()).unwrap_or_else(|| panic!("{label}"))
+  };
+  // Preferences > General > Theme: Dark, then Apply
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let combo = || crate::preferences::combo_rect_id("prefs-theme");
+  let theme_box = h.ctx.data(|d| d.get_temp::<Rect>(combo())).expect("the Theme drop-down");
+  h.click(theme_box.center());
+  let dark = find(&mut h, "Dark");
+  h.click(dark);
+  let apply = find(&mut h, "Apply");
+  h.click(apply);
+  assert!(theme::is_dark(&h.ctx));
+  let shapes = h.frame(vec![]);
+  let painted = [
+    ("application bar", theme::APP_BAR),
+    ("toolbar", theme::TOOLBAR),
+    ("timeline", theme::TIMELINE),
+    ("workspace switcher", theme::SWITCHER),
+  ];
+  for (name, c) in painted {
+    assert_eq!(rects(&shapes, c), 0, "the {name} is dark, not only Preferences");
+  }
+  // the page's heading box keeps a dark ground and light text
+  let heading = texts(&shapes).into_iter().find(|(t, _)| t == "Preferences controlling general UI behavior");
+  assert!(heading.is_some(), "the heading reads");
+  assert!(
+    !shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.fill == Color32::WHITE && r.rect.height() > 20.0
+    && r.rect.width() > 300.0)),
+    "no white strip"
+  );
+  // the drop-down still opens in the dark dialog, over it (the click on Apply put the dialog on
+  // top of the list's old place), and Light + OK undoes it
+  let theme_box = h.ctx.data(|d| d.get_temp::<Rect>(combo())).expect("the Theme drop-down");
+  h.quick_click(theme_box.center());
+  assert!(egui::Popup::is_any_open(&h.ctx), "the Theme list opens");
+  let light = find(&mut h, "Light");
+  let under = h.ctx.memory(|m| m.layer_id_at(light));
+  let modal = egui::LayerId::new(egui::Order::Foreground, egui::Id::new(crate::preferences::MODAL_ID));
+  assert!(under.is_some_and(|l| l != modal), "the list is above the dialog, not hidden under it: {under:?}");
+  h.click(light);
+  assert_eq!(h.app.preferences.draft.theme, crate::preferences::Theme::Light);
+  let ok = find(&mut h, "OK");
+  h.click(ok);
+  assert!(!h.app.preferences.open);
+  assert!(!theme::is_dark(&h.ctx));
+  assert!(rects(&h.frame(vec![]), theme::APP_BAR) > 0, "the light chrome is back");
 }

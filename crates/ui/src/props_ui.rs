@@ -83,7 +83,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
       .resizable(true)
       .frame(
         egui::Frame::NONE
-          .fill(Color32::from_rgb(243, 245, 248))
+          .fill(theme::SIDE_PANEL)
           .inner_margin(egui::Margin::same(8))
           .stroke(egui::Stroke::new(1.0, theme::BORDER)),
       )

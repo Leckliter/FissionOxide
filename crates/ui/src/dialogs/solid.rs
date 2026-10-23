@@ -67,6 +67,8 @@ pub(super) struct Extra {
   axis_pick: Value,
   /// Chamfer Type (see [`CHAMFER_TYPES`]) with its second distance or angle.
   pub(super) chamfer_type: &'static str,
+  /// Chamfer's Corner Type (see [`CORNER_TYPES`]; empty is Chamfer).
+  pub(super) chamfer_corner: &'static str,
   pub(super) distance2: String,
   pub(super) chamfer_angle: String,
   /// Shell Direction (see [`SHELL_DIRECTIONS`]), the outside thickness when both, and tangent
@@ -96,14 +98,27 @@ const ROUND_SETS: [&str; 3] = ["Side Face 1", "Center Faces", "Side Face 2"];
 
 /// Fusion's Chamfer Type.
 pub(super) const CHAMFER_TYPES: [(&str, &str); 3] =
-  [("equal", "Equal distance"), ("two", "Two distances"), ("angle", "Distance and angle")];
+  [("equal", "Equal Distance"), ("two", "Two Distances"), ("angle", "Distance and Angle")];
 /// Fusion's Shell Direction.
 pub(super) const SHELL_DIRECTIONS: [(&str, &str); 3] = [("inside", "Inside"), ("outside", "Outside"), ("both", "Both")];
 /// Fusion's Shell Type: how the offset faces meet at the corners (the engine's `corners`).
 const SHELL_TYPES: [Choice; 2] =
   [ic("sharp", Icon::ShellSharp, "Sharp corners"), ic("round", Icon::ShellRound, "Rounded corners")];
-/// Fusion's Chamfer Corner Type; the engine chamfers the corners, so the rest are greyed.
+/// Fusion's Chamfer Corner Type (the kernel makes every corner as Chamfer's flat patch).
 const CORNER_TYPES: [(&str, &str); 3] = [("chamfer", "Chamfer"), ("miter", "Miter"), ("blend", "Blend")];
+
+/// The icon before a Chamfer Type or Corner Type value, as Fusion's drop-downs show them.
+fn chamfer_icon(key: &str) -> Option<Icon> {
+  Some(match key {
+    "equal" => Icon::SkChamfer,
+    "two" => Icon::SkChamfer2,
+    "angle" => Icon::SkChamferAngle,
+    "chamfer" => Icon::CornerChamfer,
+    "miter" => Icon::CornerMiter,
+    "blend" => Icon::CornerBlend,
+    _ => return None,
+  })
+}
 /// Fusion's Offset Face Offset Type (Press Pull on a face). Automatic and New Offset both add an
 /// Offset Face feature; Modify Existing Feature needs the engine to edit the face's feature.
 const OFFSET_TYPES: [(&str, &str, bool); 3] =
@@ -220,7 +235,7 @@ impl Dialog {
             }
           }
         });
-        if creating && rows.len() > 1 && ui.small_button("✕").on_hover_text("Remove this set").clicked() {
+        if creating && rows.len() > 1 && ui.small_button("🗙").on_hover_text("Remove this set").clicked() {
           remove = Some(i);
         }
       });
@@ -613,13 +628,15 @@ impl Dialog {
       }
       ui.add_enabled(false, egui::Button::new("+").small())
         .on_disabled_hover_text("Selection sets with their own distances need chamfer sets in the engine");
-      if creating && ui.add_enabled(n > 0, egui::Button::new("✕").small()).on_hover_text("Clear this set").clicked() {
+      if creating && ui.add_enabled(n > 0, egui::Button::new("🗙").small()).on_hover_text("Clear this set").clicked()
+      {
         clear = true;
       }
     });
     ui.end_row();
     ui.label("Type");
-    let type_changed = choice(ui, "chamfer-type", &mut self.solid.chamfer_type, &CHAMFER_TYPES);
+    let type_changed =
+      super::choice::combo(ui, "chamfer-type", &CHAMFER_TYPES, &mut self.solid.chamfer_type, chamfer_icon);
     changed |= type_changed;
     ui.end_row();
     ui.label("Edges");
@@ -640,12 +657,10 @@ impl Dialog {
     }
     ui.end_row();
     ui.label("Corner Type");
-    ui.add_enabled_ui(false, |ui| {
-      let mut corner: &'static str = "chamfer";
-      choice(ui, "chamfer-corner", &mut corner, &CORNER_TYPES);
-    })
-    .response
-    .on_disabled_hover_text("Corner Type needs engine support; the corners are chamfered");
+    if self.solid.chamfer_corner.is_empty() {
+      self.solid.chamfer_corner = "chamfer";
+    }
+    changed |= super::choice::combo(ui, "chamfer-corner", &CORNER_TYPES, &mut self.solid.chamfer_corner, chamfer_icon);
     ui.end_row();
     if clear {
       self.withdraw(&mut app.s);
@@ -667,7 +682,12 @@ impl Dialog {
       "angle" => (Value::Null, json!(self.solid.chamfer_angle)),
       _ => (Value::Null, Value::Null),
     };
-    for (k, v) in [("distance2", d2), ("angle", a)] {
+    // Corner Type Chamfer is the command's default
+    let corner = match self.solid.chamfer_corner {
+      c @ ("miter" | "blend") => json!(c),
+      _ => Value::Null,
+    };
+    for (k, v) in [("distance2", d2), ("angle", a), ("corner", corner)] {
       if !v.is_null() || editing {
         p[k] = v;
       }
@@ -675,7 +695,12 @@ impl Dialog {
     p
   }
 
-  pub(super) fn load_chamfer(&mut self, distance2: &Option<String>, angle: &Option<String>) {
+  pub(super) fn load_chamfer(&mut self, distance2: &Option<String>, angle: &Option<String>, corner: &Option<String>) {
+    self.solid.chamfer_corner = match corner.as_deref() {
+      Some("miter") => "miter",
+      Some("blend") => "blend",
+      _ => "chamfer",
+    };
     self.solid.chamfer_type = match (distance2, angle) {
       (_, Some(a)) => {
         self.solid.chamfer_angle = a.clone();
@@ -1505,7 +1530,6 @@ mod tests {
     assert!(!d.ready());
     let shown = |d: &Dialog, k: &str| d.form.shown(&EMBOSS, EMBOSS.inputs.iter().position(|x| x.key() == k).unwrap());
     assert!(!shown(&d, "depth") && !shown(&d, "rotation") && shown(&d, "effect"));
-    assert!(crate::forms::always_previews(&EMBOSS));
     let sel = vec![Sel::Profile { sketch: sk, index: 0 }, Sel::Face { body: b, face: side }];
     let mut d = form(&mut s, &EMBOSS, sel);
     assert!(shown(&d, "depth") && shown(&d, "horizontal"));

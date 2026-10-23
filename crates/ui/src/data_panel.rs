@@ -223,7 +223,7 @@ pub struct DataPanel {
   tab: ProjectTab,
   project: Option<String>,
   folder: Option<String>,
-  /// The project card a single click picked.
+  /// The project card opened last (its border is blue back on the list).
   picked: Option<Card>,
   filter: ProjectFilter,
   /// The Filter field under the project list.
@@ -433,7 +433,7 @@ fn thumb(ui: &mut egui::Ui, app: &App, item: &str, version: Option<u64>, size: f
     Some(t) => ui.add(egui::Image::new(t).fit_to_exact_size(egui::vec2(size, size)).corner_radius(4.0)),
     None => {
       let (rect, r) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-      ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(232, 235, 240));
+      ui.painter().rect_filled(rect, 4.0, theme::PLACEHOLDER);
       ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -469,7 +469,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     .resizable(true)
     .frame(
       egui::Frame::NONE
-        .fill(Color32::from_rgb(243, 245, 248))
+        .fill(theme::SIDE_PANEL)
         .inner_margin(egui::Margin::same(8))
         .stroke(egui::Stroke::new(1.0, theme::BORDER)),
     )
@@ -524,10 +524,10 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
-/// Search All Data: "←" leaves it (Escape doesn't), "×" clears the term.
+/// Search All Data: "⬅" leaves it (Escape doesn't), "×" clears the term.
 fn search_bar(app: &mut App, ui: &mut egui::Ui) {
   ui.horizontal(|ui| {
-    if ui.small_button("←").on_hover_text("Back").clicked() {
+    if ui.small_button("⬅").on_hover_text("Back").clicked() {
       app.data.searching = false;
       app.data.search.clear();
       app.data.stale = true;
@@ -571,7 +571,7 @@ fn hub_menu(app: &mut App, ui: &mut egui::Ui) {
     }
     None => HUB_TIP.to_string(),
   };
-  let r = ui.menu_button(RichText::new(format!("{name} ▾")).strong(), |ui| {
+  let r = ui.menu_button(RichText::new(format!("{name} ⏷")).strong(), |ui| {
     ui.label(RichText::new(format!("✔ {name}")).strong());
     ui.separator();
     if ui.button("Connect to a hub server…").clicked() {
@@ -658,10 +658,11 @@ pub(crate) fn project_cards(
 }
 
 /// A white card with a border that turns blue when picked; the whole card takes clicks, under
-/// whatever it holds.
+/// whatever it holds (its text isn't selectable, so a click on the name is a click on the card).
 fn card_frame(ui: &mut egui::Ui, picked: bool, add: impl FnOnce(&mut egui::Ui)) -> egui::Response {
   let stroke = if picked { Stroke::new(1.5, theme::ACCENT) } else { Stroke::new(1.0, theme::BORDER) };
   ui.scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| {
+    ui.style_mut().interaction.selectable_labels = false;
     egui::Frame::NONE.fill(Color32::WHITE).stroke(stroke).corner_radius(4.0).inner_margin(egui::Margin::same(6)).show(
       ui,
       |ui| {
@@ -676,7 +677,7 @@ fn card_frame(ui: &mut egui::Ui, picked: bool, add: impl FnOnce(&mut egui::Ui)) 
 /// A card's icon: a glyph on a grey square.
 fn icon_box(ui: &mut egui::Ui, glyph: &str, color: Color32) {
   let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), egui::Sense::hover());
-  ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(232, 235, 240));
+  ui.painter().rect_filled(rect, 4.0, theme::PLACEHOLDER);
   ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(17.0), color);
 }
 
@@ -712,7 +713,7 @@ fn project_list(app: &mut App, ui: &mut egui::Ui) {
   });
   ui.horizontal(|ui| {
     let label =
-      RichText::new(format!("{} ▾", app.data.filter.label().to_uppercase())).small().strong().color(theme::GROUP_LABEL);
+      RichText::new(format!("{} ⏷", app.data.filter.label().to_uppercase())).small().strong().color(theme::GROUP_LABEL);
     ui.menu_button(label, |ui| {
       for f in ProjectFilter::ALL {
         if ui.selectable_label(app.data.filter == f, f.label()).clicked() {
@@ -741,6 +742,7 @@ fn project_list(app: &mut App, ui: &mut egui::Ui) {
           Card::Project(id) => Some(Naming::Project(id.clone())),
           _ => None,
         };
+        let editing = naming.as_ref().is_some_and(|n| app.data.edit.as_ref().is_some_and(|e| e.what == *n));
         let (glyph, color) = match card {
           Card::Recent => ("🕘", theme::ACCENT),
           Card::Editable => ("✏", theme::ACCENT),
@@ -762,10 +764,8 @@ fn project_list(app: &mut App, ui: &mut egui::Ui) {
             });
           }
         });
-        if r.clicked() {
-          app.data.picked = Some(card.clone());
-        }
-        if r.double_clicked() {
+        // one click opens it, as in Fusion (a click beside the name being edited ends the edit)
+        if r.clicked() && !editing {
           open_card(app, &card);
         }
         if let Card::Project(id) = &card {
@@ -824,7 +824,7 @@ pub(crate) fn new_folder(app: &mut App) {
   }
 }
 
-/// A double-click on a project list card.
+/// A click on a project list card.
 fn open_card(app: &mut App, card: &Card) {
   let d = &mut app.data;
   d.picked = Some(card.clone());
@@ -1237,48 +1237,85 @@ fn tile(app: &mut App, ui: &mut egui::Ui, it: &Value) {
 }
 
 /// A list row: thumbnail, badge and bold name, the date; at the right the mode drop-down and
-/// the expander of the details card.
+/// under it the expander of the details card. Each part has its own column of the row, so a
+/// narrow panel cuts the name and the date short rather than squeezing them.
 fn list_row(app: &mut App, ui: &mut egui::Ui, it: &Value, show_path: bool) {
+  const PAD: f32 = 3.0;
+  const BUTTON: f32 = 18.0;
   let id = s(it, "id");
   let selected = app.data.selected.as_deref() == Some(id.as_str());
   let expanded = app.data.expanded.as_deref() == Some(id.as_str());
   let latest = it.pointer("/latest/number").and_then(Value::as_u64);
-  let fill = if selected { Color32::from_rgb(214, 232, 250) } else { Color32::TRANSPARENT };
-  let r = ui
-    .scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| {
-      egui::Frame::NONE.fill(fill).corner_radius(4.0).inner_margin(egui::Margin::same(3)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-          thumb(ui, app, &id, latest, THUMB);
-          ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-            ui.vertical(|ui| {
-              ui.menu_button(RichText::new("▾").small(), |ui| {
-                ui.label("✔ Editable");
-                ui.add_enabled(false, egui::Button::new("    Read-Only").frame(false))
-                  .on_disabled_hover_text(ALWAYS_EDITABLE);
-              });
-              if ui.small_button(if expanded { "▴" } else { "⌄" }).on_hover_text("Details").clicked() {
-                app.data.expanded = if expanded { None } else { Some(id.clone()) };
-              }
-            });
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-              ui.vertical(|ui| {
-                name_line(app, ui, it);
-                ui.label(RichText::new(updated(it)).small().color(theme::MUTED));
-                if show_path {
-                  ui.label(RichText::new(location_text(it, " › ")).small().color(theme::MUTED));
-                }
-              });
-            });
-          });
-        });
-      });
-    })
-    .response;
+  let lines = if show_path { 3.0 } else { 2.0 };
+  let height = THUMB.max(lines * 17.0) + 2.0 * PAD;
+  let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::click());
+  if selected {
+    ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(214, 232, 250));
+  } else if r.hovered() {
+    ui.painter().rect_filled(rect, 4.0, theme::HOVER);
+  }
+  let inner = rect.shrink(PAD);
+  let column = |ui: &mut egui::Ui, at: egui::Rect| {
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::top_down(egui::Align::Min)));
+    child.style_mut().interaction.selectable_labels = false;
+    child
+  };
+  let mut left = column(ui, egui::Rect::from_min_size(inner.min, vec2(THUMB, THUMB)));
+  thumb(&mut left, app, &id, latest, THUMB);
+  // the drop-down and the expander, one over the other at the right
+  let at =
+    |row: f32| egui::Rect::from_min_size(egui::pos2(inner.right() - BUTTON, inner.top() + row), vec2(BUTTON, BUTTON));
+  let mode = row_button(ui, at(0.0), egui::Id::new(("data-item-mode", &id)), RowButton::Mode);
+  egui::Popup::menu(&mode).show(|ui| {
+    ui.label("✔ Editable");
+    ui.add_enabled(false, egui::Button::new("    Read-Only").frame(false)).on_disabled_hover_text(ALWAYS_EDITABLE);
+  });
+  let more = row_button(ui, at(BUTTON + 2.0), egui::Id::new(("data-item-details", &id)), RowButton::Details(expanded));
+  if more.on_hover_text("Details").clicked() {
+    app.data.expanded = if expanded { None } else { Some(id.clone()) };
+  }
+  let text = egui::Rect::from_min_max(
+    egui::pos2(inner.left() + THUMB + 8.0, inner.top()),
+    egui::pos2(inner.right() - BUTTON - 6.0, inner.bottom()),
+  );
+  let mut mid = column(ui, text);
+  mid.spacing_mut().item_spacing.y = 2.0;
+  name_line(app, &mut mid, it);
+  mid.add(egui::Label::new(RichText::new(updated(it)).small().color(theme::MUTED)).truncate());
+  if show_path {
+    mid.add(egui::Label::new(RichText::new(location_text(it, " › ")).small().color(theme::MUTED)).truncate());
+  }
   item_clicks(app, &r, it);
   if expanded {
     details_card(app, ui, it);
   }
+}
+
+/// The two small buttons at a list row's right.
+#[derive(Clone, Copy)]
+enum RowButton {
+  /// The mode drop-down: a small triangle.
+  Mode,
+  /// The details expander: a chevron, pointing up while the card shows.
+  Details(bool),
+}
+
+/// One of a list row's buttons in `rect`, painted (the UI font has no arrows).
+fn row_button(ui: &mut egui::Ui, rect: egui::Rect, id: egui::Id, kind: RowButton) -> egui::Response {
+  let r = ui.interact(rect, id, egui::Sense::click());
+  if r.hovered() || r.is_pointer_button_down_on() {
+    ui.painter().rect(rect, 2.0, theme::HOVER, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
+  }
+  let c = rect.center();
+  match kind {
+    RowButton::Mode => crate::icons::chevron(ui.painter(), c, theme::TEXT),
+    RowButton::Details(open) => {
+      let dy = if open { -2.0 } else { 2.0 };
+      let pts = vec![c + vec2(-4.0, -dy), c + vec2(0.0, dy), c + vec2(4.0, -dy)];
+      ui.painter().add(egui::Shape::line(pts, Stroke::new(1.3, theme::TEXT)));
+    }
+  }
+  r
 }
 
 /// "Project › folder › folder".
@@ -1823,7 +1860,7 @@ fn compare_window(app: &mut App, ctx: &egui::Context) {
         ui.label(RichText::new(format!("{:.1} mm³", vol("added_mm3"))).small());
         ui.label(RichText::new("■ removed").color(theme::ERROR));
         ui.label(RichText::new(format!("{:.1} mm³", vol("removed_mm3"))).small());
-        ui.label(RichText::new("□ unchanged").color(theme::MUTED));
+        ui.label(RichText::new("☐ unchanged").color(theme::MUTED));
       });
       ui.label(
         RichText::new("The viewport shows the comparison until this window closes.").small().color(theme::MUTED),
@@ -1932,7 +1969,9 @@ fn upload_window(app: &mut App, ctx: &egui::Context) {
       ui.horizontal(|ui| {
         ui.label(RichText::new("Upload").strong().size(16.0));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-          if ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Close").clicked() {
+          if crate::icons::icon_button(ui, crate::icons::Icon::Close, 20.0, "Close", false, Some(theme::ICON_INK))
+            .clicked()
+          {
             cancel = true;
           }
         });
@@ -2255,8 +2294,9 @@ mod tests {
   use serde_json::{Value, json};
 
   use super::{
-    BUTTON_TIP, Card, CardTab, ITEM_MENU, Naming, ProjectFilter, ProjectTab, Sort, UPLOAD_ID, View, item_action,
-    new_folder, open_card, project_cards, sort_items, upload_dialog, us_time, work_out_references,
+    BUTTON_TIP, Card, CardTab, DEFAULT_PROJECT, ITEM_MENU, Naming, ProjectFilter, ProjectTab, Sort, UPLOAD_ID, View,
+    item_action, new_folder, open_card, project_cards, sort_items, updated, upload_dialog, us_time,
+    work_out_references,
   };
 
   fn key(key: egui::Key) -> Event {
@@ -2290,6 +2330,112 @@ mod tests {
     fn list(&mut self, project: &str, folder: Option<&str>) -> Value {
       self.app.s.execute("hub.list", &json!({"project": project, "folder": folder})).unwrap()
     }
+  }
+
+  /// Every piece of text a frame drew: the string and where.
+  fn texts(mut out: egui::FullOutput) -> Vec<(String, Rect)> {
+    out.textures_delta.clear();
+    fn walk(s: egui::Shape, out: &mut Vec<(String, Rect)>) {
+      match s {
+        egui::Shape::Vec(v) => v.into_iter().for_each(|s| walk(s, out)),
+        egui::Shape::Text(t) => out.push((t.galley.text().to_string(), t.visual_bounding_rect())),
+        _ => {}
+      }
+    }
+    let mut found = Vec::new();
+    for c in out.shapes {
+      walk(c.shape, &mut found);
+    }
+    found
+  }
+
+  impl Window {
+    /// A frame whose drawn text comes back.
+    fn frame_texts(&mut self, events: Vec<Event>) -> Vec<(String, Rect)> {
+      self.time += 1.0 / 60.0;
+      let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+        time: Some(self.time),
+        focused: true,
+        events,
+        ..Default::default()
+      };
+      let app = &mut self.app;
+      texts(self.ctx.run_ui(input, |ui| app.draw(ui)))
+    }
+  }
+
+  #[test]
+  fn one_click_on_a_project_card_opens_it_even_on_its_name() {
+    let (mut w, root) = window("one-click");
+    w.save_as("Bracket");
+    w.app.data.toggle();
+    w.frames(3);
+    assert_eq!(w.app.data.view, View::Projects);
+    let drawn = w.frame_texts(vec![]);
+    let (_, name) = drawn.iter().find(|(t, _)| t == DEFAULT_PROJECT).expect("the Default Project card");
+    // one click on the bold name, as in Fusion: no double-click, no text selection
+    w.click(true, name.center());
+    w.frames(2);
+    assert_eq!(w.app.data.view, View::Project);
+    assert_eq!(names(&w.app.data.listing, "items"), ["Bracket"]);
+    let _ = std::fs::remove_dir_all(root);
+  }
+
+  #[test]
+  fn a_list_row_keeps_its_columns_in_a_narrow_panel() {
+    let (mut w, root) = window("list-row");
+    let id = w.save_as("Bracket with a long name");
+    w.app.data.toggle();
+    w.frames(3);
+    let card = project_cards(&w.app.data.projects, ProjectFilter::All, "", false)[2].0.clone();
+    open_card(&mut w.app, &card);
+    w.frames(3);
+    let it = w.app.data.listing["items"][0].clone();
+    // the row alone, at the 242 px the verifier's panel had
+    let width = 226.0;
+    let row_frame = |w: &mut Window, events: Vec<Event>| {
+      w.time += 1.0 / 60.0;
+      let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))),
+        time: Some(w.time),
+        focused: true,
+        events,
+        ..Default::default()
+      };
+      let app = &mut w.app;
+      texts(w.ctx.run_ui(input, |ui| {
+        ui.allocate_ui(vec2(width, 300.0), |ui| {
+          ui.set_width(width);
+          super::list_row(app, ui, &it, false);
+        });
+      }))
+    };
+    let drawn = row_frame(&mut w, vec![]);
+    let (name, name_at) = drawn.iter().find(|(t, _)| t.starts_with("Bracket")).expect("the name");
+    assert!(name.chars().count() > 5 && name_at.width() > 60.0, "the name isn't cut to a letter: {name:?} {name_at:?}");
+    let date = updated(&it);
+    let (_, date_at) = drawn.iter().find(|(t, _)| *t == date).expect("the date on one line");
+    assert!(date_at.height() < 18.0, "one line: {date_at:?}");
+    assert!(date_at.top() >= name_at.bottom() - 1.0, "the date sits under the name: {name_at:?} {date_at:?}");
+    assert!(date_at.right() <= width, "{date_at:?}");
+    // the drop-down and the expander are at the row's right, and the expander opens the card
+    let more = w.ctx.read_response(egui::Id::new(("data-item-details", &id))).expect("the expander").rect;
+    let mode = w.ctx.read_response(egui::Id::new(("data-item-mode", &id))).expect("the drop-down").rect;
+    assert!(more.right() <= width + 1.0 && more.left() > date_at.right() - 1.0, "{more:?}");
+    assert!(mode.bottom() <= more.top(), "the drop-down over the expander");
+    let at = more.center();
+    let b = |pressed| Event::PointerButton {
+      pos: at,
+      button: PointerButton::Primary,
+      pressed,
+      modifiers: Default::default(),
+    };
+    row_frame(&mut w, vec![Event::PointerMoved(at), b(true), b(false)]);
+    assert_eq!(w.app.data.expanded.as_deref(), Some(id.as_str()));
+    let drawn = row_frame(&mut w, vec![]);
+    assert!(drawn.iter().any(|(t, _)| t == "FissionOxide Design"), "the details card shows");
+    let _ = std::fs::remove_dir_all(root);
   }
 
   fn names(v: &Value, k: &str) -> Vec<String> {

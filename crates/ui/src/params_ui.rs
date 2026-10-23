@@ -631,9 +631,9 @@ fn header(app: &mut App, ui: &mut egui::Ui, t: &Table) {
   let ar = Rect::from_center_size(pos2(t.left + PARAM + 72.0, rect.center().y), vec2(16.0, 16.0));
   let resp = ui.interact(ar, egui::Id::new("params-sort"), egui::Sense::click());
   let (glyph, col) = match sort {
-    None => ("▲", theme::MUTED),
-    Some(false) => ("▲", theme::TEXT),
-    Some(true) => ("▼", theme::TEXT),
+    None => ("⏶", theme::MUTED),
+    Some(false) => ("⏶", theme::TEXT),
+    Some(true) => ("⏷", theme::TEXT),
   };
   ui.painter().text(ar.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(10.0), col);
   if resp.on_hover_text("Sort by parameter").clicked() {
@@ -783,7 +783,7 @@ fn new_row(app: &mut App, ui: &mut egui::Ui, t: &Table, n: &mut NewParam) -> boo
         let p = json!({"name": n.name.trim(), "expr": expr, "kind": kname, "comment": n.comment});
         done = app.run("param.add", p).is_some();
       }
-      if ui.small_button("✕").on_hover_text("Cancel").clicked() {
+      if ui.small_button("🗙").on_hover_text("Cancel").clicked() {
         done = true;
       }
     });

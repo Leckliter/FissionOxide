@@ -361,7 +361,7 @@ fn rules(app: &mut App, ui: &mut egui::Ui, cols: &[Value]) {
         }
       });
     ui.add(egui::TextEdit::singleline(&mut expr).hint_text("if(length > 100 mm, 8 mm, 5 mm)").desired_width(200.0));
-    add = ui.button("＋ Add").clicked() && !expr.trim().is_empty();
+    add = ui.button("+ Add").clicked() && !expr.trim().is_empty();
   });
   if add && let Some((_, col)) = choices.get(pick) {
     // an appearance rule starts red when true, no colour otherwise (edit them above)
@@ -423,7 +423,7 @@ fn add_row(app: &mut App, ui: &mut egui::Ui) {
     ui.label("New configuration:");
     ui.add(egui::TextEdit::singleline(&mut name).hint_text("name").desired_width(120.0));
     let copy = app.s.design.configurations.active.clone();
-    if ui.button("＋ Add").clicked() && !name.trim().is_empty() {
+    if ui.button("+ Add").clicked() && !name.trim().is_empty() {
       let mut p = json!({"name": name.trim()});
       if let Some(c) = copy {
         p["copy"] = json!(c);
@@ -477,7 +477,7 @@ fn add_column(app: &mut App, ui: &mut egui::Ui, first: Option<String>) {
           ui.selectable_value(&mut pick, i, label);
         }
       });
-    if ui.button("＋ Add").clicked() {
+    if ui.button("+ Add").clicked() {
       add = choices.get(pick).map(|c| c.1.clone());
     }
   });

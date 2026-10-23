@@ -550,7 +550,7 @@ fn input(app: &mut App, ui: &egui::Ui, resp: &egui::Response, cam: &Cam, v: &mut
       ui.painter_at(cam.rect).text(
         cam.to(at),
         egui::Align2::CENTER_CENTER,
-        format!("{r} ✥"),
+        format!("{r} ✚"),
         egui::FontId::proportional(13.0),
         theme::ACCENT,
       );
@@ -667,7 +667,7 @@ fn report_window(ctx: &egui::Context, v: &mut EcadView, cam: &Cam) {
         for it in &items {
           let color = if it.severity == Severity::Error { theme::ERROR } else { Color32::from_rgb(190, 130, 20) };
           let r = ui
-            .add(egui::Label::new(egui::RichText::new(format!("● {}", it.message)).color(color)).sense(Sense::click()));
+            .add(egui::Label::new(egui::RichText::new(format!("• {}", it.message)).color(color)).sense(Sense::click()));
           if r.clicked() {
             goto = it.at;
           }

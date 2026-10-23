@@ -195,6 +195,29 @@ pub struct EdgeInfo {
   pub faces: [u32; 2],
 }
 
+/// How two faces meet at an edge, seen from the material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Meet {
+  /// An outside corner (a box's edges).
+  Convex,
+  /// An inside corner (where a boss stands on a face).
+  Concave,
+  /// The faces continue smoothly (a fillet's edges).
+  Tangent,
+  Other,
+}
+
+/// An edge in one of a face's wires (see [`Shape::edge_uses`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EdgeUse {
+  pub face: u32,
+  /// Which wire of the face: 0 its outer boundary, 1, 2, ... its inner ones (holes in it, or
+  /// where bosses and pockets meet it).
+  pub wire: u32,
+  pub edge: u32,
+  pub meet: Meet,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MassProps {
   /// mm³
@@ -746,6 +769,33 @@ impl Shape {
   /// Splits faces where `tool` crosses them; the body stays in one piece.
   pub fn split_faces(&self, faces: &[u32], tool: &Shape) -> Result<Shape> {
     Shape::wrap(sys::split_faces(self.get()?, faces, tool.get()?)?)
+  }
+
+  /// Splits faces along curves lying on them (edges or wires); the body stays in one piece.
+  pub fn split_faces_by_edges(&self, edges: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::split_faces_by_edges(self.get()?, edges.get()?)?)
+  }
+
+  /// Every face's wires and their edges, for recognising features: which loop of its face each
+  /// edge is in and how the faces meet there.
+  pub fn edge_uses(&self) -> Result<Vec<EdgeUse>> {
+    let raw = sys::face_edge_loops(self.get()?)?;
+    Ok(
+      raw
+        .chunks_exact(4)
+        .map(|c| EdgeUse {
+          face: c[0] as u32,
+          wire: c[1] as u32,
+          edge: c[2] as u32,
+          meet: match c[3] {
+            0 => Meet::Convex,
+            1 => Meet::Concave,
+            2 => Meet::Tangent,
+            _ => Meet::Other,
+          },
+        })
+        .collect(),
+    )
   }
 
   /// A surface filling a closed boundary of edges (planar when the boundary is flat).

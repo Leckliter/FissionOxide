@@ -647,3 +647,21 @@ General defaults, profile menu width, the Unsaved banner over Home. Three wave-4
 (`ui-reverify-sketch-4`, `ui-reverify-dialogs-4`, `ui-reverify-chrome-2`); report
 `parity/reports/2026-10-22-reverify-sketch-dialogs-chrome-inspect.md`. 138 keys remain fixing-merged;
 toolbar, shortcuts and documents next.
+
+## 2026-10-22, verifier 5: re-verification sweep, toolbar to sheet metal
+Rebuilt `c6232d9f` and re-checked toolbar, shortcuts, documents, menus, workspaces, render, manage,
+utilities, plastic, animation, electronics, manufacture, surface and sheet metal: 106 keys, 92 verified, 14
+reopened, 3 new rows (in-canvas render's black ground slab, the grey ground quad in Design, a schematic tab that
+asks to save). Four wave-41 batches (`ui-reverify-render-1`, `ui-reverify-workspaces-1`,
+`ui-reverify-toolbar-1`, `ui-reverify-dialogs-5`); report `parity/reports/2026-10-22-reverify-toolbar-tabs.md`.
+38 keys remain fixing-merged: mesh 21, seven new dialogs merges, two render, eight singles.
+
+## 2026-10-22, verifier 6: re-verification sweep, mesh, dialogs, render and the singles
+Built `dadbcad3`, then `d2202676` after twelve more merges, and and `3aa0fa4c`, re-checked 61 keys with an inserted STL, a box,
+an Assembly Design, the RENDER workspace and the chrome: 42 verified, 15 reopened, 4 new rows, 4 left (flick, comments on a
+saved design, Vertical on a horizontal line, component-owned features). The sweep line is done. Open: mesh
+dialogs lost their Preview row with ce56bfa, Remesh melts the prism, Smooth freezes on opening, Convert Mesh's
+extra icon, no Scale Mesh arrow, mesh menus and shading, Mirror originals, Remove on components, Chamfer status,
+Measure into a dimension box, angle decimals, an applied appearance not drawn (P1), texture handles, the
+environment background, Export types. Four wave-42 batches (`ui-reverify-mesh-1`, `ui-reverify-mesh-2`,
+`ui-reverify-dialogs-6`, `ui-reverify-render-2`); report `parity/reports/2026-10-22-reverify-mesh-dialogs-render.md`.

@@ -297,6 +297,10 @@ fn a_dialog_docks_top_right_when_it_opens_and_after_a_resize() {
 #[test]
 fn the_viewcube_home_button_and_faces_take_clicks() {
   let mut h = Harness::new();
+  // the offsets below are the Normal cube's: without the TEXT COMMANDS bar the canvas is tall
+  // enough for it
+  h.app.text_commands.open = false;
+  h.frame(vec![]);
   let canvas = h.app.canvas;
   let center = canvas.right_top() + vec2(-92.0, 80.0);
   h.app.cam.set_view(fox_engine::render::StandardView::Front);
@@ -2692,21 +2696,21 @@ fn tab_moves_the_value_box_to_the_taper_handle_and_back() {
   // the taper's value is selected: typing replaces it, with its unit written out
   h.frame(typing("5"));
   h.frame(vec![]);
-  assert_eq!(taper(&mut h), "5 deg");
+  assert_eq!(taper(&mut h), "5.0 deg");
   h.frame(vec![key(egui::Key::Tab)]);
   h.frame(vec![]);
   assert_eq!(h.app.manip.value_box.at_handle, None, "back at the distance arrow");
   assert!(h.ctx.memory(|m| m.focused()).is_some());
   h.frame(typing("30"));
   h.frame(vec![]);
-  assert_eq!((field(&mut h), taper(&mut h)), ("30 mm".to_string(), "5 deg".to_string()));
+  assert_eq!((field(&mut h), taper(&mut h)), ("30 mm".to_string(), "5.0 deg".to_string()));
   h.frame(vec![key(egui::Key::Enter)]);
   h.frame(vec![]);
   assert!(h.app.dialog.is_none(), "Enter is OK");
   let f = h.app.s.design.features.last().unwrap();
   let fox_engine::model::FeatureKind::Extrude { extent, .. } = &f.kind else { panic!("{:?}", f.kind) };
   // Edit Feature shows the values with their units
-  assert_eq!((extent.distance.as_str(), extent.taper.as_str()), ("30 mm", "5 deg"));
+  assert_eq!((extent.distance.as_str(), extent.taper.as_str()), ("30 mm", "5.0 deg"));
 }
 
 /// `ui:manip:preview-hover-highlight`: the pointer over Extrude's preview body lights nothing up.
@@ -3067,7 +3071,7 @@ fn the_material_browser_tree_has_one_library_per_row() {
     }
   }
   // the bottom toolbar is in the window, at its bottom, below the tree
-  let bar = row("📚 ▾");
+  let bar = row("📚 ⏷");
   assert!(bar.top() > rows[5].bottom() && bar.bottom() <= window.bottom(), "{bar:?} in {window:?}");
   assert!(window.bottom() - bar.bottom() < 24.0, "{bar:?} in {window:?}");
   assert!(window.bottom() <= 785.0, "the browser fits the window: {window:?}");
@@ -3412,4 +3416,132 @@ fn the_centre_of_concentric_circles_is_picked_as_the_pattern_centre() {
   let d = h.app.dialog.as_ref().expect("the dialog stays open");
   assert!(d.center_pick().is_some(), "the shared centre is the Center Point: {:?}", h.app.s.selection);
   assert_eq!(d.objects(), vec![small.0], "the small circle stays the object");
+}
+
+/// `ui:dialogs:thicken-rows`: SOLID > CREATE > Thicken opens THICKEN with nothing picked in a
+/// design of solid bodies, asking for surfaces; a solid selected before isn't taken (nor
+/// thickened by the preview).
+#[test]
+fn thicken_opens_from_the_create_menu() {
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+  let b = h.app.s.model.bodies[0].id;
+  h.app.s.selection = vec![fox_engine::Sel::Body { body: b }];
+  h.settle();
+  let label = h.create_label();
+  h.move_then_click(label.center());
+  let row = h.find(vec![], "Thicken").expect("Thicken is in the CREATE menu");
+  h.move_then_click(row.center());
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let d = h.app.dialog.as_ref().expect("THICKEN is open");
+  assert!(matches!(d.kind, crate::dialogs::Kind::Form(f) if std::ptr::eq(f, &crate::forms::THICKEN)));
+  assert_eq!(d.prompt(false).as_deref(), Some("Select Surfaces to Thicken"));
+  assert!(!d.previewing_model() && h.app.s.model.bodies.len() == 1, "the solid isn't thickened");
+  let t: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
+  for s in ["THICKEN", "Faces / Surface Bodies", "Chain Selection", "Direction", "Thicken Type", "Operation"] {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+}
+
+/// `ui:dialogs:boundary-fill-rows`: BOUNDARY FILL is as wide as the other command dialogs, and
+/// Remove Tools sits on its own row under Operation (Thicken's Thicken Type under Direction).
+#[test]
+fn boundary_fill_rows_stack_in_a_normal_width_dialog() {
+  let mut h = Harness::new();
+  h.open_dialog();
+  let normal = h.dialog_rect().width();
+  h.app.cancel_dialog();
+  for (form, above, below) in
+    [(&crate::forms::BOUNDARY_FILL, "Operation", "Remove Tools"), (&crate::forms::THICKEN, "Direction", "Thicken Type")]
+  {
+    h.app.start(crate::dialogs::Kind::Form(form));
+    for _ in 0..3 {
+      h.frame(vec![]);
+    }
+    assert!((h.dialog_rect().width() - normal).abs() < 1.0, "{} vs {normal}", h.dialog_rect().width());
+    let a = h.find(vec![], above).unwrap();
+    let b = h.find(vec![], below).unwrap();
+    assert!(b.top() > a.bottom(), "{below} {b:?} under {above} {a:?}");
+    h.app.cancel_dialog();
+  }
+}
+
+#[test]
+fn the_ground_plane_offset_box_takes_a_typed_distance() {
+  let mut h = Harness::new();
+  h.app.display.open_ground_offset(h.app.s.design.units);
+  // Adaptive off: the Offset row shows its value in the design's unit
+  h.frame(vec![]); // the dialog shows from its second frame
+  let adaptive = h.find(vec![], "Adaptive").expect("the dialog is open");
+  h.move_then_click(adaptive.left_center() + vec2(96.0 + 10.0 + 8.0, 0.0));
+  assert_eq!(h.app.display.ground_offset_form.as_ref().map(|f| f.adaptive), Some(false));
+  assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "0.00 mm");
+  // a click goes into the box (no nudged value) and typing replaces its text
+  let offset = h.find(vec![], "Offset").expect("the Offset row");
+  h.move_then_click(offset.left_center() + vec2(96.0 + 10.0 + 60.0, 0.0));
+  assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "0.00 mm", "a click changes nothing");
+  let mut ev = vec![Event::Key {
+    key: egui::Key::A,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::COMMAND,
+  }];
+  ev.extend(typing("20"));
+  h.frame(ev);
+  h.frame(vec![]);
+  assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "20");
+  // OK moves the ground that far below the model
+  let ok = h.find(vec![], "OK").expect("OK");
+  h.move_then_click(ok.center());
+  assert_eq!(h.app.display.ground_offset_form, None);
+  assert!(!h.app.display.ground_adaptive);
+  assert_eq!(h.app.display.ground(), Some(20.0));
+  // units and expressions work as in the command dialogs; OK greys while it does not evaluate
+  let s = &h.app.s;
+  assert_eq!(crate::navbar::ground_offset_mm(s, "20 mm"), Some(20.0));
+  assert!((crate::navbar::ground_offset_mm(s, "1 in / 2").unwrap() - 12.7).abs() < 1e-9);
+  assert_eq!(crate::navbar::ground_offset_mm(s, "abc"), None);
+  assert_eq!(crate::navbar::ground_offset_mm(s, "-3"), None);
+  // it reopens on the value applied
+  h.app.display.open_ground_offset(h.app.s.design.units);
+  assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "20.00 mm");
+}
+
+/// The verifier's case: Circular Pattern's objects picked, the next canvas click on a sketch
+/// point is the Center Point (Fusion moves the active row on with the prompt), and the status
+/// bar then reads the centre's position.
+#[test]
+fn sketch_circular_pattern_takes_the_centre_after_the_objects_pick() {
+  use crate::dialogs::Kind;
+  use crate::viewport::Tool;
+  use fox_engine::Sel;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  let line = h.app.run("sketch.line", json!({"points": [[20, 0], [40, 0]]})).unwrap()["curves"][0].as_u64().unwrap();
+  h.app.run("sketch.point", json!({"at": [0, -15]})).unwrap();
+  h.app.set_tool(Tool::Select);
+  h.frame(vec![]);
+  h.app.start(Kind::SkCircPattern);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let plane = h.app.s.model.sketches[&sk].plane;
+  h.move_then_click(h.screen(plane.to_world([30.0, 0.0])));
+  let d = h.app.dialog.as_ref().expect("the dialog stays open");
+  assert_eq!(d.objects(), vec![line as u32]);
+  assert_eq!(d.prompt(false).as_deref(), Some("Select the center point"));
+  h.move_then_click(h.screen(plane.to_world([0.0, -15.0])));
+  let d = h.app.dialog.as_ref().expect("the dialog stays open");
+  assert!(
+    matches!(d.center_pick(), Some(Sel::SketchPoint { .. })),
+    "the point is the Center Point: {:?}",
+    h.app.s.selection
+  );
+  assert_eq!(d.objects(), vec![line as u32], "and not another object");
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Sketch Point | X: 0.00 Y: -15.00 Z: 0.00 mm"));
 }

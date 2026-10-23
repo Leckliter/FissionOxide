@@ -78,6 +78,8 @@ pub(crate) use primitive::temp_sketch_name;
 mod construct_tests;
 #[cfg(test)]
 mod leftovers_tests;
+#[cfg(test)]
+mod reverify_tests;
 
 pub(crate) use section::{KeptSection, shown_section};
 mod edit_picks;
@@ -86,6 +88,9 @@ pub(crate) use remove::remove_params;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
 pub(crate) const PICK_PLANE_HINT: &str = "Select a plane or planar face";
+/// Fusion's prompt once a single hole is placed, until two reference edges hold it.
+pub(crate) const HOLE_REFERENCE_PROMPT: &str =
+  "Select linear or circular reference edges to fully define hole location";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -901,7 +906,7 @@ impl Dialog {
 
   /// Does this Extrude take planar body faces as its profiles (none of a sketch's picked)? Its
   /// preview then changes the very body picked, so it previews as the model-picking dialogs do.
-  fn extrudes_faces(&self) -> bool {
+  pub(super) fn extrudes_faces(&self) -> bool {
     self.kind == Kind::Extrude && self.profiles.is_empty() && !self.faces.is_empty()
   }
 
@@ -1275,9 +1280,12 @@ impl Dialog {
     if kind == Kind::PressPull {
       d.sync_press_owner(&app.s);
     }
-    // Fusion's Offset Face starts at 0.00 in the document unit
+    // Fusion's Offset Face starts at 0.00 in the document unit, as do Move/Copy's distances
     if kind == Kind::OffsetFace {
       d.distance = d.unit.fixed(0.0, 2);
+    }
+    if kind == Kind::Move {
+      d.translate = std::array::from_fn(|_| d.unit.fixed(0.0, 2));
     }
     d.drop_mesh_bodies(&app.s);
     d.dirty = !d.picks();
@@ -1386,10 +1394,10 @@ impl Dialog {
         d.edges = vec![Value::Null; edges.len()];
         d
       }
-      FeatureKind::Chamfer { distance, edges, distance2, angle, .. } => {
+      FeatureKind::Chamfer { distance, edges, distance2, angle, corner, .. } => {
         let mut d = Dialog::blank(Kind::Chamfer);
         d.radius = distance.clone();
-        d.load_chamfer(distance2, angle);
+        d.load_chamfer(distance2, angle, corner);
         d.edges = vec![Value::Null; edges.len()];
         d
       }
@@ -2093,6 +2101,7 @@ impl Dialog {
     if matches!(self.kind, Kind::Form(f) if crate::forms::close_only(f)) {
       return;
     }
+    self.face_extrude_op(s);
     let Some((cmd, params)) = self.command() else {
       return;
     };
@@ -2108,8 +2117,12 @@ impl Dialog {
     self.cut_ghost(s, cmd, &params);
     self.live_applying(s, cmd, &params);
     let before: Vec<BodyId> = s.model.bodies.iter().map(|b| b.id).collect();
+    let hole_before = self.hole_before(s);
     let result = s.execute(cmd, &params);
     self.note_copies(s, &before, result.is_ok());
+    if result.is_ok() {
+      self.hole_ghost(s, &hole_before);
+    }
     if let Some(t) = self.trace.as_mut() {
       t.result = result.as_ref().ok().cloned();
     }
@@ -2957,9 +2970,16 @@ impl Dialog {
     if self.kind == Kind::Mirror && self.editing.is_none() {
       return Some("Hold Ctrl to modify object selection or mirror plane".into());
     }
-    // so does Draft's, once its picks are made
+    // so does Draft's, once its picks are made, and Chamfer's once an edge is picked
     if self.kind == Kind::Draft {
       return Some("Specify draft angle".into());
+    }
+    if self.kind == Kind::Chamfer {
+      return Some("Specify chamfer distance".into());
+    }
+    // a placed hole asks for the edges that hold it until both references are picked
+    if self.hole_single() && self.editing.is_none() && self.edges.len() < 2 {
+      return Some(HOLE_REFERENCE_PROMPT.into());
     }
     // a mesh dialog keeps naming its settings, as Fusion's do
     if let Kind::Form(f) = self.kind
@@ -3037,7 +3057,9 @@ impl Dialog {
   /// fails (a fillet too big for its edges), until a value that works is typed.
   pub(crate) fn ok_enabled(&self) -> bool {
     let input = match self.kind {
-      Kind::Extrude if !self.picks_fixed() => !self.profiles.is_empty() || !self.faces.is_empty(),
+      Kind::Extrude if !self.picks_fixed() => {
+        (!self.profiles.is_empty() || !self.faces.is_empty()) && !self.waits_for_value()
+      }
       // OK waits for Compute, and Section Analysis for its cut plane
       Kind::Interference => self.report.is_some(),
       Kind::Section => !self.plane.is_null(),
@@ -3062,6 +3084,10 @@ impl Dialog {
   fn waits_for_value(&self) -> bool {
     match self.kind {
       Kind::SkOffset | Kind::OffsetFace => !self.offset_set(),
+      // a body face's extrude, until its distance leaves 0.00 (or To Object picks its object)
+      Kind::Extrude if self.editing.is_none() && self.extrudes_faces() => {
+        matches!(self.extent, "one_side" | "symmetric" | "two_sides") && !length_set(&self.distance)
+      }
       Kind::Draft => !self.draft_angle_set(),
       Kind::Fillet if self.editing.is_none() && self.solid.fillet_type != "full_round" => !length_set(&self.radius),
       Kind::Shell if self.editing.is_none() => !length_set(&self.radius),
@@ -3306,6 +3332,21 @@ impl Dialog {
         ui.end_row();
         continue;
       }
+      // Replace with Primitives: Object type shows its icon; the Primitive Size group folds
+      if f.cmd == "replace_with_primitives" {
+        match input.key() {
+          "object_type" => {
+            ui.label(input.label());
+            let mut sel: &'static str = "bodies";
+            choice::combo(ui, "form-object-type", crate::forms::PRIMITIVE_OBJECTS, &mut sel, |_| Some(Icon::Body));
+            self.form.values[i] = json!(sel);
+            ui.end_row();
+            continue;
+          }
+          "offset" if !section_header(ui, egui::Id::new("primitive-size"), "Primitive Size") => continue,
+          _ => {}
+        }
+      }
       // Coil's and Pipe's Operation shows each value's icon, as Fusion's
       if let Input::Choice { key: "operation", label, options } = input
         && matches!(f.cmd, "coil.form" | "pipe.form")
@@ -3434,8 +3475,8 @@ impl Dialog {
         Input::Check { label, .. } | Input::CheckOn { label, .. } => {
           let mut b = v.as_bool().unwrap_or(false);
           if let Some(why) = greyed {
-            ui.label("");
-            ui.add_enabled_ui(false, |ui| ui.checkbox(&mut b, *label)).inner.on_disabled_hover_text(why);
+            ui.label(*label);
+            ui.add_enabled_ui(false, |ui| ui.checkbox(&mut b, "")).inner.on_disabled_hover_text(why);
             ui.end_row();
           } else {
             Self::check(ui, label, &mut b, dirty);
@@ -3460,6 +3501,7 @@ impl Dialog {
             if choice::combo(ui, &format!("form-choice-{i}"), options, &mut sel, choice::form_icon) {
               *dirty = true;
             }
+            ui.end_row();
           } else if options.iter().any(|(k, _)| crate::forms::greyed_option(f, input.key(), k).is_some()) {
             // a drop-down with entries FissionOxide can't do yet: those are greyed, with the reason
             ui.label(*label);
@@ -4357,10 +4399,15 @@ impl Dialog {
     let used = self.other_row_curves();
     let objects: Vec<u32> = picked.into_iter().filter(|c| !used.contains(c)).collect();
     if !objects.is_empty() && objects != self.curves {
-      // Mirror: the first objects pick moves the active row on to the mirror line with the
-      // prompt, so the next line clicked is the line (Fusion); the other rows keep Objects
-      // active for more picks
-      if self.kind == Kind::SkMirror && self.curves.is_empty() && self.pick_row == 0 && self.line.is_none() {
+      // Mirror and Circular Pattern: the first objects pick moves the active row on to the
+      // mirror line or Center Point with the prompt, so the next pick is the line or the centre
+      // (Fusion); the other rows keep Objects active for more picks
+      let second_empty = match self.kind {
+        Kind::SkMirror => self.line.is_none(),
+        Kind::SkCircPattern => self.center.is_none(),
+        _ => false,
+      };
+      if second_empty && self.curves.is_empty() && self.pick_row == 0 {
         self.pick_row = 1;
       }
       self.curves = objects;
@@ -4798,9 +4845,11 @@ impl Dialog {
     ui.end_row();
   }
 
+  /// A check box row as Fusion lays it out: the label in the label column, the box alone in the
+  /// value column.
   fn check(ui: &mut egui::Ui, label: &str, v: &mut bool, dirty: &mut bool) {
-    ui.label("");
-    if ui.checkbox(v, label).changed() {
+    ui.label(label);
+    if ui.checkbox(v, "").changed() {
       *dirty = true;
     }
     ui.end_row();
@@ -4867,7 +4916,7 @@ impl Dialog {
   }
 
   /// Extrude's distance for the engine: its magnitude and the flip its sign (or the arrow) implies.
-  fn extrude_distance(&self) -> (String, bool) {
+  pub(super) fn extrude_distance(&self) -> (String, bool) {
     let (distance, negative) = extrude::split_sign(&self.distance);
     (distance, self.flip != negative)
   }
@@ -5124,22 +5173,26 @@ pub(crate) fn section_header(ui: &mut egui::Ui, id: egui::Id, title: &str) -> bo
   open
 }
 
-/// What Measure measures: the first two selected bodies, faces, edges and vertices, or (with
-/// nothing selected) what the pointer is over.
+/// What Measure measures: the first two selected bodies, faces, edges, vertices, sketch curves
+/// and sketch points, or (with nothing selected) what the pointer is over.
 fn measure_picks(app: &App) -> (Vec<Value>, bool) {
-  let picks: Vec<Value> = app
-    .s
-    .selection
-    .iter()
-    .filter(|x| matches!(x, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. }))
-    .take(2)
-    .filter_map(|x| serde_json::to_value(x).ok())
-    .collect();
+  let measurable = |x: &Sel| {
+    matches!(
+      x,
+      Sel::Body { .. }
+        | Sel::Face { .. }
+        | Sel::Edge { .. }
+        | Sel::Vertex { .. }
+        | Sel::SketchCurve { .. }
+        | Sel::SketchPoint { .. }
+    )
+  };
+  let picks: Vec<Value> =
+    app.s.selection.iter().filter(|x| measurable(x)).take(2).filter_map(|x| serde_json::to_value(x).ok()).collect();
   if !picks.is_empty() {
     return (picks, false);
   }
-  let hover =
-    app.hover.map(|p| p.to_sel()).filter(|x| matches!(x, Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. }));
+  let hover = app.hover.map(|p| p.to_sel()).filter(|x| !matches!(x, Sel::Body { .. }) && measurable(x));
   (hover.and_then(|h| serde_json::to_value(h).ok()).into_iter().collect(), true)
 }
 
@@ -5151,6 +5204,7 @@ impl Dialog {
     use crate::select::Priority;
     use icon_row::{choice, icon_row};
     app.measure = None;
+    app.tstate.measured = None;
     // Measure picks vertices too, while it's open
     if self.saved_filter.is_none() {
       self.saved_filter = Some((app.sel_priority, app.sel_filter.vertices));
@@ -5230,6 +5284,10 @@ impl Dialog {
       if let (Some(a), Some(b)) = (v3(a), v3(b)) {
         app.measure = Some((a, b, fmt.len(d)));
       }
+      app.tstate.measured = Some(d);
+    } else if !hovering && r.get("kind").and_then(Value::as_str) == Some("edge") {
+      // one picked edge or sketch line: its length
+      app.tstate.measured = r.get("length").and_then(Value::as_f64);
     }
     for (i, sec) in measure_sections(&r, &fmt).iter().enumerate() {
       if !section_header(ui, ui.id().with(("measure-section", i)), &sec.title) {
@@ -5268,6 +5326,12 @@ impl Dialog {
     self.pick_row = row;
   }
 
+  /// Circular Pattern's centre while its Center Point row is active: the status bar reads it as
+  /// Fusion does ("Sketch Point | X: 0.00 Y: 0.00 Z: 0.00 in"), not the objects with it.
+  pub(crate) fn center_status(&self) -> Option<Sel> {
+    (self.kind == Kind::SkCircPattern && self.pick_row == 1).then_some(self.center).flatten()
+  }
+
   /// The sketch pattern's or Scale's picked centre point.
   #[cfg(test)]
   pub(crate) fn center_pick(&self) -> Option<Sel> {
@@ -5298,6 +5362,7 @@ impl Dialog {
       crate::viewport::fill_dim_from_measure(app);
       app.s.selection.clear();
       app.measure = None;
+      app.tstate.measured = None;
     }
     // Section Analysis's live cut goes (OK kept a copy in the browser)
     if self.kind == Kind::Section {
@@ -6404,7 +6469,7 @@ mod tests {
       &forms::SK_INTERSECTION_CURVE,
       &forms::SK_ISOPARAMETRIC,
     ] {
-      assert!(forms::always_previews(f) || forms::no_preview(f), "{} shows a Preview box", f.name);
+      assert!(!Dialog::blank(Kind::Form(f)).has_preview_box(), "{} shows a Preview box", f.name);
     }
     let f = &forms::SK_SPUN_PROFILE;
     let keys: Vec<&str> = f.inputs.iter().map(|i| i.key()).collect();
@@ -6412,7 +6477,16 @@ mod tests {
     assert!(
       matches!(f.inputs[0], Input::Pick { multi: true, .. }) && matches!(f.inputs[3], Input::Pick { multi: false, .. })
     );
-    assert!(forms::greyed(f, "associative").is_none());
+    // every row is live, as in Fusion: Project Axis, Tolerance (0.01 mm) and Projection Link too,
+    // and Flip Result is an icon toggle
+    for key in keys {
+      assert!(forms::greyed(f, key).is_none(), "{key} is greyed");
+    }
+    assert!(matches!(f.inputs[6], Input::Expr { default: "0.01 mm", .. }));
+    assert!(matches!(f.inputs[7], Input::Flip { label: "Flip Result", .. }));
+    for g in [&forms::SK_PROJECT_SURFACE, &forms::SK_INTERSECTION_CURVE] {
+      assert!(forms::greyed(g, "associative").is_none(), "{}: Projection Link is live", g.name);
+    }
     let iso = &forms::SK_ISOPARAMETRIC;
     assert!(forms::greyed(iso, "curve").is_none() && forms::greyed(iso, "associative").is_none());
     assert!(Dialog::blank(Kind::Form(iso)).ok_enabled(), "Fusion's OK is live");
@@ -7144,7 +7218,6 @@ mod tests {
     apply(&mut s, &mut d);
     let m = s.model.body(block).unwrap().shape.mass().unwrap();
     assert!((m.bbox_min.z - 10.0).abs() < 1e-6 && (m.bbox_min.x - 50.0).abs() < 1e-6, "{:?}", m.bbox_min);
-    assert!(!crate::forms::preview_box(&ALIGN));
 
     // Remove with nothing selected opens REMOVE: Objects, OK greyed, Fusion's prompt
     let mut app = App::with_session(Session::default());
@@ -7185,7 +7258,7 @@ mod tests {
     assert_eq!(d.rf_types(), ["hole", "chamfer", "extrude", "revolve", "other"]);
     d.rf_tick("all", true);
     assert_eq!(d.rf_types(), REMOVE_FEATURE_TYPES);
-    assert!(greyed(&REMOVE_FEATURES, "chamfer").is_some() && greyed(&REMOVE_FEATURES, "hole").is_none());
+    assert!(REMOVE_FEATURES.inputs.iter().all(|i| greyed(&REMOVE_FEATURES, i.key()).is_none()), "every type is live");
     let body = s.model.bodies[0].id;
     let mut d = form(&mut s, &REMOVE_FEATURES, vec![Sel::Body { body }], &[]);
     // picking the body applies nothing; the hole is found and Remove takes it off
@@ -7204,15 +7277,21 @@ mod tests {
     d.cancel(&mut s);
     assert!((s.model.bodies[0].shape.mass().unwrap().volume - after).abs() < 1e-9);
 
-    // Replace with Primitives: Bodies and the primitive; OK swaps the body for a box
+    // Replace with Primitives: Object type, Selection, Primitive Shape and the Primitive Size
+    // group, no Preview box; OK swaps the body for a box
     let mut s = Session::default();
     s.execute("cylinder", &json!({"radius": 5, "height": 20})).unwrap();
     let body = s.model.bodies[0].id;
+    let labels: Vec<&str> = REPLACE_PRIMITIVES.inputs.iter().map(Input::label).collect();
+    assert_eq!(labels, ["Object type", "Selection", "Primitive Shape", "Offset"]);
+    assert!(!Dialog::blank(Kind::Form(&REPLACE_PRIMITIVES)).has_preview_box(), "no Preview check box");
     let d = form(&mut s, &REPLACE_PRIMITIVES, vec![], &[]);
     assert!(!d.ok_enabled());
-    assert_eq!(d.prompt(false).as_deref(), Some("Select solid bodies"));
+    assert_eq!(d.prompt(false).as_deref(), Some("Select Bodies"));
+    assert_eq!((d.form.values[0].clone(), d.form.values[2].clone()), (json!("bodies"), json!("box")));
     let mut d = form(&mut s, &REPLACE_PRIMITIVES, vec![Sel::Body { body }], &[]);
-    assert_eq!(d.command().unwrap().0, "replace_with_primitives");
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, p["offset"].clone()), ("replace_with_primitives", json!("0 mm")));
     apply(&mut s, &mut d);
     assert_eq!(s.model.bodies.len(), 1);
     assert!((s.model.bodies[0].shape.mass().unwrap().volume - 2000.0).abs() < 1e-6);

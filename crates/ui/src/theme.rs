@@ -61,6 +61,15 @@ pub const EXTEND_PIECE: Color32 = color(fox_brand::RED.light);
 /// Break's red x at each point the curve will split at.
 pub const BREAK_MARK: Color32 = color(fox_brand::RED.base);
 
+/// The ground of the data panel and the properties panel docked at the side.
+pub const SIDE_PANEL: Color32 = Color32::from_rgb(243, 245, 248);
+/// The grey square behind a data panel card's icon or a design without a thumbnail.
+pub const PLACEHOLDER: Color32 = Color32::from_rgb(232, 235, 240);
+/// The workspace switcher (DESIGN ▾): its ground, outline and ink, Fusion's greys.
+pub const SWITCHER: Color32 = Color32::from_rgb(248, 248, 248);
+pub const SWITCHER_LINE: Color32 = Color32::from_gray(196);
+pub const SWITCHER_INK: Color32 = Color32::from_gray(30);
+
 /// Icon palette: outlines, solid fills, the highlighted face, sketch curves and accents.
 pub const ICON_INK: Color32 = color(app::ICON_INK);
 pub const ICON_BLUE: Color32 = color(fox_brand::BLUE.base);
@@ -185,7 +194,7 @@ pub fn is_dark(ctx: &egui::Context) -> bool {
 /// The dark theme's colour for each light one painted as a fill, from the brand's dark palette:
 /// bars and panels go dark, borders and separators dim, hover and selection turn deep blue.
 /// Looked up in order (several light tokens share a colour); colours not listed stay.
-fn dark_fills() -> [(Color32, Color32); 13] {
+fn dark_fills() -> [(Color32, Color32); 17] {
   use fox_brand::{BLUE, dark, neutral};
   let pill = Color32::from_rgba_premultiplied(neutral::GRAPHITE.0, neutral::GRAPHITE.1, neutral::GRAPHITE.2, 230);
   [
@@ -197,6 +206,12 @@ fn dark_fills() -> [(Color32, Color32); 13] {
     (PANEL, color(dark::SURFACE_RAISED)),
     (DIALOG_BODY, color(dark::SURFACE_RAISED)),
     (PILL, pill),
+    // the data panel's and the properties panel's ground, and a thumbnail's placeholder
+    (SIDE_PANEL, color(dark::SURFACE)),
+    (PLACEHOLDER, color(neutral::GRAPHITE)),
+    // the workspace switcher's ground and outline
+    (SWITCHER, color(dark::SURFACE_RAISED)),
+    (SWITCHER_LINE, color(neutral::GRAPHITE)),
     (BORDER, color(neutral::GRAPHITE)),
     (SEPARATOR, color(neutral::GRAPHITE)),
     (HOVER, color(BLUE.deep)),
@@ -217,14 +232,14 @@ fn dark_fill(c: Color32) -> Option<Color32> {
 /// strokes, the active tab's underline) light.
 fn dark_line(c: Color32) -> Option<Color32> {
   let ink = color(fox_brand::dark::TEXT_MUTED);
-  lookup(&[(TEXT, ink), (ICON_INK, ink), (Color32::BLACK, ink)], c).or_else(|| dark_fill(c))
+  lookup(&[(TEXT, ink), (ICON_INK, ink), (Color32::BLACK, ink), (SWITCHER_INK, ink)], c).or_else(|| dark_fill(c))
 }
 
 /// The dark theme's colour for light-theme text: dark ink reads light on the dark panels.
 fn dark_text(c: Color32) -> Option<Color32> {
   use fox_brand::dark;
   let (text, muted) = (color(dark::TEXT), color(dark::TEXT_MUTED));
-  lookup(&[(TEXT, text), (GROUP_LABEL, text), (Color32::BLACK, text), (MUTED, muted)], c)
+  lookup(&[(TEXT, text), (GROUP_LABEL, text), (Color32::BLACK, text), (SWITCHER_INK, text), (MUTED, muted)], c)
 }
 
 /// Layers painted directly (not through an egui area), which the area order doesn't list.

@@ -512,8 +512,8 @@ fn palette_rows(app: &mut App, ui: &mut egui::Ui) {
   let mut act: Option<&str> = None;
   for (label, pair) in [
     ("Expand", [("+", "Expand Selection"), ("−", "Shrink Selection")]),
-    ("Grow/Shrink", [("⊕", "Grow Selection"), ("⊖", "Shrink Selection")]),
-    ("Invert", [("⇄", "Invert Selection"), ("⊘", "Clear Selection")]),
+    ("Grow/Shrink", [("⊞", "Grow Selection"), ("⊟", "Shrink Selection")]),
+    ("Invert", [("🔀", "Invert Selection"), ("⊗", "Clear Selection")]),
   ] {
     row(ui, label, |ui| {
       for (g, tip) in pair.iter().rev() {

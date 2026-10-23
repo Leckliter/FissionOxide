@@ -263,7 +263,8 @@ fn the_gear_opens_fusions_timeline_settings() {
     panels::timeline_bar::settings(&h.ctx),
     panels::timeline_bar::Settings { swatch: false, hide_inactive: true }
   );
-  h.click(pos2(1440.0 - 8.0 - 12.0, 882.0));
+  // the timeline sits over the TEXT COMMANDS bar
+  h.click(pos2(1440.0 - 8.0 - 12.0, 882.0 - crate::text_commands::BAR_H));
   let d = h.settle();
   for t in ["Change to Direct Modeling", "Component Color Swatch", "Hide all inactive features"] {
     assert!(d.texts.iter().any(|(_, s)| s.trim() == t), "{t}: {:?}", d.texts);

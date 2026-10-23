@@ -594,7 +594,7 @@ fn every_format_round_trips() {
   let mut t = Session::default();
   run(&mut t, "open", json!({"path": dir.join("plate.foxz")}));
   assert_eq!(t.design, s.design);
-  for ext in ["glb", "usdz"] {
+  for ext in ["glb", "usdz", "fbx"] {
     let path = dir.join(format!("plate.{ext}"));
     run(&mut s, "export", json!({"path": path}));
     assert!(std::fs::metadata(&path).unwrap().len() > 100);

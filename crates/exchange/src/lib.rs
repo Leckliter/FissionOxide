@@ -1,5 +1,5 @@
 //! File formats for FissionOxide that don't need the B-rep kernel: triangle meshes (STL, OBJ, PLY,
-//! 3MF, glTF, USDZ), 2D sketch geometry (DXF, SVG), FissionOxide design archives (`.foxz`) and inspection
+//! 3MF, glTF, USDZ, FBX), 2D sketch geometry (DXF, SVG), FissionOxide design archives (`.foxz`) and inspection
 //! of Autodesk Fusion archives (`.f3d`/`.f3z`).
 //!
 //! B-rep formats (STEP, IGES, BRep) go through `fox-kernel`; [`FORMATS`] lists every format the
@@ -11,6 +11,7 @@
 pub mod archive;
 pub mod cutservice;
 pub mod dxf;
+mod fbx;
 pub mod flatcheck;
 mod glb;
 pub mod nurbs;
@@ -22,6 +23,7 @@ mod threemf;
 pub mod tsm;
 mod usdz;
 
+pub use fbx::write_fbx;
 pub use glb::write_glb;
 pub use obj::{read_obj, write_obj};
 pub use ply::{read_ply, write_ply};
@@ -102,6 +104,7 @@ formats! {
   "tsm", "T-Spline Mesh", ["tsm"], Brep, true, false, "T-spline control cage (Fusion's Insert T-Spline): its smooth limit surface becomes a body";
   "glb", "glTF binary", ["glb"], Mesh, false, true, "Metres, Y-up, for web and AR viewers";
   "usdz", "USDZ", ["usdz"], Mesh, false, true, "Universal Scene Description package (ASCII layer)";
+  "fbx", "FBX", ["fbx"], Mesh, false, true, "Binary FBX 7.4 (Fusion's FBX export): millimetres, Y-up, one model per body";
   "dxf", "DXF", ["dxf"], Sketch, true, true, "2D: imports into a new sketch; exports the active or last sketch";
   "svg", "SVG", ["svg"], Sketch, true, true, "2D: imports into a new sketch (paths, shapes, transforms); exports the active or last sketch with exact curves";
 }
@@ -227,6 +230,7 @@ pub fn write_mesh(ext: &str, meshes: &[Mesh]) -> Result<Vec<u8>> {
     "3mf" => write_3mf(meshes, None),
     "glb" => write_glb(meshes),
     "usdz" => write_usdz(meshes),
+    "fbx" => write_fbx(meshes),
     e => Err(ExchangeError::fmt(format!("'.{e}' is not a mesh format FissionOxide writes"))),
   }
 }

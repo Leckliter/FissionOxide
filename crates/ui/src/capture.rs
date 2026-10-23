@@ -399,7 +399,7 @@ pub(crate) fn print_ok(app: &mut App, form: &PrintForm) {
   if form.preparation == Preparation::Manufacture {
     crate::panels::switch_workspace(app, "Manufacture");
     app.status = Some((
-      "Additive setups aren't in FissionOxide yet: 3D Print ▸ Mesh Export writes an STL, 3MF or OBJ to slice".into(),
+      "Additive setups aren't in FissionOxide yet: 3D Print > Mesh Export writes an STL, 3MF or OBJ to slice".into(),
       false,
     ));
     return;

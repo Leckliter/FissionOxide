@@ -145,6 +145,8 @@ pub(crate) mod ffi {
     fn scale(s: &Shape, cx: f64, cy: f64, cz: f64, sx: f64, sy: f64, sz: f64) -> Result<UniquePtr<Shape>>;
     fn remove_faces(s: &Shape, faces: &[u32]) -> Result<UniquePtr<Shape>>;
     fn split_faces(s: &Shape, faces: &[u32], tool: &Shape) -> Result<UniquePtr<Shape>>;
+    fn split_faces_by_edges(s: &Shape, edges: &Shape) -> Result<UniquePtr<Shape>>;
+    fn face_edge_loops(s: &Shape) -> Result<Vec<i32>>;
     fn patch(boundary: &Shape) -> Result<UniquePtr<Shape>>;
     fn face_loops(s: &Shape, deflection: f64) -> Result<EdgeData>;
     fn reversed(s: &Shape) -> Result<UniquePtr<Shape>>;

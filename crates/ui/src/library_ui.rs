@@ -262,7 +262,7 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
           ui.horizontal(|ui| {
             let col = if r["exists"].as_bool() == Some(true) { theme::TEXT } else { theme::MUTED };
             ui.label(RichText::new(path).color(col).small());
-            if saved.iter().any(|f| f == path) && ui.small_button("✕").on_hover_text("Remove from settings").clicked() {
+            if saved.iter().any(|f| f == path) && ui.small_button("🗙").on_hover_text("Remove from settings").clicked() {
               remove_folder = Some(path.to_string());
             }
           });

@@ -23,7 +23,9 @@
 #include <BRepAlgoAPI_Section.hxx>
 #include <BRepFeat_SplitShape.hxx>
 #include <BRepFill_Filling.hxx>
+#include <BRepOffset_Analyse.hxx>
 #include <BRepOffset_MakeOffset.hxx>
+#include <ChFiDS_TypeOfConcavity.hxx>
 #include <Geom2d_Line.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Lin2d.hxx>
@@ -2497,10 +2499,93 @@ std::unique_ptr<Shape> split_faces(const Shape &s, rust::Slice<const uint32_t> f
   if (n == 0) throw std::runtime_error("the tool does not cross the faces");
   ss.Build();
   if (!ss.IsDone()) throw std::runtime_error("the faces could not be split");
+  // (a tool that stops inside a face leaves it whole)
+  TopTools_IndexedMapOfShape after;
+  index_map(ss.Shape(), TopAbs_FACE, after);
+  if (after.Extent() <= map.Extent()) throw std::runtime_error("the tool does not cross the faces");
   Track t({&s});
   t.step(s.s, ss);
   return wrap(ss.Shape(), t);
   FOX_CATCH("split face")
+}
+
+// Splits a body's faces along curves (edges or wires) lying on them, as Split Face's Closest
+// Point does with curves dropped onto the faces; the body stays one piece.
+std::unique_ptr<Shape> split_faces_by_edges(const Shape &s, const Shape &edges) {
+  FOX_TRY
+  TopTools_ListOfShape args, tools;
+  args.Append(s.s);
+  for (TopExp_Explorer ex(edges.s, TopAbs_EDGE); ex.More(); ex.Next()) tools.Append(ex.Current());
+  if (tools.IsEmpty()) throw std::runtime_error("there are no curves to split with");
+  BRepAlgoAPI_Splitter sp;
+  sp.SetArguments(args);
+  sp.SetTools(tools);
+  sp.SetFuzzyValue(1e-5);
+  sp.Build();
+  if (!sp.IsDone() || sp.HasErrors()) throw std::runtime_error("the faces could not be split");
+  TopoDS_Shape r = sp.Shape();
+  // (the splitter hands back a compound around the one body)
+  if (r.ShapeType() == TopAbs_COMPOUND) {
+    TopoDS_Iterator it(r);
+    if (it.More()) {
+      TopoDS_Shape only = it.Value();
+      it.Next();
+      if (!it.More()) r = only;
+    }
+  }
+  TopTools_IndexedMapOfShape before, after;
+  index_map(s.s, TopAbs_FACE, before);
+  index_map(r, TopAbs_FACE, after);
+  if (after.Extent() <= before.Extent()) throw std::runtime_error("the curves do not cross the faces");
+  Track t({&s});
+  t.step(sp.History());
+  return wrap(r, t);
+  FOX_CATCH("split face")
+}
+
+// For feature recognition: every face's wires and their edges as (face, loop, edge, kind)
+// quadruples, face and edge being 1-based map indices, loop 0 the face's outer wire (1, 2, ...
+// its inner ones) and kind the edge's concavity there (0 convex, 1 concave, 2 tangent, 3 other).
+rust::Vec<int32_t> face_edge_loops(const Shape &s) {
+  FOX_TRY
+  TopTools_IndexedMapOfShape faces, edges;
+  index_map(s.s, TopAbs_FACE, faces);
+  index_map(s.s, TopAbs_EDGE, edges);
+  BRepOffset_Analyse an(s.s, 1e-3);
+  rust::Vec<int32_t> out;
+  for (int fi = 1; fi <= faces.Extent(); ++fi) {
+    const TopoDS_Face &f = TopoDS::Face(faces(fi));
+    TopoDS_Wire outer = BRepTools::OuterWire(f);
+    int inner = 0;
+    for (TopoDS_Iterator wi(f); wi.More(); wi.Next()) {
+      if (wi.Value().ShapeType() != TopAbs_WIRE) continue;
+      int loop = wi.Value().IsSame(outer) ? 0 : ++inner;
+      for (TopExp_Explorer ex(wi.Value(), TopAbs_EDGE); ex.More(); ex.Next()) {
+        const TopoDS_Edge &e = TopoDS::Edge(ex.Current());
+        if (BRep_Tool::Degenerated(e)) continue;
+        int kind = 3;
+        try {
+          const BRepOffset_ListOfInterval &l = an.Type(e);
+          if (!l.IsEmpty()) {
+            switch (l.First().Type()) {
+            case ChFiDS_Convex: kind = 0; break;
+            case ChFiDS_Concave: kind = 1; break;
+            case ChFiDS_Tangential: kind = 2; break;
+            default: kind = 3;
+            }
+          }
+        } catch (const Standard_Failure &) {
+          // (a free or seam edge isn't analysed)
+        }
+        out.push_back(fi);
+        out.push_back(loop);
+        out.push_back(edges.FindIndex(e));
+        out.push_back(kind);
+      }
+    }
+  }
+  return out;
+  FOX_CATCH("face loops")
 }
 
 // A surface patch filling a closed boundary (a wire or edges): planar when it can be.

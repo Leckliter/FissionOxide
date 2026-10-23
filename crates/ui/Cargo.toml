@@ -20,6 +20,7 @@ fox-render-gl.workspace = true
 
 [dev-dependencies]
 fox-render-gl = { workspace = true, features = ["headless"] }
+ttf-parser.workspace = true
 
 [lints]
 workspace = true

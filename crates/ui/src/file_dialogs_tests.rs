@@ -106,7 +106,7 @@ fn file_view_lists_fusions_hide_and_show_entries_with_their_shortcuts() {
       "Hide ViewCube Ctrl+Alt+V",
       "Hide Browser Ctrl+Alt+B",
       "Hide Comments Ctrl+Alt+A",
-      "Show Text Commands Ctrl+Alt+C",
+      "Hide Text Commands Ctrl+Alt+C",
       "Hide Navigation Bar Ctrl+Alt+N",
       "Hide Command Toolbar Ctrl+Alt+T",
       "Show Data Panel Ctrl+Alt+P",
@@ -115,11 +115,12 @@ fn file_view_lists_fusions_hide_and_show_entries_with_their_shortcuts() {
     ]
   );
   assert!(entries.iter().all(|e| e.2), "every entry runs, Text Commands too");
+  assert!(h.app.text_commands.open, "TEXT COMMANDS shows at start, as in Fusion");
   h.key(Key::C, Modifiers::COMMAND | Modifiers::ALT);
-  assert!(h.app.text_commands.open, "Ctrl+Alt+C shows the TEXT COMMANDS panel");
-  assert_eq!(labels(&h.app)[3].0, "Hide Text Commands");
+  assert!(!h.app.text_commands.open, "Ctrl+Alt+C hides the TEXT COMMANDS panel");
+  assert_eq!(labels(&h.app)[3].0, "Show Text Commands");
   h.key(Key::C, Modifiers::COMMAND | Modifiers::ALT);
-  assert!(!h.app.text_commands.open);
+  assert!(h.app.text_commands.open);
   // the shortcuts flip them, and the labels with them
   let ctrl_alt = Modifiers::COMMAND | Modifiers::ALT;
   h.key(Key::V, ctrl_alt);
@@ -234,6 +235,13 @@ fn export_is_fusions_window_with_name_type_and_location() {
   assert_eq!(form.path(), dir.join("Part.stl"));
   assert!(file_dialogs::export_now(&mut h.app, &form), "{:?}", h.app.status);
   assert!(dir.join("Part.stl").is_file());
+  // FBX is live, as in Fusion; Fusion's own archive and Inventor's part need Autodesk's kernels
+  form.kind = EXPORT_TYPES.iter().position(|t| t.ext == "fbx").unwrap();
+  assert!(file_dialogs::export_now(&mut h.app, &form), "{:?}", h.app.status);
+  assert!(std::fs::read(dir.join("Part.fbx")).unwrap().starts_with(b"Kaydara FBX Binary"));
+  let greyed: Vec<&str> =
+    EXPORT_TYPES.iter().filter(|t| t.format.is_none() && !t.fusion_greys).map(|t| t.ext).collect();
+  assert_eq!(greyed, ["f3d", "ipt", "skp", "smt"]);
   // a greyed type or a missing folder writes nothing
   form.kind = 1;
   assert!(!file_dialogs::export_now(&mut h.app, &form));

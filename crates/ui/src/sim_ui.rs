@@ -369,7 +369,7 @@ fn study_tree(app: &mut App, v: &mut SimUi, ui: &mut egui::Ui) {
       for (i, text) in items.iter().enumerate() {
         ui.horizontal(|ui| {
           ui.label(text);
-          if ui.small_button("✕").on_hover_text("Remove").clicked() {
+          if ui.small_button("🗙").on_hover_text("Remove").clicked() {
             remove = Some(json!({"study": id, key.trim_end_matches('s'): i}));
           }
         });
@@ -411,7 +411,7 @@ fn study_tree(app: &mut App, v: &mut SimUi, ui: &mut egui::Ui) {
       for (i, r) in r.iter().enumerate() {
         ui.horizontal(|ui| {
           ui.label(format!("Local: {} face(s) at {} mm", r["faces"], r["size"]));
-          if ui.small_button("✕").clicked() {
+          if ui.small_button("🗙").clicked() {
             app.run("sim.remove", json!({"study": id, "refinement": i}));
           }
         });

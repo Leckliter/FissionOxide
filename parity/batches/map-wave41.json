@@ -1,0 +1,19 @@
+{
+  "ui:render:in-canvas-ground-slab": "ui-reverify-render-1",
+  "ui:render:design-ground-look": "ui-reverify-render-1",
+  "ui:render:scene-settings-dialog": "ui-reverify-render-1",
+  "ui:manage:bom-palette": "ui-reverify-workspaces-1",
+  "ui:manufacture:cam-browser": "ui-reverify-workspaces-1",
+  "ui:manufacture:milling-panels": "ui-reverify-workspaces-1",
+  "ui:manufacture:setup-dialog": "ui-reverify-workspaces-1",
+  "ui:electronics:new-document-tab": "ui-reverify-workspaces-1",
+  "ui:electronics:schematic-close-prompt": "ui-reverify-workspaces-1",
+  "ui:toolbar:responsive-collapse": "ui-reverify-toolbar-1",
+  "ui:toolbar:workspace-menu-style": "ui-reverify-toolbar-1",
+  "ui:workspaces:menu-row-style": "ui-reverify-toolbar-1",
+  "ui:menus:construct-icons": "ui-reverify-toolbar-1",
+  "ui:documents:tab-overflow-menu": "ui-reverify-toolbar-1",
+  "ui:shortcuts:sketch-keys-from-3d": "ui-reverify-toolbar-1",
+  "ui:surface:sweep-loft-missing": "ui-reverify-dialogs-5",
+  "ui:sheet:flange-dialog-open": "ui-reverify-dialogs-5"
+}

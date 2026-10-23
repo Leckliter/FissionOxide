@@ -45,10 +45,11 @@ pub struct Line {
   pub error: bool,
 }
 
-#[derive(Default)]
 pub struct TextCommands {
-  /// The panel is shown (File ▸ View ▸ Show / Hide Text Commands).
+  /// The panel is shown (File ▸ View ▸ Show / Hide Text Commands): Fusion shows it at start.
   pub open: bool,
+  /// Expanded from its header bar to the log and the input line.
+  pub expanded: bool,
   pub mode: Mode,
   pub input: String,
   pub log: Vec<Line>,
@@ -58,8 +59,24 @@ pub struct TextCommands {
   back: Option<usize>,
 }
 
-/// The panel's height, as Fusion docks it.
+impl Default for TextCommands {
+  fn default() -> TextCommands {
+    TextCommands {
+      open: true,
+      expanded: false,
+      mode: Mode::default(),
+      input: String::new(),
+      log: Vec::new(),
+      history: Vec::new(),
+      back: None,
+    }
+  }
+}
+
+/// The expanded panel's height, as Fusion docks it.
 const HEIGHT: f32 = 150.0;
+/// The header bar's height: all that shows until it is expanded.
+pub(crate) const BAR_H: f32 = 24.0;
 
 /// Splits a Txt line into the command and its parameters.
 pub fn parse(line: &str) -> Result<(String, Value), String> {
@@ -116,80 +133,110 @@ fn step_history(t: &mut TextCommands, back: bool) {
 }
 
 /// The panel, docked along the bottom of the window (call before the timeline so it sits under
-/// it).
+/// it): Fusion's TEXT COMMANDS header bar, which a click expands to the log and the input line.
 pub fn panel(app: &mut App, ui: &mut egui::Ui) {
   if !app.text_commands.open {
     return;
   }
-  egui::Panel::bottom("text-commands")
-    .resizable(true)
-    .default_size(HEIGHT)
-    .min_size(80.0)
-    .frame(egui::Frame::NONE.fill(theme::PANEL).stroke(egui::Stroke::new(1.0, theme::BORDER)))
-    .show(ui, |ui| {
-      // the title bar: TEXT COMMANDS and the close button
-      egui::Frame::NONE.fill(theme::FLOAT_HEADER).inner_margin(egui::Margin::symmetric(8, 3)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-          ui.label(RichText::new("TEXT COMMANDS").size(11.5).strong().color(theme::GROUP_LABEL));
-          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let close = ui.add(egui::Button::new(RichText::new("×").size(14.0).color(theme::MUTED)).frame(false));
-            if close.on_hover_text("Hide Text Commands").clicked() {
-              app.text_commands.open = false;
-            }
-          });
-        });
-      });
-      let row_h = 26.0;
-      let log_h = (ui.available_height() - row_h - 6.0).max(20.0);
-      egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 3)).show(ui, |ui| {
-        egui::ScrollArea::vertical().max_height(log_h).auto_shrink([false, false]).stick_to_bottom(true).show(
-          ui,
-          |ui| {
-            for l in &app.text_commands.log {
-              let col = if l.error { theme::ERROR } else { theme::TEXT };
-              ui.add(egui::Label::new(RichText::new(&l.text).monospace().color(col)).wrap());
-            }
-          },
-        );
-      });
-      ui.separator();
-      ui.horizontal(|ui| {
-        ui.add_space(8.0);
-        let modes_w = 150.0;
-        let mode = app.text_commands.mode;
-        let hint = if mode.available() { "Enter a command (help lists them)" } else { "" };
-        let r = ui.add_enabled(
-          mode.available(),
-          egui::TextEdit::singleline(&mut app.text_commands.input)
-            .id(egui::Id::new("text-commands-input"))
-            .font(egui::TextStyle::Monospace)
-            .hint_text(hint)
-            .desired_width((ui.available_width() - modes_w).max(80.0)),
-        );
-        if r.has_focus() {
-          let (up, down) = ui.input(|i| (i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown)));
-          if up || down {
-            step_history(&mut app.text_commands, up);
-          }
-        }
-        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-          submit(app);
-          r.request_focus();
-        }
-        for m in Mode::ALL {
-          let b = ui.add_enabled(m.available(), egui::RadioButton::new(app.text_commands.mode == m, m.label()));
-          let b = b.on_disabled_hover_text(format!(
-            "FissionOxide has no {} interpreter; Txt runs its commands",
-            if m == Mode::Py { "Python" } else { "TypeScript" }
-          ));
-          if b.clicked() {
-            app.text_commands.mode = m;
-          }
-        }
-      });
-      ui.add_space(2.0);
-    });
+  let frame = egui::Frame::NONE.fill(theme::PANEL).stroke(egui::Stroke::new(1.0, theme::BORDER));
+  // separate panels for the bar and the expanded panel: each keeps its own height
+  let panel = if app.text_commands.expanded {
+    egui::Panel::bottom("text-commands").resizable(true).default_size(HEIGHT).min_size(80.0)
+  } else {
+    egui::Panel::bottom("text-commands-bar").resizable(false).exact_size(BAR_H)
+  };
+  panel.frame(frame).show(ui, |ui| {
+    ui.spacing_mut().item_spacing.y = 0.0;
+    let (bar, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), BAR_H), egui::Sense::hover());
+    header(ui, bar, &mut app.text_commands.expanded);
+    if !app.text_commands.expanded {
+      return;
+    }
+    ui.spacing_mut().item_spacing.y = 4.0;
+    body(app, ui);
+  });
+}
+
+/// The header bar: an arrow and TEXT COMMANDS; a click expands or collapses the panel.
+fn header(ui: &mut egui::Ui, r: egui::Rect, expanded: &mut bool) {
+  let resp = ui.interact(r, egui::Id::new("text-commands-header"), egui::Sense::click());
+  let fill = if resp.hovered() { theme::HOVER } else { theme::FLOAT_HEADER };
+  ui.painter().rect_filled(r, 0.0, fill);
+  let c = r.left_center() + egui::vec2(12.0, 0.0);
+  // pointing up while collapsed (it opens upwards), down while expanded
+  let pts = if *expanded {
+    vec![c + egui::vec2(-4.0, -2.0), c + egui::vec2(4.0, -2.0), c + egui::vec2(0.0, 3.0)]
+  } else {
+    vec![c + egui::vec2(-4.0, 2.0), c + egui::vec2(4.0, 2.0), c + egui::vec2(0.0, -3.0)]
+  };
+  ui.painter().add(egui::Shape::convex_polygon(pts, theme::GROUP_LABEL, egui::Stroke::NONE));
+  ui.painter().text(
+    r.left_center() + egui::vec2(24.0, 0.0),
+    egui::Align2::LEFT_CENTER,
+    "TEXT COMMANDS",
+    egui::FontId::proportional(12.0),
+    theme::GROUP_LABEL,
+  );
+  let tip = if *expanded { "Collapse Text Commands" } else { "Expand Text Commands" };
+  if resp.on_hover_text(tip).clicked() {
+    *expanded = !*expanded;
+  }
+}
+
+/// The expanded panel under the header: the log, then the input line and Txt / Py / TS.
+fn body(app: &mut App, ui: &mut egui::Ui) {
+  // fixed rects inside the panel: whatever is drawn never asks the panel to grow
+  const ROW_H: f32 = 28.0;
+  let rest = ui.available_rect_before_wrap();
+  // claimed whole, so the panel keeps its height
+  ui.allocate_rect(rest, egui::Sense::hover());
+  let row = egui::Rect::from_min_max(egui::pos2(rest.left(), rest.bottom() - ROW_H), rest.right_bottom());
+  let log = egui::Rect::from_min_max(rest.min, egui::pos2(rest.right(), row.top()));
+  ui.painter().hline(rest.x_range(), row.top(), egui::Stroke::new(1.0, theme::BORDER));
+  let mut log_ui = ui.new_child(egui::UiBuilder::new().max_rect(log.shrink2(egui::vec2(8.0, 3.0))));
+  egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(&mut log_ui, |ui| {
+    for l in &app.text_commands.log {
+      let col = if l.error { theme::ERROR } else { theme::TEXT };
+      ui.add(egui::Label::new(RichText::new(&l.text).monospace().color(col)).wrap());
+    }
+  });
+  let mut row_ui = ui.new_child(
+    egui::UiBuilder::new()
+      .max_rect(row.shrink2(egui::vec2(8.0, 3.0)))
+      .layout(egui::Layout::left_to_right(egui::Align::Center)),
+  );
+  let ui = &mut row_ui;
+  let modes_w = 150.0;
+  let mode = app.text_commands.mode;
+  let hint = if mode.available() { "Enter a command (help lists them)" } else { "" };
+  let r = ui.add_enabled(
+    mode.available(),
+    egui::TextEdit::singleline(&mut app.text_commands.input)
+      .id(egui::Id::new("text-commands-input"))
+      .font(egui::TextStyle::Monospace)
+      .hint_text(hint)
+      .desired_width((ui.available_width() - modes_w).max(80.0)),
+  );
+  if r.has_focus() {
+    let (up, down) = ui.input(|i| (i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown)));
+    if up || down {
+      step_history(&mut app.text_commands, up);
+    }
+  }
+  if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+    submit(app);
+    r.request_focus();
+  }
+  for m in Mode::ALL {
+    let b = ui.add_enabled(m.available(), egui::RadioButton::new(app.text_commands.mode == m, m.label()));
+    let b = b.on_disabled_hover_text(format!(
+      "FissionOxide has no {} interpreter; Txt runs its commands",
+      if m == Mode::Py { "Python" } else { "TypeScript" }
+    ));
+    if b.clicked() {
+      app.text_commands.mode = m;
+    }
+  }
 }
 
 #[cfg(test)]

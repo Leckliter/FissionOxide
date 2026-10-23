@@ -328,58 +328,61 @@ fn open_window(app: &mut App, ctx: &egui::Context) {
       egui::Frame::new().stroke(Stroke::new(1.0, theme::BORDER)).show(ui, |ui| {
         ui.set_width(220.0);
         ui.set_height(TABLE_H);
+        // the frame sits in a row: the tree's rows go down a column of their own
         egui::ScrollArea::vertical().id_salt("open-tree").auto_shrink([false, false]).show(ui, |ui| {
-          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-          for p in f.projects.clone() {
-            let id = s(&p, "id");
-            let on = f.sample.is_none() && f.project.as_deref() == Some(id.as_str());
-            let (rect, r) = row(ui, on);
-            row_text(ui, rect, 10.0, &s(&p, "name"), theme::TEXT);
-            if r.clicked() {
-              f.project = Some(id);
-              f.sample = None;
-              f.folder = None;
-              f.selected = None;
-              f.stale = true;
+          ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            for p in f.projects.clone() {
+              let id = s(&p, "id");
+              let on = f.sample.is_none() && f.project.as_deref() == Some(id.as_str());
+              let (rect, r) = row(ui, on);
+              row_text(ui, rect, 10.0, &s(&p, "name"), theme::TEXT);
+              if r.clicked() {
+                f.project = Some(id);
+                f.sample = None;
+                f.folder = None;
+                f.selected = None;
+                f.stale = true;
+              }
             }
-          }
-          if f.projects.is_empty() {
-            let (rect, _) = row(ui, false);
-            row_text(ui, rect, 10.0, "No projects yet", theme::MUTED);
-          }
-          match &mut f.new_project {
-            Some((name, first)) => {
-              let r = name_field(ui, name, first);
-              if r.lost_focus() {
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !name.trim().is_empty() {
-                  act = OpenAct::CreateProject(name.trim().to_string());
+            if f.projects.is_empty() {
+              let (rect, _) = row(ui, false);
+              row_text(ui, rect, 10.0, "No projects yet", theme::MUTED);
+            }
+            match &mut f.new_project {
+              Some((name, first)) => {
+                let r = name_field(ui, name, first);
+                if r.lost_focus() {
+                  if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !name.trim().is_empty() {
+                    act = OpenAct::CreateProject(name.trim().to_string());
+                  }
+                  f.new_project = None;
                 }
-                f.new_project = None;
+              }
+              None => {
+                let (rect, r) = row(ui, false);
+                row_text(ui, rect, 10.0, "+  New Project", theme::ACCENT);
+                if r.on_hover_text("Create a project").clicked() {
+                  f.new_project = Some((String::new(), true));
+                }
               }
             }
-            None => {
-              let (rect, r) = row(ui, false);
-              row_text(ui, rect, 10.0, "+  New Project", theme::ACCENT);
-              if r.on_hover_text("Create a project").clicked() {
-                f.new_project = Some((String::new(), true));
-              }
-            }
-          }
-          ui.add_space(10.0);
-          ui.horizontal(|ui| {
             ui.add_space(10.0);
-            ui.label(RichText::new("Samples").strong());
-          });
-          ui.add_space(2.0);
-          for (i, name) in SAMPLES.iter().enumerate() {
-            let (rect, r) = row(ui, f.sample == Some(i));
-            row_text(ui, rect, 22.0, name, theme::TEXT);
-            if r.on_hover_text(SAMPLES_EMPTY).clicked() {
-              f.sample = Some(i);
-              f.selected = None;
-              f.stale = true;
+            ui.horizontal(|ui| {
+              ui.add_space(10.0);
+              ui.label(RichText::new("Samples").strong());
+            });
+            ui.add_space(2.0);
+            for (i, name) in SAMPLES.iter().enumerate() {
+              let (rect, r) = row(ui, f.sample == Some(i));
+              row_text(ui, rect, 22.0, name, theme::TEXT);
+              if r.on_hover_text(SAMPLES_EMPTY).clicked() {
+                f.sample = Some(i);
+                f.selected = None;
+                f.stale = true;
+              }
             }
-          }
+          });
         });
       });
       ui.add_space(12.0);
@@ -561,7 +564,7 @@ pub(crate) const EXPORT_TYPES: [ExportType; 19] = [
   t("Autodesk Inventor 2025 Files (*.ipt)", None, "ipt", false),
   t("DWG Files (*.dwg)", None, "dwg", true),
   t("DXF Files (*.dxf)", None, "dxf", true),
-  t("FBX Files (*.fbx)", None, "fbx", false),
+  t("FBX Files (*.fbx)", Some("fbx"), "fbx", false),
   t("IGES Files (*.igs *.iges)", None, "igs", true),
   t("OBJ Files (*.obj)", Some("obj"), "obj", false),
   t("SAT Files (*.sat)", None, "sat", true),

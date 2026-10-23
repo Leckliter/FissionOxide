@@ -1,0 +1,21 @@
+{
+  "ui:mesh:combine-dialog": "ui-reverify-mesh-1",
+  "ui:mesh:reduce-dialog": "ui-reverify-mesh-1",
+  "ui:mesh:remesh-dialog": "ui-reverify-mesh-1",
+  "ui:mesh:shell-dialog": "ui-reverify-mesh-1",
+  "ui:mesh:smooth-dialog": "ui-reverify-mesh-1",
+  "ui:mesh:body-menu-greyed-entries": "ui-reverify-mesh-2",
+  "ui:mesh:convert-mesh-dialog": "ui-reverify-mesh-2",
+  "ui:mesh:face-groups-dialogs": "ui-reverify-mesh-2",
+  "ui:mesh:scale-mesh-dialog": "ui-reverify-mesh-2",
+  "ui:mesh:sharp-edge-shading": "ui-reverify-mesh-2",
+  "ui:chrome:export-dialog": "ui-reverify-dialogs-6",
+  "ui:dialogs:angle-box-precision": "ui-reverify-dialogs-6",
+  "ui:dialogs:chamfer-fields-2": "ui-reverify-dialogs-6",
+  "ui:dialogs:copy-ghost-preview": "ui-reverify-dialogs-6",
+  "ui:dialogs:remove-components": "ui-reverify-dialogs-6",
+  "ui:sketch:dim-box-measure-fill": "ui-reverify-dialogs-6",
+  "ui:render:appearance-not-drawn": "ui-reverify-render-2",
+  "ui:render:flatten-ground": "ui-reverify-render-2",
+  "ui:render:texture-map-controls": "ui-reverify-render-2"
+}

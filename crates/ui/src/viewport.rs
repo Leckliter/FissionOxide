@@ -151,6 +151,8 @@ pub enum Drag {
   ConicRho,
   /// Dragging the arrow of an applied sketch fillet or chamfer (see [`crate::sketch_modify`]).
   ToolManip,
+  /// 3D Sketch: dragging the Line manipulator's arrow along axis `0`, moving the next point.
+  SketchAxis(usize),
   /// A right-drag the preset doesn't navigate with: Fusion's marking gesture from `start`, run
   /// when the button is let go (see [`crate::marking::flick`]).
   Flick {
@@ -203,9 +205,17 @@ pub struct ToolState {
   /// Measure was opened from a dimension box's menu: its measurement goes into the box when it
   /// closes.
   pub(crate) measure_fill: bool,
+  /// The length Measure reads now: the distance between its two picks, or one picked edge's or
+  /// sketch curve's length (what [`fill_dim_from_measure`] writes into the box).
+  pub(crate) measured: Option<f64>,
   /// 3D Sketch: where the Line chain's last point is in the world (off the sketch plane when it
   /// was taken from a model vertex).
   pub(crate) last3d: Option<DVec3>,
+  /// 3D Sketch: the shape being drawn started on a model point off the sketch plane, this far
+  /// along its normal; it is drawn on the parallel plane through that point (see [`tool_plane`]).
+  pub(crate) lift: Option<f64>,
+  /// 3D Sketch: where dragging the Line manipulator's axis arrow has taken the next point.
+  pub(crate) axis_to: Option<DVec3>,
 }
 
 /// Fusion's rho for a new conic curve.
@@ -332,6 +342,8 @@ pub fn reset_tool_state(app: &mut App) {
   app.tstate.rho = None;
   app.tstate.con_picks = 0;
   app.tstate.con_any = false;
+  app.tstate.lift = None;
+  app.tstate.axis_to = None;
 }
 
 /// The conic's rho as the tool has it now: typed in its box, dragged with its arrow, or Fusion's
@@ -530,7 +542,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   track_arc_wind(app, &resp, &view);
   offset_follow(app, &resp, &view);
   tool_preview(app, &painter, &resp, &view);
-  sketch_3d_manipulator(app, &painter, &view);
+  consumed |= sketch_3d_manipulator(app, &resp, &painter, &view);
   crate::cam_ui::setup_preview(app, &painter, &project);
   trim_preview(app, &painter, &resp, &view);
   crate::sketch_modify::preview(app, &painter, &resp, &view);
@@ -694,6 +706,7 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
   {
     match drag {
       Drag::SketchPoint { sketch, point } => finish_point_drag(app, sketch, point),
+      Drag::SketchAxis(_) => finish_axis_drag(app),
       Drag::Component => crate::comp_drag::finish(app),
       Drag::Flick { start, now } => crate::marking::flick(app, ctx, start, now),
       Drag::Box { start, now } => {
@@ -1037,25 +1050,145 @@ pub(crate) fn sketch_3d_enabled(app: &App) -> bool {
   !matches!(app.tool, Tool::Ellipse | Tool::Conic | Tool::Point | Tool::Spline | Tool::ControlSpline)
 }
 
-/// 3D Sketch on: the Line tool's 3D manipulator at the start of the segment being drawn (the
-/// last placed point), a plane handle across the sketch normal and the three axis arrows, as
-/// Fusion shows it. Drawn only: the solver keeps the sketch in its plane.
-fn sketch_3d_manipulator(app: &App, painter: &egui::Painter, view: &View) {
-  if !app.palette.sketch_3d || app.tool != Tool::Line {
-    return;
+/// 3D Sketch on: what a click would take off the sketch plane lights up under the pointer (see
+/// [`snap_3d_marker`]), and the Line tool shows its 3D manipulator at the start of the segment
+/// being drawn (the last placed point): a plane handle across the sketch normal and the three
+/// axis arrows, as Fusion shows it. Dragging an arrow moves the next point along that axis; letting
+/// go places it there. Returns true while an arrow has the pointer.
+fn sketch_3d_manipulator(app: &mut App, resp: &egui::Response, painter: &egui::Painter, view: &View) -> bool {
+  if !app.palette.sketch_3d || !draws_3d(app.tool) {
+    return false;
   }
-  let Some((_, plane)) = sketch_plane(app) else { return };
-  let Some(last) = app.tstate.pts.last() else { return };
-  let project = |p: DVec3| view.to_screen(&app.cam, p);
+  let Some((_, plane)) = sketch_plane(app) else { return false };
+  if app.drag.is_none()
+    && let Some(pos) = resp.hover_pos()
+  {
+    snap_3d_marker(app, painter, view, pos);
+  }
+  if app.tool != Tool::Line {
+    return false;
+  }
+  let Some(last) = app.tstate.pts.last().copied() else { return false };
+  let cam = app.cam;
+  let project = |p: DVec3| view.to_screen(&cam, p);
   // a point taken off the plane: the manipulator sits there, and the segment runs from it
-  let at = app.tstate.last3d.filter(|w| plane.to_local(*w) == *last).unwrap_or_else(|| plane.to_world(*last));
-  if (at - plane.origin).dot(plane.normal()).abs() > 1e-6
+  let at = line_start_3d(app, &plane, last);
+  let dragging = match app.drag {
+    Some(Drag::SketchAxis(i)) => Some(i),
+    _ => None,
+  };
+  let hot = dragging.or_else(|| {
+    resp.hover_pos().and_then(|p| crate::manipulators::sketch_axes_arrow(&project, &cam, at, plane.normal(), p))
+  });
+  if let Some(i) = hot
+    && dragging.is_none()
+    && resp.drag_started_by(egui::PointerButton::Primary)
+  {
+    app.drag = Some(Drag::SketchAxis(i));
+  }
+  let ink = Stroke::new(1.5, Color32::from_rgb(6, 150, 214));
+  if let Some(i) = dragging {
+    // the next point follows the pointer along the arrow's axis
+    let axis = [DVec3::X, DVec3::Y, DVec3::Z][i];
+    if let Some(p) = resp.interact_pointer_pos() {
+      let (o, d) = view.ray(&cam, p);
+      if let Some(t) = axis_param(at, axis, o, d) {
+        let step = app.increments.linear_step(grid_step(app, view) / 10.0);
+        let t = if step > 0.0 { (t / step).round() * step } else { t };
+        app.tstate.axis_to = Some(at + axis * t);
+      }
+    }
+    if let Some(to) = app.tstate.axis_to
+      && let (Some(a), Some(b)) = (project(at), project(to))
+    {
+      painter.line_segment([a, b], ink);
+    }
+  } else if (at - plane.origin).dot(plane.normal()).abs() > 1e-6
     && let Some(cur) = app.tstate.hud.cursor.map(|c| plane.to_world(c.0))
     && let (Some(a), Some(b)) = (project(at), project(cur))
   {
-    painter.line_segment([a, b], Stroke::new(1.5, Color32::from_rgb(6, 150, 214)));
+    painter.line_segment([a, b], ink);
   }
-  crate::manipulators::sketch_axes(painter, &project, &app.cam, at, plane.normal());
+  crate::manipulators::sketch_axes(painter, &project, &cam, at, plane.normal(), hot);
+  hot.is_some()
+}
+
+/// Where the Line chain's next segment starts in the world: the last point, off the plane when it
+/// was taken there in 3D.
+fn line_start_3d(app: &App, plane: &Plane, last: [f64; 2]) -> DVec3 {
+  app.tstate.last3d.filter(|w| plane.to_local(*w) == last).unwrap_or_else(|| plane.to_world(last))
+}
+
+/// The Line manipulator's arrow was let go: the next point goes where the drag took it.
+fn finish_axis_drag(app: &mut App) {
+  let Some(to) = app.tstate.axis_to.take() else { return };
+  let Some((sk, plane)) = sketch_plane(app) else { return };
+  if app.tool != Tool::Line || app.tstate.pts.is_empty() {
+    return;
+  }
+  // along an axis in the sketch plane from a point on it, it is an ordinary line
+  if !line_3d_to(app, sk, &plane, to) {
+    place_point(app, sk, plane.to_local(to), None);
+  }
+}
+
+/// The tools with a 3D form under the palette's 3D Sketch: they take model vertices and points
+/// along model edges where they are, off the sketch plane.
+pub(crate) fn draws_3d(tool: Tool) -> bool {
+  tool == Tool::Line || lifts(tool)
+}
+
+/// The shape tools that, started on a model point off the sketch plane, draw on the plane parallel
+/// to the sketch's through it (see [`tool_plane`]).
+fn lifts(tool: Tool) -> bool {
+  matches!(
+    tool,
+    Tool::Rect
+      | Tool::CenterRect
+      | Tool::Rect3
+      | Tool::Circle
+      | Tool::Circle2P
+      | Tool::Circle3P
+      | Tool::Arc3
+      | Tool::CenterArc
+      | Tool::Polygon
+      | Tool::CircPolygon
+      | Tool::EdgePolygon
+      | Tool::Slot
+      | Tool::OverallSlot
+      | Tool::CenterSlot
+      | Tool::ArcSlot3
+      | Tool::ArcSlotCenter
+      | Tool::MidpointLine
+  )
+}
+
+/// The plane the active tool draws on: the sketch's, or with 3D Sketch the parallel one through
+/// the model point the shape started on (its coordinates are the sketch's, shifted along the
+/// normal).
+pub(crate) fn tool_plane(app: &App) -> Option<(FeatureId, Plane)> {
+  let (sk, mut plane) = sketch_plane(app)?;
+  if let Some(h) = app.tstate.lift {
+    plane.origin += plane.normal() * h;
+  }
+  Some((sk, plane))
+}
+
+/// 3D Sketch: the model vertex or edge point a click would take lights up, as Fusion shows it: a
+/// vertex's hollow ring, or a dot on the edge.
+fn snap_3d_marker(app: &App, painter: &egui::Painter, view: &View, pos: Pos2) {
+  let Some(snap) = snap_3d(app, view, pos) else { return };
+  let Some(at) = view.to_screen(&app.cam, snap.at()) else { return };
+  let [r, g, b, a] = fox_engine::scene::VERTEX_HOVER_RING;
+  let ring = Color32::from_rgba_unmultiplied(r, g, b, a);
+  match snap {
+    Snap3d::Vertex(_) => {
+      painter.circle(at, 4.5, Color32::from_white_alpha(220), Stroke::new(1.5, ring));
+    }
+    Snap3d::Edge(_) => {
+      painter.circle(at, 3.0, Color32::from_rgb(6, 150, 214), Stroke::new(1.0, Color32::WHITE));
+    }
+  }
 }
 
 /// The render parameters with the theme: Theme: Dark draws the canvas dark (see
@@ -1125,9 +1258,10 @@ fn sketch_cursor(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<
 /// [`sketch_cursor`], plus the points the cursor lines up with in x and in y (the inference
 /// lines' far ends).
 fn sketch_inference(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<PointId>, Aligned)> {
-  let (sk, plane) = sketch_plane(app)?;
-  // snap to the hovered point (exact coordinates)
-  if let Some(Pick::SketchPoint { sketch, point }) = app.hover
+  let (sk, plane) = tool_plane(app)?;
+  // snap to the hovered point (exact coordinates), unless the shape is drawn off the plane
+  if app.tstate.lift.is_none()
+    && let Some(Pick::SketchPoint { sketch, point }) = app.hover
     && sketch == sk
     && let Some(p) = app.s.design.sketch(sk).ok().and_then(|s| s.pos(point))
   {
@@ -1396,6 +1530,11 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     dimension_click(app, pos, add);
     return;
   }
+  sketch_tool_click(app, view, pos);
+}
+
+/// A click at `pos` for the active sketch tool (not Select, Dimension or a constraint).
+fn sketch_tool_click(app: &mut App, view: &View, pos: Pos2) {
   let Some((sk, plane)) = sketch_plane(app) else { return };
   if matches!(app.tool, Tool::Trim | Tool::Extend) {
     let (o, d) = view.ray(&app.cam, pos);
@@ -1412,10 +1551,29 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     curve_tool_click(app, view, pos);
     return;
   }
+  // 3D Sketch: a shape started on a model point off the plane is drawn on the parallel plane
+  // through it
+  let lift = if app.palette.sketch_3d && lifts(app.tool) && app.tstate.pts.is_empty() {
+    snap_3d(app, view, pos).map(Snap3d::at).filter(|w| (*w - plane.origin).dot(plane.normal()).abs() > 1e-6)
+  } else {
+    None
+  };
+  if let Some(w) = lift {
+    app.tstate.lift = Some((w - plane.origin).dot(plane.normal()));
+    place_point(app, sk, plane.to_local(w), None);
+    return;
+  }
   let Some((p, snapped)) = sketch_cursor(app, view, pos) else { return };
   if app.tool == Tool::Line && app.palette.sketch_3d && line_3d_click(app, view, pos, sk, &plane, p) {
     return;
   }
+  // a lifted shape's other points take model points where they fall on its plane
+  let p = match (app.tstate.lift, app.palette.sketch_3d) {
+    (Some(_), true) => {
+      tool_plane(app).and_then(|(_, lp)| snap_3d(app, view, pos).map(|s| lp.to_local(s.at()))).unwrap_or(p)
+    }
+    _ => p,
+  };
   if matches!(app.tool, Tool::Spline | Tool::ControlSpline) {
     // clicking the last point again finishes the spline
     if app.tstate.pts.last().is_some_and(|l| (l[0] - p[0]).hypot(l[1] - p[1]) < 1e-9) {
@@ -1446,14 +1604,65 @@ fn vertex_near(app: &App, view: &View, pos: Pos2) -> Option<DVec3> {
   best.map(|b| b.1)
 }
 
+/// What a 3D Sketch point takes under the pointer, in the world.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Snap3d {
+  /// A model vertex.
+  Vertex(DVec3),
+  /// The nearest point along a model edge.
+  Edge(DVec3),
+}
+
+impl Snap3d {
+  pub(crate) fn at(self) -> DVec3 {
+    match self {
+      Snap3d::Vertex(w) | Snap3d::Edge(w) => w,
+    }
+  }
+}
+
+/// 3D Sketch's snap under the screen point `pos`: a model vertex within [`VERTEX_SNAP_PX`], else
+/// the nearest point along a model edge within it.
+pub(crate) fn snap_3d(app: &App, view: &View, pos: Pos2) -> Option<Snap3d> {
+  if let Some(w) = vertex_near(app, view, pos) {
+    return Some(Snap3d::Vertex(w));
+  }
+  let mut best: Option<(f32, DVec3)> = None;
+  for b in app.s.model.bodies.iter().filter(|b| app.s.body_visible(b.id) && !b.is_mesh()) {
+    for e in b.edges() {
+      let Ok(kind) = fox_engine::model::include::edge_curve3d(e) else { continue };
+      for w in kind.polyline(64).windows(2) {
+        let (a, c) = (DVec3::from(w[0]), DVec3::from(w[1]));
+        let (Some(sa), Some(sc)) = (view.to_screen(&app.cam, a), view.to_screen(&app.cam, c)) else { continue };
+        let d = sc - sa;
+        let t = if d.length_sq() > 1e-6 { ((pos - sa).dot(d) / d.length_sq()).clamp(0.0, 1.0) } else { 0.0 };
+        let dist = (sa + d * t).distance(pos);
+        if dist <= VERTEX_SNAP_PX && best.is_none_or(|(bd, _)| dist < bd) {
+          // the point on the segment nearest the pointer's ray (a screen-space fraction is off
+          // in perspective)
+          let (o, r) = view.ray(&app.cam, pos);
+          let k = axis_param(a, c - a, o, r).map_or(t as f64, |k| k.clamp(0.0, 1.0));
+          best = Some((dist, a.lerp(c, k)));
+        }
+      }
+    }
+  }
+  best.map(|b| Snap3d::Edge(b.1))
+}
+
 /// The Line tool with the palette's 3D Sketch on, as Fusion runs it: a click near a model
-/// vertex takes the vertex where it is in 3D, off the sketch plane, and a segment with an end
-/// off the plane is a 3D sketch line (`sketch.line3d`). Returns false for a click the plane
+/// vertex or edge takes that point where it is in 3D, off the sketch plane, and a segment with an
+/// end off the plane is a 3D sketch line (`sketch.line3d`). Returns false for a click the plane
 /// tool takes as usual (both ends on the plane); `p` is the plane cursor.
 fn line_3d_click(app: &mut App, view: &View, pos: Pos2, sk: FeatureId, plane: &Plane, p: [f64; 2]) -> bool {
-  let target = vertex_near(app, view, pos).unwrap_or_else(|| plane.to_world(p));
+  let target = snap_3d(app, view, pos).map(Snap3d::at).unwrap_or_else(|| plane.to_world(p));
+  line_3d_to(app, sk, plane, target)
+}
+
+/// [`line_3d_click`] once the point is known: `target`, in the world.
+fn line_3d_to(app: &mut App, sk: FeatureId, plane: &Plane, target: DVec3) -> bool {
   let off = |w: DVec3| (w - plane.origin).dot(plane.normal()).abs() > 1e-6;
-  let prev = if app.tstate.pts.is_empty() { None } else { app.tstate.last3d };
+  let prev = app.tstate.pts.last().map(|l| line_start_3d(app, plane, *l));
   app.tstate.last3d = Some(target);
   if !off(target) && prev.is_none_or(|w| !off(w)) {
     return false;
@@ -1608,11 +1817,16 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
     }
     app.tstate.held.clear();
     app.tstate.rho = None;
+    // 3D Sketch: a shape started off the plane moves there, as 3D sketch curves
+    let lift = if multi { None } else { app.tstate.lift.take() };
     // the shape and the dimensions locking its typed values are one undo step
-    let grouped = !locks.is_empty() && app.run("transaction.begin", json!({})).is_some();
+    let grouped = (!locks.is_empty() || lift.is_some()) && app.run("transaction.begin", json!({})).is_some();
     let made = app.run(c, params);
     if let Some(r) = &made {
       lock_typed(app, sk, r, &locks, chain_from);
+      if let Some(h) = lift {
+        app.run("sketch.lift", json!({"sketch": sk.0, "curves": r["curves"], "offset": h}));
+      }
     }
     if grouped {
       app.run("transaction.commit", json!({}));
@@ -2821,6 +3035,10 @@ fn dim_shape_at(
       let foot = [l0[0] + d[0] * t, l0[1] + d[1] * t];
       linear_at(foot, pp, unit(foot, pp)?)
     }
+    ConstraintKind::ChamferDistance { p, line, other, .. } => {
+      let (corner, pp) = chamfer_span(s, *p, *line, *other)?;
+      linear_at(corner, pp, unit(corner, pp)?)
+    }
     ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => {
       let c = s.pos(*s.curve_points(*curve).first()?)?;
       let r = s.radius(*curve)?;
@@ -3030,8 +3248,7 @@ pub(crate) fn fill_dim_from_measure(app: &mut App) {
   if !std::mem::take(&mut app.tstate.measure_fill) {
     return;
   }
-  let Some((a, b, _)) = &app.measure else { return };
-  let d = (*b - *a).length();
+  let Some(d) = app.tstate.measured else { return };
   let unit = app.s.design.units;
   if let Some((_, text, _)) = app.dim_edit.as_mut() {
     *text = dim_full_text(unit, false, d);
@@ -3706,6 +3923,10 @@ fn dim_shape(
       let foot = [l0[0] + d[0] * t, l0[1] + d[1] * t];
       linear_shape(foot, pp, unit(foot, pp)?, center, off, wpp, to_screen)
     }
+    ConstraintKind::ChamferDistance { p, line, other, .. } => {
+      let (corner, pp) = chamfer_span(s, *p, *line, *other)?;
+      linear_shape(corner, pp, unit(corner, pp)?, center, off, wpp, to_screen)
+    }
     ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => {
       let c = s.pos(*s.curve_points(*curve).first()?)?;
       let r = s.radius(*curve)?;
@@ -3760,6 +3981,10 @@ fn dim_label(
       let pp = s.pos(*p)?;
       Some(([(pp[0] + q[0]) / 2.0, (pp[1] + q[1]) / 2.0], shown("")))
     }
+    ConstraintKind::ChamferDistance { p, line, other, .. } => {
+      let (corner, pp) = chamfer_span(s, *p, *line, *other)?;
+      Some(([(pp[0] + corner[0]) / 2.0, (pp[1] + corner[1]) / 2.0], shown("")))
+    }
     ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => {
       let c = s.pos(*s.curve_points(*curve).first()?)?;
       let r = s.radius(*curve)?;
@@ -3773,6 +3998,28 @@ fn dim_label(
     }
     _ => None,
   }
+}
+
+/// What a chamfer distance measures: from the corner the chamfer cut off (where `line` and
+/// `other` meet, extended) to the chamfer's end `p` on `line`.
+fn chamfer_span(
+  s: &Sketch,
+  p: PointId,
+  line: fox_engine::sketch::CurveId,
+  other: fox_engine::sketch::CurveId,
+) -> Option<([f64; 2], [f64; 2])> {
+  let ends = |c: fox_engine::sketch::CurveId| -> Option<([f64; 2], [f64; 2])> {
+    let pts = s.curve_points(c);
+    Some((s.pos(*pts.first()?)?, s.pos(*pts.get(1)?)?))
+  };
+  let ((a0, a1), (b0, b1)) = (ends(line)?, ends(other)?);
+  let (u, v) = ([a1[0] - a0[0], a1[1] - a0[1]], [b1[0] - b0[0], b1[1] - b0[1]]);
+  let den = u[0] * v[1] - u[1] * v[0];
+  if den.abs() < 1e-12 {
+    return None;
+  }
+  let t = ((b0[0] - a0[0]) * v[1] - (b0[1] - a0[1]) * v[0]) / den;
+  Some(([a0[0] + u[0] * t, a0[1] + u[1] * t], s.pos(p)?))
 }
 
 fn sketch_center(s: &Sketch) -> Option<[f64; 2]> {
@@ -3822,7 +4069,7 @@ pub(crate) fn curve_min_distance(
 
 /// Rubber-band preview of the shape being drawn.
 fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
-  let Some((_, plane)) = sketch_plane(app) else { return };
+  let Some((_, plane)) = tool_plane(app) else { return };
   if matches!(app.tool, Tool::Select | Tool::Dimension | Tool::Constrain(_))
     || app.tool.picks_curves() && app.tool != Tool::Circle2T
   {
@@ -4208,7 +4455,7 @@ fn take_hud_tab(app: &mut App, ctx: &egui::Context) {
 fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view: &View, ctx: &egui::Context) {
   let tab = app.tstate.hud.tab.take();
   let fields = hud_fields(app.tool, hud_step(app));
-  let Some((sk, plane)) = sketch_plane(app).filter(|_| !fields.is_empty()) else {
+  let Some((sk, plane)) = tool_plane(app).filter(|_| !fields.is_empty()) else {
     if app.tstate.hud.buf.is_some() || !app.tstate.hud.typed.iter().all(String::is_empty) {
       app.tstate.hud = HeadsUp::default();
     }
@@ -6496,6 +6743,37 @@ mod tests {
     assert!((hud_value(&app, 1).unwrap() - 336.8f64.to_radians()).abs() < 1e-9);
   }
 
+  /// The verifier's case: a Distance and Angle chamfer of an H/V corner shows its distance
+  /// dimension along the first line next to its angle, from the corner it cut off.
+  #[test]
+  fn distance_and_angle_chamfer_draws_its_distance_dimension() {
+    let (mut app, sk) = sketching(Tool::Select);
+    let r = app.run("sketch.rect", json!({"sketch": sk.0, "corner1": [0, 0], "corner2": [40, 20]})).unwrap();
+    let lines: Vec<u64> = r["curves"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+    app
+      .run(
+        "sketch.chamfer",
+        json!({"sketch": sk.0, "curves": [lines[0], lines[1]], "distance": "4", "angle": "45 deg"}),
+      )
+      .unwrap();
+    let s = app.s.design.sketch(sk).unwrap();
+    let to_screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, p[1] as f32));
+    let dims: Vec<_> = s.constraints.iter().filter(|c| c.kind.dim().is_some()).collect();
+    assert_eq!(dims.len(), 2, "{dims:?}");
+    let d = dims.iter().find(|c| matches!(c.kind, ConstraintKind::ChamferDistance { .. })).unwrap();
+    let (anchor, label) = dim_label(s, &d.kind, d.kind.dim().unwrap(), app.s.design.units).unwrap();
+    assert_eq!(label, "4.00");
+    // half way between the cut-off corner (40, 0) and the chamfer's end on the bottom line
+    assert!((anchor[0] - 38.0).abs() < 1e-6 && anchor[1].abs() < 1e-6, "{anchor:?}");
+    let shape = dim_shape(s, &d.kind, d.kind.dim().unwrap(), None, Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap();
+    assert_eq!(shape.arrows.len(), 2);
+    let xs: Vec<f32> = shape.arrows.iter().map(|(tip, _)| tip.x).collect();
+    assert!(xs.iter().any(|x| (x - 36.0).abs() < 1e-3) && xs.iter().any(|x| (x - 40.0).abs() < 1e-3), "{xs:?}");
+    // the angle dimension still draws too
+    let a = dims.iter().find(|c| c.kind.is_angle()).unwrap();
+    assert!(dim_label(s, &a.kind, a.kind.dim().unwrap(), app.s.design.units).is_some());
+  }
+
   #[test]
   fn circle_diameter_runs_horizontally_through_the_centre() {
     let (mut app, sk) = sketching(Tool::Select);
@@ -7134,24 +7412,68 @@ mod tests {
 
   /// `ui:sketch:dim-box-measure-fill`: Measure opened from a dimension box's menu writes what it
   /// measured into the box when it closes; Measure opened any other way leaves the box alone.
+  /// As the verifier tried it: a sketch line picked in Measure (while the sketch is open) reads
+  /// its length in MEASURE, and Close puts that length in the box.
   #[test]
   fn measure_from_the_dimension_box_fills_it() {
-    let (mut app, _) = sketching(Tool::Dimension);
-    app.dim_edit = Some((0, "20 mm".into(), Pos2::new(200.0, 200.0)));
-    let measured = || Some((DVec3::ZERO, DVec3::new(3.0, 4.0, 12.0), "13.00 mm".to_string()));
-    // the box menu's Measure
-    let mut d = crate::dialogs::Dialog::open(&mut app, crate::dialogs::Kind::Inspect);
-    app.tstate.measure_fill = true;
-    app.measure = measured();
-    d.leave(&mut app);
-    assert_eq!(app.dim_edit.as_ref().unwrap().1, "13 mm");
-    assert!(!app.tstate.measure_fill);
+    let (mut app, sk) = sketching(Tool::Dimension);
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [10, 0]]})).unwrap();
+    let line = fox_engine::sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32);
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 4], [10, 4]]})).unwrap();
+    let other = fox_engine::sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32);
+    let ctx = egui::Context::default();
+    let mut t = 0.0;
+    let mut frame = |app: &mut App| {
+      t += 0.05;
+      let input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 800.0))),
+        time: Some(t),
+        ..Default::default()
+      };
+      ctx.run_ui(input, |ui| app.draw(ui)).drop_without_applying_deltas();
+    };
+    let measure = |app: &mut App, from_box: bool, picks: Vec<Sel>| {
+      app.dim_edit = Some((0, "d1 * 2".into(), Pos2::new(200.0, 200.0)));
+      // the box menu's Measure (or the toolbar's)
+      app.dialog = Some(crate::dialogs::Dialog::open(app, crate::dialogs::Kind::Inspect));
+      app.tstate.measure_fill = from_box;
+      app.s.selection = picks;
+    };
+    let close = |app: &mut App| {
+      let mut d = app.dialog.take().expect("Measure is open");
+      d.leave(app);
+    };
+    // one sketch line: MEASURE reads its length, and Close writes it into the box
+    measure(&mut app, true, vec![Sel::SketchCurve { sketch: sk, curve: line }]);
+    for _ in 0..3 {
+      frame(&mut app);
+    }
+    assert_eq!(app.tstate.measured, Some(10.0), "MEASURE has a result");
+    assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
+    close(&mut app);
+    assert_eq!(app.dim_edit.as_ref().unwrap().1, "10 mm");
+    assert!(!app.tstate.measure_fill && app.tstate.measured.is_none());
+    // two sketch lines: the distance between them
+    measure(
+      &mut app,
+      true,
+      vec![Sel::SketchCurve { sketch: sk, curve: line }, Sel::SketchCurve { sketch: sk, curve: other }],
+    );
+    for _ in 0..3 {
+      frame(&mut app);
+    }
+    assert!(app.tstate.measured.is_some_and(|d| (d - 4.0).abs() < 1e-6), "{:?}", app.tstate.measured);
+    assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
+    close(&mut app);
+    assert_eq!(app.dim_edit.as_ref().unwrap().1, "4 mm");
     // Measure from the toolbar doesn't touch it
-    app.dim_edit = Some((0, "20 mm".into(), Pos2::new(200.0, 200.0)));
-    let mut d = crate::dialogs::Dialog::open(&mut app, crate::dialogs::Kind::Inspect);
-    app.measure = measured();
-    d.leave(&mut app);
-    assert_eq!(app.dim_edit.as_ref().unwrap().1, "20 mm");
+    measure(&mut app, false, vec![Sel::SketchCurve { sketch: sk, curve: line }]);
+    for _ in 0..3 {
+      frame(&mut app);
+    }
+    assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
+    close(&mut app);
+    assert_eq!(app.dim_edit.as_ref().unwrap().1, "d1 * 2");
   }
 
   /// `ui:sketch:3d-sketch-input`: with 3D Sketch on, a Line click near a model vertex takes it
@@ -7207,5 +7529,114 @@ mod tests {
 
   fn viewport_reset(app: &mut App) {
     reset_tool_state(app);
+  }
+
+  /// A 10 mm box and an XY sketch with 3D Sketch on, in an 800 × 600 view.
+  fn sketch_3d_on_a_box(tool: Tool) -> (App, FeatureId, View, Plane) {
+    let mut app = App::with_session(fox_engine::Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    app.set_tool(tool);
+    app.palette.sketch_3d = true;
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)), ppp: 1.0, w: 800, h: 600 };
+    let (_, plane) = sketch_plane(&app).unwrap();
+    (app, sk, view, plane)
+  }
+
+  /// `ui:sketch:3d-sketch-input`: 3D Sketch snaps to points along model edges as well as to
+  /// vertices, and the Line tool ends a 3D line there.
+  #[test]
+  fn three_d_sketch_snaps_to_points_along_model_edges() {
+    let (mut app, sk, view, plane) = sketch_3d_on_a_box(Tool::Line);
+    // part way up a vertical edge of the box, off the plane
+    let edge = app.s.model.bodies[0]
+      .edges()
+      .iter()
+      .find(|e| (e.start.z - e.end.z).abs() > 9.0)
+      .map(|e| (e.start, e.end))
+      .unwrap();
+    let on = edge.0.lerp(edge.1, 0.3);
+    let at = view.to_screen(&app.cam, on).unwrap();
+    let snap = snap_3d(&app, &view, at).expect("a snap");
+    let Snap3d::Edge(w) = snap else { panic!("{snap:?}") };
+    assert!(view.to_screen(&app.cam, w).unwrap().distance(at) < 1.0, "{w:?}");
+    // (the box is centred on the origin in X and Y)
+    let on_edges = [w.x, w.y, w.z - 5.0].iter().filter(|c| (c.abs() - 5.0).abs() < 1e-6).count();
+    assert!(on_edges >= 2, "on an edge of the box: {w:?}");
+    // a vertex wins over the edges through it
+    let corner = edge.1;
+    assert!(matches!(snap_3d(&app, &view, view.to_screen(&app.cam, corner).unwrap()), Some(Snap3d::Vertex(_))));
+    // nothing far from the box
+    assert_eq!(snap_3d(&app, &view, Pos2::new(5.0, 5.0)), None);
+    // the Line tool ends a 3D sketch line on the edge point
+    place_point(&mut app, sk, [30.0, 30.0], None);
+    assert!(line_3d_click(&mut app, &view, at, sk, &plane, [0.0, 0.0]));
+    let s = app.s.design.sketch(sk).unwrap();
+    let fox_engine::sketch::Curve3dKind::Line { b, .. } = s.curves3d[0].kind else { panic!() };
+    assert!((DVec3::from(b) - w).length() < 1e-9);
+  }
+
+  /// `ui:sketch:3d-sketch-input`: the Line manipulator's arrows move the next point along their
+  /// axis: up the Z arrow off the plane is a 3D line, and the chain goes on from there.
+  #[test]
+  fn three_d_sketch_triad_arrow_moves_the_next_point_along_its_axis() {
+    let (mut app, sk, view, plane) = sketch_3d_on_a_box(Tool::Line);
+    place_point(&mut app, sk, [30.0, 30.0], None);
+    let start = plane.to_world([30.0, 30.0]);
+    // the Z arrow is under the pointer a little way up its axis
+    let project = |p: DVec3| view.to_screen(&app.cam, p);
+    let (o, up) = (project(start).unwrap(), project(start + DVec3::Z).unwrap());
+    let along = o + (up - o).normalized() * 60.0;
+    assert_eq!(crate::manipulators::sketch_axes_arrow(&project, &app.cam, start, plane.normal(), along), Some(2));
+    // a drag up it to 7 above the plane, let go
+    app.tstate.axis_to = Some(start + DVec3::Z * 7.0);
+    finish_axis_drag(&mut app);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert_eq!(s.curves3d.len(), 1);
+    let fox_engine::sketch::Curve3dKind::Line { a, b } = s.curves3d[0].kind else { panic!() };
+    assert_eq!((a, b), ([30.0, 30.0, 0.0], [30.0, 30.0, 7.0]));
+    // then along X from up there: still 3D
+    app.tstate.axis_to = Some(DVec3::new(35.0, 30.0, 7.0));
+    finish_axis_drag(&mut app);
+    assert_eq!(app.s.design.sketch(sk).unwrap().curves3d.len(), 2);
+    // along X from a point on the plane it is an ordinary line
+    viewport_reset(&mut app);
+    place_point(&mut app, sk, [50.0, 0.0], None);
+    let lines = app.s.design.sketch(sk).unwrap().curves.len();
+    app.tstate.axis_to = Some(DVec3::new(60.0, 0.0, 0.0));
+    finish_axis_drag(&mut app);
+    assert_eq!(app.s.design.sketch(sk).unwrap().curves.len(), lines + 1);
+  }
+
+  /// `ui:sketch:3d-sketch-input`: the other tools draw in 3D too: a circle centred on a model
+  /// vertex off the plane lies on the plane parallel to the sketch's through it, as one undo step.
+  #[test]
+  fn three_d_sketch_circle_started_off_the_plane_is_drawn_there() {
+    let (mut app, sk, view, plane) = sketch_3d_on_a_box(Tool::Circle);
+    let corner = fox_engine::scene::body_vertices(&app.s.model.bodies[0])
+      .into_iter()
+      .map(|v| v.2)
+      .find(|w| (w.z - 10.0).abs() < 1e-9)
+      .unwrap();
+    let steps = app.s.undo_history().len();
+    let at = view.to_screen(&app.cam, corner).unwrap();
+    sketch_tool_click(&mut app, &view, at);
+    assert_eq!(app.tstate.lift, Some(10.0));
+    // the radius point is taken on that plane
+    let (_, lifted) = tool_plane(&app).unwrap();
+    assert!((lifted.origin.z - 10.0).abs() < 1e-9);
+    let edge_of = lifted.to_world([corner.x + 4.0, corner.y]);
+    let at = view.to_screen(&app.cam, edge_of).unwrap();
+    sketch_tool_click(&mut app, &view, at);
+    assert_eq!(app.tstate.lift, None, "the next shape starts on the plane again");
+    let s = app.s.design.sketch(sk).unwrap();
+    assert!(s.curves.is_empty(), "no planar circle: {:?}", s.curves);
+    let fox_engine::sketch::Curve3dKind::Circle { center, radius, .. } = s.curves3d[0].kind else { panic!() };
+    assert!((DVec3::from(center) - corner).length() < 1e-6, "{center:?}");
+    assert!((radius - 4.0).abs() < 0.05, "{radius}");
+    assert!(s.curves3d[0].drawn);
+    assert_eq!(app.s.undo_history().len(), steps + 1, "one undo step");
+    let _ = plane;
   }
 }

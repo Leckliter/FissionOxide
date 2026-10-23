@@ -418,7 +418,8 @@ fn spun_profile_flips_to_the_other_side() {
   run(&mut s, "extrude", json!({"sketch": 1, "distance": 4}));
   run(&mut s, "sketch.create", xz);
   let body = s.model.bodies[0].id.0;
-  let r = run(&mut s, "sketch.spun_profile", json!({"bodies": [body], "axis": "z", "flip": true, "centerline": false}));
+  let r =
+    run(&mut s, "sketch.spun_profile", json!({"bodies": [body], "axis": "z", "flip": true, "project_axis": false}));
   assert_eq!(ids(&r["curves"]).len(), 4, "{r}");
   let sk = &s.model.sketches.values().last().unwrap().sketch;
   let xs: Vec<f64> = sk.points.iter().map(|p| p.x).collect();
@@ -442,6 +443,46 @@ fn spun_profile_without_the_projection_link_is_plain_curves() {
   assert_eq!((ids(&r["curves"]).len(), r["profiles"].as_u64()), (5, Some(1)), "{r}");
   assert!(r.get("spun").is_none());
   assert!(s.design.sketch(s.edit_sketch.unwrap()).unwrap().spuns.is_empty());
+}
+
+/// Spun Profile's Project Axis and Add Centerline: the axis as a construction centre line, a plain
+/// line or not at all; its Tolerance is kept and used.
+#[test]
+fn spun_profile_projects_its_axis_as_asked() {
+  let mut s = Session::default();
+  let xz = json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}});
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [15, 0], "radius": 5}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 4}));
+  run(&mut s, "sketch.create", xz);
+  let sk = s.edit_sketch.unwrap();
+  let body = s.model.bodies[0].id.0;
+  let lines = |s: &Session, r: &Value| -> (usize, usize) {
+    let sketch = s.design.sketch(sk).unwrap();
+    let cs: Vec<_> =
+      ids(&r["curves"]).into_iter().filter_map(|c| sketch.curve(fox_sketch::CurveId(c as u32))).collect();
+    (cs.len(), cs.iter().filter(|c| c.construction).count())
+  };
+  let spun = |s: &mut Session, extra: Value| {
+    let mut p = json!({"bodies": [body], "axis": "z", "tolerance": "0.01 mm"});
+    p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    run(s, "sketch.spun_profile", p)
+  };
+  // the four sides and the construction centre line
+  let r = spun(&mut s, json!({}));
+  assert_eq!(lines(&s, &r), (5, 1), "{r}");
+  let sp = &s.design.sketch(sk).unwrap().spuns[0];
+  assert!((sp.tolerance - 0.01).abs() < 1e-12 && sp.axis_drawn() == fox_sketch::SpunAxisLine::Centerline);
+  s.undo();
+  // Add Centerline off: the axis is a plain line
+  let r = spun(&mut s, json!({"centerline": false}));
+  assert_eq!(lines(&s, &r), (5, 0), "{r}");
+  s.undo();
+  // Project Axis off: no axis
+  let r = spun(&mut s, json!({"project_axis": false}));
+  assert_eq!(lines(&s, &r), (4, 0), "{r}");
+  assert!(s.execute("sketch.spun_profile", &json!({"bodies": [body], "axis": "z", "tolerance": "-1"})).is_err());
 }
 
 /// The Centerline linetype is independent of the construction flag, as Fusion's Linetype

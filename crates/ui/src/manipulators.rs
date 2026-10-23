@@ -462,24 +462,49 @@ fn draw(painter: &egui::Painter, l: &Layout, lit: Option<Handle>) {
 
 /// 3D Sketch's manipulator at a sketch tool's start point, as Fusion draws it: the X, Y and Z
 /// arrows and a square plane handle across `normal` (the sketch plane's, drawn in that axis's
-/// colour: blue for an XY sketch). Drawn only; nothing drags it.
+/// colour: blue for an XY sketch), with arrow `lit` (under the pointer or dragged) highlighted.
+/// Its arrows move the next point along their axis (see `viewport::sketch_3d_manipulator`).
 pub(crate) fn sketch_axes(
   painter: &egui::Painter,
   project: &dyn Fn(DVec3) -> Option<Pos2>,
   cam: &fox_engine::render::Camera,
   origin: DVec3,
   normal: DVec3,
+  lit: Option<usize>,
 ) {
+  let Some(l) = sketch_axes_layout(project, cam, origin, normal) else { return };
+  draw(painter, &l, lit.map(Handle::Arrow));
+}
+
+/// The axis whose arrow of 3D Sketch's manipulator (see [`sketch_axes`]) is at `p`, if any.
+pub(crate) fn sketch_axes_arrow(
+  project: &dyn Fn(DVec3) -> Option<Pos2>,
+  cam: &fox_engine::render::Camera,
+  origin: DVec3,
+  normal: DVec3,
+  p: Pos2,
+) -> Option<usize> {
+  match hit(&sketch_axes_layout(project, cam, origin, normal)?, p) {
+    Some(Handle::Arrow(i)) => Some(i),
+    _ => None,
+  }
+}
+
+fn sketch_axes_layout(
+  project: &dyn Fn(DVec3) -> Option<Pos2>,
+  cam: &fox_engine::render::Camera,
+  origin: DVec3,
+  normal: DVec3,
+) -> Option<Layout> {
   let (right, up, _) = cam.basis();
-  let Some(size) = world_size(project, right, origin, SIZE_PX) else { return };
+  let size = world_size(project, right, origin, SIZE_PX)?;
   // the plane handle sits across the world axis nearest the sketch normal
   let n = [normal.x.abs(), normal.y.abs(), normal.z.abs()];
   let across = (0..3).max_by(|a, b| n[*a].total_cmp(&n[*b])).unwrap_or(2);
   let mut t = Triad::world(origin);
   t.rings = [false; 3];
   t.planes = [across == 0, across == 1, across == 2];
-  let l = layout(&t, size, (right, up), project);
-  draw(painter, &l, None);
+  Some(layout(&t, size, (right, up), project))
 }
 
 /// World length that spans `px` points on screen at `at`.
