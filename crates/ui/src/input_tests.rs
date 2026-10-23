@@ -1397,8 +1397,49 @@ fn the_preferences_modal_is_centred_and_sized_like_fusions() {
   let screen = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0));
   assert!((r.center() - screen.center()).length() < 3.0, "centred: {r:?}");
   let size = crate::preferences::SIZE;
-  assert!(r.width() >= size.x && r.width() <= size.x + 40.0, "about 750 wide: {r:?}");
-  assert!(r.height() >= size.y && r.height() <= size.y + 40.0, "about 450 high: {r:?}");
+  // Fusion's is 748 x 447 in the probers' screenshots, 986 x 589 points at their 1.3187 scale
+  assert!(r.width() >= size.x && r.width() <= size.x + 40.0, "about 986 wide: {r:?}");
+  assert!(r.height() >= size.y && r.height() <= size.y + 40.0, "about 589 high: {r:?}");
+  assert!(size.x > 980.0 && size.y > 580.0);
+  // opening on General shows General's children
+  let shown = h.frame_texts(1.0 / 60.0, vec![]);
+  let has = |t: &str| shown.iter().any(|(_, s)| s == t);
+  assert!(has("API") && has("Electronics") && has("Simulation and Generative Design"), "General is expanded");
+  // and its rows read Fusion's defaults: the cache and backup intervals are spinners
+  for t in ["English | English", "Default Design Type", "Design", "15", "5", "Offline cache time period (days)"] {
+    assert!(has(t), "{t} on General");
+  }
+  assert!(!has("14 days") && !has("Commercial") && !has("5 minutes"));
+}
+
+#[test]
+fn general_precision_reads_fusions_default() {
+  let mut h = Harness::new();
+  assert_eq!(h.app.preferences.values.general_precision, None, "nothing chosen");
+  h.app.preferences.page = crate::preferences::Page::UnitDisplay;
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let shown = h.frame_texts(1.0 / 60.0, vec![]);
+  assert!(shown.iter().any(|(_, s)| s == "0.123"), "General precision reads 0.123");
+  assert!(!shown.iter().any(|(_, s)| s == "0.12"));
+}
+
+#[test]
+fn the_recovery_spinner_steps_the_interval() {
+  let mut h = Harness::new();
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let id = crate::preferences::combo_rect_id("prefs-recovery");
+  let r = h.ctx.data(|d| d.get_temp::<Rect>(id)).expect("the backup interval spinner is drawn");
+  h.move_then_click(r.right_top() + vec2(-6.0, 4.0));
+  assert_eq!(h.app.preferences.draft.recovery_minutes, 6, "the up arrow adds a minute");
+  h.move_then_click(r.right_bottom() + vec2(-6.0, -4.0));
+  h.move_then_click(r.right_bottom() + vec2(-6.0, -4.0));
+  assert_eq!(h.app.preferences.draft.recovery_minutes, 4, "the down arrow takes one off");
 }
 
 #[test]
@@ -1477,15 +1518,20 @@ fn prefs_tree_row(h: &Harness, page: crate::preferences::Page) -> Option<Rect> {
 }
 
 #[test]
-fn the_preferences_tree_starts_collapsed_and_opens_like_fusions() {
+fn the_preferences_tree_opens_on_generals_children_and_toggles_like_fusions() {
   use crate::preferences::Page;
   let mut h = Harness::new();
   crate::preferences::open(&mut h.app);
   for _ in 0..3 {
     h.frame(vec![]);
   }
-  assert!(prefs_tree_row(&h, Page::Api).is_none(), "General's children are hidden");
-  assert!(prefs_tree_row(&h, Page::GraphicsRdp).is_none());
+  // opening on General shows its children, as Fusion's does; the other branches stay closed
+  assert!(prefs_tree_row(&h, Page::Api).is_some(), "General's children show");
+  assert!(prefs_tree_row(&h, Page::DesignAssembly).is_none() && prefs_tree_row(&h, Page::GraphicsRdp).is_none());
+  // General's arrow closes the branch
+  let general = prefs_tree_row(&h, Page::General).expect("General is drawn");
+  h.move_then_click(Pos2::new(general.left() + 9.0, general.center().y));
+  assert!(!h.app.preferences.expanded.contains(&Page::General), "General's children are hidden");
   let general = prefs_tree_row(&h, Page::General).expect("General is drawn");
   let tokens = prefs_tree_row(&h, Page::Tokens).expect("Tokens is drawn");
   assert!((tokens.top() - general.bottom()).abs() < 1.0, "Tokens sits right under the collapsed General");
@@ -1524,7 +1570,7 @@ fn the_preferences_x_cancels_and_labels_line_up_against_their_controls() {
   assert!((label.right() - longer.right()).abs() < 1.0, "right-aligned: {label:?} {longer:?}");
   assert!(label.right() < theme.left() && theme.left() - label.right() < 16.0);
   // a greyed row says why
-  let row = h.find(vec![], "Offline cache period").expect("Fusion's Offline cache period row");
+  let row = h.find(vec![], "Purpose for using Fusion").expect("Fusion's Purpose for using Fusion row");
   let tips = h.rest(Pos2::new(theme.center().x, row.center().y), 1.5);
   assert!(tips.iter().any(|t| t.starts_with("Not in FissionOxide yet")), "{tips:?}");
   // the title bar's X cancels

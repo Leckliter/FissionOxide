@@ -210,16 +210,9 @@ impl OrbitType {
   }
 }
 
-/// General → Automatic recovery backup interval, in minutes (0 never backs up).
-pub const RECOVERY_CHOICES: [u32; 7] = [0, 1, 2, 5, 10, 15, 30];
-
-pub fn recovery_label(minutes: u32) -> String {
-  match minutes {
-    0 => "Never".into(),
-    1 => "1 minute".into(),
-    m => format!("{m} minutes"),
-  }
-}
+/// General → "Automatic recovery backup interval (minutes)": the spinner's range (0 never backs
+/// up).
+pub const RECOVERY_RANGE: std::ops::RangeInclusive<u32> = 0..=120;
 
 /// General → Graphics driver. Both of FissionOxide's choices draw with OpenGL; Fusion's DirectX
 /// entries are listed greyed, and FissionOxide's CPU renderer is the list's last entry
@@ -273,6 +266,10 @@ pub(crate) fn effect(e: &mut Effects, i: usize) -> &mut bool {
 
 /// Unit and Value Display → the precisions offered: "0", "0.1", "0.12" … eight decimals.
 pub const PRECISIONS: std::ops::RangeInclusive<u8> = 0..=8;
+
+/// Unit and Value Display → General precision as the drop-down shows it while none is chosen:
+/// Fusion's default, "0.123".
+pub const DEFAULT_PRECISION: u8 = 3;
 
 /// A precision as Fusion's drop-down shows it: "0.123" for three decimals.
 pub fn precision_label(decimals: u8) -> String {
@@ -380,7 +377,9 @@ pub struct Prefs {
   /// Graphics → Canvas Effects: the Display Settings effects the canvas starts with.
   pub effects: Effects,
   /// Unit and Value Display → General precision: the decimals lengths are shown with; `None`
-  /// takes the design unit's (two in millimetres, three in inches).
+  /// (the drop-down reads Fusion's default, [`DEFAULT_PRECISION`]) shows each unit with its
+  /// display precision (two decimals in millimetres, three in inches; see
+  /// `ui:chrome:unit-display-hide-trailing-zeroes`).
   pub general_precision: Option<u8>,
   /// Unit and Value Display → Angular precision: the decimals angles are shown with.
   pub angular_precision: u8,
@@ -865,7 +864,7 @@ pub struct Preferences {
   pub open: bool,
   /// The page shown; the window reopens on it, as Fusion's does (kept in `[PreferencesWindow]`).
   pub page: Page,
-  /// The tree's expanded branches (all collapsed to begin with, as in Fusion).
+  /// The tree's expanded branches: on opening, the shown page's own and those above it.
   pub(crate) expanded: Vec<Page>,
   /// Where recovery backups go; `None` writes none (tests).
   pub recovery_dir: Option<PathBuf>,
@@ -971,11 +970,21 @@ pub fn open(app: &mut App) {
   app.preferences.draft = app.preferences.values.clone();
   app.preferences.open = true;
   let p = &mut app.preferences;
-  for a in ancestors(p.page) {
+  // the shown page's branch opens with its children showing, as Fusion's General does
+  let own = has_children(p.page).then_some(p.page);
+  for a in ancestors(p.page).into_iter().chain(own) {
     if !p.expanded.contains(&a) {
       p.expanded.push(a);
     }
   }
+}
+
+/// Whether `page` is a branch of the tree.
+pub(crate) fn has_children(page: Page) -> bool {
+  fn find(nodes: &[Node], page: Page) -> Option<&Node> {
+    nodes.iter().find_map(|n| if n.page == page { Some(n) } else { find(n.children, page) })
+  }
+  find(TREE, page).is_some_and(|n| !n.children.is_empty())
 }
 
 /// Closes the window, keeping the page it showed.
@@ -1093,8 +1102,9 @@ fn note(ui: &mut egui::Ui, text: &str) {
 
 /// The modal's egui area id, for tests.
 pub const MODAL_ID: &str = "preferences-modal";
-/// The modal's size, as Fusion's (about 748 x 447).
-pub const SIZE: Vec2 = vec2(748.0, 447.0);
+/// The modal's size, as Fusion's: 748 x 447 screenshot px, 986 x 589 points at the probers'
+/// 1.3187 capture scale. A smaller screen gets the window shrunk to fit.
+pub const SIZE: Vec2 = vec2(986.0, 589.0);
 /// The tree's width.
 const TREE_WIDTH: f32 = 222.0;
 /// A tree row's height.
@@ -1129,11 +1139,12 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
     egui::Popup::close_all(ctx);
   }
   let frame = egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::same(8));
+  let size = SIZE.min(ctx.content_rect().size() - vec2(40.0, 40.0)).max(vec2(400.0, 300.0));
   egui::Modal::new(egui::Id::new(MODAL_ID)).frame(frame).backdrop_color(Color32::from_black_alpha(60)).show(
     ctx,
     |ui| {
-      ui.set_width(SIZE.x);
-      ui.set_height(SIZE.y);
+      ui.set_width(size.x);
+      ui.set_height(size.y);
       // the title bar: the app's icon and "Preferences" at the left, an X at the right
       ui.horizontal(|ui| {
         let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
@@ -1146,7 +1157,7 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
         });
       });
       ui.separator();
-      let body_height = SIZE.y - 2.0 * 30.0;
+      let body_height = size.y - 2.0 * 30.0;
       ui.horizontal_top(|ui| {
         ui.set_height(body_height);
         ui.vertical(|ui| {
@@ -1330,6 +1341,40 @@ fn fixed_combo(ui: &mut egui::Ui, id: &str, value: &str, hover: &str) {
   });
 }
 
+/// A number box with Fusion's up and down arrows at its right; `enabled` off greys it.
+fn spinner(
+  ui: &mut egui::Ui,
+  id: &str,
+  value: &mut u32,
+  range: std::ops::RangeInclusive<u32>,
+  enabled: bool,
+) -> egui::Response {
+  let (lo, hi) = (*range.start(), *range.end());
+  ui.add_enabled_ui(enabled, |ui| {
+    ui.spacing_mut().item_spacing.x = 0.0;
+    let mut r = ui.add_sized(vec2(FIELD_W - 14.0, ROW_H), egui::DragValue::new(value).range(range).speed(0.1));
+    let (rect, arrows) = ui.allocate_exact_size(vec2(14.0, ROW_H), Sense::click());
+    let (up, down) = (rect.split_top_bottom_at_fraction(0.5).0, rect.split_top_bottom_at_fraction(0.5).1);
+    let ink = if enabled { theme::ICON_INK } else { theme::MUTED };
+    let painter = ui.painter();
+    painter.rect_stroke(rect, 1.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+    for (half, sign) in [(up, -1.0), (down, 1.0)] {
+      let c = half.center();
+      let pts = vec![c + vec2(-3.0, -1.5 * sign), c + vec2(3.0, -1.5 * sign), c + vec2(0.0, 1.5 * sign)];
+      painter.add(egui::Shape::convex_polygon(pts, ink, Stroke::NONE));
+    }
+    if arrows.clicked()
+      && let Some(at) = arrows.interact_pointer_pos()
+    {
+      *value = if up.contains(at) { value.saturating_add(1).min(hi) } else { value.saturating_sub(1).max(lo) };
+      r.mark_changed();
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(combo_rect_id(id), r.rect.union(rect)));
+    r | arrows
+  })
+  .inner
+}
+
 /// A greyed box showing `value`.
 fn fixed_field(ui: &mut egui::Ui, value: &str, width: f32, hover: &str) {
   let mut text = value.to_string();
@@ -1345,6 +1390,10 @@ fn fixed_control(ui: &mut egui::Ui, key: &str, item: &Item, value: &str) {
     }
     Item::Combo(..) => fixed_combo(ui, key, value, NOT_YET),
     Item::Field(..) => fixed_field(ui, value, FIELD_W, NOT_YET),
+    Item::Spin(..) => {
+      let mut n = value.trim().parse().unwrap_or(0);
+      spinner(ui, key, &mut n, 0..=u32::MAX, false).on_disabled_hover_text(NOT_YET);
+    }
     Item::Radio(_, _, choices) => {
       for c in choices.iter() {
         ui.add_enabled(false, egui::RadioButton::new(value == *c, *c)).on_disabled_hover_text(NOT_YET);
@@ -1477,14 +1526,8 @@ fn live_row(app: &App, ui: &mut egui::Ui, live: Live, p: &mut Prefs) {
       };
     }
     Live::Recovery => {
-      egui::ComboBox::from_id_salt("prefs-recovery")
-        .selected_text(recovery_label(p.recovery_minutes))
-        .width(COMBO_W)
-        .show_ui(ui, |ui| {
-          for m in RECOVERY_CHOICES {
-            ui.selectable_value(&mut p.recovery_minutes, m, recovery_label(m));
-          }
-        });
+      spinner(ui, "prefs-recovery", &mut p.recovery_minutes, RECOVERY_RANGE, true)
+        .on_hover_text("Minutes between backups of an unsaved design; 0 makes none");
     }
     Live::UpAxis => {
       choice(ui, "prefs-up", &mut p.up_axis, &UpAxis::ALL, UpAxis::label);
@@ -1549,8 +1592,7 @@ fn live_row(app: &App, ui: &mut egui::Ui, live: Live, p: &mut Prefs) {
       fixed_combo(ui, "design-mass", length_unit(p.units).mass_symbol(), "Follows the default units for new design")
     }
     Live::GeneralPrecision => {
-      let unit_default = crate::units::unit_decimals(length_unit(p.units)) as u8;
-      let shown = p.general_precision.unwrap_or(unit_default);
+      let shown = p.general_precision.unwrap_or(DEFAULT_PRECISION);
       let r = egui::ComboBox::from_id_salt("prefs-general-precision")
         .selected_text(precision_label(shown))
         .width(COMBO_W)
@@ -1988,9 +2030,7 @@ mod tests {
       CubeSize::Automatic.factor(400.0) < CubeSize::Automatic.factor(900.0),
       "a short canvas gets a smaller cube"
     );
-    assert_eq!(recovery_label(0), "Never");
-    assert_eq!(recovery_label(1), "1 minute");
-    assert_eq!(recovery_label(5), "5 minutes");
+    assert!(RECOVERY_RANGE.contains(&Prefs::default().recovery_minutes));
     // Fusion's tree: General's children, then the top-level sections in its order
     let top: Vec<&str> = TREE.iter().map(|n| n.page.label()).collect();
     assert_eq!(top[0], "General");
@@ -2076,12 +2116,28 @@ mod tests {
     let general = labels(Page::General);
     let at = |l: &str| general.iter().position(|x| *x == l).unwrap_or_else(|| panic!("{l} on General"));
     assert!(at("Theme") < at("Graphics driver") && at("Graphics driver") < at("Start-up experience"));
-    assert!(at("Automatic save on close") < at("Automatic recovery backup interval"));
+    assert!(at("Automatic save on close") < at("Automatic recovery backup interval (minutes)"));
     assert!(at("Show command prompt") < at("Show default measure"));
     assert!(at("Show in-command errors and warnings") < at("Mouse setup (pan, zoom, orbit)"));
-    for l in ["Offline cache period", "Purpose for using Fusion", "Default design type"] {
+    for l in ["Offline cache time period (days)", "Purpose for using Fusion", "Default design type"] {
       at(l);
     }
+    // and Fusion's defaults on them
+    let default = |l: &str| {
+      let item = pages::items(Page::General).iter().find(|i| i.label() == Some(l)).unwrap();
+      (item.default_value().unwrap_or_default(), *item)
+    };
+    assert_eq!(default("User language").0, "English | English");
+    assert_eq!(default("Start-up experience").0, "Default Design Type");
+    assert_eq!(
+      default("Offline cache time period (days)"),
+      ("15".into(), Item::Spin("Offline cache time period (days)", "15"))
+    );
+    assert_eq!(default("Purpose for using Fusion").0, "Design");
+    assert_eq!(default("Create new shortcuts when updating Fusion").0, "0");
+    assert_eq!(default("Automatic save on close").0, "1");
+    assert_eq!(default("Use gesture-based view navigation").0, "1");
+    assert_eq!(Prefs::default().recovery_minutes, 5, "the backup spinner reads 5");
     assert_eq!(labels(Page::DefaultUnitsDesign), ["Default units for new design", "Length", "Mass"]);
     assert_eq!(labels(Page::UnitDisplay)[..2], ["General precision", "Angular precision"]);
     // each stored row has its own key
@@ -2176,6 +2232,7 @@ mod tests {
     app.preferences = Preferences::load_from(path.clone());
     assert_eq!(app.preferences.page, Page::General);
     open(&mut app);
+    assert!(app.preferences.expanded.contains(&Page::General), "General opens with its children showing");
     app.preferences.page = Page::ElecDrill;
     cancel(&mut app);
     let mut again = App::with_session(fox_engine::Session::default());

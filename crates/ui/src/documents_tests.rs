@@ -583,7 +583,8 @@ fn texts(h: &mut Harness) -> Vec<(String, Pos2)> {
     ..Default::default()
   };
   let app = &mut h.app;
-  let out = h.ctx.run_ui(input, |ui| app.draw(ui));
+  let mut out = h.ctx.run_ui(input, |ui| app.draw(ui));
+  out.textures_delta.clear();
   out
     .shapes
     .iter()
@@ -692,6 +693,33 @@ fn the_profile_menu_lists_fusions_entries() {
   let enabled: Vec<&str> = crate::panels::PROFILE_MENU.iter().flatten().filter(|e| e.1).map(|e| e.0).collect();
   assert_eq!(enabled, ["Preferences", "Share Feedback"], "the account entries are greyed");
   let mut h = Harness::new("profile");
+  // the menu is a narrow list under the avatar, as Fusion's (about 108 screenshot px)
+  let avatar = texts(&mut h).into_iter().find(|(t, _)| t == "CL").expect("the avatar").1;
+  click(&mut h, avatar + vec2(2.0, 2.0));
+  let shown = texts(&mut h);
+  assert!(shown.iter().any(|(t, _)| t == "Autodesk Account"), "the menu opens");
+  let menu = h.ctx.data(|d| d.get_temp::<Rect>(crate::panels::profile_menu_rect_id())).expect("the menu's rect");
+  assert!(menu.width() <= crate::panels::PROFILE_MENU_W + 1.0, "narrow: {menu:?}");
+  assert!(menu.left() < avatar.x && menu.right() > avatar.x - 150.0, "under the avatar: {menu:?} {avatar:?}");
+  for (t, at) in shown.iter().filter(|(t, _)| t == "Autodesk Account" || t == "Subscribe Now") {
+    assert!(menu.contains(*at), "{t} inside the menu: {at:?} {menu:?}");
+  }
   crate::panels::profile_action(&mut h.app, "Preferences");
   assert!(h.app.preferences.open, "Preferences opens");
+}
+
+/// The Home page shows nothing of the design underneath: no Unsaved banner over its cards.
+#[test]
+fn home_hides_the_unsaved_banner() {
+  let mut h = Harness::new("home-banner");
+  h.app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+  assert!(h.app.s.dirty && h.app.s.path.is_none());
+  // a frame first: a newly shown area draws nothing while it sizes itself
+  let unsaved = |h: &mut Harness| {
+    h.frame(vec![]);
+    texts(h).iter().any(|(t, _)| t == "Unsaved:")
+  };
+  assert!(unsaved(&mut h), "the design shows the banner");
+  crate::home::open(&mut h.app);
+  assert!(!unsaved(&mut h), "Home doesn't");
 }

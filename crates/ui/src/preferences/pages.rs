@@ -58,6 +58,8 @@ pub(crate) enum Item {
   Combo(&'static str, &'static str),
   /// A number or text box: label, Fusion's default.
   Field(&'static str, &'static str),
+  /// A number box with up and down arrows: label, Fusion's default.
+  Spin(&'static str, &'static str),
   /// Radio buttons: label, Fusion's default, the choices.
   Radio(&'static str, &'static str, &'static [&'static str]),
   /// Several drop-downs side by side separated by " : ": label, each one's default.
@@ -69,7 +71,7 @@ impl Item {
   pub(crate) fn label(&self) -> Option<&'static str> {
     match self {
       Item::Heading(_) => None,
-      Item::Live(l, _) | Item::Check(l, _) | Item::Combo(l, _) | Item::Field(l, _) => Some(l),
+      Item::Live(l, _) | Item::Check(l, _) | Item::Combo(l, _) | Item::Field(l, _) | Item::Spin(l, _) => Some(l),
       Item::Radio(l, ..) | Item::Combos(l, _) => Some(l),
     }
   }
@@ -78,7 +80,7 @@ impl Item {
   pub(crate) fn default_value(&self) -> Option<String> {
     match self {
       Item::Check(_, v) => Some(if *v { "1" } else { "0" }.to_string()),
-      Item::Combo(_, v) | Item::Field(_, v) | Item::Radio(_, v, _) => Some(v.to_string()),
+      Item::Combo(_, v) | Item::Field(_, v) | Item::Spin(_, v) | Item::Radio(_, v, _) => Some(v.to_string()),
       Item::Combos(_, v) => Some(v.join("|")),
       Item::Heading(_) | Item::Live(..) => None,
     }
@@ -125,17 +127,17 @@ pub(crate) fn items(page: Page) -> &'static [Item] {
   use Item::*;
   match page {
     Page::General => &[
-      Combo("User language", "English"),
+      Combo("User language", "English | English"),
       Live("Theme", L::Theme),
       Live("Graphics driver", L::GraphicsDriver),
-      Combo("Start-up experience", "Home"),
-      Combo("Offline cache period", "14 days"),
-      Combo("Purpose for using Fusion", "Commercial"),
+      Combo("Start-up experience", "Default Design Type"),
+      Spin("Offline cache time period (days)", "15"),
+      Combo("Purpose for using Fusion", "Design"),
       Combo("Default design type", "Part Design"),
       Check("New document tab (+) creates default design", false),
-      Check("Create new shortcuts when updating", true),
-      Check("Automatic save on close", false),
-      Live("Automatic recovery backup interval", L::Recovery),
+      Check("Create new shortcuts when updating Fusion", false),
+      Check("Automatic save on close", true),
+      Live("Automatic recovery backup interval (minutes)", L::Recovery),
       Live("Default modeling orientation", L::UpAxis),
       Live("Show tooltips", L::Tooltips),
       Live("Show command prompt", L::Prompt),
@@ -146,7 +148,7 @@ pub(crate) fn items(page: Page) -> &'static [Item] {
       Live("Reverse zoom direction", L::ReverseZoom),
       Live("Enable camera pivot", L::CameraPivot),
       Live("ViewCube size", L::CubeSize),
-      Check("Use gesture-based view navigation", false),
+      Check("Use gesture-based view navigation", true),
       Check("Use Windows touchpad for gestures", false),
       Live("Spacebar repeats last command", L::SpaceRepeats),
     ],
