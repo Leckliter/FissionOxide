@@ -1,6 +1,29 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 20:30, session "Re-verification sweep, verifier 4"
+## Last stop: 2026-10-22, 21:20, session "Re-verification sweep, verifier 5"
+
+Rebuilt `main` at `c6232d9f` (built on Windows as is) and re-checked toolbar 9, shortcuts 10, documents 7,
+menus 4, workspaces 4, render 12 of 14, manage 2, utilities 5, plastic 1, animation 5, electronics 4,
+manufacture 6, surface 19, sheet 18: 92 verified, 14 reopened, 3 new rows (report
+`parity/reports/2026-10-22-reverify-toolbar-tabs.md`). New wave-41 batches, all `ready` with no fixer (keys in
+`map-wave41.json`): `ui-reverify-render-1` (3: in-canvas render's black ground slab (P1, new), the grey ground
+quad and hard shadow in Design (new), Scene Settings' 45 mm focal length), `ui-reverify-workspaces-1` (6: BOM
+header row, CAM navbar icons, Solid Holder arrow, Setup's Machine button, electronics tab name, schematic close
+prompt (new)), `ui-reverify-toolbar-1` (6: New Component quick icon, workspace list badges and row style,
+CONSTRUCT icon colours, tab minimum width, O's OFFSET dialog) and `ui-reverify-dialogs-5` (2: Loft's Chain
+Selection / Guide Type, the Flange list's missing-glyph x).
+
+Left `fixing-merged`: 38 (mesh 21; dialogs 7, merged by `ui-reverify-dialogs-2` during this session; render 2:
+`texture-map-controls` needs a textured appearance, `flatten-ground` needs an environment background; and the
+singles: marking-menu flick, manip drag snap, timeline component owner, chrome comments-expand, context-menus
+face list, status sketch-curve readout, sketch vertical-on-horizontal, assemble convert design type).
+
+Where the documents stand: Fusion untouched apart from In-canvas Render started and stopped on "Untitled(2)"
+(back to DESIGN). FissionOxide (one instance, `c6232d9f`) at x 0..907 with the Data Panel closed, tabs
+"Untitled*" (box, sketches, a render light), "Untitled(1)*" (sheet metal plate, edge flange, flat pattern,
+unfold / refold), "Untitled(2)", "Untitled(3)*" (box, SurfacePatch1, ruled sheet, sketch on a face).
+
+## Earlier stop: 2026-10-22, 20:30, session "Re-verification sweep, verifier 4"
 
 Re-checked on `main` at `ff53fda7` (binary current): sketch 11, dialogs 8, chrome 14, construct 5,
 inspect 6, insert 1. 33 verified, 9 reopened, 4 new rows, 4 left (report
@@ -113,17 +136,25 @@ documents 3, manage 2, viewcube 1, plastic 1).
 
 1. Keep the sweep line `in progress`. Swept so far: sketch, dialogs, chrome (verifiers 1-2, 4), canvas,
    navbar, viewcube, marking-menu, browser, timeline, manip (verifier 3), construct, inspect, insert
-   (verifier 4). 138 keys were `fixing-merged` at 20:30. Recount before each area (fixers keep merging):
-   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='toolbar' and r['status']=='fixing-merged']"`.
-2. Start with toolbar (9), shortcuts (10), documents (7), menus (4), workspaces (4), then the other tabs
-   (mesh 21, surface 19, sheet 18, render 14, manufacture 6, utilities 5, animation 5, electronics 4,
-   manage 2, plastic 1) and the singles (context-menus, status, marking-menu flick, manip drag snap,
-   timeline component owner). Also recount sketch / dialogs / chrome / canvas: wave-38 to wave-40 fixers
-   will have merged more keys there.
+   (verifier 4), toolbar, shortcuts, documents, menus, workspaces, render, manage, utilities, plastic,
+   animation, electronics, manufacture, surface, sheet (verifier 5). 38 keys were `fixing-merged` at 21:20.
+   Recount before each area (fixers keep merging):
+   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='mesh' and r['status']=='fixing-merged']"`.
+2. Start with mesh (21): insert an STL (INSERT > Insert Mesh, the Windows file dialog takes a typed path;
+   any small STL from the repo's tests or one exported from FissionOxide), then the mesh dialogs. Then the
+   seven new dialogs keys (Edit Mirror rows, whole-body picks, Edit Combine / Draft / Hole, copy ghost
+   preview), the two render keys left, and the singles. Recount sketch / dialogs / chrome / canvas /
+   render / toolbar: wave-38 to wave-41 fixers will have merged more.
 3. Rebuild first (kill `fissionoxide.exe`, `cargo build --release -p fissionoxide`, about 3 min).
 4. Work from the rows' `fusion` text and look at Fusion only where the text is unclear.
 
 ## Traps
+- FissionOxide's tab x sits about 20 px right of the tab label's end (Untitled(4)'s x at 663 with its text
+  ending near 645); a click on the text does nothing.
+- FissionOxide's Save dialog Cancel is at about (511,457) for both a tab close and the window X.
+- A key press once went to Explorer (tier click, refused): click FissionOxide's title bar before keys.
+- FissionOxide's MODIFY dropdown rows are about 16.7 px apart on the SURFACE tab; Untrim at y 199, Reverse
+  Normal at y 267 (Unstitch is between).
 - Fusion maximised puts Finish Sketch and its palette under the overlay: Win+Left snaps it to x 0..920
   (no snap assist this time); the sketch marking menu's OK did not finish the sketch.
 - FissionOxide's Replace Face target ignores construction planes (canvas and browser); use a face.

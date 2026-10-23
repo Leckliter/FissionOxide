@@ -647,3 +647,11 @@ General defaults, profile menu width, the Unsaved banner over Home. Three wave-4
 (`ui-reverify-sketch-4`, `ui-reverify-dialogs-4`, `ui-reverify-chrome-2`); report
 `parity/reports/2026-10-22-reverify-sketch-dialogs-chrome-inspect.md`. 138 keys remain fixing-merged;
 toolbar, shortcuts and documents next.
+
+## 2026-10-22, verifier 5: re-verification sweep, toolbar to sheet metal
+Rebuilt `c6232d9f` and re-checked toolbar, shortcuts, documents, menus, workspaces, render, manage,
+utilities, plastic, animation, electronics, manufacture, surface and sheet metal: 106 keys, 92 verified, 14
+reopened, 3 new rows (in-canvas render's black ground slab, the grey ground quad in Design, a schematic tab that
+asks to save). Four wave-41 batches (`ui-reverify-render-1`, `ui-reverify-workspaces-1`,
+`ui-reverify-toolbar-1`, `ui-reverify-dialogs-5`); report `parity/reports/2026-10-22-reverify-toolbar-tabs.md`.
+38 keys remain fixing-merged: mesh 21, seven new dialogs merges, two render, eight singles.
