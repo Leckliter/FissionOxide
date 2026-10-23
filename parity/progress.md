@@ -1,6 +1,28 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 18:15, session "Re-verification sweep, verifier 2"
+## Last stop: 2026-10-22, 19:45, session "Re-verification sweep, verifier 3"
+
+Swept canvas, navbar, viewcube, marking-menu, browser, timeline and manip on `main` at `afddd332`, then
+eleven sketch keys (six on a rebuild at `3e4cc76d`). 84 verified, 6 reopened, 2 new rows (report
+`parity/reports/2026-10-22-reverify-canvas-timeline.md`). New wave-39 batches, all `ready` with no
+fixer (keys in `map-wave39.json`): `ui-reverify-canvas-1` (4: Draft angle drag hangs the app (P1, new),
+Create Sketch grid preview and whole-canvas hover (P1), Error window icons over labels, Extrude's
+near-white hovered profile), `ui-reverify-navbar-1` (3: Ground Plane Offset ignores typed values,
+Ctrl+5 shows no hidden edges, 450 px Grid menu / Visual Style flyout (new)) and `ui-reverify-sketch-3`
+(1: Measure from a dimension box writes nothing). `ui:chrome:status-two-faces-angle` was verified on
+the way (Draft's two picks read "2 Faces | Angle : 90.0 deg").
+
+Left `fixing-merged` in the swept areas: `ui:marking-menu:flick` (the tool has no right-button drag),
+`ui:manip:drag-snap-readout` (no snap seen with one body; try dragging an Extrude arrow past a second
+body's vertex), `ui:timeline:feature-owner-component` (needs components). Sketch keys left: 11 (see
+below).
+
+Where the documents stand: Fusion untouched apart from Create Sketch opened and cancelled on
+"Untitled*(3)". FissionOxide (PID changes on relaunch; the first instance hung and was killed) runs
+`main` at `3e4cc76d` with one "Untitled*" mm Part Design: Sketch1 on XY holding a 20 x 5 mm rectangle
+whose width is "fx: d1 * 2", 3D Sketch off; window at screenshot x 0..907, Data Panel closed.
+
+## Earlier stop: 2026-10-22, 18:15, session "Re-verification sweep, verifier 2"
 
 Swept dialogs (below) and then chrome. Chrome: of the 31 keys `fixing-merged` at the start, 21
 `verified`, 8 reopened into `ui-reverify-chrome-1` (`ready`, no fixer; keys in `map-wave38.json`): the
@@ -66,26 +88,32 @@ documents 3, manage 2, viewcube 1, plastic 1).
 
 ## Next verifier: start here
 
-1. Keep the sweep line `in progress`. Sketch, dialogs and chrome are swept; take canvas next (19
-   keys; list them with
-   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='canvas' and r['status']=='fixing-merged']"`),
-   then navbar (13), viewcube, marking-menu (7), browser (10), timeline (19), manip (12) and the rest
-   in `coverage.md`'s order, then the six chrome and twelve sketch keys left. Fixers keep merging
-   (sketch went from 4 to 12 and chrome gained 4 during verifier 2): recount each area before
-   starting it. 235 keys were `fixing-merged` at 18:15.
-2. Pick up the four sketch keys above when a body crosses a sketch plane (draw on XY, extrude, sketch on
-   XZ through the body for Intersect and Slice; Look At on XZ and YZ in both apps).
+1. Keep the sweep line `in progress`. Swept so far: sketch, dialogs, chrome (verifiers 1-2), canvas,
+   navbar, viewcube, marking-menu, browser, timeline, manip (verifier 3). 180 keys were
+   `fixing-merged` at 19:45. Recount before each area (fixers keep merging):
+   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='sketch' and r['status']=='fixing-merged']"`.
+2. Start with the 11 sketch keys: `ui-reverify-sketch-2`'s four (`circular-pattern-rows`,
+   `constraint-glyph-context-menu`, `text-dialog-rows`, `project-include-menu`, merged at `cd2aa0b`),
+   then `dimension-placement-kept` (dimension a plain line, not a projected one),
+   `blend-curve-constrained`, `chamfer-angle-dimension`, `tangent-line-circle-motion` (a line joined
+   to another line only), `project-specified-edge`, `3d-sketch-input`, `vertical-on-horizontal-line`
+   (see Traps). Then the 8 dialogs and 14 chrome keys merged since (Preferences pages, Home, profile,
+   window title, check for updates; `comments-expand` still needs a saved design), then construct (5),
+   inspect (6), insert, assemble, toolbar (9), shortcuts (10), documents (7) and the other tabs
+   (surface 19, mesh 21, sheet 18, render 14, ...) in `coverage.md`'s order.
 3. Rebuild first (kill `fissionoxide.exe`, `cargo build --release -p fissionoxide`, about 3 min).
-4. Work from the rows' `fusion` text and look at Fusion only where the text is unclear; one sketch per
-   group of keys (this session: a rectangle with typed values and expressions, a line with typed angle,
-   circles, polygons, slots, then a clean second sketch for fillet / chamfer / offset / trim / constraints).
-
-Where the documents stand: Fusion untouched this session (four tabs as prober 20 left them).
-FissionOxide: one "Untitled*" mm Part Design with Sketch1 (hexagon extruded into Body1, the rest of the
-test shapes), Sketch2 (rectangle, circles, lines, a blend curve) and Sketch3 on a vertical origin plane
-(projected Body1 outline), open for edit; window at screenshot x 0..908, Data Panel closed.
+4. Work from the rows' `fusion` text and look at Fusion only where the text is unclear. One body with a
+   sketch on XZ through it covered Intersect, Slice and Look At this session.
 
 ## Traps
+- Draft with an angle dragged to a failing value hung FissionOxide (Not Responding, CPU busy) until
+  `ui-reverify-canvas-1` lands: type the angle instead of dragging, on a plain face.
+- `open_application` on "Autodesk Fusion" while Fusion runs opens "Multiple instances are not
+  supported" (Cancel at about (854,472)); it did bring the desktop back from a non-granted app in front.
+- FissionOxide's Ground Plane Offset field is a drag value: a click nudges it and typing does nothing.
+- FissionOxide's Horizontal/Vertical is one constraint tool, so "Vertical on a horizontal line" cannot be
+  applied separately; find another route for `ui:sketch:vertical-on-horizontal-line`.
+- Shift+click on timeline icons works from the automation tool now (earlier trap said it did not).
 - Synthetic clicks on FissionOxide's canvas right after a key press or a menu click are sometimes dropped
   (the first corner of a rectangle, the first Mirror pick, a palette checkbox right after another click):
   `mouse_move` to the target, wait 0.3 s, then click, and look before assuming the click landed.

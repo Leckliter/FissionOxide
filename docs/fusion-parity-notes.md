@@ -626,3 +626,12 @@ Rebuilt after fixing a Windows-only build break (`far` macro in `surface3.cpp`, 
 the automation tool). The dark theme darkens only Preferences and its dropdown then sticks; a Data Panel
 project opens only on a double-click on its icon. Four wave-38 batches (`ui-reverify-dialogs-1/-2/-3`,
 `ui-reverify-chrome-1`); report `parity/reports/2026-10-22-reverify-dialogs-chrome.md`. Canvas next.
+
+## 2026-10-22, verifier 3: re-verification sweep, canvas to manip and sketch
+Re-checked canvas, navbar, viewcube, marking-menu, browser, timeline and manip on `afddd332`, then eleven
+sketch keys (six on a rebuild at `3e4cc76d`): 84 verified, 6 reopened, 2 new rows. A Draft angle drag to a
+failing value hung the app (new P1); Create Sketch still draws no plane grid preview; the Error window's
+icons overlap their labels; Ground Plane Offset ignores typed values; Ctrl+5 shows no hidden edges; two
+navbar menus are 450 px wide; Measure from a dimension box fills nothing. Three wave-39 batches
+(`ui-reverify-canvas-1`, `ui-reverify-navbar-1`, `ui-reverify-sketch-3`); report
+`parity/reports/2026-10-22-reverify-canvas-timeline.md`. 180 keys remain fixing-merged; sketch next.
