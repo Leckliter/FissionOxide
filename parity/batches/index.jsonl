@@ -147,7 +147,7 @@
 {"name": "ui-reverify-dialogs-7", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_e9f3d771 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-reverify-workspaces-2", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_e9f3d771 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-reverify-prefs-1", "items": 2, "status": "done", "pr": "627c1e2", "fixer": "cloud session_01Ks4sJHbNDAv5MBPYnvD65n (2026-10-23)"}
-{"name": "ui-reverify-dialogs-8", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_c897e504 (requested 2026-10-23 by the coordinator)"}
+{"name": "ui-reverify-dialogs-8", "items": 4, "status": "done", "pr": "55488d7", "fixer": "cloud session_01Ks4sJHbNDAv5MBPYnvD65n (2026-10-23)"}
 {"name": "ui-reverify-workspaces-3", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_62901c53 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-animation-actions-1", "items": 1, "status": "fixing", "pr": null, "fixer": "cloud task_62901c53 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-kernel-tests-1", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_9b720f60 (requested 2026-10-23 by the coordinator)"}
