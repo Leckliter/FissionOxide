@@ -463,6 +463,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
   let hot_plane = sketch_planes_overlay(app, planes, &painter, &view);
   offset_plane_overlay(app, &painter, &view);
+  hole_glyph_overlay(app, &painter, &view);
   section_plane_overlay(app, &painter, &view);
   crate::dialogs::plane_cut_overlay(app, &painter, &|p| view.to_screen(&cam, p));
   // Preferences → General → Enable camera pivot: the orbit's centre while orbiting
@@ -5137,6 +5138,10 @@ fn sketch_planes_overlay(
     let (fill, edge, width) = if hot == Some(i) {
       let [r, g, b] = PLANE_HOT_RGB;
       (Color32::from_rgba_unmultiplied(r, g, b, 110), Color32::from_rgb(r, g, b), 2.0)
+    } else if app.dialog.as_ref().is_some_and(|d| d.mirror_plane_is(p)) {
+      // Mirror's picked plane: selected blue
+      let [r, g, b] = crate::origin::PLANE_SELECTED;
+      (Color32::from_rgba_unmultiplied(r, g, b, 110), Color32::from_rgb(r, g, b), 1.5)
     } else {
       (Color32::from_rgba_unmultiplied(r, g, b, 46), Color32::from_rgba_unmultiplied(r, g, b, 170), 1.0)
     };
@@ -5165,6 +5170,16 @@ fn origin_triad(app: &App, painter: &egui::Painter, view: &View, reach: f64) {
 /// The corners of the square drawn for a plane: `half` either side of `centre` along its axes.
 pub(crate) fn plane_square(pl: &Plane, centre: DVec3, half: f64) -> [DVec3; 4] {
   [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]].map(|[u, v]| centre + pl.x * (u * half) + pl.y * (v * half))
+}
+
+/// The Hole dialog's position glyph at the hole's centre: Fusion's white point with a dark ring
+/// and centre dot.
+fn hole_glyph_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  let Some(at) = app.dialog.as_ref().and_then(|d| d.hole_glyph(&app.s)) else { return };
+  let Some(p) = view.to_screen(&app.cam, at) else { return };
+  let ink = Color32::from_rgb(40, 40, 40);
+  painter.circle(p, 5.0, Color32::WHITE, Stroke::new(1.5, ink));
+  painter.circle_filled(p, 1.5, ink);
 }
 
 /// Offset Plane's new plane as a see-through orange square at the offset, centred over its base

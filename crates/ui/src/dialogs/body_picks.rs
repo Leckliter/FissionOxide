@@ -1,7 +1,9 @@
-//! Dialogs whose only model picks are bodies (Combine's target and tools, Split Body's bodies to
-//! split, Scale's entities): while one is open a click picks the whole body, as in Fusion, so the
-//! body lights blue on hover and pick and the status bar names it ("Body1"), not the face under
-//! the pointer.
+//! Dialogs whose active pick is a body chip (Combine's target and tools, Split Body's bodies to
+//! split, Scale's entities, Remove's objects, and the Objects chip of Move/Copy, Mirror and the
+//! patterns with Object Type Bodies): while it waits a click picks the whole body, as in Fusion,
+//! so the body lights blue on hover and pick and the status bar names it ("Body1"), not the face
+//! under the pointer. A row that picks faces or edges (Mirror's plane, a pattern's axis or edge
+//! direction, Move's rotation axis or points) gets the priority the dialog opened with back.
 
 use crate::App;
 use crate::select::Priority;
@@ -9,15 +11,42 @@ use crate::select::Priority;
 use super::{Dialog, Kind};
 
 impl Dialog {
-  /// Does every viewport pick this dialog takes go to a body chip?
+  /// Does the next viewport pick go to a body chip?
   pub(super) fn picks_bodies(&self) -> bool {
-    matches!(self.kind, Kind::Combine | Kind::SplitBody | Kind::Scale)
+    match self.kind {
+      Kind::Combine | Kind::SplitBody | Kind::Scale => true,
+      Kind::Form(f) => std::ptr::eq(f, &crate::forms::REMOVE),
+      _ => self.objects_chip_waits(),
+    }
+  }
+
+  /// Is Move/Copy's, Mirror's or a pattern's Objects chip (Object Type Bodies) what the next
+  /// pick goes to, rather than a plane, axis, edge or point row?
+  fn objects_chip_waits(&self) -> bool {
+    match self.kind {
+      Kind::Mirror => self.choice != "features" && self.pick_row == 0,
+      Kind::CircPattern => self.pick_row == 0,
+      Kind::RectPattern => {
+        self.pattern_kind() == "bodies" && self.dir != "edge" && !(self.use_dir2 && self.dir2 == "edge")
+      }
+      Kind::Move => self.move_picks_bodies(),
+      _ => false,
+    }
   }
 
   /// Picks whole bodies while a body chip is active (the selection priority is put back when the
-  /// dialog closes, see [`Dialog::leave`]).
+  /// dialog closes, see [`Dialog::leave`], or when the active row picks something else).
   pub(super) fn body_pick_priority(&mut self, app: &mut App) {
-    if !self.picks_bodies() || self.editing.is_some() {
+    if self.picks_fixed() {
+      return;
+    }
+    if !self.picks_bodies() {
+      // Mirror's plane, a pattern's axis: what the dialog opened with
+      if let Some((priority, _)) = self.saved_filter
+        && matches!(self.kind, Kind::Mirror | Kind::CircPattern | Kind::RectPattern | Kind::Move)
+      {
+        app.sel_priority = priority;
+      }
       return;
     }
     if self.saved_filter.is_none() {
@@ -87,6 +116,53 @@ mod tests {
     // a dialog that picks faces leaves the priority alone
     let mut app = two_boxes();
     let mut d = Dialog::open(&mut app, Kind::OffsetFace);
+    d.body_pick_priority(&mut app);
+    assert_eq!(app.sel_priority, Priority::Face);
+  }
+
+  /// Remove's Objects, Move/Copy's bodies and the Objects chips of Mirror and the patterns pick
+  /// whole bodies too (hover, pick and status bar); a row that picks a plane, an axis or edges
+  /// gives the faces and edges back.
+  #[test]
+  fn objects_chips_pick_whole_bodies() {
+    let remove = Kind::Form(&crate::forms::REMOVE);
+    for kind in [remove, Kind::Move, Kind::Mirror, Kind::CircPattern, Kind::RectPattern] {
+      let mut app = two_boxes();
+      let b1 = app.s.model.bodies[0].id;
+      let mut d = Dialog::open(&mut app, kind);
+      d.body_pick_priority(&mut app);
+      assert_eq!(app.sel_priority, Priority::Body, "{kind:?}");
+      app.hover = Some(a_face(&app, 0));
+      assert_eq!(crate::select::hover_bodies(&app), vec![b1], "{kind:?}: the hover lights the body");
+      let p = a_face(&app, 0);
+      crate::select::pick(&mut app, p, true);
+      assert_eq!(app.s.selection, vec![Sel::Body { body: b1 }], "{kind:?}");
+      assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("Body1"), "{kind:?}");
+      d.sync_selection(&app.s);
+      d.cancel(&mut app.s);
+      d.leave(&mut app);
+      assert_eq!(app.sel_priority, Priority::Face, "{kind:?}: put back on close");
+    }
+    // Mirror's plane row and Circular Pattern's axis row pick faces and edges
+    for kind in [Kind::Mirror, Kind::CircPattern] {
+      let mut app = two_boxes();
+      let mut d = Dialog::open(&mut app, kind);
+      d.body_pick_priority(&mut app);
+      d.pick_row = 1;
+      d.body_pick_priority(&mut app);
+      assert_eq!(app.sel_priority, Priority::Face, "{kind:?}");
+      d.pick_row = 0;
+      d.body_pick_priority(&mut app);
+      assert_eq!(app.sel_priority, Priority::Body, "{kind:?}");
+    }
+    // Move's Rotate picks an edge for its axis; Mirror's Features type picks no bodies
+    let mut app = two_boxes();
+    let mut d = Dialog::open(&mut app, Kind::Move);
+    d.mv.mtype = "rotate";
+    d.body_pick_priority(&mut app);
+    assert_eq!(app.sel_priority, Priority::Face);
+    let mut d = Dialog::open(&mut app, Kind::Mirror);
+    d.choice = "features";
     d.body_pick_priority(&mut app);
     assert_eq!(app.sel_priority, Priority::Face);
   }

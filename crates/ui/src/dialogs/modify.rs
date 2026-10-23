@@ -42,7 +42,7 @@ fn point_of(s: &Session, sel: &Sel) -> Option<[f64; 3]> {
 
 /// A pull direction's name in the Draft dialog: the origin plane's, the construction plane's
 /// or the body the face is on.
-fn pull_label(s: &Session, v: &Value) -> String {
+pub(super) fn pull_label(s: &Session, v: &Value) -> String {
   if let Some(n) = v.as_str() {
     return format!("{} plane", n.to_uppercase());
   }
@@ -53,6 +53,12 @@ fn pull_label(s: &Session, v: &Value) -> String {
     Some(b) => format!("Face of {}", s.body_name(BodyId(b as u32))),
     None => String::new(),
   }
+}
+
+/// An angle typed as a bare number, with its unit ("5" reads "5 deg").
+fn with_deg(angle: &str) -> String {
+  let t = angle.trim();
+  if t.parse::<f64>().is_ok() { format!("{t} deg") } else { angle.to_string() }
 }
 
 impl Dialog {
@@ -66,7 +72,7 @@ impl Dialog {
     self.pick_row_chip(ui, "Pull Direction", 0, pull, !self.plane.is_null());
     let faces = chip_text(self.faces.len(), "selected");
     self.pick_row_chip(ui, "Faces", 1, &faces, !self.faces.is_empty());
-    if self.editing.is_some() {
+    if self.picks_fixed() {
       // the edited feature keeps the faces it was given
       Self::check_greyed(ui, "Tangent Chain", "The faces of an edited draft stay as they are");
     } else {
@@ -150,7 +156,7 @@ impl Dialog {
   /// Is Draft waiting for its pull direction (so the viewport offers the origin and construction
   /// planes to pick)?
   pub(crate) fn wants_pull_plane(&self) -> bool {
-    self.kind == Kind::Draft && self.editing.is_none() && self.pick_row == 0
+    self.kind == Kind::Draft && !self.picks_fixed() && self.pick_row == 0
   }
 
   /// Draft: an origin or construction plane picked in the viewport for the pull direction.
@@ -165,14 +171,15 @@ impl Dialog {
     let FeatureKind::Draft { faces, plane, angle, flip, symmetric, angle2 } = kind else { return };
     self.choice = "fixed_plane";
     self.flag = true;
-    self.angle = angle.clone();
+    // a bare stored angle is degrees, and the box shows the unit, as Fusion's "5 deg"
+    self.angle = with_deg(angle);
     self.flip = *flip;
     self.position = match (symmetric, angle2) {
       (true, _) => "symmetric",
       (_, Some(_)) => "two_side",
       _ => "one_side",
     };
-    self.angle2 = angle2.clone().unwrap_or_else(|| "0.0 deg".into());
+    self.angle2 = angle2.as_deref().map_or_else(|| "0.0 deg".into(), with_deg);
     self.faces = vec![Value::Null; faces.len()];
     // (the feature keeps its pull direction; the row shows it as picked)
     self.plane = serde_json::to_value(plane).unwrap_or(json!("xy"));
@@ -399,10 +406,22 @@ mod tests {
     assert!(app.status.is_none(), "{:?}", app.status);
     let mut d = app.dialog.take().expect("EDIT FEATURE");
     assert_eq!((d.kind, d.editing, d.angle.as_str(), d.faces.len()), (Kind::Draft, Some(id), "5 deg", 1));
+    // the picks found again on the rolled-back body: both blue, the pull arrow and angle dial on
+    // the model, Tangent Chain live
+    assert!(d.repicks && !d.picks_fixed());
+    assert_eq!(d.faces, vec![json!({"body": side["body"], "face": side["face"]})]);
+    // the pull face is selected (the drafted face, changed by the preview, is found again by
+    // live.rs's drafted-face matching)
+    let pull =
+      Sel::Face { body: BodyId(top["body"].as_u64().unwrap() as u32), face: top["face"].as_u64().unwrap() as u32 };
+    assert!(app.s.selection.contains(&pull), "{:?}", app.s.selection);
+    assert_eq!(d.picked_selection().len(), 2, "both picks");
     let ctx = egui::Context::default();
     let t = frame(&ctx, &mut app, &mut d);
     assert!(has(&t, "EDIT FEATURE") && has(&t, "Angle") && has(&t, "5 deg"), "{t:?}");
     assert_eq!(t.iter().filter(|x| *x == "1 selected").count(), 2, "{t:?}");
+    assert!(d.draft_pull().is_some(), "the pull arrow");
+    assert_eq!(d.handles(&app.s).len(), 2, "the angle dial and the pull arrow");
     assert!(d.ok_enabled());
     d.angle = "8 deg".into();
     d.position = "symmetric";
@@ -410,6 +429,14 @@ mod tests {
     assert!(d.applied && d.error.is_none(), "{:?}", d.error);
     let FeatureKind::Draft { angle, symmetric, .. } = &app.s.design.feature(id).unwrap().kind else { panic!() };
     assert_eq!((angle.as_str(), *symmetric), ("8 deg", true));
+    // a draft whose angle was typed bare reopens with its unit
+    let mut app = block();
+    let (_, top) = face(&app.s, DVec3::Z);
+    let (_, side) = face(&app.s, -DVec3::Y);
+    app.run("draft", json!({"faces": [side], "plane": top, "angle": "5"}));
+    let id = app.s.design.features.last().unwrap().id;
+    crate::panels::edit_feature(&mut app, id);
+    assert_eq!(app.dialog.as_ref().map(|d| d.angle.as_str()), Some("5 deg"));
   }
 
   /// Scale opens as Fusion's: Entities (active, "Select bodies or sketches to scale"), Point and

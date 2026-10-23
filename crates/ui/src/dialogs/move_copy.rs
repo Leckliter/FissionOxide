@@ -341,6 +341,15 @@ impl Dialog {
     }
   }
 
+  /// Does a click pick a body to move (Object Type Bodies, no rotation axis, point or pivot
+  /// waiting for its pick)?
+  pub(super) fn move_picks_bodies(&self) -> bool {
+    self.mv.object == "bodies"
+      && self.mv.mtype != "rotate"
+      && self.points_needed() == 0
+      && self.mv.picking_pivot.is_none()
+  }
+
   /// Does Move turn anything?
   fn move_turns(&self) -> bool {
     match self.mv.mtype {

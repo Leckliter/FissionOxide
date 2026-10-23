@@ -231,7 +231,7 @@ impl Dialog {
   }
 
   /// Where a single hole sits now: the click, or the face's centre.
-  fn hole_centre(&self, s: &Session) -> Option<DVec3> {
+  pub(super) fn hole_centre(&self, s: &Session) -> Option<DVec3> {
     let f = self.faces.first()?;
     match &self.solid.hp.at {
       Some((g, p)) if g == f => Some(DVec3::from(*p)),

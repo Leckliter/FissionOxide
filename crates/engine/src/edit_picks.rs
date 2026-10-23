@@ -1,7 +1,7 @@
 //! Edit Feature's picks made again on the rolled-back model, for the features whose edit
 //! dialogs are their creation dialogs with live selection chips (Revolve's profiles and axis,
 //! Shell's faces and bodies, Offset Plane's and Mirror's plane, the patterns' objects and
-//! axis). `feature.edit`'s `picks` are parsed as the creation command parses them and become
+//! axis, Draft's faces and pull direction). `feature.edit`'s `picks` are parsed as the creation command parses them and become
 //! fields of the stored feature; Fillet's and Chamfer's are in `commands::edit_picks`.
 
 use fox_model::{BodyId, FeatureId, FeatureKind};
@@ -33,6 +33,7 @@ pub(crate) fn fields(s: &Session, kind: &FeatureKind, picks: &Value) -> Option<R
   let r = match kind {
     FeatureKind::Revolve { sketch, .. } => revolve(s, *sketch, picks, &mut out),
     FeatureKind::Shell { .. } => shell(s, picks, &mut out),
+    FeatureKind::Draft { .. } => draft(s, picks, &mut out),
     FeatureKind::ConstructionPlane { .. } => {
       picks.get("plane").map_or(Ok(()), |p| put(&mut out, "base", plane_ref(s, p)?))
     }
@@ -83,6 +84,26 @@ fn shell(s: &Session, picks: &Value, out: &mut Fields) -> Result<(), CmdError> {
     && out.get("bodies").and_then(Value::as_array).is_some_and(Vec::is_empty)
   {
     return Err(CmdError::new("pick the faces to remove or the bodies to shell"));
+  }
+  Ok(())
+}
+
+/// Draft's faces (with the faces joined to them across smooth edges for `tangent_chain`) and
+/// pull direction.
+fn draft(s: &Session, picks: &Value, out: &mut Fields) -> Result<(), CmdError> {
+  if let Some(list) = picks.get("faces").and_then(Value::as_array) {
+    let mut picked = list.clone();
+    if picks.get("tangent_chain").and_then(Value::as_bool).unwrap_or(false) {
+      picked = crate::solid::tangent_faces(s, picked);
+    }
+    if picked.is_empty() {
+      return Err(CmdError::new("pick the faces to draft"));
+    }
+    let faces = picked.iter().map(|f| face_ref(s, f)).collect::<Result<Vec<_>, _>>()?;
+    put(out, "faces", faces)?;
+  }
+  if let Some(p) = picks.get("plane") {
+    put(out, "plane", plane_ref(s, p)?)?;
   }
   Ok(())
 }

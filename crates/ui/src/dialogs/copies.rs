@@ -85,9 +85,36 @@ impl Dialog {
     };
   }
 
-  /// The previewed copies, drawn as Fusion's translucent grey ghosts with dark edges.
+  /// The previewed copies, drawn as Fusion's translucent grey ghosts with dark edges (an edited
+  /// Mirror's or pattern's too: its preview adds them to the rolled-back design again; an edited
+  /// primitive's body draws as itself).
   pub(crate) fn ghost_bodies(&self) -> Vec<BodyId> {
-    if self.applied && self.editing.is_none() { self.ghosts.clone() } else { Vec::new() }
+    let copies = self.editing.is_none() || super::primitive::base_of(self.kind).is_none();
+    if self.applied && copies { self.ghosts.clone() } else { Vec::new() }
+  }
+
+  /// The origin plane Mirror mirrors about, drawn selected (blue) and shown while the dialog is
+  /// open, as Fusion draws the picked plane.
+  pub(crate) fn mirror_origin_plane(&self) -> Option<OriginItem> {
+    if self.kind != Kind::Mirror {
+      return None;
+    }
+    OriginItem::from_sketch_plane(&self.plane)
+  }
+
+  /// Is `plane` (a `sketch.create` plane) the one Mirror has picked?
+  pub(crate) fn mirror_plane_is(&self, plane: &Value) -> bool {
+    self.kind == Kind::Mirror && !self.plane.is_null() && *plane == self.plane
+  }
+
+  /// The status bar while Mirror has its objects and plane: "2 selections", Fusion's count of
+  /// the picks across both rows.
+  pub(crate) fn mirror_status(&self) -> Option<String> {
+    if self.kind != Kind::Mirror || self.plane.is_null() {
+      return None;
+    }
+    let n = if self.choice == "features" { self.mirror_features.len() } else { self.bodies.len() };
+    (n > 0).then(|| format!("{} selections", n + 1))
   }
 
   // ---- the patterns' Type row ----

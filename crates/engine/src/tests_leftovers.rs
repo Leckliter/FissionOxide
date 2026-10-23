@@ -91,3 +91,25 @@ fn edit_picks_of_revolve_shell_planes_and_patterns() {
   assert_eq!((axis, bodies), (AxisRef::Y, BodySel::Bodies { ids: vec![BodyId(b)] }));
   assert!(s.execute("feature.edit", &json!({"feature": c, "set": {}, "picks": {"bodies": [999]}})).is_err());
 }
+
+/// Batch ui-reverify-dialogs-2: Edit Draft's picks made again on the rolled-back model: other
+/// faces to draft and another pull direction.
+#[test]
+fn edit_picks_of_draft() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+  let d = run(&mut s, "draft", json!({"faces": [{"point": [0, -10, 10]}], "plane": "xy", "angle": "5 deg"}))["feature"]
+    .clone();
+  run(&mut s, "timeline.marker", json!({"at": 1}));
+  let picks = json!({"faces": [{"point": [10, 0, 10]}], "plane": {"point": [0, 0, 20]}, "tangent_chain": true});
+  run(&mut s, "feature.edit", json!({"feature": d, "set": {}, "picks": picks, "marker_after": true}));
+  let FeatureKind::Draft { faces, plane, .. } =
+    &s.design.feature(fox_model::FeatureId(d.as_u64().unwrap() as u32)).unwrap().kind
+  else {
+    panic!()
+  };
+  assert_eq!(faces.len(), 1);
+  assert!((faces[0].point[0] - 10.0).abs() < 1e-9, "{:?}", faces[0].point);
+  assert!(matches!(plane, PlaneRef::Face { .. }), "{plane:?}");
+  assert!(s.execute("feature.edit", &json!({"feature": d, "set": {}, "picks": {"faces": []}})).is_err());
+}

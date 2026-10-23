@@ -139,7 +139,13 @@ pub(crate) fn visible(app: &App, item: OriginItem) -> bool {
     OriginItem::X | OriginItem::Y | OriginItem::Z => o.origin_axes,
     OriginItem::Xy | OriginItem::Xz | OriginItem::Yz => o.origin_planes,
   };
-  row && app.origin_shown && eye(app, item) || dialog_shows(app)
+  let planes = item.plane().is_some() && app.dialog.as_ref().is_some_and(|d| d.shows_origin_planes());
+  row && app.origin_shown && eye(app, item) || dialog_shows(app) || planes || mirror_plane(app) == Some(item)
+}
+
+/// The origin plane an open Mirror mirrors about (shown, and drawn selected).
+fn mirror_plane(app: &App) -> Option<OriginItem> {
+  app.dialog.as_ref().and_then(|d| d.mirror_origin_plane())
 }
 
 /// The open dialog shows the origin planes and axes for its picks (Revolve, Loft), as Fusion
@@ -298,7 +304,7 @@ pub(crate) enum RowHover {
 pub(crate) fn look(app: &App, item: OriginItem) -> Look {
   let dialog_axis = app.dialog.as_ref().and_then(|d| d.origin_axis());
   let form_pick = app.dialog.as_ref().is_some_and(|d| d.origin_picked(&crate::forms::origin_value(item)));
-  if picked(app) == Some(item) || dialog_axis == Some(item) || form_pick {
+  if picked(app) == Some(item) || dialog_axis == Some(item) || form_pick || mirror_plane(app) == Some(item) {
     Look::Selected
   } else if app.hover_origin == Some(item) || app.row_hover == Some(RowHover::Origin(item)) {
     Look::Hovered

@@ -1515,7 +1515,13 @@ impl Dialog {
     }
     self.rolled = Some(old);
     self.repicks = self.load_edit_picks(s);
-    self.preview(s);
+    // the handles hang on the picks as they are before the preview (Draft's pull arrow and dial)
+    self.refresh_manip(s);
+    // Combine's edit shows its target and tools apart, as before the combine (a change previews
+    // the result again)
+    if self.kind != Kind::Combine {
+      self.preview(s);
+    }
   }
 
   /// Ends Edit Feature's rolled-back view: OK (`keep`) rolls the marker forward to where it was
@@ -2357,6 +2363,7 @@ impl Dialog {
         Some(Manipulator { origin: centre, dir: self.offset_sign(s) * base.normal(), value: len(&self.distance)? })
       }
       Kind::Section => self.section_manipulator(s),
+      Kind::Hole if self.editing.is_some() => self.hole_edit_manipulator(s),
       _ => self.more_manipulator(s),
     }
   }
@@ -2372,6 +2379,8 @@ impl Dialog {
       }
       Kind::OffsetPlane => self.distance = manip::mm(self.unit, v),
       Kind::Section => self.set_section_distance(v),
+      // an edited hole's depth arrow: some depth, never none
+      Kind::Hole if self.editing.is_some() => self.b = manip::mm(self.unit, v.max(step.max(1e-3))),
       _ => {
         if !self.set_more_manipulator(v, step) {
           return;
@@ -2576,7 +2585,7 @@ impl Dialog {
       Kind::CircPattern => self.circ_sync(s),
       Kind::Interference => self.interference_sync(s),
       Kind::Section => self.section_sync(s),
-      Kind::Combine if !self.applied => self.sync_combine(s),
+      Kind::Combine if !self.applied && !self.picks_fixed() => self.sync_combine(s),
       _ => {}
     }
   }
@@ -3149,80 +3158,18 @@ impl Dialog {
       Kind::Chamfer => self.chamfer_rows(app, ui, creating),
       Kind::Shell => self.shell_rows(ui, creating),
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => self.primitive_rows(ui, creating),
-      Kind::Mirror if creating => self.mirror_rows(app, ui),
+      // an edit opens on the creation rows, its picks live or (not found again) as stored
+      Kind::Mirror => self.mirror_rows(app, ui),
       Kind::CircPattern if creating => self.circ_rows(ui),
-      Kind::OffsetPlane | Kind::Mirror => {
+      Kind::OffsetPlane => {
         ui.label("Plane");
-        if self.kind == Kind::OffsetPlane && creating {
+        if creating {
           self.offset_plane_chip(ui, &mut app.s);
-        } else if creating {
-          self.plane_choice(ui);
-        } else if self.kind == Kind::Mirror {
-          sel_chip(ui, self.accent(), "1 selected", true);
         } else {
           ui.label("(unchanged)");
         }
         ui.end_row();
-        if self.kind == Kind::OffsetPlane {
-          self.offset_plane_rows(ui);
-        } else {
-          ui.label("Type");
-          let types = [("bodies", "Bodies"), ("features", "Features")];
-          let label = types.iter().find(|(k, _)| *k == self.choice).map_or("Bodies", |(_, l)| *l);
-          egui::ComboBox::from_id_salt("mirror_type").selected_text(label).width(140.0).show_ui(ui, |ui| {
-            for (k, l) in types {
-              if ui.selectable_label(self.choice == k, l).clicked() {
-                self.choice = k;
-                self.dirty = true;
-              }
-            }
-          });
-          ui.end_row();
-          if self.choice == "features" {
-            // features that add or remove a solid: their tool is what gets mirrored
-            let tools: Vec<(u32, String)> = app
-              .s
-              .design
-              .features
-              .iter()
-              .filter(|f| {
-                matches!(
-                  f.kind,
-                  FeatureKind::Extrude { .. }
-                    | FeatureKind::Revolve { .. }
-                    | FeatureKind::Primitive { .. }
-                    | FeatureKind::Loft { .. }
-                    | FeatureKind::Sweep { .. }
-                    | FeatureKind::Hole { .. }
-                )
-              })
-              .map(|f| (f.id.0, f.name.clone()))
-              .collect();
-            ui.label("Features");
-            ui.vertical(|ui| {
-              for (id, name) in tools {
-                let mut on = self.mirror_features.contains(&id);
-                if ui.checkbox(&mut on, name).changed() {
-                  self.mirror_features.retain(|f| *f != id);
-                  if on {
-                    self.mirror_features.push(id);
-                  }
-                  self.dirty = true;
-                }
-              }
-            });
-            ui.end_row();
-          } else {
-            ui.label("Bodies");
-            sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
-            ui.end_row();
-            ui.label("");
-            if ui.checkbox(&mut self.join, "Join to original").changed() {
-              self.dirty = true;
-            }
-            ui.end_row();
-          }
-        }
+        self.offset_plane_rows(ui);
       }
       Kind::RectPattern => {
         if self.editing.is_none() {
@@ -4949,19 +4896,6 @@ impl Dialog {
             "dir2" => self.dir2 = a,
             _ => self.axis = a,
           }
-          self.dirty = true;
-        }
-      }
-    });
-  }
-
-  fn plane_choice(&mut self, ui: &mut egui::Ui) {
-    let cur = self.plane_label.clone();
-    egui::ComboBox::from_id_salt("plane").selected_text(cur.clone()).width(140.0).show_ui(ui, |ui| {
-      for (l, p) in [("XY plane", "xy"), ("XZ plane", "xz"), ("YZ plane", "yz")] {
-        if ui.selectable_label(cur == l, l).clicked() {
-          self.plane = json!(p);
-          self.plane_label = l.into();
           self.dirty = true;
         }
       }

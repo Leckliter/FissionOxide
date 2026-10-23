@@ -253,7 +253,7 @@ impl Dialog {
   /// Draft: the pull direction once it is picked, as it was before the preview: a point on its
   /// face or plane and the way it points (flipped with Flip Pull Direction).
   pub fn draft_pull(&self) -> Option<(DVec3, DVec3)> {
-    if self.kind != Kind::Draft || self.editing.is_some() {
+    if self.kind != Kind::Draft || self.picks_fixed() {
       return None;
     }
     let (key, o, n) = self.manip.pull.as_ref()?;

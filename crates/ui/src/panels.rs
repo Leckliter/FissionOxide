@@ -3188,6 +3188,10 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
 /// browser or timeline row prints nothing, as in Fusion, except while a command dialog is
 /// picking, when the item under the pointer reads out as a click would pick it.
 pub(crate) fn selection_text(app: &App) -> Option<String> {
+  // Mirror's objects and plane read as one count
+  if let Some(t) = app.dialog.as_ref().and_then(|d| d.mirror_status()) {
+    return Some(t);
+  }
   let (hovered, picked);
   let sel = match app.s.selection.as_slice() {
     // a curve-picking sketch tool's picks read out like a selection ("2 Sketch Curves | ...")

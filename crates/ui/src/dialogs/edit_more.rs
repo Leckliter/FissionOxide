@@ -3,11 +3,12 @@
 //! `feature.edit` takes back. Also what an opened edit selects in the canvas (the bodies Mirror,
 //! Combine and Move act on, drawn blue as in Fusion).
 
-use fox_engine::model::{BodyId, BodySel, FeatureKind};
+use fox_engine::kernel::glam::DVec3;
+use fox_engine::model::{BodyId, BodySel, FeatureKind, PlaneRef};
 use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
-use super::{Dialog, Kind, op_str};
+use super::{Dialog, Kind, Manipulator, op_str};
 
 /// The bodies a body selection names now (every body for "all").
 fn body_ids(s: &Session, sel: &BodySel) -> Vec<u32> {
@@ -34,7 +35,8 @@ pub(super) fn load(s: &Session, kind: &FeatureKind) -> Option<Dialog> {
       d.mirror_features = features.iter().map(|f| f.0).collect();
       d.bodies = if features.is_empty() { body_ids(s, bodies) } else { Vec::new() };
       d.join = *join;
-      d.plane = serde_json::to_value(plane).unwrap_or_default();
+      d.plane =
+        super::edit_picks::plane_pick(s, plane).unwrap_or_else(|| serde_json::to_value(plane).unwrap_or_default());
       d.plane_label = "1 selected".into();
       d
     }
@@ -76,15 +78,87 @@ impl Dialog {
   /// exist at this point of the timeline).
   pub(crate) fn edit_selection(&self, s: &Session) -> Option<Vec<Sel>> {
     self.editing?;
+    // a hole's face is its pick (blue under the glyph), not its body
+    if self.kind == Kind::Hole {
+      return Some(self.hole_face(s).into_iter().collect());
+    }
     let picks = match self.kind {
       Kind::Move if self.mv.object == "bodies" => &self.bodies,
       Kind::Mirror if self.choice == "bodies" => &self.bodies,
+      Kind::Mirror => &Vec::new(),
       Kind::Combine => &self.target.iter().chain(&self.bodies).copied().collect(),
       _ => return None,
     };
-    let sel: Vec<Sel> =
+    let mut sel: Vec<Sel> =
       picks.iter().filter(|b| s.model.body(BodyId(**b)).is_some()).map(|b| Sel::Body { body: BodyId(*b) }).collect();
+    // Mirror's plane is drawn selected too (a face or construction plane; an origin plane draws
+    // blue among the origin planes)
+    if self.kind == Kind::Mirror {
+      sel.extend(super::edit_picks::plane_sel(&self.plane).filter(|p| match p {
+        Sel::Face { body, .. } => s.model.body(*body).is_some(),
+        _ => true,
+      }));
+    }
     (!sel.is_empty()).then_some(sel)
+  }
+}
+
+impl Dialog {
+  /// The face an edited single hole sits on (its placement sketch's plane), on the model as it
+  /// is now.
+  pub(super) fn hole_face(&self, s: &Session) -> Option<Sel> {
+    if !self.solid.hp.single {
+      return None;
+    }
+    let FeatureKind::Sketch { plane: PlaneRef::Face { face, .. }, .. } = &s.design.feature(self.sketch?)?.kind else {
+      return None;
+    };
+    Some(Sel::Face { body: face.body, face: s.model.body(face.body)?.find_face(face)? })
+  }
+
+  /// Where an edited hole sits, on the model as it is now: its (first) placement point and its
+  /// sketch's normal, which the hole drills against (along it, flipped).
+  pub(crate) fn hole_edit_anchor(&self, s: &Session) -> Option<(DVec3, DVec3)> {
+    if self.kind != Kind::Hole {
+      return None;
+    }
+    let FeatureKind::Hole { sketch, points, .. } = &s.design.feature(self.editing?)?.kind else { return None };
+    let r = s.model.sketches.get(sketch)?;
+    let used: Vec<_> = r.sketch.curves.iter().flat_map(|c| r.sketch.curve_points(c.id)).collect();
+    let point = match points.first() {
+      Some(p) => *p,
+      None => r.sketch.points.iter().map(|p| p.id).find(|p| *p != fox_engine::sketch::ORIGIN && !used.contains(p))?,
+    };
+    Some((r.plane.to_world(r.sketch.pos(point)?), r.plane.normal()))
+  }
+
+  /// Where the Hole dialog draws its position glyph: a single hole's centre on its face (an
+  /// edited hole's placement point).
+  pub(crate) fn hole_glyph(&self, s: &Session) -> Option<DVec3> {
+    if self.kind != Kind::Hole {
+      return None;
+    }
+    if self.editing.is_some() {
+      return self.hole_edit_anchor(s).map(|(c, _)| c);
+    }
+    if self.solid.hp.single { self.hole_centre(s) } else { None }
+  }
+
+  /// Edit Hole's depth arrow: from the hole's centre on its face, into the material, as deep as
+  /// the hole (none for Through All).
+  pub(super) fn hole_edit_manipulator(&self, s: &Session) -> Option<Manipulator> {
+    if self.flag {
+      return None;
+    }
+    let (origin, n) = self.hole_edit_anchor(s)?;
+    let dir = if self.flip { n } else { -n };
+    Some(Manipulator { origin, dir, value: self.len(s, &self.b)? })
+  }
+
+  /// Does the dialog show the origin planes (whatever the Origin folder's eyes say)? Edit Hole
+  /// does, as Fusion's.
+  pub(crate) fn shows_origin_planes(&self) -> bool {
+    self.kind == Kind::Hole && self.editing.is_some()
   }
 }
 
@@ -196,6 +270,21 @@ mod tests {
     );
     let before = volume(&s);
     let (mut app, _) = edit_last(s);
+    // the face it sits on is the pick, not the whole body; the origin planes show
+    let [Sel::Face { body: b, face }] = app.s.selection[..] else { panic!("{:?}", app.s.selection) };
+    let normal = app.s.model.body(b).unwrap().faces().iter().find(|f| f.id == face).unwrap().normal;
+    assert!(b.0 == body && normal.z > 0.9, "the top face: {normal:?}");
+    assert!(crate::origin::OriginItem::PLANES.iter().all(|p| crate::origin::visible(&app, *p)));
+    assert!(!crate::origin::visible(&app, crate::origin::OriginItem::X));
+    // the position glyph at its centre, the depth arrow down into the block, as deep as the hole
+    let d = app.dialog.as_ref().unwrap();
+    let g = d.hole_glyph(&app.s).expect("the glyph");
+    // (its offsets hold it 25 from the left edge and 15 from the front)
+    let c = DVec3::new(25.0, 15.0, 10.0);
+    assert!(close(g, c), "{g:?}");
+    let m = d.manipulator(&app.s).expect("the depth arrow");
+    assert!(close(m.origin, c) && close(m.dir, -DVec3::Z), "{:?} {:?}", m.origin, m.dir);
+    assert!((m.value - 5.0).abs() < 1e-9);
     let d = app.dialog.as_ref().unwrap();
     assert_eq!((d.kind, d.choice, d.solid.hp.single), (Kind::Hole, "counterbore", true));
     assert_eq!((d.faces.len(), d.edges.len()), (1, 2));
@@ -237,8 +326,22 @@ mod tests {
     assert_eq!(app.s.selection, vec![Sel::Body { body: b }], "the source body is drawn selected");
     let d = app.dialog.as_ref().unwrap();
     assert_eq!((d.kind, d.choice, d.bodies.clone(), d.join), (Kind::Mirror, "bodies", vec![b.0], false));
+    // the mirrored body previews as a see-through ghost; the plane is shown and drawn blue
+    let ghosts = d.ghost_bodies();
+    assert_eq!(ghosts.len(), 1, "{ghosts:?}");
+    assert!(ghosts[0] != b);
+    use crate::origin::{Look, OriginItem, look, visible};
+    assert_eq!(d.mirror_origin_plane(), Some(OriginItem::Yz));
+    assert!(visible(&app, OriginItem::Yz) && !visible(&app, OriginItem::Xy));
+    assert_eq!(look(&app, OriginItem::Yz), Look::Selected);
+    assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("2 selections"));
+    // Fusion's rows: Object Type, Objects, Mirror Plane, Operation
     let t = texts(&mut app);
-    assert_eq!(t.iter().filter(|x| *x == "1 selected").count(), 2, "Bodies and Plane chips: {t:?}");
+    assert_eq!(t.iter().filter(|x| *x == "1 selected").count(), 2, "Objects and Mirror Plane chips: {t:?}");
+    for want in ["EDIT FEATURE", "Object Type", "Objects", "Mirror Plane", "Operation", "New Body"] {
+      assert!(t.iter().any(|x| x == want), "no {want:?} in {t:?}");
+    }
+    assert!(!t.iter().any(|x| x == "Join to original" || x == "Plane" || x == "Type"), "{t:?}");
     // joined to the original, the two become one body
     app.dialog.as_mut().unwrap().join = true;
     preview(&mut app);
@@ -259,8 +362,15 @@ mod tests {
       (d.kind, d.target, d.bodies.clone(), d.op, d.keep_tools),
       (Kind::Combine, Some(t), vec![tool], "join", false)
     );
-    assert_eq!(app.s.selection, vec![Sel::Body { body: fox_engine::model::BodyId(t) }]);
+    // rolled back: target and tool apart, both selected, the browser's rows as before the combine
+    let both =
+      vec![Sel::Body { body: fox_engine::model::BodyId(t) }, Sel::Body { body: fox_engine::model::BodyId(tool) }];
+    assert_eq!(app.s.selection, both);
+    assert_eq!(app.s.model.bodies.len(), 2);
+    assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("2 Bodies"));
+    assert!(app.dialog.as_ref().unwrap().browser_bodies(&app.s).is_none(), "the browser lists the model's bodies");
     texts(&mut app);
+    assert_eq!(app.s.selection, both, "a frame keeps both picks");
     let d = app.dialog.as_mut().unwrap();
     d.op = "cut";
     d.keep_tools = true;

@@ -1,4 +1,4 @@
-//! Edit Feature on a Revolve, Shell, Offset Plane, Mirror or pattern: the creation dialog filled
+//! Edit Feature on a Revolve, Shell, Draft, Offset Plane, Mirror or pattern: the creation dialog filled
 //! in, its selection chips live. The stored picks are found again on the rolled-back model (and
 //! selected, as the creation dialog shows them), and a new pick goes back to the feature through
 //! `feature.edit`'s `picks`, as Fillet's, Chamfer's and Extrude's do.
@@ -23,7 +23,7 @@ fn regions(s: &Session, sketch: FeatureId, profiles: &[[f64; 2]]) -> Option<Vec<
 }
 
 /// A stored plane as the dialogs pick one: an origin plane's name, `{feature}` or `{body, face}`.
-fn plane_pick(s: &Session, plane: &PlaneRef) -> Option<Value> {
+pub(super) fn plane_pick(s: &Session, plane: &PlaneRef) -> Option<Value> {
   Some(match plane {
     PlaneRef::Origin { plane } => json!(match plane {
       OriginPlane::Xy => "xy",
@@ -37,7 +37,7 @@ fn plane_pick(s: &Session, plane: &PlaneRef) -> Option<Value> {
 }
 
 /// What a plane pick selects: a face or a construction plane (an origin plane isn't selected).
-fn plane_sel(v: &Value) -> Option<Sel> {
+pub(super) fn plane_sel(v: &Value) -> Option<Sel> {
   let get = |k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
   match (get("body"), get("face"), get("feature")) {
     (Some(b), Some(f), _) => Some(Sel::Face { body: fox_engine::model::BodyId(b), face: f }),
@@ -61,7 +61,7 @@ fn body_sels(ids: &[u32]) -> impl Iterator<Item = Sel> + '_ {
 }
 
 impl Dialog {
-  /// Finds a Revolve's, Shell's, Offset Plane's, Mirror's or pattern's stored picks on the
+  /// Finds a Revolve's, Shell's, Draft's, Offset Plane's, Mirror's or pattern's stored picks on the
   /// rolled-back model and selects them; false when one can't be found (or `kind` is none of
   /// these), and the rows keep the stored picks.
   pub(super) fn load_more_edit_picks(&mut self, s: &mut Session, kind: &FeatureKind) -> bool {
@@ -93,6 +93,19 @@ impl Dialog {
         let mut sel = self.picked_selection();
         sel.extend(body_sels(&self.bodies));
         sel
+      }
+      FeatureKind::Draft { faces, plane, .. } => {
+        let Some(pull) = plane_pick(s, plane) else { return false };
+        let mut found = Vec::new();
+        for fr in faces {
+          let Some(f) = s.model.body(fr.body).and_then(|b| b.find_face(fr)) else { return false };
+          found.push(json!({"body": fr.body.0, "face": f}));
+        }
+        self.faces = found;
+        self.plane_label = super::modify::pull_label(s, &pull);
+        self.plane = pull;
+        self.pick_row = 1;
+        self.faces.iter().filter_map(plane_sel).chain(plane_sel(&self.plane)).collect()
       }
       FeatureKind::ConstructionPlane { base, .. } => {
         let Some(plane) = plane_pick(s, base) else { return false };
@@ -136,7 +149,7 @@ impl Dialog {
     true
   }
 
-  /// `feature.edit`'s `picks` for an edited Revolve, Shell, Offset Plane, Mirror or pattern
+  /// `feature.edit`'s `picks` for an edited Revolve, Shell, Draft, Offset Plane, Mirror or pattern
   /// whose picks are live.
   pub(super) fn more_edit_picks(&self) -> Option<Value> {
     Some(match self.kind {
@@ -146,6 +159,7 @@ impl Dialog {
       Kind::Shell => {
         json!({"faces": self.faces, "bodies": self.bodies, "tangent_chain": !self.solid.shell_no_chain})
       }
+      Kind::Draft => json!({"faces": self.faces, "plane": self.plane, "tangent_chain": self.flag}),
       Kind::OffsetPlane => json!({"plane": self.plane}),
       Kind::Mirror if self.choice == "features" => json!({"plane": self.plane}),
       Kind::Mirror => json!({"plane": self.plane, "bodies": self.bodies}),
