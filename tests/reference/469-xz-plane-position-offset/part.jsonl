@@ -1,7 +1,7 @@
 # 469-xz-plane-position-offset: added by the parity loop from a Fusion probe
 # xz-plane-position-offset: mm DXF plate (as mm-plate-lines-arc-circle) inserted on the XZ plane (sketch y = -Z) positioned at sketch (10,5) mm; plate region extruded 6 mm along +Y.
-# hand-written; reads part.dxf from the case folder (absolute path)
+# hand-written; reads part.dxf from the case folder
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
-{"cmd": "sketch.insert", "from": {"path": "C:/Users/colli/OneDrive/Documents/GitHub/FissionOxide/.claude/worktrees/parity-loop-driver/parity/probes/importdxffilecommand/xz-plane-position-offset/part.dxf"}, "translate": [10, 5]}
+{"cmd": "sketch.insert", "from": {"path": "part.dxf"}, "translate": [10, 5]}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "profiles": [[40, 10]], "distance": 6, "operation": "new_body"}

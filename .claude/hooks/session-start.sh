@@ -12,7 +12,7 @@ fi
 cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
 
 PKGS=(cmake g++ pkg-config libxkbcommon-x11-dev libxkbcommon-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
-  libwayland-dev libgl1-mesa-dev libegl1-mesa-dev)
+  libwayland-dev libgl1-mesa-dev libegl1-mesa-dev cabextract)
 missing=()
 for p in "${PKGS[@]}"; do
   dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p")
@@ -24,6 +24,11 @@ if [ ${#missing[@]} -gt 0 ]; then
   if ! { $SUDO apt-get update -qq && DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends "${missing[@]}"; } >/dev/null 2>&1; then
     echo "session-start: apt-get install failed; the OCCT build may lack cmake or a C++ compiler"
   fi
+fi
+
+# Arial, which the text reference parts were measured in (tools/fetch-arial.sh)
+if ! tools/fetch-arial.sh >/dev/null 2>&1; then
+  echo "session-start: Arial could not be fetched; the text reference parts will fail"
 fi
 
 # Warm the build: the debug build is what `cargo test` and `cargo clippy` reuse (OCCT goes to

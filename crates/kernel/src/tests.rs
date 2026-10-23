@@ -94,6 +94,47 @@ fn fillet_chamfer_shell() {
   assert!((volume(&sh) - (8000.0 - inner)).abs() < 1e-2, "{}", volume(&sh));
 }
 
+/// Fusion's chamfer Corner Types where three chamfered edges meet: Chamfer a flat triangle, Miter
+/// the three chamfer faces run on to a point (keeping the tetrahedron the triangle cut off),
+/// Blend that point rounded.
+#[test]
+fn chamfer_corner_types() {
+  let a = block();
+  let at = |m: DVec3| a.edges().unwrap().iter().find(|e| (e.mid - m).length() < 1e-6).unwrap().id;
+  let corner = [at(DVec3::new(20.0, 20.0, 10.0)), at(DVec3::new(40.0, 10.0, 10.0)), at(DVec3::new(40.0, 20.0, 5.0))];
+  let d = 2.0;
+  let flat = a.chamfer_cornered(&corner, d, ChamferCorner::Chamfer).unwrap();
+  let miter = a.chamfer_cornered(&corner, d, ChamferCorner::Miter).unwrap();
+  let blend = a.chamfer_cornered(&corner, d, ChamferCorner::Blend).unwrap();
+  for s in [&flat, &miter, &blend] {
+    assert!(s.is_valid() && s.solid_count() == 1);
+  }
+  let faces = |s: &Shape| s.faces().unwrap().len();
+  assert_eq!((faces(&a), faces(&flat), faces(&miter)), (6, 10, 9));
+  assert!(faces(&blend) > faces(&miter), "{}", faces(&blend));
+  // the triangle's tetrahedron: d³ / 12
+  let (vf, vm, vb) = (volume(&flat), volume(&miter), volume(&blend));
+  assert!((vm - vf - d * d * d / 12.0).abs() < 1e-6, "{vf} {vm}");
+  assert!(vb > vf + 1e-3 && vb < vm - 1e-3, "{vf} {vb} {vm}");
+  // the mitered faces meet at the point where the three chamfer planes cross
+  let apex = DVec3::new(40.0 - d / 2.0, 20.0 - d / 2.0, 10.0 - d / 2.0);
+  let ends = |s: &Shape| {
+    s.edges().unwrap().iter().filter(|e| (e.start - apex).length() < 1e-6 || (e.end - apex).length() < 1e-6).count()
+  };
+  assert_eq!((ends(&flat), ends(&miter), ends(&blend)), (0, 3, 0));
+  assert!(miter.faces().unwrap().iter().all(|f| f.kind == SurfaceKind::Plane));
+  assert!(blend.faces().unwrap().iter().any(|f| f.kind != SurfaceKind::Plane));
+  // with two chamfered edges at each corner (the top loop) there is no patch: all three agree
+  let top: Vec<u32> = a.edges().unwrap().iter().filter(|e| (e.mid.z - 10.0).abs() < 1e-6).map(|e| e.id).collect();
+  let v = volume(&a.chamfer(&top, d).unwrap());
+  for c in [ChamferCorner::Miter, ChamferCorner::Blend] {
+    assert!((volume(&a.chamfer_cornered(&top, d, c).unwrap()) - v).abs() < 1e-9, "{c:?}");
+  }
+  // two-distance chamfers miter too
+  let two = a.chamfer_two_cornered(&corner, (d, 1.0), (false, false, false), ChamferCorner::Miter).unwrap();
+  assert!(two.is_valid() && faces(&two) == 9, "{}", faces(&two));
+}
+
 #[test]
 fn revolve_profile() {
   // a 10x5 rectangle offset 5 from the Z axis on the XZ plane → a tube
@@ -448,4 +489,28 @@ fn merge_flags_after_a_quintic_spline_name_segments() {
   let open = &segs[..3];
   assert_eq!(Shape::path(&Plane::XY, open).unwrap().edges().unwrap().len(), 3);
   assert_eq!(Shape::path_with(&Plane::XY, open, &merge[..3]).unwrap().edges().unwrap().len(), 2);
+}
+
+/// Line pieces flagged to merge become one straight edge (a flat side), not a B-spline.
+#[test]
+fn merged_line_pieces_are_one_straight_edge() {
+  use fox_sketch::{CurveId, SegSrc};
+  let segs = vec![
+    Seg::Line { a: [0.0, 0.0], b: [8.0, 0.0] },
+    Seg::Line { a: [8.0, 0.0], b: [20.0, 0.0] },
+    Seg::Line { a: [20.0, 0.0], b: [20.0, 10.0] },
+    Seg::Line { a: [20.0, 10.0], b: [0.0, 10.0] },
+    Seg::Line { a: [0.0, 10.0], b: [0.0, 0.0] },
+  ];
+  let src = [(0, true), (0, false), (1, false), (2, false), (3, false)]
+    .map(|(c, m)| SegSrc { curve: CurveId(c), merge_next: m })
+    .to_vec();
+  let face = Shape::face(&Plane::XY, &Profile { outer: fox_sketch::Loop { segs, src }, holes: Vec::new() }).unwrap();
+  let edges = face.edges().unwrap();
+  assert_eq!(edges.len(), 4);
+  assert!(edges.iter().all(|e| e.kind == CurveKind::Line), "{edges:?}");
+  assert!(edges.iter().any(|e| (e.length - 20.0).abs() < 1e-9));
+  let solid = face.extrude(DVec3::Z).unwrap();
+  assert!(solid.faces().unwrap().iter().all(|f| f.kind == SurfaceKind::Plane));
+  assert_eq!(solid.faces().unwrap().len(), 6);
 }

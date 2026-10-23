@@ -1,11 +1,11 @@
 # 470-on-box-top-face-cut: added by the parity loop from a Fusion probe
 # on-box-top-face-cut: 50x40x20 box centred on the origin in XY; mm DXF r6 circle at the origin inserted on the box's top face; disc cut 5 mm deep.
-# hand-written; reads part.dxf from the case folder (absolute path)
+# hand-written; reads part.dxf from the case folder
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.rect", "corner1": [-25, -20], "corner2": [25, 20]}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
 {"cmd": "sketch.create", "plane": {"point": [10.0, 10.0, 20.0]}}
-{"cmd": "sketch.insert", "from": {"path": "C:/Users/colli/OneDrive/Documents/GitHub/FissionOxide/.claude/worktrees/parity-loop-driver/parity/probes/importdxffilecommand/on-box-top-face-cut/part.dxf"}}
+{"cmd": "sketch.insert", "from": {"path": "part.dxf"}}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 3, "profiles": [[0, 0]], "distance": 5, "operation": "cut", "flip": true}

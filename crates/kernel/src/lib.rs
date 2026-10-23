@@ -97,6 +97,28 @@ impl Plane {
   }
 }
 
+/// Fusion's Corner Type for a chamfer: how a corner where chamfers meet at a vertex is closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChamferCorner {
+  /// A flat patch across the corner.
+  #[default]
+  Chamfer,
+  /// The chamfer faces run on until they meet in a point.
+  Miter,
+  /// The mitered corner rounded smooth.
+  Blend,
+}
+
+impl ChamferCorner {
+  fn code(self) -> i32 {
+    match self {
+      ChamferCorner::Chamfer => 0,
+      ChamferCorner::Miter => 1,
+      ChamferCorner::Blend => 2,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoolOp {
   Union,
@@ -441,10 +463,15 @@ impl Shape {
   }
 
   pub fn chamfer(&self, edges: &[u32], distance: f64) -> Result<Shape> {
+    self.chamfer_cornered(edges, distance, ChamferCorner::Chamfer)
+  }
+
+  /// [`Shape::chamfer`] with the corners where chamfers meet closed as `corner` says.
+  pub fn chamfer_cornered(&self, edges: &[u32], distance: f64, corner: ChamferCorner) -> Result<Shape> {
     if !(distance > 1e-9 && distance.is_finite()) {
       return Err(KernelError::Input("chamfer distance must be positive".into()));
     }
-    Shape::wrap(sys::chamfer(self.get()?, edges, distance)?)?.outward()
+    Shape::wrap(sys::chamfer(self.get()?, edges, distance, corner.code())?)?.outward()
   }
 
   /// Hollows the solid to `thickness`, opening the given faces (1-based face-map indices).
@@ -664,20 +691,42 @@ impl Shape {
   /// Chamfers with two distances (`angle` = false) or a distance and an angle in radians. `d1`
   /// and the angle are on the face each edge runs forward in (Fusion's choice); `flip` swaps.
   pub fn chamfer_two(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool) -> Result<Shape> {
-    self.chamfer_two_on(edges, d1, d2, angle, flip, true)
+    self.chamfer_two_on(edges, d1, d2, angle, flip, true, ChamferCorner::Chamfer)
+  }
+
+  /// [`Shape::chamfer_two`] (or with `legacy`, [`Shape::chamfer_two_legacy`]) with the corners
+  /// closed as `corner` says.
+  pub fn chamfer_two_cornered(
+    &self,
+    edges: &[u32],
+    (d1, d2): (f64, f64),
+    (angle, flip, legacy): (bool, bool, bool),
+    corner: ChamferCorner,
+  ) -> Result<Shape> {
+    self.chamfer_two_on(edges, d1, d2, angle, flip, !legacy, corner)
   }
 
   /// [`Shape::chamfer_two`] as designs from before the `chamfer_forward_face` behaviour build it:
   /// `d1` and the angle on each edge's first adjacent face (`flip`: the other one).
   pub fn chamfer_two_legacy(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool) -> Result<Shape> {
-    self.chamfer_two_on(edges, d1, d2, angle, flip, false)
+    self.chamfer_two_on(edges, d1, d2, angle, flip, false, ChamferCorner::Chamfer)
   }
 
-  fn chamfer_two_on(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool, forward: bool) -> Result<Shape> {
+  #[allow(clippy::too_many_arguments)]
+  fn chamfer_two_on(
+    &self,
+    edges: &[u32],
+    d1: f64,
+    d2: f64,
+    angle: bool,
+    flip: bool,
+    forward: bool,
+    corner: ChamferCorner,
+  ) -> Result<Shape> {
     if !(d1 > 1e-9 && d2 > 1e-9 && d1.is_finite() && d2.is_finite()) {
       return Err(KernelError::Input("chamfer sizes must be positive".into()));
     }
-    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle, flip, forward)?)?.outward()
+    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle, flip, forward, corner.code())?)?.outward()
   }
 
   /// Fillets edges with the radius running from `r1` to `r2` along each edge.

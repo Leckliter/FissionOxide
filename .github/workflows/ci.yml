@@ -51,7 +51,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake g++ pkg-config \
             libxkbcommon-x11-dev libxkbcommon-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
-            libwayland-dev libgl1-mesa-dev libegl1-mesa-dev
+            libwayland-dev libgl1-mesa-dev libegl1-mesa-dev cabextract
+      # the text reference parts were measured in Arial
+      - name: Install Arial
+        run: tools/fetch-arial.sh
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}

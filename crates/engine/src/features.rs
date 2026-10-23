@@ -441,7 +441,8 @@ fn plane_of(s: &Session, p: &Value, k: &str) -> Result<PlaneRef, CmdError> {
   plane_ref(s, p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (a plane)")))?)
 }
 
-/// {"at": [x,y,z]} | {"vertex": edge, "end"?: bool} | {"center": edge} | {"point": feature}.
+/// {"at": [x,y,z]} | {"vertex": edge, "end"?: bool} | {"center": edge} | {"center": {sketch, curve}}
+/// (a sketch circle's, arc's or ellipse's centre) | {"point": feature}.
 pub(crate) fn point_ref(s: &Session, v: &Value) -> Result<PointRef, CmdError> {
   if v.get("at").is_some() {
     return Ok(PointRef::At { at: req_vec3(v, "at")? });
@@ -453,6 +454,14 @@ pub(crate) fn point_ref(s: &Session, v: &Value) -> Result<PointRef, CmdError> {
     });
   }
   if let Some(e) = v.get("center") {
+    if e.get("sketch").is_some() {
+      let sketch = FeatureId(req_u32(e, "sketch")?);
+      let curve = CurveId(req_u32(e, "curve")?);
+      if s.design.sketch(sketch)?.curve(curve).is_none() {
+        return Err(CmdError::new("no such sketch curve"));
+      }
+      return Ok(PointRef::SketchCenter { sketch, curve });
+    }
     return Ok(PointRef::Center { edge: edge_ref_of(s, e)? });
   }
   if v.get("point").is_some() {
@@ -465,7 +474,7 @@ pub(crate) fn point_ref(s: &Session, v: &Value) -> Result<PointRef, CmdError> {
   if v.as_array().is_some() {
     return Ok(PointRef::At { at: req_vec3(&json!({"at": v}), "at")? });
   }
-  Err(CmdError::new("a point is {at: [x,y,z]}, {vertex: edge, end?}, {center: edge} or {point: id}"))
+  Err(CmdError::new("a point is {at: [x,y,z]}, {vertex: edge, end?}, {center: edge or {sketch, curve}} or {point: id}"))
 }
 
 fn pref(s: &Session, p: &Value, k: &str) -> Result<PointRef, CmdError> {

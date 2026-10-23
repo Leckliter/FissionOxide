@@ -200,3 +200,19 @@ fn sheet_metal_reference_flat_patterns_pass_the_checks() {
   let kinds: Vec<&str> = r["issues"].as_array().unwrap().iter().filter_map(|i| i["kind"].as_str()).collect();
   assert!(!kinds.is_empty() && kinds.iter().all(|k| *k == "hole_near_bend"), "{r}");
 }
+
+/// A tray of four edge flanges with butt corners under a rule with a Round corner relief (Fusion's
+/// default): the flat pattern is one closed outline with the relief cut at each corner.
+#[test]
+fn butt_corners_with_a_round_corner_relief_flatten_closed() {
+  let mut s = reference_part("69-sm-tray");
+  let flat0 = run(&mut s, "sheet.flat_pattern", json!({}))["volume_mm3"].as_f64().unwrap();
+  run(&mut s, "sheet.rule", json!({"name": "Steel (mm)", "corner_relief": "round"}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  let r = run(&mut s, "sheet.check_dxf", json!({}));
+  assert_eq!(r["ok"], true, "{r}");
+  assert_eq!((r["contours"].as_u64(), r["holes"].as_u64()), (Some(1), Some(0)), "{r}");
+  // the reliefs take material from the flat
+  let flat = run(&mut s, "sheet.flat_pattern", json!({}))["volume_mm3"].as_f64().unwrap();
+  assert!(flat < flat0 - 1.0, "{flat0} {flat}");
+}

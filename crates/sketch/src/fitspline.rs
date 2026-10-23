@@ -124,11 +124,12 @@ impl Sketch {
     self.put_curve(id, kind, construction)
   }
 
-  /// Extends an open fit-point spline to `hit` on curve `other` by adding a fit point there (the
-  /// old end stays as a fit point). For a Catmull-Rom spline (a sketch without
-  /// [`QUINTIC_FIT_SPLINE`]), when the hit is far enough out, a fit point placed so the old end
-  /// keeps its tangent goes in first, so the old part keeps its shape exactly. False when `kind`
-  /// is not an open fit-point spline.
+  /// Extends an open Catmull-Rom fit-point spline (a sketch without [`QUINTIC_FIT_SPLINE`]) to
+  /// `hit` on curve `other` by adding a fit point there (the old end stays as a fit point); when
+  /// the hit is far enough out, a fit point placed so the old end keeps its tangent goes in first,
+  /// so the old part keeps its shape exactly. False for any other curve, a quintic fit spline
+  /// among them: refitting it through a new point would reshape all of it, and Fusion's keeps its
+  /// shape, so the caller carries its end piece on.
   pub(crate) fn extend_fit(
     &mut self,
     curve: CurveId,
@@ -140,36 +141,33 @@ impl Sketch {
       return Ok(false);
     };
     let (Some(first), Some(last)) = (points.first(), points.last()) else { return Ok(false) };
-    let quintic = self.behaviours.has(QUINTIC_FIT_SPLINE);
-    if points.len() >= 1000 || (quintic && crate::spline_closed(points)) {
+    if points.len() >= 1000 || self.behaviours.has(QUINTIC_FIT_SPLINE) {
       return Ok(false);
     }
     let old = if from_end { *last } else { *first };
     let old_pos = self.pos(old).ok_or(SketchError::NoPoint(old))?;
     let mut added = Vec::new();
-    if !quintic {
-      // the neighbour q that gives the old end, now inside, the tangent T it had: the inner
-      // tangent rule makes it (q - F[n-2]) / 2 at the end, (F[1] - q) / 2 at the start
-      let bz = self.beziers(curve);
-      let keep = match (from_end, bz.first(), bz.last(), points.get(1), points.get(points.len().wrapping_sub(2))) {
-        (true, _, Some(b), _, Some(prev)) => {
-          let (t, f) = (bz_d1(b, 1.0), self.pos(*prev).unwrap_or(old_pos));
-          Some([f[0] + 2.0 * t[0], f[1] + 2.0 * t[1]])
-        }
-        (false, Some(b), _, Some(next), _) => {
-          let (t, f) = (bz_d1(b, 0.0), self.pos(*next).unwrap_or(old_pos));
-          Some([f[0] - 2.0 * t[0], f[1] - 2.0 * t[1]])
-        }
-        _ => None,
-      };
-      let far = |q: P| {
-        let (d, h) = ([q[0] - old_pos[0], q[1] - old_pos[1]], [hit.0[0] - old_pos[0], hit.0[1] - old_pos[1]]);
-        let dd = d[0] * d[0] + d[1] * d[1];
-        dd > 1e-18 && (h[0] * d[0] + h[1] * d[1]) / dd > 1.5
-      };
-      if let Some(q) = keep.filter(|q| far(*q)) {
-        added.push(self.add_point(q[0], q[1]));
+    // the neighbour q that gives the old end, now inside, the tangent T it had: the inner
+    // tangent rule makes it (q - F[n-2]) / 2 at the end, (F[1] - q) / 2 at the start
+    let bz = self.beziers(curve);
+    let keep = match (from_end, bz.first(), bz.last(), points.get(1), points.get(points.len().wrapping_sub(2))) {
+      (true, _, Some(b), _, Some(prev)) => {
+        let (t, f) = (bz_d1(b, 1.0), self.pos(*prev).unwrap_or(old_pos));
+        Some([f[0] + 2.0 * t[0], f[1] + 2.0 * t[1]])
       }
+      (false, Some(b), _, Some(next), _) => {
+        let (t, f) = (bz_d1(b, 0.0), self.pos(*next).unwrap_or(old_pos));
+        Some([f[0] - 2.0 * t[0], f[1] - 2.0 * t[1]])
+      }
+      _ => None,
+    };
+    let far = |q: P| {
+      let (d, h) = ([q[0] - old_pos[0], q[1] - old_pos[1]], [hit.0[0] - old_pos[0], hit.0[1] - old_pos[1]]);
+      let dd = d[0] * d[0] + d[1] * d[1];
+      dd > 1e-18 && (h[0] * d[0] + h[1] * d[1]) / dd > 1.5
+    };
+    if let Some(q) = keep.filter(|q| far(*q)) {
+      added.push(self.add_point(q[0], q[1]));
     }
     let np = self.add_point(hit.0[0], hit.0[1]);
     added.push(np);
@@ -303,30 +301,26 @@ mod tests {
   }
 
   #[test]
-  fn extended_quintic_splines_gain_one_fit_point() {
-    // a quintic spline gains only the fit point at the hit; refitting through it moves the old
-    // part a little, since no fit point can pin a minimum-energy curve's tangent at the old end
+  fn extended_quintic_splines_keep_their_shape() {
+    // as Fusion's: the old part stays exactly where it was and the end piece runs on to the line
+    // (refitting through a fit point at the hit would move all of it)
     let mut s = Sketch::new();
     let sp = spline(&mut s, &[[0.0, 0.0], [10.0, 2.0], [20.0, 0.0]]);
     s.add_line(PtSpec::At(40.0, -50.0), PtSpec::At(40.0, 50.0)).unwrap();
     let before = s.beziers(sp);
     s.extend(sp, [20.0, 0.0]).unwrap();
-    let f = fit_points(&s, sp);
-    assert_eq!(f.len(), 4, "{f:?}");
-    assert_eq!(f[2], [20.0, 0.0], "the old end stays a fit point");
-    assert!((f[3][0] - 40.0).abs() < 1e-6);
-    let dev = deviation(&s.beziers(sp), &before);
-    assert!(dev < 0.1, "the old part keeps close to its shape: {dev}");
+    let after = s.beziers(sp);
+    assert!(deviation(&after, &before) < 1e-9, "the old part keeps its shape");
+    let end = after.last().unwrap()[3];
+    assert!((end[0] - 40.0).abs() < 1e-6, "{end:?}");
     assert!(s.solve().ok());
     // from the start, to a line close by
     let before = s.beziers(sp);
     s.add_line(PtSpec::At(-3.0, -50.0), PtSpec::At(-3.0, 50.0)).unwrap();
     s.extend(sp, [0.0, 0.0]).unwrap();
-    let f = fit_points(&s, sp);
-    assert_eq!(f.len(), 5);
-    assert!((f[0][0] + 3.0).abs() < 1e-6);
-    let dev = deviation(&s.beziers(sp), &before);
-    assert!(dev < 0.5, "{dev}");
+    let after = s.beziers(sp);
+    assert!(deviation(&after, &before) < 1e-9);
+    assert!((after[0][0][0] + 3.0).abs() < 1e-6, "{:?}", after[0][0]);
     assert!(s.solve().ok());
   }
 }

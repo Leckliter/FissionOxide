@@ -123,6 +123,7 @@
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
+#include <TopTools_MapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shell.hxx>
@@ -386,8 +387,9 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t &rec) {
 // ---- one edge per sketch curve ----
 //
 // A segment list may carry merge flags, one per segment: nonzero lets the segment become one edge
-// with the next in its chain. The sketch sets them only between pieces of one curve (see
-// fox_sketch::behaviour), so a run of flagged segments is one curve cut into pieces.
+// with the next in its chain. The sketch sets them only between pieces of one curve (or a line
+// and its mirror copy, see fox_sketch::behaviour), so a run of flagged segments is one curve cut
+// into pieces.
 
 // Points closer than this join (as the sketch's profile graph).
 const double JOIN_TOL = 1e-6;
@@ -517,6 +519,20 @@ bool merged_arc(rust::Slice<const double> segs, const std::vector<size_t> &idx, 
   return true;
 }
 
+// Collinear lines (kind 0), run end to start, as one line.
+bool merged_line(rust::Slice<const double> segs, const std::vector<size_t> &idx, TopoDS_Edge &out) {
+  gp_Pnt a = pnt(segs, idx[0] * 13 + 1), b = pnt(segs, idx.back() * 13 + 4);
+  if (a.Distance(b) < JOIN_TOL) return false;
+  gp_Lin line(a, gp_Dir(gp_Vec(a, b)));
+  for (size_t i : idx) {
+    if (line.Distance(pnt(segs, i * 13 + 1)) > JOIN_TOL || line.Distance(pnt(segs, i * 13 + 4)) > JOIN_TOL) return false;
+  }
+  BRepBuilderAPI_MakeEdge me(a, b);
+  if (!me.IsDone()) return false;
+  out = me.Edge();
+  return true;
+}
+
 // Edges run end to start as one B-spline edge (C0 joins smoothed where the shape allows).
 bool merged_bspline(const std::vector<TopoDS_Edge> &edges, TopoDS_Edge &out) {
   GeomConvert_CompCurveToBSplineCurve cc;
@@ -541,8 +557,8 @@ bool merged_bspline(const std::vector<TopoDS_Edge> &edges, TopoDS_Edge &out) {
 }
 
 // One edge for the segments starting at records `idx` (one curve's pieces, run end to start; `closed`: they are the
-// whole closed chain): exact for an ellipse's or a circle's arcs, else a B-spline. False to keep
-// them separate edges.
+// whole closed chain): exact for an ellipse's or a circle's arcs and for lines, else a B-spline.
+// False to keep them separate edges.
 bool merged_edge(rust::Slice<const double> segs, const std::vector<size_t> &idx, bool closed, TopoDS_Edge &out) {
   try {
     int kind = seg_kind(segs, idx[0]);
@@ -550,6 +566,7 @@ bool merged_edge(rust::Slice<const double> segs, const std::vector<size_t> &idx,
     for (size_t i : idx) same = same && seg_kind(segs, i) == kind;
     if (same && kind == 4 && merged_ellipse(segs, idx, closed, out)) return true;
     if (same && kind == 1 && merged_arc(segs, idx, closed, out)) return true;
+    if (same && kind == 0) return !closed && merged_line(segs, idx, out);
     if (same && kind == 2) return false;
     std::vector<TopoDS_Edge> edges;
     for (size_t i : idx) edges.push_back(rec_edge(segs, i));
@@ -765,24 +782,108 @@ std::unique_ptr<Shape> fillet(const Shape &s, rust::Slice<const uint32_t> edges,
   FOX_CATCH("fillet")
 }
 
-std::unique_ptr<Shape> chamfer(const Shape &s, rust::Slice<const uint32_t> edges, double dist) {
+// Fusion's Corner Type where chamfers meet at a vertex. OCCT closes such a corner with a patch
+// face of its own (Chamfer, `corner` 0). Miter (1) removes the patches so the chamfer faces run
+// on to meet in a point; Blend (2) then rounds the edges they meet along to half the chamfer
+// `size`, a smooth patch. A corner that can't be mitered or blended keeps OCCT's patch.
+static TopoDS_Shape chamfer_corners(const TopoDS_Shape &in, BRepFilletAPI_MakeChamfer &mk,
+                                    const std::vector<TopoDS_Edge> &edges, int corner, double size, Track &t) {
+  TopoDS_Shape out = mk.Shape();
+  if (corner == 0) return out;
+  // the chamfer faces, and the faces carried over from the input
+  TopTools_MapOfShape chamfers, kept;
+  for (const TopoDS_Edge &e : edges) {
+    for (TopTools_ListIteratorOfListOfShape it(mk.Generated(e)); it.More(); it.Next()) chamfers.Add(it.Value());
+  }
+  for (TopExp_Explorer x(in, TopAbs_FACE); x.More(); x.Next()) {
+    kept.Add(x.Current());
+    for (TopTools_ListIteratorOfListOfShape it(mk.Modified(x.Current())); it.More(); it.Next()) kept.Add(it.Value());
+  }
+  // corner patches: faces from neither
+  TopTools_ListOfShape patches;
+  TopTools_MapOfShape seen;
+  for (TopExp_Explorer x(out, TopAbs_FACE); x.More(); x.Next()) {
+    if (!chamfers.Contains(x.Current()) && !kept.Contains(x.Current()) && seen.Add(x.Current())) {
+      patches.Append(x.Current());
+    }
+  }
+  if (patches.IsEmpty()) return out;
+  BRepAlgoAPI_Defeaturing df;
+  df.SetShape(out);
+  df.AddFacesToRemove(patches);
+  df.SetRunParallel(Standard_False);
+  df.Build();
+  if (!df.IsDone() || df.HasErrors() || !BRepCheck_Analyzer(df.Shape()).IsValid()) return out;
+  TopoDS_Shape mitered = df.Shape();
+  if (corner == 1) {
+    t.step(df.History());
+    return mitered;
+  }
+  // Blend: the edges at each point where only chamfer faces meet
+  TopTools_MapOfShape faces;
+  for (TopTools_MapIteratorOfMapOfShape it(chamfers); it.More(); it.Next()) {
+    const TopTools_ListOfShape &m = df.Modified(it.Key());
+    if (m.IsEmpty() && !df.IsDeleted(it.Key())) faces.Add(it.Key());
+    for (TopTools_ListIteratorOfListOfShape i(m); i.More(); i.Next()) faces.Add(i.Value());
+  }
+  TopTools_IndexedDataMapOfShapeListOfShape ef, ve;
+  TopExp::MapShapesAndAncestors(mitered, TopAbs_EDGE, TopAbs_FACE, ef);
+  TopExp::MapShapesAndAncestors(mitered, TopAbs_VERTEX, TopAbs_EDGE, ve);
+  auto between_chamfers = [&](const TopoDS_Shape &e) {
+    if (!ef.Contains(e)) return false;
+    const TopTools_ListOfShape &fs = ef.FindFromKey(e);
+    if (fs.Extent() != 2) return false;
+    for (TopTools_ListIteratorOfListOfShape it(fs); it.More(); it.Next()) {
+      if (!faces.Contains(it.Value())) return false;
+    }
+    return true;
+  };
+  BRepFilletAPI_MakeFillet mf(mitered);
+  TopTools_MapOfShape added;
+  for (int i = 1; i <= ve.Extent(); ++i) {
+    TopTools_MapOfShape at;
+    bool all = true;
+    for (TopTools_ListIteratorOfListOfShape it(ve(i)); it.More(); it.Next()) {
+      at.Add(it.Value());
+      all = all && between_chamfers(it.Value());
+    }
+    if (!all || at.Extent() < 3) continue;
+    for (TopTools_MapIteratorOfMapOfShape it(at); it.More(); it.Next()) {
+      if (added.Add(it.Key())) mf.Add(size / 2.0, TopoDS::Edge(it.Key()));
+    }
+  }
+  if (added.IsEmpty()) return out;
+  try {
+    mf.Build();
+  } catch (const Standard_Failure &) {
+    return out;
+  }
+  if (!mf.IsDone() || !BRepCheck_Analyzer(mf.Shape()).IsValid()) return out;
+  t.step(df.History());
+  t.step(mitered, mf);
+  return mf.Shape();
+}
+
+// Chamfers edges (1-based) by `dist`, corners as `corner` says (see chamfer_corners).
+std::unique_ptr<Shape> chamfer(const Shape &s, rust::Slice<const uint32_t> edges, double dist, int32_t corner) {
   FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
   BRepFilletAPI_MakeChamfer mk(s.s);
-  int added = 0;
+  std::vector<TopoDS_Edge> added;
   for (uint32_t i : edges) {
     if (i >= 1 && static_cast<int>(i) <= map.Extent()) {
-      mk.Add(dist, TopoDS::Edge(map(static_cast<int>(i))));
-      ++added;
+      added.push_back(TopoDS::Edge(map(static_cast<int>(i))));
+      mk.Add(dist, added.back());
     }
   }
-  if (added == 0) throw std::runtime_error("no edges to chamfer");
+  if (added.empty()) throw std::runtime_error("no edges to chamfer");
   mk.Build();
   if (!mk.IsDone()) throw UserError(FILLET_SIZE_ERROR);
   Track t({&s});
   t.step(s.s, mk);
-  return wrap(checked(mk.Shape(), "chamfer", &t), t);
+  TopoDS_Shape out = chamfer_corners(s.s, mk, added, corner, dist, t);
+  return wrap(checked(out, "chamfer", &t), t);
   FOX_CATCH("chamfer")
 }
 
@@ -2236,9 +2337,9 @@ std::unique_ptr<Shape> offset_face(const Shape &face, double d) {
 // `forward_face`, d1 and the angle are measured on the face the edge runs forward in, as Fusion
 // does (on an extrusion's cap edges, the cap); without it (designs from before the
 // chamfer_forward_face behaviour), on the edge's first adjacent face. `flip` measures them on the
-// other face.
+// other face. Corners as `corner` says (see chamfer_corners).
 std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle,
-                                bool flip, bool forward_face) {
+                                bool flip, bool forward_face, int32_t corner) {
   FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
@@ -2246,7 +2347,7 @@ std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edge
   TopExp::MapShapesAndAncestors(s.s, TopAbs_EDGE, TopAbs_FACE, ef);
   BRepFilletAPI_MakeChamfer mk(s.s);
   const TopAbs_Orientation want = flip ? TopAbs_REVERSED : TopAbs_FORWARD;
-  int added = 0;
+  std::vector<TopoDS_Edge> added;
   for (uint32_t i : edges) {
     if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
     const TopoDS_Edge &e = TopoDS::Edge(map(static_cast<int>(i)));
@@ -2274,14 +2375,15 @@ std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edge
     }
     if (angle) mk.AddDA(d1, d2, e, f);
     else mk.Add(d1, d2, e, f);
-    ++added;
+    added.push_back(e);
   }
-  if (added == 0) throw std::runtime_error("no edges to chamfer");
+  if (added.empty()) throw std::runtime_error("no edges to chamfer");
   mk.Build();
   if (!mk.IsDone()) throw UserError(FILLET_SIZE_ERROR);
   Track t({&s});
   t.step(s.s, mk);
-  return wrap(checked(mk.Shape(), "chamfer", &t), t);
+  TopoDS_Shape out = chamfer_corners(s.s, mk, added, corner, angle ? d1 : std::min(d1, d2), t);
+  return wrap(checked(out, "chamfer", &t), t);
   FOX_CATCH("chamfer")
 }
 

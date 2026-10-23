@@ -170,25 +170,29 @@ fn fit_point_splines_stay_fit_point_through_trim_and_extend() {
   assert!((last[0] - 25.0).abs() < 1e-6, "{last:?}");
 }
 
+/// A quintic fit-point spline stays one through Trim; Extend then keeps its shape and runs its end
+/// on, as Fusion's does (tests/reference/280-extend-spline-to-line).
 #[test]
-fn quintic_fit_point_splines_stay_fit_point_through_trim_and_extend() {
+fn quintic_fit_point_splines_trim_and_extend() {
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   let sp =
     run(&mut s, "sketch.spline", json!({"points": [[0, 0], [10, 8], [20, 0], [30, 5]]}))["curves"][0].as_u64().unwrap();
   run(&mut s, "sketch.line", json!({"points": [[25, -10], [25, 20]]}));
   run(&mut s, "sketch.trim", json!({"curve": sp, "at": [29, 4]}));
+  let id = fox_sketch::CurveId(sp as u32);
+  assert!(matches!(sketch(&s).curve(id).map(|c| &c.kind), Some(CurveKind::Spline { .. })), "a fit-point spline");
+  let before = sketch(&s).beziers(id);
   // the quintic leaves (0, 0) more steeply than the Catmull-Rom curve (about 2.2 up for 1
   // across), so it reaches x = -10 near y = -22, below the legacy test's line
   run(&mut s, "sketch.line", json!({"points": [[-10, -40], [-10, 20]]}));
   run(&mut s, "sketch.extend", json!({"curve": sp, "at": [0, 0]}));
-  let sk = sketch(&s);
-  let c = sk.curves.iter().find(|c| c.id.0 as u64 == sp).unwrap();
-  let CurveKind::Spline { points, .. } = &c.kind else { panic!("still a fit-point spline: {:?}", c.kind) };
-  let first = sk.pos(points[0]).unwrap();
-  let last = sk.pos(*points.last().unwrap()).unwrap();
+  let after = sketch(&s).beziers(id);
+  let (first, last) = (after[0][0], after.last().unwrap()[3]);
   assert!((first[0] + 10.0).abs() < 1e-6, "{first:?}");
   assert!((last[0] - 25.0).abs() < 1e-6, "{last:?}");
+  // the old part is where it was
+  assert!(before.iter().all(|b| after.contains(b)), "{before:?} {after:?}");
 }
 
 #[test]

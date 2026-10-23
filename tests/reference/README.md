@@ -25,7 +25,11 @@ survive; one that stops surviving fails the test.
 Parts can also carry hand-written edits with their own answers; see `variants.json` below.
 
 `baseline.txt` lists the cases that pass. The test fails when a listed case stops passing; when a
-new case passes, add it to the list (the test prints the line to add).
+new case passes, add it to the list (the test prints the line to add). A case missing from it can
+fail without failing the test, on any machine.
+
+The text parts (253-256) need Arial, the font Fusion measured them in; on Linux run
+`tools/fetch-arial.sh` (see CONTRIBUTING.md).
 
 ## expected.json
 

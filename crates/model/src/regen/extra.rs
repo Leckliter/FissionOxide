@@ -853,6 +853,21 @@ impl Ctx<'_> {
       PointRef::Construction { feature } => {
         self.state.points.get(feature).copied().ok_or_else(|| "its construction point failed".to_string())
       }
+      PointRef::SketchCenter { sketch, curve } => {
+        let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?;
+        let center = match sk.sketch.curve(*curve).map(|c| &c.kind) {
+          Some(
+            fox_sketch::CurveKind::Circle { center, .. }
+            | fox_sketch::CurveKind::Arc { center, .. }
+            | fox_sketch::CurveKind::Ellipse { center, .. }
+            | fox_sketch::CurveKind::EllipticalArc { center, .. },
+          ) => *center,
+          Some(_) => return Err("the sketch curve has no centre".into()),
+          None => return Err("the sketch curve no longer exists".into()),
+        };
+        let c = sk.sketch.pos(center).ok_or("the sketch curve no longer exists")?;
+        Ok(sk.plane.to_world(c))
+      }
     }
   }
 

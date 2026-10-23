@@ -33,7 +33,8 @@
 //! loop segment records the curve it was cut from and whether it may merge with the next segment
 //! ([`Loop::src`](crate::Loop::src)). `find_profiles` sets that flag only for consecutive pieces of
 //! the same curve whose kind's [`one_edge_behaviour`] is on ([`Sketch::merge_flags`]), so pieces
-//! of different curves never merge, however smoothly they join. The kernel's `make_face` (and
+//! of different curves never merge, however smoothly they join (but for a line and its mirror
+//! copy, which Fusion's Mirror makes one line: [`ONE_EDGE_SPLIT_LINES`]). The kernel's `make_face` (and
 //! `Shape::path_with` for sweep paths) turns each run of mergeable segments into one edge, and
 //! builds everything else as before. To ship one of these, move its name from [`PENDING`] to
 //! [`CURRENT`].
@@ -154,6 +155,18 @@ pub const COMBINE_JOIN_ONE_BODY: &str = "combine_join_one_body";
 /// a rounded slab's top, rounds and sides become one flat top. Without it a curved face moves
 /// along its mean normal, which spreads a round sideways.
 pub const REPLACE_FACE_ALONG_PLANE: &str = "replace_face_along_plane";
+/// One edge per line: pieces of a line split where other curves' ends touch it become one edge
+/// where they run on into each other in a loop, and so do a line and its mirror copy that meet
+/// square-on at the mirror line (Fusion's Mirror makes one line of the two), so each extrudes to
+/// one side face, as in Fusion.
+pub const ONE_EDGE_SPLIT_LINES: &str = "one_edge_split_lines";
+/// The end of a spline or conic lying on a line, arc or circle splits it there for profiles (as
+/// a line's end does), so a spline extended or drawn onto a line closes a region with it.
+/// Without it only crossings among lines, arcs and circles and their ends split them.
+pub const CURVE_ENDS_SPLIT: &str = "curve_ends_split";
+/// One edge per Bézier chain (what a trimmed, extended or offset spline and a DXF spline become):
+/// its cubic pieces become one B-spline edge, as a spline's do.
+pub const ONE_EDGE_BEZIER: &str = "one_edge_bezier";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -183,6 +196,9 @@ pub const CURRENT: &[&str] = &[
   COMBINE_KEEPS_TARGET,
   COMBINE_JOIN_ONE_BODY,
   REPLACE_FACE_ALONG_PLANE,
+  ONE_EDGE_SPLIT_LINES,
+  CURVE_ENDS_SPLIT,
+  ONE_EDGE_BEZIER,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
@@ -211,19 +227,55 @@ pub fn one_edge_behaviour(kind: &CurveKind) -> Option<&'static str> {
     CurveKind::ControlSpline { .. } => Some(ONE_EDGE_CONTROL_SPLINE),
     CurveKind::Spline { .. } => Some(ONE_EDGE_FIT_SPLINE),
     CurveKind::Arc { .. } | CurveKind::Circle { .. } => Some(ONE_EDGE_SPLIT_ARCS),
+    CurveKind::Line { .. } => Some(ONE_EDGE_SPLIT_LINES),
+    CurveKind::Bezier { .. } => Some(ONE_EDGE_BEZIER),
     // a quintic spline (blend curve) reaches a profile as one segment, never split: already one edge
-    CurveKind::Line { .. } | CurveKind::Bezier { .. } | CurveKind::Conic { .. } | CurveKind::QuinticSpline { .. } => {
-      None
-    }
+    CurveKind::Conic { .. } | CurveKind::QuinticSpline { .. } => None,
   }
 }
 
 impl Sketch {
   /// Whether a segment cut from curve `a`, followed in a chain by one cut from curve `b`, may
   /// become one edge with it: both come from the same curve and that curve kind's
-  /// [`one_edge_behaviour`] is on for this sketch.
+  /// [`one_edge_behaviour`] is on for this sketch, or (with [`ONE_EDGE_SPLIT_LINES`]) they are a
+  /// line and its mirror copy meeting square-on at the mirror line.
   pub fn may_merge(&self, a: CurveId, b: CurveId) -> bool {
-    a == b && self.curve(a).and_then(|c| one_edge_behaviour(&c.kind)).is_some_and(|name| self.behaviours.has(name))
+    if a != b {
+      return self.behaviours.has(ONE_EDGE_SPLIT_LINES) && self.mirrored_halves(a, b);
+    }
+    self.curve(a).and_then(|c| one_edge_behaviour(&c.kind)).is_some_and(|name| self.behaviours.has(name))
+  }
+
+  /// Lines `a` and `b` are a line and its mirror copy meeting square-on at the mirror line: they
+  /// share an end on it and their far ends are held symmetric about it.
+  fn mirrored_halves(&self, a: CurveId, b: CurveId) -> bool {
+    let ends = |c: CurveId| match self.curve(c).map(|c| &c.kind) {
+      Some(CurveKind::Line { a, b }) => Some([*a, *b]),
+      _ => None,
+    };
+    let sub = |p: [f64; 2], q: [f64; 2]| [p[0] - q[0], p[1] - q[1]];
+    let len = |v: [f64; 2]| v[0].hypot(v[1]);
+    let (Some(ea), Some(eb)) = (ends(a), ends(b)) else { return false };
+    let shared = |(i, j): (usize, usize)| match (self.pos(ea[i]), self.pos(eb[j])) {
+      (Some(p), Some(q)) => len(sub(p, q)) < 1e-9,
+      _ => false,
+    };
+    let Some((i, j)) = [(0, 0), (0, 1), (1, 0), (1, 1)].into_iter().find(|&k| shared(k)) else { return false };
+    let (far_a, far_b) = (ea[1 - i], eb[1 - j]);
+    let (Some(m), Some(f)) = (self.pos(ea[i]), self.pos(far_a)) else { return false };
+    self.constraints.iter().any(|c| match c.kind {
+      crate::ConstraintKind::Symmetric { a: p, b: q, line } if (p, q) == (far_a, far_b) || (p, q) == (far_b, far_a) => {
+        let Some([Some(l0), Some(l1)]) = ends(line).map(|e| e.map(|p| self.pos(p))) else { return false };
+        let (d, v, w) = (sub(l1, l0), sub(f, m), sub(m, l0));
+        let (ld, lv) = (len(d), len(v));
+        // the shared end on the mirror line, the line square to it
+        ld > 1e-12
+          && lv > 1e-12
+          && (d[0] * w[1] - d[1] * w[0]).abs() < 1e-9 * ld
+          && (d[0] * v[0] + d[1] * v[1]).abs() < 1e-9 * ld * lv
+      }
+      _ => false,
+    })
   }
 
   /// Merge flags for a chain of segments cut from the curves `src`, in order: entry `k` says

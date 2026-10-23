@@ -77,6 +77,8 @@
 217-midpoint-line-on-origin-resize
 218-midpoint-line-slanted-triangle
 22-split-body
+222-half-profile-vertical-axis
+225-control-spline-half-profile
 229-circle-along-vector-cylinder-groove
 23-bracket-multifeature
 230-circle-closest-point-cylinder-groove
@@ -119,6 +121,7 @@
 275-l-shape-inner-fillet
 276-line-arc-fillet
 28-blind-pocket-fillets
+280-extend-spline-to-line
 284-rounded-rect-outward-ring
 285-open-l-chain-left
 286-circle-both-sides
@@ -128,6 +131,7 @@
 29-two-sided-and-partial-revolve
 290-triangle-acute-vertex
 291-apparent-intersection
+294-arc-and-spline-middle-trims
 296-flush-face-offset
 297-hinged-plate-angle
 30-fillet-after-shell
@@ -193,6 +197,7 @@
 38-coincident-cylinders
 380-body-edge-extended-past-end
 381-sketch-line-offset-plane
+385-sketch-circle-box-split
 386-edges-meeting-at-vertex
 387-edges-extended-intersection
 388-sketch-line-and-edge
@@ -259,7 +264,11 @@
 464-stl-millimeter
 465-obj-inch
 466-3mf-file
+467-mm-plate-lines-arc-circle
+468-inch-units-plate-hole
+469-xz-plane-position-offset
 47-draft-curved-pocket
+470-on-box-top-face-cut
 471-insert-tsm-box
 472-mm-viewbox-plate-hole
 473-px-path-arc-offset-scale

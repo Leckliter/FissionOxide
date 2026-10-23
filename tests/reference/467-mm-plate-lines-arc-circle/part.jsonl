@@ -1,5 +1,5 @@
 # 467-mm-plate-lines-arc-circle: added by the parity loop from a Fusion probe
 # mm-plate-lines-arc-circle: mm DXF (INSUNITS 4): 40x30 plate with R5 rounded corner and r6 hole at (12,15), inserted on XY at the origin; plate region extruded 8 mm.
-# hand-written; reads part.dxf from the case folder (absolute path)
-{"cmd": "import", "path": "C:/Users/colli/OneDrive/Documents/GitHub/FissionOxide/.claude/worktrees/parity-loop-driver/parity/probes/importdxffilecommand/mm-plate-lines-arc-circle/part.dxf", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+# hand-written; reads part.dxf from the case folder
+{"cmd": "import", "path": "part.dxf", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "extrude", "sketch": 1, "profiles": [[30, 5]], "distance": 8, "operation": "new_body"}

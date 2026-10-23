@@ -10,7 +10,6 @@
 {"cmd": "sketch.create", "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]}}
 {"cmd": "sketch.circle", "center": [25, 12], "radius": 6}
 {"cmd": "sketch.finish"}
-# Fox point refs take body edges only; a sketch circle as the centre source is the gap this case shows.
-{"cmd": "point", "method": "vertex", "point": {"center": {"sketch": 3, "curve": 1}}}
+{"cmd": "point", "method": "vertex", "point": {"center": {"sketch": 3, "curve": 2}}}
 {"cmd": "plane", "method": "three_points", "a": {"point": 4}, "b": {"at": [0, 0, 0]}, "c": {"at": [40, 0, 0]}}
 {"cmd": "split", "plane": {"feature": 5}}

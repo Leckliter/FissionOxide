@@ -104,7 +104,7 @@ pub(super) const SHELL_DIRECTIONS: [(&str, &str); 3] = [("inside", "Inside"), ("
 /// Fusion's Shell Type: how the offset faces meet at the corners (the engine's `corners`).
 const SHELL_TYPES: [Choice; 2] =
   [ic("sharp", Icon::ShellSharp, "Sharp corners"), ic("round", Icon::ShellRound, "Rounded corners")];
-/// Fusion's Chamfer Corner Type (the kernel makes every corner as Chamfer's flat patch).
+/// Fusion's Chamfer Corner Type, how a corner where chamfered edges meet is closed.
 const CORNER_TYPES: [(&str, &str); 3] = [("chamfer", "Chamfer"), ("miter", "Miter"), ("blend", "Blend")];
 
 /// The icon before a Chamfer Type or Corner Type value, as Fusion's drop-downs show them.

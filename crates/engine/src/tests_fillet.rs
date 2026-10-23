@@ -226,3 +226,27 @@ fn chamfer_keeps_its_corner_type() {
   run(&mut s, "chamfer", json!({"edges": [{"point": [0, 10, 20]}], "distance": 1, "corner": "chamfer"}));
   assert_eq!(corner(&s), None);
 }
+
+/// Corner Type shapes the corner where three chamfered edges meet: Chamfer's flat triangle, Miter's
+/// point (keeping the tetrahedron the triangle cuts off, d³ / 12) and Blend's rounded point in
+/// between; editing the corner type rebuilds it.
+#[test]
+fn chamfer_corner_type_shapes_the_corner() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
+  let edges = json!([{"point": [20, 10, 20]}, {"point": [10, 20, 20]}, {"point": [20, 20, 10]}]);
+  run(&mut s, "chamfer", json!({"edges": edges, "distance": 2}));
+  let f = s.design.features.last().unwrap().id.0;
+  let faces = |s: &Session| s.model.bodies[0].faces().len();
+  let flat = (volume(&s), faces(&s));
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"corner": "miter"}}));
+  let miter = (volume(&s), faces(&s));
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"corner": "blend"}}));
+  let blend = (volume(&s), faces(&s));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  assert_eq!((flat.1, miter.1), (10, 9));
+  assert!((miter.0 - flat.0 - 8.0 / 12.0).abs() < 1e-6, "{flat:?} {miter:?}");
+  assert!(blend.0 > flat.0 && blend.0 < miter.0 && blend.1 > miter.1, "{flat:?} {blend:?} {miter:?}");
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"corner": null}}));
+  assert!((volume(&s) - flat.0).abs() < 1e-9);
+}

@@ -45,6 +45,8 @@ pub enum PointRef {
   Center { edge: EdgeRef },
   /// A construction point feature.
   Construction { feature: FeatureId },
+  /// The centre of a sketch circle, arc or ellipse.
+  SketchCenter { sketch: FeatureId, curve: fox_sketch::CurveId },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -278,7 +280,7 @@ pub enum MeshCombineOp {
 impl PointRef {
   pub(crate) fn feature(&self) -> Option<FeatureId> {
     match self {
-      PointRef::Construction { feature } => Some(*feature),
+      PointRef::Construction { feature } | PointRef::SketchCenter { sketch: feature, .. } => Some(*feature),
       _ => None,
     }
   }

@@ -911,13 +911,18 @@ impl Ctx<'_> {
           None => self.edge_op(id, edges, |s, ids| round(s, s.fillet(ids, r)?, ids)),
         }
       }
-      FeatureKind::Chamfer { edges, distance, distance2, angle, flipped, .. } => {
+      FeatureKind::Chamfer { edges, distance, distance2, angle, flipped, corner } => {
         let flip = *flipped;
         let d = self.len(distance)?;
+        let corner = match corner.as_deref() {
+          Some("miter") => fox_kernel::ChamferCorner::Miter,
+          Some("blend") => fox_kernel::ChamferCorner::Blend,
+          _ => fox_kernel::ChamferCorner::Chamfer,
+        };
         // designs from before CHAMFER_FORWARD_FACE measure d1 on each edge's first adjacent face
-        let forward = self.behaviours.has(fox_sketch::behaviour::CHAMFER_FORWARD_FACE);
+        let legacy = !self.behaviours.has(fox_sketch::behaviour::CHAMFER_FORWARD_FACE);
         let two = move |s: &Shape, ids: &[u32], d2: f64, angle: bool| {
-          if forward { s.chamfer_two(ids, d, d2, angle, flip) } else { s.chamfer_two_legacy(ids, d, d2, angle, flip) }
+          s.chamfer_two_cornered(ids, (d, d2), (angle, flip, legacy), corner)
         };
         match (distance2, angle) {
           (_, Some(a)) => {
@@ -928,7 +933,7 @@ impl Ctx<'_> {
             let d2 = self.len(d2)?;
             self.edge_op(id, edges, |s, ids| two(s, ids, d2, false))
           }
-          (None, None) => self.edge_op(id, edges, |s, ids| s.chamfer(ids, d)),
+          (None, None) => self.edge_op(id, edges, |s, ids| s.chamfer_cornered(ids, d, corner)),
         }
       }
       FeatureKind::OffsetFaces { faces, distance } => {

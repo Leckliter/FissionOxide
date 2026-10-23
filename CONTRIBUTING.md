@@ -48,6 +48,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+The text reference parts (`tests/reference/253-256`) were measured in Fusion in Arial. Windows
+and macOS have it; on Linux, `tools/fetch-arial.sh` installs it from Microsoft's freely
+distributable core fonts (it needs `curl` and `cabextract`; cloud sessions and CI run it), or the
+parts' text draws in a stand-in with other outlines and fails.
+
 The crates that don't link OpenCASCADE build and test in seconds, so iterate on them alone:
 
 ```sh

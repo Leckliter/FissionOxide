@@ -78,6 +78,7 @@
 379-body-edge-face-beyond-bounds
 380-body-edge-extended-past-end
 381-sketch-line-offset-plane
+385-sketch-circle-box-split
 386-edges-meeting-at-vertex
 387-edges-extended-intersection
 388-sketch-line-and-edge
@@ -121,6 +122,7 @@
 452-body-flip-from-end-chain
 46-shell-two-open-faces
 47-draft-curved-pocket
+470-on-box-top-face-cut
 483-plane-envelope-rectangular
 484-true-shape-rotation-frame
 485-two-distance-box-top-loop

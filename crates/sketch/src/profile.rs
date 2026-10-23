@@ -231,8 +231,8 @@ pub struct SegSrc {
   /// The sketch curve the segment was cut from.
   pub curve: CurveId,
   /// The segment and the next one in the loop (the first, after the last) may be built as one
-  /// edge: both come from `curve` and its kind's one-edge behaviour is on (see
-  /// [`crate::behaviour`]).
+  /// edge: both come from `curve` and its kind's one-edge behaviour is on, or they are a line and
+  /// its mirror copy (see [`crate::behaviour`]).
   pub merge_next: bool,
 }
 
@@ -471,7 +471,8 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64, Cur
     }
   }
   // Curves that cross mid-span split each other there, as in Fusion (no trimming needed).
-  let (split, rest) = split_at_crossings(pieces, circles);
+  let ends_split = sketch.behaviours.has(crate::behaviour::CURVE_ENDS_SPLIT);
+  let (split, rest) = split_at_crossings(pieces, circles, ends_split);
   circles = rest;
   verts.clear();
   // Edges as segments oriented u→v, and the curve each came from
@@ -588,7 +589,13 @@ type Circle = ([f64; 2], f64, CurveId);
 
 /// Splits segments (and circles) where they cross each other's interiors. Circles crossed at two
 /// or more points become arcs; the rest stay circles. Each piece keeps the curve it came from.
-fn split_at_crossings(segs: Vec<(Seg, CurveId)>, circles: Vec<Circle>) -> (Vec<(Seg, CurveId)>, Vec<Circle>) {
+/// With `ends_split`, the ends of spline pieces and conics (which don't split themselves) split
+/// the lines, arcs and circles they lie on.
+fn split_at_crossings(
+  segs: Vec<(Seg, CurveId)>,
+  circles: Vec<Circle>,
+  ends_split: bool,
+) -> (Vec<(Seg, CurveId)>, Vec<Circle>) {
   use crate::edit::{Geo, meet};
   // spline pieces and conics don't split (yet); they join the graph as they are
   let (curved, segs): (Vec<(Seg, CurveId)>, Vec<(Seg, CurveId)>) =
@@ -624,6 +631,17 @@ fn split_at_crossings(segs: Vec<(Seg, CurveId)>, circles: Vec<Circle>) -> (Vec<(
         if geos[i].contains(p) && geos[j].contains(p) {
           cuts[i].push(geos[i].param(p));
           cuts[j].push(geos[j].param(p));
+        }
+      }
+    }
+  }
+  if ends_split {
+    for (c, _) in &curved {
+      for p in [c.start(), c.end()] {
+        for (g, cut) in geos.iter().zip(cuts.iter_mut()) {
+          if g.contains(p) && g.distance(p) <= MERGE_TOL {
+            cut.push(g.param(p));
+          }
         }
       }
     }
@@ -948,6 +966,78 @@ mod merge_tests {
     assert_eq!(p.len(), 1);
     assert_eq!(p[0].outer.src.len(), 2);
     assert_eq!(p[0].outer.merge_next(), [false, false]);
+  }
+
+  /// A sketch with every current behaviour but `off`.
+  fn without(off: &str) -> Sketch {
+    let mut s = Sketch::new();
+    s.behaviours.remove(off);
+    s
+  }
+
+  fn line(s: &mut Sketch, a: [f64; 2], b: [f64; 2]) -> CurveId {
+    s.add_line(crate::PtSpec::At(a[0], a[1]), crate::PtSpec::At(b[0], b[1])).unwrap().0
+  }
+
+  /// How many of a single profile's outer joins merge.
+  fn merged_joins(s: &Sketch) -> usize {
+    let p = find_profiles(s);
+    assert_eq!(p.len(), 1, "{p:?}");
+    p[0].outer.merge_next().iter().filter(|m| **m).count()
+  }
+
+  #[test]
+  fn a_line_split_where_a_stub_touches_it_merges_back_with_one_edge_split_lines() {
+    for on in [false, true] {
+      let mut s = if on { Sketch::new() } else { without(crate::behaviour::ONE_EDGE_SPLIT_LINES) };
+      let bottom = line(&mut s, [0.0, 0.0], [40.0, 0.0]);
+      line(&mut s, [40.0, 0.0], [40.0, 30.0]);
+      line(&mut s, [40.0, 30.0], [0.0, 30.0]);
+      line(&mut s, [0.0, 30.0], [0.0, 0.0]);
+      // a stub ending on the bottom line, outside the rectangle
+      line(&mut s, [15.0, -5.0], [15.0, 0.0]);
+      let p = find_profiles(&s);
+      assert_eq!(p[0].outer.src.iter().filter(|x| x.curve == bottom).count(), 2, "the bottom in two pieces");
+      assert_eq!(merged_joins(&s), usize::from(on));
+    }
+  }
+
+  #[test]
+  fn a_line_and_its_mirror_copy_meeting_square_on_merge() {
+    for on in [false, true] {
+      let mut s = if on { Sketch::new() } else { without(crate::behaviour::ONE_EDGE_SPLIT_LINES) };
+      let axis = line(&mut s, [0.0, 0.0], [0.0, 40.0]);
+      s.set_construction(axis, true).unwrap();
+      let half = [line(&mut s, [0.0, 0.0], [20.0, 0.0]), line(&mut s, [20.0, 0.0], [20.0, 20.0])];
+      let top = line(&mut s, [20.0, 20.0], [0.0, 25.0]);
+      s.mirror(&[half[0], half[1], top], axis).unwrap();
+      // the bottom line and its copy merge; the slanted top meets its copy at an angle and doesn't
+      assert_eq!(merged_joins(&s), usize::from(on));
+    }
+  }
+
+  #[test]
+  fn a_spline_ending_on_a_line_closes_a_region_with_curve_ends_split() {
+    for on in [false, true] {
+      let mut s = if on { Sketch::new() } else { without(crate::behaviour::CURVE_ENDS_SPLIT) };
+      let pts = [[0.0, 0.0], [10.0, 8.0], [20.0, 10.0]].map(|p| s.add_point(p[0], p[1]));
+      s.add_curve(CurveKind::spline(pts.to_vec())).unwrap();
+      line(&mut s, [0.0, 0.0], [40.0, 0.0]);
+      line(&mut s, [20.0, -5.0], [20.0, 25.0]);
+      assert_eq!(find_profiles(&s).len(), usize::from(on));
+    }
+  }
+
+  #[test]
+  fn a_bezier_chain_is_one_edge_with_one_edge_bezier() {
+    for on in [false, true] {
+      let mut s = if on { Sketch::new() } else { without(crate::behaviour::ONE_EDGE_BEZIER) };
+      let pts = [[0.0, 0.0], [5.0, 8.0], [15.0, 8.0], [20.0, 4.0], [25.0, 0.0], [35.0, 8.0], [40.0, 0.0]];
+      let ids = pts.map(|p| s.add_point(p[0], p[1]));
+      s.add_curve(CurveKind::Bezier { points: ids.to_vec() }).unwrap();
+      line(&mut s, [40.0, 0.0], [0.0, 0.0]);
+      assert_eq!(merged_joins(&s), usize::from(on));
+    }
   }
 
   #[test]

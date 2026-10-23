@@ -1100,7 +1100,7 @@ pub fn corner_relief(
     },
   };
   let face = Shape::face(&pl, &prof).map_err(|e| e.to_string())?;
-  Ok(Some(face.extrude(up * (top + 2.0 * t + 1e-3)).map_err(|e| e.to_string())?))
+  Ok(Some(face.extrude(up * (top + 2.0 * t)).map_err(|e| e.to_string())?))
 }
 
 // ---------------------------------------------------------------- flat pattern sketch

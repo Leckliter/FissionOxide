@@ -1299,6 +1299,16 @@ fn angle_plane_offset_and_point_at_a_circular_edges_centre() {
   let p = run(&mut s, "point", json!({"method": "center", "edge": {"body": body, "edge": edge}}));
   let q = s.model.points[&crate::model::FeatureId(p["feature"].as_u64().unwrap() as u32)];
   assert!((q - centre).length() < 1e-9, "{q:?}");
+
+  // a sketch circle's centre, on the sketch's plane, following the circle when it moves
+  let sk = run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]}}));
+  let sk = sk["sketch"].as_u64().unwrap();
+  let c = run(&mut s, "sketch.circle", json!({"center": [25, 12], "radius": 6}))["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.finish", json!({}));
+  let p = run(&mut s, "point", json!({"method": "vertex", "point": {"center": {"sketch": sk, "curve": c}}}));
+  let f = crate::model::FeatureId(p["feature"].as_u64().unwrap() as u32);
+  assert!((s.model.points[&f] - fox_kernel::glam::DVec3::new(25.0, 12.0, 20.0)).length() < 1e-9);
+  assert!(s.execute("point", &json!({"method": "vertex", "point": {"center": {"sketch": sk, "curve": 999}}})).is_err());
 }
 
 /// MESH > MODIFY on the inserted `lprism.stl` (an L-shaped prism, 2000 mm³): Remesh, Shell,
