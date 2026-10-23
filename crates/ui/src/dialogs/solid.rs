@@ -7,7 +7,7 @@ use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 use super::icon_row::{Choice, choice as ic, icon_row};
-use super::{Dialog, Kind, sel_chip};
+use super::{Dialog, Kind, sel_chip, sel_chip_lit};
 use crate::App;
 use crate::forms::{Form, Input};
 use crate::icons::Icon;
@@ -90,7 +90,7 @@ pub(super) struct Extra {
 pub(super) const FILLET_TYPES: [(&str, &str); 3] =
   [("", "Fillet"), ("rule", "Rule Fillet"), ("full_round", "Full Round Fillet")];
 /// Fusion's Radius Type.
-const RADIUS_TYPES: [(&str, &str); 3] = [("constant", "Constant"), ("chord", "Chord length"), ("variable", "Variable")];
+const RADIUS_TYPES: [(&str, &str); 3] = [("constant", "Constant"), ("chord", "Chord Length"), ("variable", "Variable")];
 /// A fillet set's continuity; curvature (G2) has no engine support and is greyed.
 const CONTINUITIES: [(&str, &str); 2] = [("", "Tangent (G1)"), ("g2", "Curvature (G2)")];
 /// Full Round Fillet's selection rows.
@@ -196,7 +196,11 @@ impl Dialog {
     let accent = self.accent();
     let (mut switch, mut remove, mut add) = (None, None, false);
     let mut changed = false;
-    for (i, row) in rows.iter().enumerate() {
+    // Fusion's table is empty until the first pick: only + and a greyed x
+    let picked = !creating || rows.len() > 1 || rows.iter().any(|r| !r.is_empty());
+    // the greyed setback boxes mirror each set's radius
+    let mirrored: Vec<String> = rows.iter().map(|r| self.unit_fixed(&r.radius, &app.s.model.params)).collect();
+    for (i, row) in rows.iter().enumerate().filter(|_| picked) {
       // the set's picks; clicking another set's makes it the active one
       let active = i == self.solid.active;
       let text = if creating { row.label() } else { format!("{} (unchanged)", row.edges.len()) };
@@ -214,15 +218,16 @@ impl Dialog {
           crate::units::pin(ui, &mut r, &mut self.solid.rows[i].radius);
           r.changed()
         };
-        // the corner setback, for Corner Type Setback
-        let mut sb = ui.add_enabled(
-          self.solid.setback_corner,
-          egui::TextEdit::singleline(&mut self.solid.setback).hint_text("setback").desired_width(44.0),
-        );
+        // the corner setback, for Corner Type Setback; greyed, it mirrors the set's radius
         if self.solid.setback_corner {
+          let mut sb =
+            ui.add(egui::TextEdit::singleline(&mut self.solid.setback).hint_text("setback").desired_width(44.0));
           crate::units::pin(ui, &mut sb, &mut self.solid.setback);
+          changed |= sb.changed();
+        } else {
+          let mut shown = mirrored[i].clone();
+          ui.add_enabled(false, egui::TextEdit::singleline(&mut shown).desired_width(44.0));
         }
-        changed |= sb.changed();
         // continuity: tangent; curvature has no engine support yet
         let cont = CONTINUITIES.iter().find(|(k, _)| *k == row.continuity).map_or("Tangent (G1)", |(_, l)| *l);
         egui::ComboBox::from_id_salt(("fillet-continuity", i)).selected_text(cont).width(96.0).show_ui(ui, |ui| {
@@ -235,17 +240,21 @@ impl Dialog {
             }
           }
         });
-        if creating && rows.len() > 1 && ui.small_button("🗙").on_hover_text("Remove this set").clicked() {
-          remove = Some(i);
-        }
       });
       ui.end_row();
     }
     if creating {
+      // + adds a set; the x under it removes the active one, greyed while there is only one
       ui.label("");
-      if ui.small_button("+").on_hover_text("Add a selection set with its own radius").clicked() {
-        add = true;
-      }
+      ui.vertical(|ui| {
+        if ui.small_button("+").on_hover_text("Add a selection set with its own radius").clicked() {
+          add = true;
+        }
+        if ui.add_enabled(rows.len() > 1, egui::Button::new("🗙").small()).on_hover_text("Remove this set").clicked()
+        {
+          remove = Some(self.solid.active.min(rows.len() - 1));
+        }
+      });
       ui.end_row();
     }
     changed |= self.radius_type_row(ui);
@@ -253,19 +262,23 @@ impl Dialog {
     ui.label("Edges/Faces/Features");
     let row = &rows[self.solid.active.min(rows.len() - 1)];
     if creating {
-      sel_chip(ui, accent, &row.label(), !row.is_empty());
+      // Fusion's chip keeps reading Select (lit): the picks are counted in the table
+      sel_chip_lit(ui, accent, "Select", true, false);
     } else {
       ui.label(format!("{} (unchanged)", row.edges.len()));
     }
     ui.end_row();
     self.tangent_chain_row(ui, creating);
-    ui.label("Tangency weight");
-    if self.solid.tangency_weight.is_empty() {
-      self.solid.tangency_weight = "1.00".into();
+    // Tangency Weight comes with the first pick
+    if picked {
+      ui.label("Tangency Weight");
+      if self.solid.tangency_weight.is_empty() {
+        self.solid.tangency_weight = "1.00".into();
+      }
+      ui.add_enabled(false, egui::TextEdit::singleline(&mut self.solid.tangency_weight).desired_width(140.0))
+        .on_disabled_hover_text("Tangency weight needs a fillet shape the kernel cannot make yet");
+      ui.end_row();
     }
-    ui.add_enabled(false, egui::TextEdit::singleline(&mut self.solid.tangency_weight).desired_width(140.0))
-      .on_disabled_hover_text("Tangency weight applies to curvature continuity, which is not supported yet");
-    ui.end_row();
     if changed {
       self.dirty = !creating || self.applied;
       self.live_reset();
@@ -290,7 +303,7 @@ impl Dialog {
 
   /// Fusion's Tangent Chain checkbox (on by default).
   fn tangent_chain_row(&mut self, ui: &mut egui::Ui, creating: bool) {
-    ui.label("Tangent chain");
+    ui.label("Tangent Chain");
     let mut chain = !self.solid.no_chain;
     if ui.add_enabled(creating, egui::Checkbox::without_text(&mut chain)).changed() {
       self.solid.no_chain = !chain;
@@ -300,7 +313,7 @@ impl Dialog {
 
   /// Radius Type: Constant, Chord length or Variable (with its end radius); true when changed.
   fn radius_type_row(&mut self, ui: &mut egui::Ui) -> bool {
-    ui.label("Radius type");
+    ui.label("Radius Type");
     let mut kind = match (self.solid.chord, self.solid.variable) {
       (true, _) => "chord",
       (_, true) => "variable",
@@ -384,10 +397,10 @@ impl Dialog {
       return;
     }
     let mut changed = false;
-    ui.label("Corner type");
-    let shown = if self.solid.setback_corner { "Setback" } else { "Rolling ball" };
+    ui.label("Corner Type");
+    let shown = if self.solid.setback_corner { "Setback" } else { "Rolling Ball" };
     egui::ComboBox::from_id_salt("fillet-corner").selected_text(shown).width(140.0).show_ui(ui, |ui| {
-      changed |= ui.selectable_value(&mut self.solid.setback_corner, false, "Rolling ball").changed();
+      changed |= ui.selectable_value(&mut self.solid.setback_corner, false, "Rolling Ball").changed();
       changed |= ui.selectable_value(&mut self.solid.setback_corner, true, "Setback").changed();
     });
     ui.end_row();
@@ -439,6 +452,15 @@ impl Dialog {
       });
     }
     self.solid.edit_sets = serde_json::to_value(sets).unwrap_or_default();
+  }
+
+  /// A length expression as Fusion's read-outs show it, in the design unit with two decimals
+  /// ("2.00 mm"); as typed while it doesn't evaluate.
+  fn unit_fixed(&self, expr: &str, params: &dyn fox_engine::expr::Scope) -> String {
+    match fox_engine::expr::eval(&self.unit.typed(expr), fox_engine::expr::Kind::Length, params) {
+      Ok(mm) => self.unit.fixed(mm, 2),
+      Err(_) => expr.to_string(),
+    }
   }
 
   /// Every selection set, the active one as it is now.

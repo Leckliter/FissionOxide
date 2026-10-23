@@ -95,7 +95,7 @@ fn construct_methods_open_with_select_chips_and_ok_greyed() {
   assert_eq!(crate::menus::construct_form("Perpendicular Plane"), Some(&PERPENDICULAR_PLANE));
 }
 
-/// Plane at Angle: the Edge pick brings Extent type (To Object greyed), Angle 0.0 deg, Offset and
+/// Plane at Angle: the Edge pick brings Extent Type (To Object greyed), Angle 0.0 deg, Offset and
 /// Resize, and a rotation handle whose drag turns the plane; Offset moves it along its normal.
 #[test]
 fn plane_at_angle_rows_and_rotation_handle_follow_the_edge_pick() {
@@ -108,7 +108,7 @@ fn plane_at_angle_rows_and_rotation_handle_follow_the_edge_pick() {
   assert!(d.handles(&s).is_empty());
   s.selection = vec![Sel::Edge { body, edge }];
   resync(&mut d, &s);
-  assert_eq!(rows(&d), ["Edge", "Extent type", "Angle", "Offset", "Resize"]);
+  assert_eq!(rows(&d), ["Edge", "Extent Type", "Angle", "Offset", "Resize"]);
   assert!(forms::greyed_option(&forms::PLANE_ANGLE, "extent", "to_object").is_some());
   assert!(forms::greyed_option(&forms::PLANE_ANGLE, "extent", "angle").is_none());
   apply(&mut s, &mut d);

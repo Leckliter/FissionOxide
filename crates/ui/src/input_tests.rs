@@ -919,6 +919,93 @@ fn enter_on_typed_values_ends_the_rectangle_tool() {
   assert!(h.app.tstate.is_empty());
 }
 
+/// `ui:dialogs:extrude-auto-profile`, `ui:dialogs:extrude-start-distance`: the core workflow as
+/// a verifier runs it. A typed 40 x 30 rectangle, Finish Sketch, then E: Extrude takes the only
+/// visible profile at 0.00 (the arrow on it, nothing previewed, OK greyed) and a typed 10 in the
+/// value box previews the body. Earlier fixes held for a selected sketch only; this drives the
+/// keys and the Finish Sketch the app runs.
+#[test]
+fn e_after_finish_sketch_takes_the_only_profile_at_zero() {
+  use crate::dialogs::Kind;
+  use crate::viewport::Tool;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.set_tool(Tool::Rect);
+  let c = h.app.canvas.center();
+  h.move_then_click(c);
+  h.frame(vec![Event::PointerMoved(c + vec2(60.0, -40.0))]);
+  h.frame(vec![]);
+  h.frame(typing("40"));
+  h.frame(vec![key(egui::Key::Tab)]);
+  h.frame(typing("30"));
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert_eq!(dims(&h.app, sk), [40.0, 30.0]);
+  h.app.finish_sketch();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  h.frame(vec![key(egui::Key::E)]);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let d = h.app.dialog.as_ref().expect("E opens Extrude");
+  assert_eq!(d.kind, Kind::Extrude);
+  assert_eq!((d.sketch, d.profiles.len()), (Some(sk), 1), "the only profile is picked");
+  assert_eq!(d.distance, "0.00 mm");
+  assert!(d.ready() && !d.ok_enabled(), "OK waits for a distance");
+  assert!(d.manipulator(&h.app.s).is_some(), "the arrow is on the profile");
+  assert!(h.app.s.model.bodies.is_empty(), "nothing previewed at 0.00");
+  assert_eq!(d.profile_status(&h.app.s).as_deref(), Some("1 Profile | Area : 1200.00 mm^2"));
+  // the value box has the keyboard: a typed distance previews the body
+  h.frame(typing("10"));
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let d = h.app.dialog.as_ref().unwrap();
+  assert_eq!(d.distance, "10 mm");
+  assert!(d.ok_enabled());
+  assert_eq!(h.app.s.model.bodies.len(), 1, "a 10 mm preview body");
+}
+
+/// `ui:dialogs:fillet-before-pick`, `ui:dialogs:title-case-labels`: Fusion's FILLET opens with
+/// an empty selection table (+ and a greyed x) and no Tangency Weight row; the first edge gets a
+/// row "1 Edge | 0.00 mm | 0.00 mm | Tangent (G1)" and Tangency Weight, the chip still reading
+/// Select; a typed 2 shows in the greyed setback box as "2.00 mm".
+#[test]
+fn fillet_rows_before_and_after_the_first_pick() {
+  use fox_engine::Sel;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 40, "depth": 30, "height": 10})).unwrap();
+  h.app.start(crate::dialogs::Kind::Fillet);
+  let shown = |h: &mut Harness| -> Vec<String> {
+    for _ in 0..3 {
+      h.frame(vec![]);
+    }
+    let dialog = h.dialog_rect();
+    let t = h.frame_texts(1.0 / 60.0, vec![]);
+    t.into_iter().filter(|(r, _)| dialog.contains_rect(*r)).map(|(_, t)| t).collect()
+  };
+  let before = shown(&mut h);
+  for gone in ["Tangency Weight", "Tangent (G1)", "1 Edge"] {
+    assert!(!before.iter().any(|t| t == gone), "{gone} before a pick: {before:?}");
+  }
+  for label in ["Select", "+", "Radius Type", "Constant", "Tangent Chain", "Corner Type", "Rolling Ball"] {
+    assert!(before.iter().any(|t| t == label), "{label}: {before:?}");
+  }
+  let body = h.app.s.model.bodies[0].id;
+  h.app.s.selection = vec![Sel::Edge { body, edge: 1 }];
+  let after = shown(&mut h);
+  for label in ["1 Edge", "Tangent (G1)", "Tangency Weight", "1.00", "Select"] {
+    assert!(after.iter().any(|t| t == label), "{label} after the pick: {after:?}");
+  }
+  assert_eq!(after.iter().filter(|t| *t == "0.00 mm").count(), 2, "radius and setback: {after:?}");
+  h.app.dialog.as_mut().unwrap().radius = "2".into();
+  let typed = shown(&mut h);
+  assert!(typed.iter().any(|t| t == "2.00 mm"), "the setback box mirrors the radius: {typed:?}");
+}
+
 /// Escape discards an unfinished spline of either kind and Enter commits it, as in Fusion (no
 /// kind commits on Escape).
 #[test]
@@ -1711,7 +1798,7 @@ fn the_floating_value_box_takes_typing_and_enter_is_ok() {
 }
 
 /// `ui:manip:value-box-covers-arrow`, `ui:manip:arrow-length-offscreen`,
-/// `ui:manip:zero-default-value`: Fillet on a picked edge starts at 0 mm with the box focused and
+/// `ui:manip:zero-default-value`: Fillet on a picked edge starts at 0.00 mm with the box focused and
 /// nothing previewed; with a typed radius the box sits clear of the arrow's head, and a radius
 /// far larger than the part keeps the arrow short and the box on the canvas.
 #[test]
@@ -1728,8 +1815,8 @@ fn the_fillet_box_keeps_off_its_arrow_and_on_the_canvas() {
   }
   let focused = h.ctx.memory(|m| m.focused()).expect("the value box has the keyboard");
   assert_eq!(h.ctx.read_response(focused).map(|r| r.layer_id), Some(crate::value_box::layer()));
-  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), "0 mm");
-  assert!(!h.app.dialog.as_ref().unwrap().preview_applied(), "nothing previewed at 0 mm");
+  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), "0.00 mm");
+  assert!(!h.app.dialog.as_ref().unwrap().preview_applied(), "nothing previewed at 0.00 mm");
   h.frame(typing("2"));
   for _ in 0..2 {
     h.frame(vec![]);

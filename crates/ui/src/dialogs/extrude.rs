@@ -32,9 +32,9 @@ pub(crate) struct Rows {
 }
 
 const DIRECTIONS: [(&str, &str); 3] =
-  [("one_side", "One side"), ("two_sides", "Two sides"), ("symmetric", "Symmetric")];
-const EXTENT_TYPES: [(&str, &str); 3] = [("distance", "Distance"), ("to_object", "To object"), ("all", "All")];
-const STARTS: [(&str, &str); 3] = [("", "Profile plane"), ("offset", "Offset"), ("object", "Object")];
+  [("one_side", "One Side"), ("two_sides", "Two Sides"), ("symmetric", "Symmetric")];
+const EXTENT_TYPES: [(&str, &str); 3] = [("distance", "Distance"), ("to_object", "To Object"), ("all", "All")];
+const STARTS: [(&str, &str); 3] = [("", "Profile Plane"), ("offset", "Offset"), ("object", "Object")];
 const WALLS: [(&str, &str); 3] = [("inside", "Side 1"), ("outside", "Side 2"), ("center", "Center")];
 
 /// The engine extent of a direction and an extent type.
@@ -118,7 +118,7 @@ impl Dialog {
       dirty |= r.changed();
       ui.end_row();
     } else if ext.start == "object" {
-      ui.label("Start object");
+      ui.label("Start Object");
       if !creating && !ext.start_face.is_null() {
         ui.label("(unchanged)");
       } else {
@@ -137,7 +137,7 @@ impl Dialog {
     .response
     .on_disabled_hover_text("To object extends one side");
     ui.end_row();
-    dirty |= pick(ui, "Extent type", "ext-type", &EXTENT_TYPES, &mut kind);
+    dirty |= pick(ui, "Extent Type", "ext-type", &EXTENT_TYPES, &mut kind);
     self.extent = extent_of(if kind == "to_object" { "one_side" } else { direction }, kind);
     if self.extent == "to_object" {
       self.object_row(ui);
@@ -169,13 +169,13 @@ impl Dialog {
       // an empty taper reads as Fusion's "0.0 deg", in the box's own colour rather than a grey hint
       let ink = ui.visuals().text_color();
       let shown = |t: &str| egui::RichText::new(t).color(ink);
-      ui.label(if two_sides { "Taper angle 1" } else { "Taper angle" });
+      ui.label(if two_sides { "Taper Angle 1" } else { "Taper Angle" });
       let zero = crate::units::shown_angle("0 deg");
       dirty |=
         ui.add(egui::TextEdit::singleline(&mut ext.taper).hint_text(shown(&zero)).desired_width(140.0)).changed();
       ui.end_row();
       if two_sides {
-        ui.label("Taper angle 2");
+        ui.label("Taper Angle 2");
         let hint = if ext.taper.trim().is_empty() { zero } else { ext.taper.trim().to_string() };
         dirty |=
           ui.add(egui::TextEdit::singleline(&mut ext.taper2).hint_text(shown(&hint)).desired_width(140.0)).changed();
@@ -186,8 +186,8 @@ impl Dialog {
       if ext.thin_side.is_empty() {
         ext.thin_side = "inside";
       }
-      dirty |= pick(ui, "Wall location", "ext-wall", &WALLS, &mut ext.thin_side);
-      ui.label("Wall thickness");
+      dirty |= pick(ui, "Wall Location", "ext-wall", &WALLS, &mut ext.thin_side);
+      ui.label("Wall Thickness");
       let mut r = ui.add(egui::TextEdit::singleline(&mut ext.thickness).hint_text("1 mm").desired_width(140.0));
       crate::units::pin(ui, &mut r, &mut ext.thickness);
       dirty |= r.changed();

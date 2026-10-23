@@ -1809,7 +1809,7 @@ pub static PLANE_ANGLE: Form = Form {
   fixed: &[("method", "angle")],
   inputs: &[
     pick("axis", "Edge", Pick::Line, PICK_LINE),
-    Input::Choice { key: "extent", label: "Extent type", options: &[("angle", "Angle"), ("to_object", "To Object")] },
+    Input::Choice { key: "extent", label: "Extent Type", options: &[("angle", "Angle"), ("to_object", "To Object")] },
     Input::Expr { key: "angle", label: "Angle", default: "0.0 deg" },
     Input::Expr { key: "offset", label: "Offset", default: "0.00 mm" },
     Input::Icons { key: "resize", label: "Resize", options: RESIZE },

@@ -284,11 +284,17 @@ const BOX_SIZE: Vec2 = Vec2::new(96.0, 22.0);
 /// The gap kept between the box and the arrow it belongs to (points).
 const BOX_GAP: f32 = 4.0;
 
+/// Where Fusion's box goes when the shaft runs below and to the right of the head: about 110 px
+/// right of and 140 px below the head (its top-left corner from the head, points).
+const BOX_FAR: Vec2 = Vec2::new(108.0, 132.0);
+
 /// Where the floating value box goes beside an arrow from `a` to its head at `b` pointing `d`
 /// (a unit screen direction): its left-centre, as [`crate::value_box::show`] takes it. As in
-/// Fusion it sits apart from the arrow, below and to the right of the head where the shaft
-/// leaves room (else the next corner round that does), so the arrow stays visible and can be
-/// grabbed, and inside `canvas` whatever the arrow's length.
+/// Fusion it sits apart from the arrow, below and to the right of the head, so the arrow stays
+/// visible and can be grabbed: just off the head where the shaft leaves room, else further out
+/// the same way ([`BOX_FAR`]) until it clears the shaft, never round to the other side (onto the
+/// body the arrow stands on). Only a canvas edge sends it to another corner; it stays inside
+/// `canvas` whatever the arrow's length.
 pub(crate) fn box_beside(a: Pos2, b: Pos2, d: Vec2, canvas: egui::Rect) -> Pos2 {
   let side = Vec2::new(-d.y, d.x);
   let head = egui::Rect::from_points(&[b, b + d * 12.0, b + side * 6.0, b - side * 6.0]).expand(BOX_GAP);
@@ -297,18 +303,21 @@ pub(crate) fn box_beside(a: Pos2, b: Pos2, d: Vec2, canvas: egui::Rect) -> Pos2 
     let n = ((b - a).length() / 2.0).ceil().clamp(1.0, 400.0) as usize;
     (0..=n).any(|k| r.contains(a + (b - a) * (k as f32 / n as f32)))
   };
+  let clear = |r: &egui::Rect| !shaft(*r) && !r.intersects(head);
+  let below_right = std::iter::once(egui::Rect::from_min_size(head.right_bottom(), BOX_SIZE))
+    .chain((0..8).map(|k| egui::Rect::from_min_size(b + BOX_FAR * (1.0 + 0.5 * k as f32), BOX_SIZE)));
   let corners = [
-    egui::Rect::from_min_size(head.right_bottom(), BOX_SIZE),
     egui::Rect::from_min_size(head.left_bottom() - Vec2::new(BOX_SIZE.x, 0.0), BOX_SIZE),
     egui::Rect::from_min_size(head.right_top() - Vec2::new(0.0, BOX_SIZE.y), BOX_SIZE),
     egui::Rect::from_min_size(head.left_top() - BOX_SIZE, BOX_SIZE),
   ];
-  let r = corners
-    .iter()
-    .find(|r| !shaft(**r) && canvas.contains_rect(**r))
-    .or_else(|| corners.iter().find(|r| !shaft(**r)))
-    .copied()
-    .unwrap_or(corners[0]);
+  let first = egui::Rect::from_min_size(head.right_bottom(), BOX_SIZE);
+  let r = below_right
+    .clone()
+    .find(|r| clear(r) && canvas.contains_rect(*r))
+    .or_else(|| corners.iter().copied().find(|r| clear(r) && canvas.contains_rect(*r)))
+    .or_else(|| below_right.clone().find(clear))
+    .unwrap_or(first);
   // kept inside the canvas (an arrow running off it takes its box no further than the edge)
   let min = canvas.min;
   let max = (canvas.max - BOX_SIZE).max(min);
@@ -635,6 +644,17 @@ mod tests {
     let d = Vec2::new(1.0, -1.0).normalized();
     let r = rect(box_beside(b - d * 80.0, b, d, canvas));
     assert!(r.left() > b.x && r.top() > b.y, "{r:?}");
+    // one pointing up and to the left (Fillet's on a box's top front edge, its shaft running
+    // below-right of the head) keeps it below-right, further out as Fusion's: about 110 px right
+    // and 140 px down, not round to the left on the body
+    for len in [80.0, 200.0] {
+      let d = Vec2::new(-1.0, -1.2).normalized();
+      let r = rect(box_beside(b - d * len, b, d, canvas));
+      assert!(r.left() > b.x + 100.0 && r.center().y > b.y + 130.0, "{len}: {r:?}");
+      for k in 0..=20 {
+        assert!(!r.contains(b - d * len * (k as f32 / 20.0)), "{len}: the box {r:?} is on the shaft");
+      }
+    }
     // a head off the canvas keeps its box at the edge
     let r = rect(box_beside(Pos2::new(700.0, 300.0), Pos2::new(1500.0, 900.0), Vec2::new(0.8, 0.6), canvas));
     assert!(canvas.contains_rect(r), "{r:?}");

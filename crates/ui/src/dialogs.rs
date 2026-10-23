@@ -592,14 +592,14 @@ pub struct Dialog {
   waiting: Option<Box<Dialog>>,
   // captured inputs
   pub sketch: Option<FeatureId>,
-  profiles: Vec<[f64; 2]>,
+  pub(crate) profiles: Vec<[f64; 2]>,
   edges: Vec<Value>,
   faces: Vec<Value>,
   bodies: Vec<u32>,
   plane: Value,
   plane_label: String,
   // fields
-  distance: String,
+  pub(crate) distance: String,
   distance2: String,
   extent: &'static str,
   flip: bool,
@@ -608,7 +608,7 @@ pub struct Dialog {
   /// Revolve, two sides: the angle the other way.
   angle2: String,
   axis: String,
-  radius: String,
+  pub(crate) radius: String,
   count: String,
   spacing: String,
   dir: String,
@@ -940,8 +940,8 @@ impl Dialog {
     if matches!(kind, Kind::Extrude | Kind::Revolve | Kind::Sweep | Kind::Hole | Kind::Flange | Kind::Fold)
       && d.sketch.is_none()
     {
-      // the newest sketch's profiles are the ones to pick; Extrude takes only a picked one (as
-      // in Fusion, E opens with Profiles: Select and no preview)
+      // the newest sketch's profiles are the ones to pick; Extrude takes only a picked one, or
+      // the design's only visible one (below)
       d.sketch = s.edit_sketch.or(app.last_sketch).or_else(|| last_unconsumed_sketch(s));
       if !matches!(kind, Kind::Extrude | Kind::Sweep | Kind::Flange)
         && let Some(sk) = d.sketch
@@ -976,7 +976,6 @@ impl Dialog {
     match kind {
       // Fusion starts a fillet's radius and a shell's thickness at 0.00, previewing nothing until
       // a value is typed or the arrow dragged
-      Kind::Fillet => d.radius = "0 mm".into(),
       Kind::Shell => d.radius = "0 mm".into(),
       // Fusion's defaults for the values not drawn (0.10 in high, a 0.40 in sphere, a 0.20 in
       // tube); the drawing sets the rest
@@ -1291,6 +1290,25 @@ impl Dialog {
     }
     if kind == Kind::Chamfer {
       d.radius = d.unit.fixed(0.0, 2);
+    }
+    // a new extrude's distance and a new fillet's radius start at 0.00 too: Fusion previews only
+    // the profile (or edge) with its arrow, OK greyed until a value is typed or dragged
+    if kind == Kind::Extrude {
+      d.distance = d.unit.fixed(0.0, 2);
+    }
+    if kind == Kind::Fillet {
+      d.radius = d.unit.fixed(0.0, 2);
+    }
+    // with nothing picked, Extrude takes the design's only visible profile (selected, as Fusion
+    // shows it); with several, or none, Profiles reads Select
+    if kind == Kind::Extrude
+      && d.profiles.is_empty()
+      && !app.s.selection.iter().any(|x| matches!(x, Sel::Face { .. }))
+      && let Some((sketch, index, at)) = only_visible_profile(&app.s)
+    {
+      d.sketch = Some(sketch);
+      d.profiles = vec![at];
+      app.s.selection = vec![Sel::Profile { sketch, index }];
     }
     if kind == Kind::Move {
       d.translate = std::array::from_fn(|_| d.unit.fixed(0.0, 2));
@@ -2165,7 +2183,7 @@ impl Dialog {
   }
 
   /// Enough input to try?
-  fn ready(&self) -> bool {
+  pub(crate) fn ready(&self) -> bool {
     // an edit's stored picks stand; a fillet's or chamfer's picked again need an edge
     // (the dialogs whose edit picks again need their picks, as when creating)
     let repicked = matches!(
@@ -3111,8 +3129,8 @@ impl Dialog {
   fn waits_for_value(&self) -> bool {
     match self.kind {
       Kind::SkOffset | Kind::OffsetFace => !self.offset_set(),
-      // a body face's extrude, until its distance leaves 0.00 (or To Object picks its object)
-      Kind::Extrude if self.editing.is_none() && self.extrudes_faces() => {
+      // a new extrude, until its distance leaves 0.00 (or To Object picks its object)
+      Kind::Extrude if self.editing.is_none() => {
         matches!(self.extent, "one_side" | "symmetric" | "two_sides") && !length_set(&self.distance)
       }
       Kind::Draft => !self.draft_angle_set(),
@@ -5554,6 +5572,20 @@ fn is_planar(s: &Session, body: BodyId, face: u32) -> bool {
     .unwrap_or(false)
 }
 
+/// The one profile the design's visible sketches offer (its sketch, index and interior point),
+/// if there is exactly one: Fusion's Extrude takes it on opening. A used sketch hides itself, so
+/// its profiles don't count.
+fn only_visible_profile(s: &Session) -> Option<(FeatureId, usize, [f64; 2])> {
+  let active = s.design.active_len();
+  let mut found = s.design.features[..active]
+    .iter()
+    .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && fox_engine::scene::sketch_visible(s, f.id))
+    .filter_map(|f| Some((f.id, s.model.sketches.get(&f.id)?)))
+    .flat_map(|(id, r)| r.profiles.iter().enumerate().map(move |(i, p)| (id, i, p)));
+  let (id, i, p) = found.next()?;
+  found.next().is_none().then(|| (id, i, p.interior_point()))
+}
+
 fn last_unconsumed_sketch(s: &Session) -> Option<FeatureId> {
   let active = s.design.active_len();
   let feats = &s.design.features[..active];
@@ -6085,6 +6117,8 @@ mod tests {
     d.sync_selection(&app.s);
     assert_eq!(d.profiles.len(), 1);
     assert!(d.ready());
+    // at 0.00 until a distance is typed
+    d.distance = "10 mm".into();
     d.preview(&mut app.s);
     assert!(d.applied, "{:?}", d.error);
     assert_eq!(app.s.model.bodies.len(), bodies + 1);
@@ -6094,7 +6128,7 @@ mod tests {
 
   /// `ui:manip:zero-default-value`: Fillet and Shell start at 0.00 after the first pick, as in
   /// Fusion: nothing previewed, no complaint and OK waiting until a value is typed (an edited
-  /// fillet keeps its radius); in inches the box reads "0 in".
+  /// fillet keeps its radius); in inches a fillet's box reads "0.00 in".
   #[test]
   fn fillet_and_shell_start_at_zero() {
     let mut app = App::with_session(Session::default());
@@ -6106,7 +6140,8 @@ mod tests {
     for (kind, sel) in [(Kind::Fillet, Sel::Edge { body, edge: 1 }), (Kind::Shell, Sel::Face { body, face: top })] {
       app.s.selection = vec![sel];
       let mut d = Dialog::open(&mut app, kind);
-      assert_eq!(d.radius, "0 mm", "{kind:?}");
+      let zero = if kind == Kind::Fillet { "0.00 mm" } else { "0 mm" };
+      assert_eq!(d.radius, zero, "{kind:?}");
       assert!(d.ready() && !d.ok_enabled(), "{kind:?}: OK waits for a value");
       d.preview(&mut app.s);
       assert!(!d.applied && d.error.is_none(), "{kind:?}: nothing previewed at 0, nothing wrong");
@@ -6122,7 +6157,7 @@ mod tests {
     }
     app.s.design.units = fox_engine::model::LengthUnit::In;
     app.s.selection = vec![Sel::Edge { body, edge: 1 }];
-    assert_eq!(Dialog::open(&mut app, Kind::Fillet).radius, "0 in");
+    assert_eq!(Dialog::open(&mut app, Kind::Fillet).radius, "0.00 in");
   }
 
   /// A Fillet preview keeps the body's own colour: only the picked edge draws in the selection
@@ -7425,13 +7460,55 @@ mod tests {
     app.s.undo();
   }
 
+  /// `ui:dialogs:extrude-auto-profile`: E takes the design's only visible profile, wherever its
+  /// sketch is; a used (hidden) sketch offers none, and two visible profiles leave Select.
+  #[test]
+  fn extrude_takes_the_only_visible_profile() {
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"}));
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 30]}));
+    let sk1 = app.s.edit_sketch.unwrap();
+    app.finish_sketch();
+    let d = Dialog::open(&mut app, Kind::Extrude);
+    assert_eq!((d.sketch, d.profiles.len(), d.distance.as_str()), (Some(sk1), 1, "0.00 mm"));
+    assert!(d.ready() && !d.ok_enabled());
+    app.run("extrude", json!({"sketch": sk1.0, "distance": 10}));
+    app.s.selection.clear();
+    let d = Dialog::open(&mut app, Kind::Extrude);
+    assert!(d.profiles.is_empty(), "the used sketch is hidden: Select");
+    app.run("sketch.create", json!({"plane": "xz"}));
+    app.run("sketch.circle", json!({"center": [80, 5], "radius": 4}));
+    let sk2 = app.s.edit_sketch.unwrap();
+    let d = Dialog::open(&mut app, Kind::Extrude);
+    assert_eq!((d.sketch, d.profiles.len()), (Some(sk2), 1), "the open sketch's one circle");
+    assert!(app.s.edit_sketch.is_none(), "E finished the sketch");
+    assert_eq!(app.s.selection, vec![Sel::Profile { sketch: sk2, index: 0 }], "the profile is picked");
+    app.s.selection.clear();
+    // a second visible sketch with a profile of its own: two to choose from
+    app.run("sketch.create", json!({"plane": "yz"}));
+    app.run("sketch.circle", json!({"center": [80, 5], "radius": 4}));
+    app.finish_sketch();
+    let d = Dialog::open(&mut app, Kind::Extrude);
+    assert!(d.profiles.is_empty() && !d.ready(), "two visible profiles: Select");
+    // a picked body face is the profile, not the sketch's
+    let body = app.s.model.bodies[0].id;
+    let top = app.s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    app.run("sketch.visible", json!({"sketch": sk2.0, "visible": false}));
+    app.s.selection = vec![Sel::Face { body, face: top }];
+    let mut d = Dialog::open(&mut app, Kind::Extrude);
+    assert!(d.profiles.is_empty());
+    d.sync_selection(&app.s);
+    assert!(d.extrudes_faces());
+  }
+
   #[test]
   fn extrude_waits_for_a_picked_profile() {
-    // Sketch1 finished and still selected in the browser: E opens with Profiles: Select, no
-    // preview and OK greyed, as in Fusion
+    // Sketch1 of two regions finished and still selected in the browser: E opens with Profiles:
+    // Select, no preview and OK greyed, as in Fusion (one region alone would be taken)
     let mut app = App::with_session(Session::default());
     app.run("sketch.create", json!({"plane": "xy"}));
     app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    app.run("sketch.circle", json!({"center": [30, 5], "radius": 4}));
     let sk = app.s.edit_sketch.unwrap();
     app.run("sketch.finish", json!({}));
     app.s.selection = vec![Sel::Feature { feature: sk }];
@@ -7446,7 +7523,12 @@ mod tests {
     app.s.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
     let mut d = app.dialog.take().unwrap();
     d.sync_selection(&app.s);
-    assert!(d.ready() && d.ok_enabled());
+    assert!(d.ready() && !d.ok_enabled(), "the distance starts at 0.00");
+    assert_eq!(d.distance, "0.00 mm");
+    d.preview(&mut app.s);
+    assert!(!d.applied && app.s.model.bodies.is_empty(), "nothing previewed at 0.00");
+    d.distance = "10 mm".into();
+    assert!(d.ok_enabled());
     d.preview(&mut app.s);
     assert!(d.applied && d.error.is_none());
     assert_eq!(app.s.model.bodies.len(), 1);
