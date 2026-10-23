@@ -71,6 +71,52 @@ fn measure_two_picks_show_the_distance_and_a_section_per_pick() {
   assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("1 Face 1 Vertex | Min Distance : 30.00 mm"));
 }
 
+/// Measure keeps the selection to its picks (the newest two it can measure), so the status bar
+/// counts what it measures; a sketch point is a pick of its own with its Selection section and
+/// the Results row.
+#[test]
+fn measure_takes_a_sketch_point_and_keeps_the_selection_to_its_picks() {
+  let mut app = App::with_session(Session::default());
+  app.s.execute("box", &json!({"width": 10, "depth": 20, "height": 30})).unwrap();
+  let b = app.s.model.bodies[0].id;
+  app.s.execute("sketch.create", &json!({"plane": "xy"})).unwrap();
+  let sk = app.s.edit_sketch.unwrap();
+  app.s.execute("sketch.point", &json!({"at": [3, 4]})).unwrap();
+  app.s.execute("sketch.finish", &json!({})).unwrap();
+  let point = app.s.design.sketch(sk).unwrap().points.last().unwrap().id;
+  let body = app.s.model.body(b).unwrap();
+  let (top, bottom) = (
+    body.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id,
+    body.faces().iter().find(|f| f.normal.z < -0.9).unwrap().id,
+  );
+  let pt = Sel::SketchPoint { sketch: sk, point };
+  // a sketch point picked earlier, then two faces: the two faces are measured and counted
+  app.s.selection = vec![pt, Sel::Face { body: b, face: top }, Sel::Face { body: b, face: bottom }];
+  let mut d = Dialog::open(&mut app, Kind::Inspect);
+  assert!(show_once(&mut app, &mut d));
+  assert_eq!(app.s.selection, [Sel::Face { body: b, face: top }, Sel::Face { body: b, face: bottom }]);
+  app.dialog = Some(d);
+  let status = crate::panels::selection_text(&app).unwrap();
+  assert!(status.starts_with("2 Faces"), "{status}");
+  let mut d = app.dialog.take().unwrap();
+  // a face, then the sketch point: Results and a section each
+  app.s.selection = vec![Sel::Face { body: b, face: top }, pt];
+  app.measure = None;
+  assert!(show_once(&mut app, &mut d));
+  assert_eq!(app.s.selection.len(), 2);
+  assert!(app.measure.is_some(), "the distance line shows");
+  let a = serde_json::to_value(Sel::Face { body: b, face: top }).unwrap();
+  let r = app.s.execute("measure", &json!({"a": a, "b": serde_json::to_value(pt).unwrap()})).unwrap();
+  let secs = measure_sections(&r, &MeasureFmt::default());
+  let titles: Vec<&str> = secs.iter().map(|x| x.title.as_str()).collect();
+  assert_eq!(titles, ["Results", "Selection 1", "Selection 2"]);
+  assert_eq!(labels(&secs[0].rows), [("Distance", "30.000 mm")]);
+  assert_eq!(secs[2].note, "Sketch Point selected");
+  assert_eq!(secs[2].rows.iter().map(|r| r.value.as_str()).collect::<Vec<_>>(), ["3.000 mm", "4.000 mm", "0.000 mm"]);
+  app.dialog = Some(d);
+  assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("1 Face 1 Sketch Point | Min Distance : 30.00 mm"));
+}
+
 #[test]
 fn interference_computes_the_picked_bodies_and_ok_waits_for_it() {
   let (mut app, [a, b, c]) = three_boxes();

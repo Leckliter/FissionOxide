@@ -140,6 +140,7 @@ pub(crate) mod ffi {
       pitch: f64,
       height: f64,
       left: bool,
+      taper: f64,
     ) -> Result<UniquePtr<Shape>>;
     fn thicken(s: &Shape, d: f64) -> Result<UniquePtr<Shape>>;
     fn scale(s: &Shape, cx: f64, cy: f64, cz: f64, sx: f64, sy: f64, sz: f64) -> Result<UniquePtr<Shape>>;

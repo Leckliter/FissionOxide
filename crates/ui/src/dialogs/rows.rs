@@ -36,6 +36,16 @@ impl Dialog {
     }
   }
 
+  /// Does the active selection row take a construction plane clicked in the canvas or the
+  /// browser (Replace Face's Target Faces, Split Body's Splitting Tool(s))?
+  pub(crate) fn row_takes_plane(&self) -> bool {
+    match self.kind {
+      Kind::SplitBody => self.pick_row == 1,
+      Kind::Form(f) => self.editing.is_none() && self.form.row_takes_plane(f),
+      _ => false,
+    }
+  }
+
   /// Does the dialog route picks to an active selection row?
   pub(crate) fn routes_picks(&self) -> bool {
     self.row_priority().is_some()
@@ -502,6 +512,36 @@ mod tests {
     frame(&mut d, &mut app);
     assert!(!d.ready() && d.form.row == 0);
     assert_eq!(d.prompt(false).as_deref(), Some("Select faces to replace"));
+  }
+
+  /// REPLACE FACE: with Target Faces active, a construction plane clicked in the canvas or its
+  /// browser row is the target, and Source Faces keeps its pick.
+  #[test]
+  fn replace_face_takes_a_construction_plane_target() {
+    let mut app = two_boxes();
+    app.run("plane.offset", json!({"plane": "xy", "offset": 25})).unwrap();
+    let up = app.s.design.features.last().unwrap().id;
+    let mut d = Dialog::open(&mut app, Kind::Form(&REPLACE_FACE));
+    let top = face(&app, 0, [0.0, 0.0, 1.0]);
+    app.s.selection.push(top);
+    frame(&mut d, &mut app);
+    assert!(!d.row_takes_plane(), "Source Faces takes faces only");
+    d.form.row = 2;
+    assert!(d.row_takes_plane());
+    app.dialog = Some(d);
+    crate::panels::pick_plane(&mut app, json!({"feature": up.0}));
+    let mut d = app.dialog.take().unwrap();
+    frame(&mut d, &mut app);
+    assert_eq!(d.form.values[2], json!({"feature": up.0}), "the plane is the target");
+    assert_eq!(d.form.values[0].as_array().map(Vec::len), Some(1), "Source Faces keeps its pick");
+    assert!(app.picked_plane.is_none());
+    assert!(app.s.selection.contains(&top) && app.s.selection.contains(&Sel::Feature { feature: up }));
+    assert_eq!(crate::construction::look(&app, up), crate::origin::Look::Selected);
+    assert!(d.ready());
+    d.preview(&mut app.s);
+    assert!(d.error.is_none(), "{:?}", d.error);
+    let m = app.s.model.bodies[0].shape.mass().unwrap();
+    assert!((m.bbox_max.z - 25.0).abs() < 1e-6, "{m:?}");
   }
 
   /// SILHOUETTE SPLIT: View Direction then Target Body, Split Shelled Body by default; a sphere

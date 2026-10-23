@@ -2661,8 +2661,9 @@ pub(crate) fn pick_plane(app: &mut App, plane: Value) {
   {
     return;
   }
+  // a selection row that takes a plane (Replace Face's Target Faces) picks it from the selection
   if let Some(f) = plane.get("feature").and_then(Value::as_u64)
-    && construct_picking(app)
+    && (construct_picking(app) || app.dialog.as_ref().is_some_and(|d| d.row_takes_plane()))
   {
     toggle_sel(&mut app.s, Sel::Feature { feature: FeatureId(f as u32) }, true);
     return;

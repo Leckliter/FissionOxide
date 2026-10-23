@@ -76,9 +76,9 @@ pub(crate) fn picked(app: &App) -> Option<FeatureId> {
   app.picked_plane.as_ref()?.get("feature")?.as_u64().map(|f| FeatureId(f as u32))
 }
 
-/// How a plane draws now.
+/// How a plane draws now (selected too while a dialog's row holds it as a pick).
 pub(crate) fn look(app: &App, id: FeatureId) -> Look {
-  if picked(app) == Some(id) {
+  if picked(app) == Some(id) || app.s.selection.contains(&fox_engine::Sel::Feature { feature: id }) {
     Look::Selected
   } else if app.hover_cplane == Some(id) {
     Look::Hovered

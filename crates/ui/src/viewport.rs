@@ -4367,6 +4367,10 @@ fn conic_points(a: [f64; 2], apex: [f64; 2], b: [f64; 2], rho: f64) -> Vec<[f64;
 /// open dialog's primary value, as in Fusion. Runs before the shortcuts, so a digit can't also
 /// switch the selection mode.
 pub fn route_typing(app: &mut App, ctx: &egui::Context) {
+  // a primitive's base being sized: its heads-up boxes take every key
+  if crate::dialogs::primitive_take_keys(app, ctx) {
+    return;
+  }
   take_hud_tab(app, ctx);
   if ctx.egui_wants_keyboard_input() || app.drawing.is_some() || app.dim_edit.is_some() || app.marking.is_some() {
     return;

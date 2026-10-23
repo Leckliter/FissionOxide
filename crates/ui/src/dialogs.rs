@@ -73,6 +73,7 @@ mod mesh_modify;
 pub(crate) use export_dxf::{SaveWindow, save_window};
 pub(crate) use mesh::group_triangle;
 pub(crate) use primitive::overlay as place_overlay;
+pub(crate) use primitive::take_keys as primitive_take_keys;
 pub(crate) use primitive::temp_sketch_name;
 #[cfg(test)]
 mod construct_tests;
@@ -5129,7 +5130,7 @@ fn entity_readouts(r: &Value, f: &MeasureFmt) -> (String, Vec<Readout>) {
           out.push(row(axis, f.len(p[i])));
         }
       }
-      "Vertex"
+      if r.get("sketch_point").and_then(Value::as_bool) == Some(true) { "Sketch Point" } else { "Vertex" }
     }
     Some("body") => {
       if let Some(v) = num("volume_mm3") {
@@ -5173,20 +5174,31 @@ pub(crate) fn section_header(ui: &mut egui::Ui, id: egui::Id, title: &str) -> bo
   open
 }
 
+/// Can Measure measure it: a body, face, edge, body vertex, sketch curve or sketch point.
+fn measurable(x: &Sel) -> bool {
+  matches!(
+    x,
+    Sel::Body { .. }
+      | Sel::Face { .. }
+      | Sel::Edge { .. }
+      | Sel::Vertex { .. }
+      | Sel::SketchCurve { .. }
+      | Sel::SketchPoint { .. }
+  )
+}
+
+/// Keeps the selection to Measure's picks: what it can measure, the newest two of it, so the
+/// status bar counts what the dialog measures ("1 Face 1 Sketch Point | Min Distance : …").
+fn keep_measure_picks(sel: &mut Vec<Sel>) {
+  sel.retain(measurable);
+  if sel.len() > 2 {
+    sel.drain(..sel.len() - 2);
+  }
+}
+
 /// What Measure measures: the first two selected bodies, faces, edges, vertices, sketch curves
 /// and sketch points, or (with nothing selected) what the pointer is over.
 fn measure_picks(app: &App) -> (Vec<Value>, bool) {
-  let measurable = |x: &Sel| {
-    matches!(
-      x,
-      Sel::Body { .. }
-        | Sel::Face { .. }
-        | Sel::Edge { .. }
-        | Sel::Vertex { .. }
-        | Sel::SketchCurve { .. }
-        | Sel::SketchPoint { .. }
-    )
-  };
   let picks: Vec<Value> =
     app.s.selection.iter().filter(|x| measurable(x)).take(2).filter_map(|x| serde_json::to_value(x).ok()).collect();
   if !picks.is_empty() {
@@ -5261,6 +5273,7 @@ impl Dialog {
       .on_disabled_hover_text("FissionOxide doesn't show snap points yet");
     ui.end_row();
     let fmt = app.measure_fmt;
+    keep_measure_picks(&mut app.s.selection);
     let (picks, hovering) = measure_picks(app);
     if picks.is_empty() {
       return;

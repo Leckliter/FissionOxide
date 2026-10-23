@@ -65,6 +65,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           section,
           section_size: req_expr(p, "section_size")?,
           left: p.get("left").and_then(Value::as_bool).unwrap_or(false),
+          angle: opt_expr(p, "angle").unwrap_or_default(),
           operation: operation(p)?,
         },
       )

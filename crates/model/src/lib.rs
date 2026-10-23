@@ -1559,6 +1559,9 @@ pub enum FeatureKind {
     section_size: String,
     #[serde(default)]
     left: bool,
+    /// Taper angle (Fusion's Angle): positive widens the coil as it rises; empty is none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    angle: String,
     #[serde(default)]
     operation: Operation,
   },
@@ -3461,9 +3464,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         }
       }
     }
-    FeatureKind::Coil { diameter, pitch, height, section_size, .. } => {
+    FeatureKind::Coil { diameter, pitch, height, section_size, angle, .. } => {
       for e in [diameter, pitch, height, section_size] {
         f(e);
+      }
+      if !angle.is_empty() {
+        f(angle);
       }
     }
     FeatureKind::Pipe { diameter, wall, distance, .. } => {

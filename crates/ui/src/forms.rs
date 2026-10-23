@@ -804,6 +804,12 @@ impl State {
     }
   }
 
+  /// Does the active row take a construction plane (a plane, surface or direction row)? A plane
+  /// clicked in the canvas or the browser then joins the selection the row picks from.
+  pub fn row_takes_plane(&self, form: &Form) -> bool {
+    matches!(form.inputs.get(self.row), Some(Input::Pick { fits: Fits::Plane | Fits::Surface | Fits::Direction, .. }))
+  }
+
   /// Fusion's cursor prompt for the active [`Input::Pick`] row.
   pub fn row_prompt(&self, form: &Form) -> Option<&'static str> {
     match form.inputs.get(self.row) {
@@ -886,6 +892,8 @@ impl State {
           "revolutions" => ty != "height_pitch",
           "height" => matches!(ty, "revolution_height" | "height_pitch"),
           "pitch" => ty != "revolution_height",
+          // a spiral has no taper, as in Fusion
+          "angle" => ty != "spiral",
           _ => true,
         }
       }
@@ -4159,7 +4167,6 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
     ("emboss", "tangent_chain") => Some("Emboss goes on one face in FissionOxide: a tangent chain isn't picked yet"),
     ("thicken", "chain") => Some("Thicken picks whole surface bodies in FissionOxide: chains of faces aren't yet"),
     ("thread", "remember") => Some("Each Thread starts from the picked face's size in FissionOxide"),
-    ("coil.form", "angle") => Some("Tapered coils aren't in FissionOxide yet"),
     ("cam.setup", "stock_bottom") => Some("The stock's bottom is the part's in FissionOxide: no bottom offset yet"),
     ("cam.setup", "round_up") => Some("FissionOxide doesn't round the stock's size up yet"),
     ("cam.setup", "accessibility") => {
@@ -4397,6 +4404,11 @@ fn coil_params(p: &Value) -> Value {
     }
   }
   q.insert("left".into(), json!(p.get("rotation").and_then(Value::as_str) == Some("ccw")));
+  // the taper angle, none for a spiral
+  let angle = text("angle");
+  if !angle.is_empty() && p.get("type").and_then(Value::as_str) != Some("spiral") {
+    q.insert("angle".into(), json!(angle));
+  }
   Value::Object(q)
 }
 

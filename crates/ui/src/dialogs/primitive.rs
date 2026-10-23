@@ -151,6 +151,12 @@ impl Dialog {
     app.s.selection.clear();
   }
 
+  /// Box's Length and Width rows.
+  #[cfg(test)]
+  pub(crate) fn box_sizes(&self) -> [&str; 2] {
+    [&self.a, &self.b]
+  }
+
   /// Is the plane pick or the drawing still going (no dialog yet)?
   pub fn placing(&self) -> bool {
     self.place != Step::Done
@@ -377,8 +383,10 @@ impl Dialog {
     })
   }
 
-  /// Coil's arrows: the height (while the Type asks for it) up the axis, the diameter out from
-  /// the axis and the section size up from the section at the coil's start.
+  /// Coil's handles: the height (while the Type asks for it) up the axis, the diameter out from
+  /// the axis, the section size up from the section at the coil's start, and Fusion's Angle
+  /// handle, a disc on an arc turning about the coil's foot from the axis direction (outward for
+  /// a positive angle, which widens the coil as it rises).
   fn coil_handles(&self, s: &Session, f: &crate::forms::Form) -> Option<Vec<Handle>> {
     let pl = plane_of(s, &self.form_value("plane")?.clone())?;
     let at = self.form_value("at")?.as_array()?;
@@ -387,6 +395,12 @@ impl Dialog {
     let unit = self.unit;
     let mut out = Vec::new();
     for k in self.coil_handle_keys(f) {
+      if k == "angle" {
+        let a = self.ang(s, self.form_value("angle")?.as_str()?).unwrap_or(0.0);
+        let d = self.len(s, self.form_value("diameter")?.as_str()?)?;
+        out.push(Handle::dial(c + x * d / 2.0, n.cross(x), n, None, a, super::manip::deg(a)).taper());
+        continue;
+      }
       let v = self.len(s, self.form_value(k)?.as_str()?)?;
       out.push(match k {
         "height" => Handle::arrow(c, n, v, mm(unit, v)),
@@ -403,7 +417,7 @@ impl Dialog {
   /// The Coil fields its arrows edit, in order.
   fn coil_handle_keys(&self, f: &crate::forms::Form) -> Vec<&'static str> {
     let shown = |k: &str| f.inputs.iter().position(|x| x.key() == k).is_some_and(|i| self.form.shown(f, i));
-    ["height", "diameter", "section_size"].into_iter().filter(|k| shown(k)).collect()
+    ["height", "diameter", "section_size", "angle"].into_iter().filter(|k| shown(k)).collect()
   }
 
   /// The field the `i`th primitive handle's floating box edits: the first handle's alone.
@@ -431,6 +445,15 @@ impl Dialog {
   /// when nothing changed.
   pub(super) fn set_primitive_handle(&mut self, s: &Session, i: usize, v: f64, step: f64) -> bool {
     let unit = self.unit;
+    // Coil's Angle: short of a right angle either way
+    if let Kind::Form(f) = self.kind
+      && self.coil_handle_keys(f).get(i) == Some(&"angle")
+    {
+      let Some(j) = f.inputs.iter().position(|x| x.key() == "angle") else { return false };
+      let a = snap(v, step).clamp(-89f64.to_radians(), 89f64.to_radians());
+      self.form.values[j] = json!(super::manip::deg(a));
+      return true;
+    }
     let v = snap(v, step).max(step.max(1e-3) / 2.0);
     let size = |half: f64| mm(unit, 2.0 * half);
     match (self.kind, i) {
@@ -482,11 +505,17 @@ fn plane_name(s: &Session, plane: &Value) -> String {
 
 /// The heads-up boxes while a rectangle or circle base is sized, as Fusion's: what was typed in
 /// each (empty: the box follows the pointer) and the box with the keyboard. Typing goes into the
-/// active box, Tab moves to the next and Enter places the base at the typed size.
+/// active box, Tab moves to the next and Enter places the base at the typed size (see
+/// [`take_keys`]).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct Hud {
   pub typed: [String; 2],
   pub active: usize,
+  /// Enter was pressed: the base goes down at the typed size this frame.
+  pub commit: bool,
+  /// Where the pointer last met the plane: Enter places the base towards it even while the
+  /// pointer rests on a box rather than the canvas.
+  pub pointer: Option<[f64; 2]>,
 }
 
 fn hud_id() -> egui::Id {
@@ -500,6 +529,58 @@ fn hud_boxes(base: Base) -> usize {
     Base::Circle => 1,
     Base::Point => 0,
   }
+}
+
+/// While a primitive's base is sized, its heads-up boxes take the keyboard before anything else
+/// sees it (the shortcuts, the dialogs' typing): each key in the order typed, so `8 Tab 8 Enter`
+/// works however the keys are split over frames. Characters go into the active box, Backspace
+/// takes one back, Tab (Shift+Tab) moves to the next (previous) box and Enter places the base.
+/// True when the boxes took the keys.
+pub(crate) fn take_keys(app: &App, ctx: &egui::Context) -> bool {
+  let Some(d) = app.dialog.as_ref() else { return false };
+  let Some(base) = base_of(d.kind) else { return false };
+  let n = hud_boxes(base);
+  if !matches!(d.place, Step::Second(_)) || n == 0 || ctx.input(|i| i.modifiers.command || i.modifiers.alt) {
+    return false;
+  }
+  use egui::{Event, Key};
+  let mut hud: Hud = ctx.data(|m| m.get_temp(hud_id())).unwrap_or_default();
+  hud.active = hud.active.min(n - 1);
+  ctx.input_mut(|i| {
+    let mut done = false;
+    i.events.retain(|e| {
+      if done {
+        return true;
+      }
+      match e {
+        Event::Text(t) => {
+          hud.typed[hud.active].extend(t.chars().filter(|c| !c.is_control()));
+          false
+        }
+        Event::Key { key: Key::Escape, .. } => true,
+        Event::Key { key, pressed, modifiers, .. } => {
+          if *pressed {
+            match key {
+              Key::Backspace => {
+                hud.typed[hud.active].pop();
+              }
+              Key::Tab if modifiers.shift => hud.active = (hud.active + n - 1) % n,
+              Key::Tab => hud.active = (hud.active + 1) % n,
+              Key::Enter => {
+                hud.commit = true;
+                done = true;
+              }
+              _ => {}
+            }
+          }
+          false
+        }
+        _ => true,
+      }
+    });
+  });
+  ctx.data_mut(|m| m.insert_temp(hud_id(), hud));
+  true
 }
 
 /// A typed size (mm): a bare number or unitless expression is in the design's unit.
@@ -628,6 +709,10 @@ pub(crate) fn overlay(
     let (o, dir) = ray(p);
     on_plane(&plane, o, dir).map(|q| q.map(|v| snap(v, step)))
   });
+  if raw.is_some() {
+    hud.pointer = raw;
+  }
+  let raw = raw.or(hud.pointer.filter(|_| from.is_some()));
   let sizes = [typed_mm(&app.s, unit, &hud.typed[0]), typed_mm(&app.s, unit, &hud.typed[1])];
   let cur = match (raw, from) {
     (Some(c), Some(a)) => Some(hud_point(base, a, c, sizes)),
@@ -665,45 +750,27 @@ pub(crate) fn overlay(
       }
     }
   }
-  let mut commit = false;
+  // Enter (taken with the typing in `take_keys`) places the base at the typed size
+  let commit = std::mem::take(&mut hud.commit) && from.is_some();
   if from.is_some() && n > 0 && boxes.len() == n {
-    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
-      hud.active = (hud.active + 1) % n;
-    }
-    commit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     hud.active = hud.active.min(n - 1);
     for (i, (p, live)) in boxes.iter().enumerate() {
-      if i == hud.active {
-        // the box with the keyboard: typing replaces the live size, which shows as its hint
-        let mut text = hud.typed[i].clone();
-        egui::Area::new(hud_id().with(i))
-          .fixed_pos(*p)
-          .pivot(egui::Align2::CENTER_CENTER)
-          .order(egui::Order::Foreground)
-          .show(&ctx, |ui| {
-            let r = ui.add(
-              egui::TextEdit::singleline(&mut text)
-                .id(hud_id().with(("edit", i)))
-                .hint_text(live.as_str())
-                .desired_width(62.0)
-                .font(egui::FontId::proportional(12.0))
-                .margin(egui::Margin::symmetric(3, 1))
-                .lock_focus(true),
-            );
-            if !r.has_focus() {
-              r.request_focus();
-            }
-          });
-        hud.typed[i] = text;
-        continue;
+      // the box with the keyboard shows what was typed (else the live size, greyed) and a caret
+      let active = i == hud.active;
+      let typed = !hud.typed[i].is_empty();
+      let text = if typed { hud.typed[i].clone() } else { live.clone() };
+      let color = if active && !typed { Color32::from_gray(150) } else { Color32::from_gray(30) };
+      let g = painter.layout_no_wrap(text, egui::FontId::proportional(12.0), color);
+      let width = if active { g.size().x.max(56.0) } else { g.size().x };
+      let r = egui::Rect::from_center_size(*p, egui::vec2(width + 10.0, g.size().y + 4.0));
+      let border = Stroke::new(if active { 1.5 } else { 1.0 }, ink);
+      painter.rect(r, 2.0, Color32::WHITE, border, egui::StrokeKind::Inside);
+      let at = r.min + egui::vec2(5.0, 2.0);
+      if active {
+        let x = at.x + if typed { g.size().x + 1.0 } else { 0.0 };
+        painter.line_segment([egui::pos2(x, r.top() + 3.0), egui::pos2(x, r.bottom() - 3.0)], Stroke::new(1.0, ink));
       }
-      let typed = !hud.typed[i].trim().is_empty();
-      let text = if typed { hud.typed[i].trim().to_string() } else { live.clone() };
-      let font = egui::FontId::proportional(12.0);
-      let g = painter.layout_no_wrap(text, font, Color32::from_gray(30));
-      let r = egui::Rect::from_center_size(*p, g.size() + egui::vec2(10.0, 4.0));
-      painter.rect(r, 2.0, Color32::WHITE, Stroke::new(1.0, ink), egui::StrokeKind::Inside);
-      painter.galley(r.min + egui::vec2(5.0, 2.0), g, Color32::from_gray(30));
+      painter.galley(at, g, color);
     }
   }
   if resp.contains_pointer() {
@@ -948,19 +1015,31 @@ mod tests {
     d.preview(&mut app.s);
     assert!(d.preview_applied() && d.error.is_none(), "{:?}", d.error);
     assert_eq!(app.s.model.bodies.len(), 1);
-    assert_eq!(d.handles(&app.s).len(), 3, "height, diameter and section arrows");
+    let h = d.handles(&app.s);
+    assert_eq!(h.len(), 4, "height, diameter and section arrows, and the Angle handle");
+    assert!(h[3].angular() && h[3].head == crate::handles::Head::Taper && h[3].value.abs() < 1e-9);
+    // the Angle handle dragged out 10°: the coil widens as it rises
+    let before = app.s.model.bodies[0].shape.mass().unwrap();
+    d.set_handle(&app.s, 3, 10f64.to_radians() + 0.001, 1f64.to_radians());
+    assert_eq!(d.form_value("angle"), Some(&json!("10 deg")));
+    d.preview(&mut app.s);
+    assert!(d.error.is_none(), "{:?}", d.error);
+    let after = app.s.model.bodies[0].shape.mass().unwrap();
+    let width = |m: &fox_engine::kernel::MassProps| m.bbox_max.x - m.bbox_min.x;
+    assert!(width(&after) > width(&before) + 5.0, "{before:?} → {after:?}");
+    assert!((after.bbox_max.z - before.bbox_max.z).abs() < 0.5, "same height");
     let (cmd, p) = crate::forms::engine_command(
       &COIL,
       json!({"plane": "xy", "at": [0.0, 0.0], "type": "revolution_height", "rotation": "ccw", "diameter": "20 mm",
         "revolutions": "3", "height": "15 mm", "section": "circular", "section_position": "inside",
-        "section_size": "2 mm", "angle": "0 deg"}),
+        "section_size": "2 mm", "angle": "5 deg"}),
     );
     assert_eq!(cmd, "coil");
     assert_eq!(p["pitch"], json!("(15 mm) / (3)"));
     assert_eq!(p["height"], json!("15 mm"));
     assert_eq!(p["diameter"], json!("(20 mm) - (2 mm)"));
     assert_eq!(p["left"], json!(true));
-    assert!(p.get("angle").is_none(), "the engine can't taper a coil");
+    assert_eq!(p["angle"], json!("5 deg"), "the taper angle");
     let (_, p) = crate::forms::engine_command(
       &COIL,
       json!({"type": "revolution_pitch", "revolutions": "4", "pitch": "2 mm", "diameter": "10 mm", "section_size": "1 mm"}),
@@ -975,8 +1054,10 @@ mod tests {
     let ty = COIL.inputs.iter().position(|x| x.key() == "type").unwrap();
     d.form.values[ty] = json!("height_pitch");
     assert!(shown(&d).contains(&"pitch") && !shown(&d).contains(&"revolutions"));
+    assert!(shown(&d).contains(&"angle"));
     d.form.values[ty] = json!("spiral");
     assert!(!d.ready(), "a spiral coil isn't built");
+    assert!(!shown(&d).contains(&"angle"), "a spiral has no taper");
   }
 
   /// `ui:dialogs:pipe-rows`: Pipe waits for a path (OK greyed, Fusion's prompt), chains the

@@ -266,10 +266,16 @@ impl Ctx<'_> {
           return Err("the picked faces run along the plane: none can move onto it".into());
         }
         for (bi, list) in by_body {
+          // a body of several lumps (a Combine Join of separate bodies) stays one body, as in
+          // Fusion; only lumps the replacement cuts apart become bodies of their own
+          let lumps = self.state.bodies[bi].shape.solid_count();
           let shape = replace(&self.state.bodies[bi].shape, &list, &ext, size)?;
+          let more = shape.solid_count() > lumps;
           let bid = self.state.bodies[bi].id;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
-          self.split_multi(id, bid);
+          if more {
+            self.split_multi(id, bid);
+          }
         }
         Ok(None)
       }

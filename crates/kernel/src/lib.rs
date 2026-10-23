@@ -745,8 +745,25 @@ impl Shape {
     height: f64,
     left: bool,
   ) -> Result<Shape> {
+    self.tapered_helix_sweep(origin, dir, xdir, radius, pitch, height, left, 0.0)
+  }
+
+  /// [`Shape::helix_sweep`] round a cone: the helix's radius grows by `tan(taper)` per unit of
+  /// height (`taper` in radians; negative narrows it), as Coil's Angle.
+  #[allow(clippy::too_many_arguments)]
+  pub fn tapered_helix_sweep(
+    &self,
+    origin: DVec3,
+    dir: DVec3,
+    xdir: DVec3,
+    radius: f64,
+    pitch: f64,
+    height: f64,
+    left: bool,
+    taper: f64,
+  ) -> Result<Shape> {
     let axis = [origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, xdir.x, xdir.y, xdir.z];
-    Shape::wrap(sys::helix_sweep(self.get()?, &axis, radius, pitch, height, left)?)
+    Shape::wrap(sys::helix_sweep(self.get()?, &axis, radius, pitch, height, left, taper)?)
   }
 
   /// A face or shell thickened into a solid (positive = along the face normals).

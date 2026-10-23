@@ -103,11 +103,18 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::Coil { plane, at, diameter, pitch, height, section, section_size, left, operation } => {
+      FeatureKind::Coil { plane, at, diameter, pitch, height, section, section_size, left, angle, operation } => {
         let pl = self.resolve_plane(plane)?;
         let (r, p, h, s) = (self.len(diameter)? / 2.0, self.len(pitch)?, self.len(height)?, self.len(section_size)?);
         if r <= 0.0 || p <= 0.0 || h <= 0.0 || s <= 0.0 {
           return Err("diameter, pitch, height and section size must be positive".into());
+        }
+        let taper = if angle.trim().is_empty() { 0.0 } else { self.angle(angle)? };
+        if taper.abs() >= 89.9f64.to_radians() {
+          return Err("the angle must be under 90 degrees".into());
+        }
+        if s / 2.0 >= r + h * taper.tan() {
+          return Err("the angle narrows the coil to nothing before its end".into());
         }
         if s >= p && *section != CoilSection::Circular || s >= p * 0.999 {
           return Err("the section is too big for the pitch (the turns would overlap)".into());
@@ -130,7 +137,7 @@ impl Ctx<'_> {
           CoilSection::TriangleIn => lp(&[[half, -half], [half, half], [-half, 0.0]]),
         };
         let face = Shape::face(&sec, &Profile { outer, holes: vec![] }).map_err(ke)?;
-        let coil = face.helix_sweep(o, d, x, r, p, h, *left).map_err(ke)?;
+        let coil = face.tapered_helix_sweep(o, d, x, r, p, h, *left, taper).map_err(ke)?;
         self.operate(id, coil, *operation)?;
         Ok(None)
       }

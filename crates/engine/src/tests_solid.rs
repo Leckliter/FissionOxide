@@ -596,3 +596,32 @@ fn replace_face_tangent_chain_over_rounds() {
   let m = s.model.bodies[0].shape.mass().unwrap();
   assert!((m.bbox_max.z - 15.0).abs() < 1e-6 && (m.bbox_max.y - m.bbox_min.y - 20.0).abs() < 1e-6, "{m:?}");
 }
+
+/// Replace Face on one lump of a body made by joining two separate boxes (the first with rounded
+/// top edges): the body keeps both lumps as one body, as in Fusion.
+#[test]
+fn replace_face_keeps_a_two_lump_body_whole() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 40, "depth": 20, "height": 10}));
+  let b = &s.model.bodies[0];
+  let edges: Vec<Value> = b
+    .edges()
+    .iter()
+    .filter(|e| e.length > 39.0 && e.mid.z > 9.0)
+    .map(|e| json!({"body": b.id.0, "edge": e.id}))
+    .collect();
+  run(&mut s, "fillet", json!({"edges": edges, "radius": 2}));
+  run(&mut s, "box", json!({"at": [80, 0], "width": 20, "depth": 20, "height": 10, "operation": "new_body"}));
+  let (b1, b2) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+  run(&mut s, "combine", json!({"target": b1, "tools": [b2], "operation": "join"}));
+  assert_eq!(s.model.bodies.len(), 1);
+  assert_eq!(s.model.bodies[0].shape.solid_count(), 2, "one body of two lumps");
+  let b = &s.model.bodies[0];
+  let top = json!({"body": b.id.0, "face": b.faces().iter().find(|f| f.normal.z > 0.99 && f.origin.z > 9.0 && f.center.x < 60.0).unwrap().id});
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 15}));
+  let up = s.design.features.last().unwrap().id.0;
+  run(&mut s, "replace_face", json!({"faces": [top], "target": {"feature": up}, "tangent_chain": true}));
+  assert_eq!(s.model.bodies.len(), 1, "still one body row");
+  assert_eq!(s.model.bodies[0].shape.solid_count(), 2);
+  assert!((volume(&s) - 12_000.0 - 4000.0).abs() < 1e-2, "{}", volume(&s));
+}

@@ -83,6 +83,7 @@
 #include <GeomAPI_Interpolate.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_BezierCurve.hxx>
+#include <Geom_ConicalSurface.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <TColStd_Array1OfInteger.hxx>
 #include <TColStd_Array1OfReal.hxx>
@@ -2375,21 +2376,32 @@ rust::Vec<double> min_distance(const Shape &a, const Shape &b) {
 }
 
 // Sweeps a profile (a face or wire in the plane through the axis and xdir, at the helix start
-// origin + radius·xdir) along a helix. axis: origin(3) dir(3) xdir(3).
+// origin + radius·xdir) along a helix; a taper (radians, positive widening as it rises) runs the
+// helix round a cone instead of a cylinder. axis: origin(3) dir(3) xdir(3).
 std::unique_ptr<Shape> helix_sweep(const Shape &profile, rust::Slice<const double> axis, double radius, double pitch,
-                                   double height, bool left) {
+                                   double height, bool left, double taper) {
   FOX_TRY
   need(axis, 9, "helix axis");
   if (radius <= 0 || pitch <= 0 || height <= 0) throw std::runtime_error("radius, pitch and height must be positive");
   if (height / pitch > 400) throw std::runtime_error("too many turns (at most 400)");
+  if (std::abs(taper) >= M_PI / 2 - 1e-3) throw std::runtime_error("the taper angle must be under 90 degrees");
+  if (radius + height * std::tan(taper) <= 0) throw std::runtime_error("the taper closes the coil before its end");
   gp_Ax3 ax(pnt(axis, 0), dir(axis, 3), dir(axis, 6));
-  Handle(Geom_CylindricalSurface) cyl = new Geom_CylindricalSurface(ax, radius);
-  gp_Dir2d d2(left ? -2.0 * M_PI : 2.0 * M_PI, pitch);
+  // along the surface's v a turn climbs the pitch: on a cone v runs along its slant
+  bool tapered = std::abs(taper) > 1e-9;
+  double dv = tapered ? pitch / std::cos(taper) : pitch;
+  Handle(Geom_Surface) surf;
+  if (tapered) {
+    surf = new Geom_ConicalSurface(ax, taper, radius);
+  } else {
+    surf = new Geom_CylindricalSurface(ax, radius);
+  }
+  gp_Dir2d d2(left ? -2.0 * M_PI : 2.0 * M_PI, dv);
   gp_Lin2d line(gp_Pnt2d(0.0, 0.0), d2);
   double turns = height / pitch;
-  double len = turns * std::sqrt(4.0 * M_PI * M_PI + pitch * pitch);
+  double len = turns * std::sqrt(4.0 * M_PI * M_PI + dv * dv);
   Handle(Geom2d_TrimmedCurve) seg = GCE2d_MakeSegment(line, 0.0, len);
-  TopoDS_Edge e = BRepBuilderAPI_MakeEdge(seg, cyl);
+  TopoDS_Edge e = BRepBuilderAPI_MakeEdge(seg, surf);
   BRepLib::BuildCurves3d(e, 1e-6, GeomAbs_C1, 14, 400);
   TopoDS_Wire spine = BRepBuilderAPI_MakeWire(e);
   TopoDS_Wire w;

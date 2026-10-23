@@ -220,6 +220,24 @@ fn coil_and_pipe() {
   // wire length ≈ turns × circumference, section π r²
   let expected = 3.0 * (std::f64::consts::PI * 20.0f64).hypot(5.0) * std::f64::consts::PI;
   assert!((v - expected).abs() / expected < 0.05, "{v} vs {expected}");
+  // Coil's Angle tapers it: 15° widens it as it rises, -15° narrows it, the height stays
+  for (angle, wider) in [(15.0, true), (-15.0, false)] {
+    let mut t = Session::default();
+    let p = json!({"diameter": 20, "pitch": 5, "revolutions": 3, "section_size": 2, "angle": format!("{angle} deg")});
+    run(&mut t, "coil", p);
+    assert!(t.model.errors().is_empty(), "{:?}", t.model.errors());
+    let m = t.model.bodies[0].shape.mass().unwrap();
+    let top = 10.0 + 15.0 * f64::tan(f64::to_radians(angle));
+    let w = m.bbox_max.x - m.bbox_min.x;
+    assert_eq!(w > 22.5, wider, "{angle}°: {w}");
+    assert!((m.bbox_max.z - m.bbox_min.z - 17.0).abs() < 0.5, "{m:?}");
+    // the last turn runs at the tapered radius
+    assert!(m.bbox_max.x.max(-m.bbox_min.x) < top.max(10.0) + 1.5, "{angle}°: {m:?}");
+  }
+  let mut t = Session::default();
+  let p = json!({"diameter": 20, "pitch": 5, "revolutions": 3, "section_size": 2, "angle": "-60 deg"});
+  let r = t.execute("coil", &p).unwrap();
+  assert!(r["error"].as_str().is_some_and(|e| e.contains("narrows")), "a taper that closes the coil fails: {r}");
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xz"}));
   run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30], [20, 30]]}));

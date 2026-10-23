@@ -2551,6 +2551,58 @@ fn box_is_drawn_on_a_picked_plane_before_its_dialog_opens() {
   assert_eq!(h.app.s.model.bodies.len(), 1, "the box is previewed");
 }
 
+/// `ui:dialogs:primitive-drawing-extras`: Box's base sizes are typed into its heads-up boxes:
+/// `8 Tab 8 Enter` sets the length and the width and finishes the base, as in Fusion, whether
+/// the keys come a frame each or all in one frame (as fast typing delivers them); Backspace takes
+/// a typed character back.
+#[test]
+fn box_base_takes_typed_sizes_and_enter_finishes_it() {
+  for variant in 0..3 {
+    let mut h = Harness::new();
+    h.app.cam.set_view(fox_engine::render::StandardView::Top);
+    h.app.start(crate::dialogs::Kind::Box);
+    for _ in 0..90 {
+      h.frame(vec![]);
+    }
+    let c = h.app.canvas.center();
+    h.move_then_click(c + vec2(30.0, 20.0));
+    h.move_then_click(c);
+    h.frame(vec![Event::PointerMoved(c + vec2(60.0, -40.0))]);
+    h.frame(vec![]);
+    match variant {
+      0 => {
+        for ev in [typing("8"), vec![key(egui::Key::Tab)], typing("8"), vec![key(egui::Key::Enter)]] {
+          h.frame(ev);
+          h.frame(vec![]);
+        }
+      }
+      1 => {
+        let mut ev = typing("8");
+        ev.push(key(egui::Key::Tab));
+        ev.extend(typing("8"));
+        ev.push(key(egui::Key::Enter));
+        h.frame(ev);
+      }
+      _ => {
+        let mut ev = typing("8");
+        ev.push(key(egui::Key::Tab));
+        ev.extend(typing("9"));
+        h.frame(ev);
+        let mut ev = vec![key(egui::Key::Backspace)];
+        ev.extend(typing("8"));
+        ev.push(key(egui::Key::Enter));
+        h.frame(ev);
+      }
+    }
+    for _ in 0..3 {
+      h.frame(vec![]);
+    }
+    let d = h.app.dialog.as_ref().expect("the dialog is open");
+    assert!(!d.placing(), "variant {variant}: Enter finishes the base: {:?}", d.prompt(false));
+    assert_eq!(d.box_sizes(), ["8 mm", "8 mm"], "variant {variant}");
+  }
+}
+
 /// ui-status-readouts: hovering a face prints nothing in the status bar; a click selects the edge
 /// and a Ctrl+click on a face adds it, the readout counting both kinds with their least distance.
 #[test]

@@ -56,7 +56,7 @@ struct Entity {
 }
 
 /// `{body}`, `{body, face}`, `{body, edge}`, `{point: [x,y,z]}` (a point in space), or a
-/// selection item (`{"type": "face", ...}`, a sketch curve or sketch point too).
+/// selection item (`{"type": "face", ...}`, a body vertex, a sketch curve or a sketch point too).
 fn entity(s: &Session, v: &Value) -> Result<Entity, CmdError> {
   if let Some(sel) = v.get("type").and_then(Value::as_str) {
     let mut v = v.clone();
@@ -77,7 +77,9 @@ fn entity(s: &Session, v: &Value) -> Result<Entity, CmdError> {
         let (sk, plane) = crate::properties::solved(s, sketch)?;
         let q = sk.pos(fox_sketch::PointId(req_u32(&v, "point")?)).ok_or(CmdError::new("no such sketch point"))?;
         let plane = plane.ok_or(CmdError::new("the sketch has no plane"))?;
-        entity(s, &json!({"point": plane.to_world(q).to_array()}))
+        let mut e = entity(s, &json!({"point": plane.to_world(q).to_array()}))?;
+        e.props["sketch_point"] = json!(true);
+        Ok(e)
       }
       o => Err(CmdError::new(format!("can't measure a {o}"))),
     };
