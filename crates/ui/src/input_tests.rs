@@ -3460,10 +3460,13 @@ fn manufacture_has_no_timeline_and_new_setup_previews_its_stock() {
   assert!(!crate::viewport::scene_options(&mut h.app).toolpaths);
 }
 
-/// `ui:manufacture:cam-browser`: the Manufacture navigation bar gains Tool Visibility after the
-/// usual icons; its fly-out's Show Tool draws the tool, Show Tool on Cursor (Ctrl+T) is greyed.
+/// `ui:manufacture:navbar-cam-icons`: the Manufacture navigation bar gains Fusion's six CAM
+/// icons after the usual ones, each with a fly-out arrow: Toolpath, Synchronize Active Setup,
+/// Stock, Machine, Tool and Turning Profile Visibility. Tool Visibility's fly-out is a narrow list
+/// of check boxes: Show Tool, Show Tool Holder, Show Tool Shaft (checked), and a greyed Show Tool
+/// on Cursor (Ctrl+T).
 #[test]
-fn manufacture_adds_tool_visibility_to_the_navigation_bar() {
+fn manufacture_adds_the_cam_icons_to_the_navigation_bar() {
   let mut h = Harness::new();
   h.app.run("box", json!({"width": 60, "depth": 40, "height": 20}));
   h.frame(vec![]);
@@ -3474,31 +3477,70 @@ fn manufacture_adds_tool_visibility_to_the_navigation_bar() {
     h.frame(vec![]);
   }
   let bar = h.ctx.memory(|m| m.area_rect(egui::Id::new("navbar"))).unwrap();
-  // one more icon, its caret and a separator: 28 + 10 + 7
-  assert!((bar.width() - design.width() - 45.0).abs() < 2.0, "{design:?} -> {bar:?}");
-  // the icon is the last but its caret
-  let icon = egui::pos2(bar.right() - 10.0 - 14.0, bar.center().y);
-  let tip = h.rest(icon, 1.5);
-  assert!(tip.iter().any(|t| t == crate::navbar::TOOL_VISIBILITY), "{tip:?}");
-  h.move_then_click(icon);
-  assert!(egui::Popup::is_id_open(&h.ctx, egui::Id::new("nav-tool-visibility")));
-  let shown: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
-  for t in ["Show Tool", "Show Tool on Cursor", "Ctrl+T"] {
-    assert!(shown.iter().any(|s| s == t), "{t}: {shown:?}");
+  // six icons with their carets, after a separator: 6 x (28 + 10) + 7
+  assert!((bar.width() - design.width() - 235.0).abs() < 2.0, "{design:?} -> {bar:?}");
+  let names = crate::navbar::CAM_ICONS.map(|(_, n)| n);
+  assert_eq!(
+    names,
+    [
+      "Toolpath Visibility",
+      "Synchronize Active Setup",
+      "Stock Visibility",
+      "Machine Visibility",
+      "Tool Visibility",
+      "Turning Profile Visibility"
+    ]
+  );
+  // each icon's tooltip, left to right
+  let icon_at = |i: usize| egui::pos2(bar.right() - (6 - i) as f32 * 38.0 + 14.0, bar.center().y);
+  for (i, name) in names.iter().enumerate() {
+    let tip = h.rest(icon_at(i), 1.5);
+    assert!(tip.iter().any(|t| t == name), "{name}: {tip:?}");
+    h.frame(vec![Event::PointerMoved(egui::pos2(10.0, 10.0))]);
+  }
+  // Tool Visibility's fly-out: narrow, its three check boxes ticked
+  assert!(h.app.cam_show_tool && h.app.cam_tool_holder && h.app.cam_tool_shaft);
+  let tool = icon_at(4);
+  h.move_then_click(tool);
+  assert!(egui::Popup::is_id_open(&h.ctx, egui::Id::new(("nav-cam", 4))));
+  let shown = h.frame_texts(1.0 / 60.0, vec![]);
+  for t in crate::navbar::TOOL_MENU.iter().chain(&["Ctrl+T"]) {
+    assert!(shown.iter().any(|(_, s)| s == t), "{t}: {shown:?}");
+  }
+  let menu = h.ctx.memory(|m| m.area_rect(egui::Id::new(("nav-cam", 4)))).expect("the fly-out");
+  assert!(menu.width() < 190.0, "a narrow list: {menu:?}");
+  // Show Tool unticks (the holder and shaft rows grey), and ticks again
+  let show = h.find(vec![], "Show Tool").unwrap();
+  h.move_then_click(show.center());
+  assert!(!h.app.cam_show_tool, "Show Tool unticks");
+  if h.find(vec![], "Show Tool").is_none() {
+    h.move_then_click(tool);
   }
   let show = h.find(vec![], "Show Tool").unwrap();
   h.move_then_click(show.center());
-  assert!(h.app.cam_show_tool, "Show Tool ticks");
+  assert!(h.app.cam_show_tool);
+  if h.find(vec![], "Show Tool Holder").is_none() {
+    h.move_then_click(tool);
+  }
+  let holder = h.find(vec![], "Show Tool Holder").unwrap();
+  h.move_then_click(holder.center());
+  assert!(!h.app.cam_tool_holder, "Show Tool Holder unticks");
   if h.find(vec![], "Show Tool on Cursor").is_none() {
-    h.move_then_click(icon);
+    h.move_then_click(tool);
   }
   let cursor = h.find(vec![], "Show Tool on Cursor").unwrap();
   h.move_then_click(cursor.center());
-  assert!(h.app.cam_show_tool, "the greyed row does nothing");
-  // drawn with the toolpaths
+  assert!(h.app.cam_show_tool && !h.app.cam_tool_holder, "the greyed row does nothing");
+  // drawn with the toolpaths, with what's ticked
   h.app.run("cam.setup", json!({}));
   h.frame(vec![]);
-  assert!(crate::viewport::scene_options(&mut h.app).show_tool);
+  let opts = crate::viewport::scene_options(&mut h.app);
+  assert!(opts.show_tool && opts.tool_shaft && !opts.tool_holder);
+  // Toolpath Visibility and Stock Visibility hide their parts
+  h.app.cam_paths_hidden = true;
+  h.app.cam_stock_hidden = true;
+  let opts = crate::viewport::scene_options(&mut h.app);
+  assert!(opts.toolpaths && opts.hide_paths && opts.hide_stock);
   h.app.cam_setups_hidden = true;
   assert!(!crate::viewport::scene_options(&mut h.app).show_tool, "nothing drawn with the setups hidden");
   // the Design workspace's bar is the usual one

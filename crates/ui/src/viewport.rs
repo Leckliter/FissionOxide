@@ -1221,6 +1221,14 @@ pub(crate) fn view_params(app: &App) -> serde_json::Value {
     v["toolpaths"] = json!(app.s.toolpaths_of.map(|t| t.1));
     if app.cam_show_tool {
       v["show_tool"] = json!(true);
+      v["tool_holder"] = json!(app.cam_tool_holder);
+      v["tool_shaft"] = json!(app.cam_tool_shaft);
+    }
+    if app.cam_paths_hidden {
+      v["hide_paths"] = json!(true);
+    }
+    if app.cam_stock_hidden {
+      v["hide_stock"] = json!(true);
     }
   }
   // New Setup shows its stock translucent (see `cam_ui::setup_preview`), not as the outline

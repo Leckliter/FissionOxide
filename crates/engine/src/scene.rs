@@ -237,8 +237,12 @@ pub struct ViewOptions {
   /// Leave the stock box's outline out of the toolpaths (New Setup shows the stock itself).
   pub hide_stock: bool,
   /// Draw the shown toolpath's tool at its first cutting move (the Manufacture navigation bar's
-  /// Tool Visibility ▸ Show Tool).
+  /// Tool Visibility ▸ Show Tool), with its shaft and holder (Show Tool Shaft, Show Tool Holder).
   pub show_tool: bool,
+  pub tool_shaft: bool,
+  pub tool_holder: bool,
+  /// Leave the toolpaths' own lines out (Toolpath Visibility ▸ Show Toolpath unchecked).
+  pub hide_paths: bool,
   /// Draw the previewed 2D cut job (`cut.job.preview`) while it matches the design.
   pub cut: bool,
   /// Draw a simulation study's results (or mesh) instead of its bodies (the Simulation
@@ -869,9 +873,9 @@ impl SceneBuilder {
       }
     }
     if opts.toolpaths {
-      toolpath_lines(&mut scene, s, !opts.hide_stock);
+      toolpath_lines(&mut scene, s, !opts.hide_stock, !opts.hide_paths);
       if opts.show_tool {
-        tool_lines(&mut scene, s);
+        tool_lines(&mut scene, s, opts.tool_shaft, opts.tool_holder);
       }
       simulated_stock(&mut scene, s);
     }
@@ -1914,6 +1918,9 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
   o.toolpaths = p.get("toolpaths").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   o.hide_stock = p.get("hide_stock").and_then(serde_json::Value::as_bool).unwrap_or(false);
   o.show_tool = p.get("show_tool").and_then(serde_json::Value::as_bool).unwrap_or(false);
+  o.tool_shaft = p.get("tool_shaft").and_then(serde_json::Value::as_bool).unwrap_or(false);
+  o.tool_holder = p.get("tool_holder").and_then(serde_json::Value::as_bool).unwrap_or(false);
+  o.hide_paths = p.get("hide_paths").and_then(serde_json::Value::as_bool).unwrap_or(false);
   o.cut = p.get("cut").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   if let Some(v) = p.get("sim").filter(|v| !v.is_null()) {
     o.sim = Some(crate::sim::view_of(s, v)?);
@@ -1970,7 +1977,7 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
 }
 
 /// Toolpaths (cutting moves blue, rapids dashed orange) and the stock box of their setup.
-fn toolpath_lines(scene: &mut Scene, s: &Session, stock: bool) {
+fn toolpath_lines(scene: &mut Scene, s: &Session, stock: bool, paths: bool) {
   let line = |scene: &mut Scene, pts: Vec<[f32; 3]>, color: [u8; 4], dashed: bool, width: f32| {
     scene.lines.push(Polyline {
       points: pts,
@@ -2002,6 +2009,9 @@ fn toolpath_lines(scene: &mut Scene, s: &Session, stock: bool) {
       line(scene, vec![c(x, y, lo.z), c(x, y, hi.z)], [120, 130, 150, 255], true, 1.0);
     }
   }
+  if !paths {
+    return;
+  }
   for tp in &s.toolpaths {
     let mut run: Vec<[f32; 3]> = Vec::new();
     let mut rapid = false;
@@ -2031,7 +2041,7 @@ fn toolpath_lines(scene: &mut Scene, s: &Session, stock: bool) {
 /// The first toolpath's tool where its first cutting move starts, as a grey wireframe: the
 /// flutes' cylinder (its tip ring and the ring where the flutes end, four lines between) and
 /// the shank above, along the tool axis.
-fn tool_lines(scene: &mut Scene, s: &Session) {
+fn tool_lines(scene: &mut Scene, s: &Session, shaft: bool, holder: bool) {
   let Some((tp, i)) = s.toolpaths.iter().find_map(|tp| tp.moves.iter().position(|m| !m.rapid).map(|i| (tp, i))) else {
     return;
   };
@@ -2050,7 +2060,32 @@ fn tool_lines(scene: &mut Scene, s: &Session) {
       .collect()
   };
   let grey = [110, 115, 125, 255];
-  let mut line = |points: Vec<[f32; 3]>| {
+  let mut out: Vec<Vec<[f32; 3]>> = Vec::new();
+  let barrel = |out: &mut Vec<Vec<[f32; 3]>>, from: DVec3, to: DVec3, r: f64| {
+    for k in 0..4 {
+      let a = k as f64 * std::f64::consts::FRAC_PI_2;
+      let d = (u * a.cos() + v * a.sin()) * r;
+      out.push(vec![(from + d).as_vec3().to_array(), (to + d).as_vec3().to_array()]);
+    }
+  };
+  let top = tip + axis * flutes;
+  // the shaft runs on as far again as the flutes; the holder grips its end
+  let end = if shaft { top + axis * flutes } else { top };
+  barrel(&mut out, tip, end, r);
+  out.push(ring(tip, r));
+  out.push(ring(top, r));
+  if shaft {
+    out.push(ring(end, r));
+  }
+  if holder {
+    // a generic holder: a body a few tool diameters across and as long as the flutes and shaft
+    let (hr, hl) = ((r * 2.5).max(r + 6.0), (flutes * 2.0).max(20.0));
+    let far = end + axis * hl;
+    barrel(&mut out, end, far, hr);
+    out.push(ring(end, hr));
+    out.push(ring(far, hr));
+  }
+  for points in out {
     scene.lines.push(Polyline {
       points,
       color: grey,
@@ -2060,17 +2095,7 @@ fn tool_lines(scene: &mut Scene, s: &Session) {
       dashed: false,
       dash_dot: false,
       behind: false,
-    })
-  };
-  let top = tip + axis * flutes;
-  let shank = top + axis * flutes;
-  line(ring(tip, r));
-  line(ring(top, r));
-  line(ring(shank, r));
-  for k in 0..4 {
-    let a = k as f64 * std::f64::consts::FRAC_PI_2;
-    let d = (u * a.cos() + v * a.sin()) * r;
-    line(vec![(tip + d).as_vec3().to_array(), (shank + d).as_vec3().to_array()]);
+    });
   }
 }
 

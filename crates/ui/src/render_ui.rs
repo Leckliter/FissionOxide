@@ -1192,6 +1192,11 @@ mod tests {
     app.run("render.material.apply", json!({"material": "Gold - Polished", "faces": [{"point": [0, 0, 10]}]}));
     app.run("render.material.apply", json!({"material": "Rubber - Black", "body": body}));
     let (mut scene, picks) = app.scene.build(&app.s, &ViewOptions::default());
+    // the viewport's own ground, shadow and reflection effects stay out (In-canvas Render casts
+    // its own soft shadow): only the body's meshes are drawn
+    let bare = scene.meshes.len();
+    crate::navbar::dress(&app, &mut scene);
+    assert_eq!(scene.meshes.len(), bare, "no effect meshes under In-canvas Render");
     let look = viewport_look(&mut app, &mut scene, &picks).expect("a look in the Render workspace");
     assert_eq!(look.materials.len(), scene.meshes.len());
     let names: Vec<&str> = look.materials.iter().flatten().map(|m| m.name.as_str()).collect();

@@ -35,10 +35,14 @@ pub struct Look<'a> {
 /// Largest environment texture width uploaded.
 const ENV_WIDTH: u32 = 512;
 const SHADOW_SIZE: i32 = 2048;
-/// How dark the ground's shadow gets. The path tracer darkens a ground point by 0.85 for each of
-/// the environment's light directions the model blocks; this map holds only the key light's, so it
-/// takes about the part of the light that comes from there, for the same soft grey shadow.
-const SHADOW_STRENGTH: f32 = 0.5;
+/// How dark the ground's shadow gets: faint, as Fusion's in-canvas render (the Photo Booth's light
+/// comes from all round, so one direction blocked takes little of it).
+const SHADOW_STRENGTH: f32 = 0.3;
+/// How much of a body's light its own shadow takes.
+const SELF_SHADOW: f32 = 0.35;
+/// How far from straight down the shadow falls at most, in degrees: Fusion's soft shadows pool
+/// under the model rather than running off along a low key light.
+const SHADOW_TILT: f32 = 25.0;
 
 const PBR_VS: &str = r#"
 uniform mat4 u_vp;
@@ -96,6 +100,8 @@ vec3 tone(vec3 c) {
   vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
   return mix(lo, hi, step(vec3(0.0031308), c));
 }
+// soft: the occlusion averaged over a wide disc (about 2% of the shadow map's reach), so the
+// shadow's edge fades as Fusion's does
 float shadow_at(vec3 p) {
   if (u_shadow_on == 0) return 0.0;
   vec4 c = u_light_vp * vec4(p, 1.0);
@@ -103,13 +109,17 @@ float shadow_at(vec3 p) {
   if (q.x <= 0.0 || q.x >= 1.0 || q.y <= 0.0 || q.y >= 1.0 || q.z >= 1.0) return 0.0;
   vec2 texel = 1.0 / vec2(textureSize(u_shadow, 0));
   float s = 0.0;
-  for (int y = -2; y <= 2; y++) {
-    for (int x = -2; x <= 2; x++) {
-      float d = texture(u_shadow, q.xy + vec2(float(x), float(y)) * texel * 1.5).r;
-      s += q.z - 0.002 > d ? 1.0 : 0.0;
+  float n = 0.0;
+  for (int y = -4; y <= 4; y++) {
+    for (int x = -4; x <= 4; x++) {
+      vec2 o = vec2(float(x), float(y));
+      float w = max(0.0, 1.0 - dot(o, o) / 25.0);
+      float d = texture(u_shadow, q.xy + o * texel * 5.0).r;
+      s += (q.z - 0.002 > d ? 1.0 : 0.0) * w;
+      n += w;
     }
   }
-  return s / 25.0;
+  return s / n;
 }
 "#;
 
@@ -167,7 +177,7 @@ void main() {
   vec2 ab = env_brdf(nv, rough);
   vec3 spec = env_at(r, rough * u_env_levels) * (f0 * ab.x + ab.y);
   float fd = 1.0 - (f0d + (1.0 - f0d) * pow(1.0 - nv, 5.0));
-  float shade = 1.0 - 0.6 * shadow_at(v_wpos + n * 0.01);
+  float shade = 1.0 - SELF_SHADOW * shadow_at(v_wpos + n * 0.01);
   vec3 diffuse = sh_irr(n) * base * (1.0 - metallic) * (1.0 - trans) * fd * shade;
   vec3 c = diffuse + spec * mix(1.0, shade, 0.5);
   // the point lights: Lambert and GGX, as the path tracer's next-event estimate
@@ -326,7 +336,8 @@ impl Pbr {
       .replace("COMMON", &common)
       .replace("ID_COLOR", crate::gl::ID_COLOR)
       .replace("PROJ_UV", crate::gl::PROJ_UV)
-      .replace("MAX_LIGHTS", &MAX_LIGHTS.to_string());
+      .replace("MAX_LIGHTS", &MAX_LIGHTS.to_string())
+      .replace("SELF_SHADOW", &format!("{SELF_SHADOW:.3}"));
     let common_u =
       ["u_env", "u_env_levels", "u_env_rot", "u_sh", "u_exposure", "u_tone", "u_shadow", "u_light_vp", "u_shadow_on"];
     let mut mesh_u = vec![
@@ -410,7 +421,7 @@ impl Pbr {
     let on = look.lights.iter().filter(|l| l.on).take(MAX_LIGHTS);
     self.lights = on.clone().map(|l| l.position).collect();
     self.light_rad = on.map(|l| l.radiant().to_array()).collect();
-    self.light_vp = light_matrix(self.key, lo, hi);
+    self.light_vp = light_matrix(shadow_direction(self.key), lo, hi);
     self.shadow_dirty = true;
     self.materials.clear();
     for (i, m) in look.materials.iter().enumerate() {
@@ -734,6 +745,18 @@ pub(crate) struct MeshView {
   pub eye: [f32; 3],
   pub head: [f32; 3],
   pub persp: bool,
+}
+
+/// Where the shadow is cast from: the key light's side, tipped up to within [`SHADOW_TILT`] of
+/// straight overhead.
+fn shadow_direction(key: Vec3) -> Vec3 {
+  let key = if key.length_squared() < 1e-6 { Vec3::Z } else { key.normalize() };
+  let flat = Vec3::new(key.x, key.y, 0.0);
+  if flat.length_squared() < 1e-9 {
+    return Vec3::Z;
+  }
+  let tilt = key.z.clamp(-1.0, 1.0).acos().min(SHADOW_TILT.to_radians());
+  flat.normalize() * tilt.sin() + Vec3::Z * tilt.cos()
 }
 
 /// An orthographic projection looking along `-key` that holds the model's box.

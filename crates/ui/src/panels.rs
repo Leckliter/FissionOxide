@@ -2758,16 +2758,18 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
         let c = nav_caret(ui, "Viewports");
         egui::Popup::menu(&v).show(|ui| crate::viewports::menu(app, ui));
         egui::Popup::menu(&c).show(|ui| crate::viewports::menu(app, ui));
-        // the Manufacture workspace adds its CAM display icon after the usual ones
+        // the Manufacture workspace adds its six CAM display icons after the usual ones, each
+        // with a fly-out arrow
         if app.manufacture {
           nav_sep(ui);
-          let hint = crate::navbar::TOOL_VISIBILITY;
-          let t = tip(icons::icon_button(ui, Icon::ToolVisibility, 28.0, "", false, None), hint);
-          let c = nav_caret(ui, hint);
-          egui::Popup::menu(&t).id(egui::Id::new("nav-tool-visibility")).show(|ui| crate::navbar::tool_menu(app, ui));
-          egui::Popup::menu(&c)
-            .id(egui::Id::new("nav-tool-visibility-caret"))
-            .show(|ui| crate::navbar::tool_menu(app, ui));
+          for (i, (icon, hint)) in crate::navbar::CAM_ICONS.into_iter().enumerate() {
+            let t = tip(icons::icon_button(ui, icon, 28.0, "", false, None), hint);
+            let c = nav_caret(ui, hint);
+            egui::Popup::menu(&t).id(egui::Id::new(("nav-cam", i))).show(|ui| crate::navbar::cam_menu(app, ui, i));
+            egui::Popup::menu(&c)
+              .id(egui::Id::new(("nav-cam-caret", i)))
+              .show(|ui| crate::navbar::cam_menu(app, ui, i));
+          }
         }
       });
     });

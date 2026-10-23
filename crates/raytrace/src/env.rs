@@ -461,7 +461,7 @@ pub fn preset_map(p: Preset) -> (u32, u32, Vec<Vec3>) {
   // the studios' floor: a pool of light under the lights, fading out toward the horizon, so the
   // ground reads as a floor (and Flatten Ground lays the pool under the model)
   let pool: Option<Vec3> = match p {
-    Preset::Studio => Some(lin([164, 164, 166])),
+    Preset::Studio => Some(lin([214, 214, 216])),
     Preset::Soft => Some(lin([200, 200, 200])),
     Preset::Sunset => Some(lin([214, 178, 138])),
     Preset::Dark => Some(lin([46, 46, 50])),
@@ -480,11 +480,13 @@ pub fn preset_map(p: Preset) -> (u32, u32, Vec<Vec3>) {
       let d = Vec3::new(theta.sin() * phi.cos(), theta.sin() * phi.sin(), theta.cos());
       let up = d.z;
       let mut c = match p {
+        // Fusion's Photo Booth: light grey walls and floor round the soft boxes, so its default
+        // satin steel renders bright (ui:render:in-canvas-body-shading)
         Preset::Studio => {
           if up >= 0.0 {
-            lin([150, 152, 156]).lerp(lin([96, 98, 102]), up.powf(0.6))
+            lin([226, 228, 232]).lerp(lin([196, 198, 202]), up.powf(0.6))
           } else {
-            lin([120, 120, 122]).lerp(lin([60, 60, 62]), (-up).powf(0.5))
+            lin([190, 190, 192]).lerp(lin([150, 150, 152]), (-up).powf(0.5))
           }
         }
         Preset::Soft => {
