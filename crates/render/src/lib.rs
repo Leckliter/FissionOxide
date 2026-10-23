@@ -442,7 +442,8 @@ pub struct Marker {
 /// Fusion's default, Shaded, draws the bodies' edges in light grey and lets them be picked, so
 /// [`VisualStyle::Shaded`] draws them too. Shaded with Visible Edges Only draws them dark instead
 /// (see [`Scene::restyle_edges`]) and outlines curved faces with their silhouettes, the crisp
-/// line look of Fusion's older default.
+/// line look of Fusion's older default; Shaded with Hidden Edges draws the same and adds the
+/// edges behind the surfaces, faint dark dashes through the shading.
 ///
 /// Body surfaces are the meshes marked [`Mesh::analyze`]; their edges are the depth-tested lines
 /// with a pick id (sketch profiles, the grid and construction geometry draw as they always do).
@@ -525,14 +526,16 @@ impl VisualStyle {
   }
 
   /// Body silhouettes are drawn as edges: in every style that doesn't shade the surfaces, and in
-  /// Shaded with Visible Edges Only, whose dark outlines set it apart from Shaded.
+  /// the shaded styles with dark edges, whose outlines set them apart from Shaded.
   pub fn silhouettes(self) -> bool {
-    !self.shaded() || self == VisualStyle::ShadedVisibleEdges
+    !self.shaded() || self.dark_edges()
   }
 
-  /// Body edges are drawn dark ([`SILHOUETTE_COLOR`]) rather than in the scene's light grey.
+  /// Body edges are drawn dark ([`SILHOUETTE_COLOR`]) rather than in the scene's light grey: in
+  /// Shaded with Visible Edges Only and in Shaded with Hidden Edges, whose hidden edges would
+  /// vanish into the shading in the light grey.
   pub fn dark_edges(self) -> bool {
-    self == VisualStyle::ShadedVisibleEdges
+    matches!(self, VisualStyle::ShadedVisibleEdges | VisualStyle::ShadedHiddenEdges)
   }
 
   /// Edges behind the surfaces show, dashed.
@@ -1821,7 +1824,10 @@ mod tests {
     assert_eq!(VisualStyle::default(), VisualStyle::Shaded);
     for s in VisualStyle::ALL {
       assert_eq!(VisualStyle::parse(s.name()), Some(s));
-      assert_eq!(s.silhouettes(), !s.shaded() || s == VisualStyle::ShadedVisibleEdges);
+      assert_eq!(
+        s.silhouettes(),
+        !s.shaded() || matches!(s, VisualStyle::ShadedVisibleEdges | VisualStyle::ShadedHiddenEdges)
+      );
       assert!(!(s.shaded() && s.line_drawing()));
     }
     assert_eq!(VisualStyle::parse("Hidden_Line"), Some(VisualStyle::HiddenLine));
@@ -1969,9 +1975,57 @@ mod tests {
     assert_eq!(s.lines[0].color, SILHOUETTE_COLOR, "a plain edge turns dark");
     assert_eq!(s.lines[1].color, [10, 131, 252, 255], "a selected edge keeps its blue");
     assert_eq!(s.lines[2].color, plain, "the grid and other unpickable lines stay");
+    let mut s = Scene { lines: lines.clone(), style: VisualStyle::ShadedHiddenEdges, ..Default::default() };
+    s.restyle_edges(plain);
+    assert_eq!(s.lines[0].color, SILHOUETTE_COLOR, "Shaded with Hidden Edges darkens them too");
     let mut s = Scene { lines, style: VisualStyle::Shaded, ..Default::default() };
     s.restyle_edges(plain);
     assert_eq!(s.lines[0].color, plain, "Shaded keeps them light grey");
+  }
+
+  /// Shaded with Hidden Edges, as the app dresses it (the light grey body edges restyled): the
+  /// edge behind a body face shows through it as faint dashes that stand out from the shading,
+  /// where Shaded hides it.
+  #[test]
+  fn shaded_with_hidden_edges_shows_the_hidden_edges_through_the_body() {
+    let plain = [179, 178, 173, 255];
+    let draw = |style: VisualStyle| {
+      let mut cam = Camera::default();
+      cam.set_view(StandardView::Top);
+      cam.distance = 100.0;
+      let mut face = quad(5.0, [205, 200, 190, 255], 1);
+      face.analyze = true;
+      let edge = Polyline {
+        points: vec![[-10.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+        color: plain,
+        width: 1.0,
+        id: 3,
+        on_top: false,
+        dashed: false,
+        dash_dot: false,
+        behind: false,
+      };
+      let mut scene = Scene {
+        meshes: vec![face],
+        lines: vec![edge],
+        background_top: [255; 4],
+        background_bottom: [255; 4],
+        style,
+        ..Default::default()
+      };
+      scene.restyle_edges(plain);
+      render(&scene, &cam, 200, 100)
+    };
+    let sum = |c: &[u8; 3]| c.iter().map(|&v| v as i32).sum::<i32>();
+    let (hidden, _) = row_and_face(&draw(VisualStyle::ShadedHiddenEdges));
+    let (shaded, _) = row_and_face(&draw(VisualStyle::Shaded));
+    // Shaded: only the body's smooth shading along the edge's row
+    let (lo, hi) = (shaded.iter().map(sum).min().unwrap(), shaded.iter().map(sum).max().unwrap());
+    assert!(hi - lo < 12, "Shaded hides it: {shaded:?}");
+    // the same pixels in Shaded with Hidden Edges: dark dashes with the shading between them
+    let ink: Vec<i32> = shaded.iter().zip(&hidden).map(|(a, b)| sum(a) - sum(b)).collect();
+    assert!(ink.iter().any(|&d| d > 120), "the hidden edge stands out: {hidden:?} over {shaded:?}");
+    assert!(ink.iter().any(|&d| d.abs() < 6), "dashed: {hidden:?}");
   }
 
   /// Two boxes, one standing on a wide slab, from the side and above.
