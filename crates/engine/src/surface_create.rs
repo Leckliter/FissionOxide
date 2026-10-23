@@ -155,7 +155,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         return Err(CmdError::new("a loft needs at least two sections"));
       }
       s.edit_sketch = None;
-      add_feature(s, FeatureKind::SurfaceLoft { sections, closed: flag("closed") })
+      let mut rails = Vec::new();
+      for v in p.get("rails").and_then(Value::as_array).into_iter().flatten() {
+        rails.push(crate::solid::path_ref(s, v)?);
+      }
+      let centerline = p.get("centerline").filter(|v| !v.is_null()).map(|v| crate::solid::path_ref(s, v)).transpose()?;
+      add_feature(s, FeatureKind::SurfaceLoft { sections, closed: flag("closed"), rails, centerline })
     })(),
     _ => return None,
   })

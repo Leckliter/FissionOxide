@@ -1219,6 +1219,14 @@ fn view_params(app: &App) -> serde_json::Value {
     v["toolpaths"] = json!(app.s.toolpaths_of.map(|t| t.1));
     if app.cam_show_tool {
       v["show_tool"] = json!(true);
+      v["tool_holder"] = json!(app.cam_tool_holder);
+      v["tool_shaft"] = json!(app.cam_tool_shaft);
+    }
+    if app.cam_paths_hidden {
+      v["hide_paths"] = json!(true);
+    }
+    if app.cam_stock_hidden {
+      v["hide_stock"] = json!(true);
     }
   }
   // New Setup shows its stock translucent (see `cam_ui::setup_preview`), not as the outline
@@ -5337,7 +5345,10 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
     // in the way of the profiles on them; an open Offset Plane takes a plane clicked here
     let takes_axis = app.dialog.as_ref().map(|d| d.takes_origin_axis());
     let offset = app.dialog.as_ref().is_some_and(|d| d.takes_plane());
-    if app.dialog.as_ref().is_none_or(|d| d.wants_origin() || d.takes_origin_axis() || offset)
+    // a selection row that takes a plane (Replace Face's Target Faces, Split Body's Splitting
+    // Tool(s)) lights up the planes under the pointer too, empty or not
+    let plane_row = app.dialog.as_ref().is_some_and(|d| d.row_takes_plane());
+    if app.dialog.as_ref().is_none_or(|d| d.wants_origin() || d.takes_origin_axis() || offset || plane_row)
       && app.drag.is_none()
       && let Some(pos) = resp.hover_pos()
     {
@@ -5346,7 +5357,7 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
       let ray = |p| view.ray(&cam, p);
       app.hover_origin = crate::origin::under(app, pos, &project, &ray)
         .filter(|i| takes_axis != Some(true) || crate::origin::OriginItem::AXES.contains(i))
-        .filter(|i| !offset || i.plane().is_some());
+        .filter(|i| !(offset || plane_row) || i.plane().is_some());
       if app.hover_origin.is_none() && app.sel_filter.construction && takes_axis != Some(true) {
         app.hover_cplane = crate::construction::under(app, pos, &ray);
       }

@@ -451,15 +451,23 @@ fn show_tool_draws_the_tool_at_the_first_cut() {
   };
   let without = lines(&mut sb, json!({"toolpaths": 1}));
   assert!(crate::scene::view_options(&s, &json!({"toolpaths": 1, "show_tool": true})).unwrap().show_tool);
-  let with = lines(&mut sb, json!({"toolpaths": 1, "show_tool": true}));
-  // three rings (tip, flutes' end, shank) and four lines along it
-  assert_eq!(with, without + 7);
-  let opts = crate::scene::view_options(&s, &json!({"toolpaths": 1, "show_tool": true})).unwrap();
+  // the flutes alone: four lines along them and two rings (tip, flutes' end)
+  assert_eq!(lines(&mut sb, json!({"toolpaths": 1, "show_tool": true})), without + 6);
+  // Show Tool Shaft: the lines run on to a third ring at the shaft's end
+  let shaft = json!({"toolpaths": 1, "show_tool": true, "tool_shaft": true});
+  assert_eq!(lines(&mut sb, shaft.clone()), without + 7);
+  // Show Tool Holder: a wider barrel above it (four lines, two rings)
+  let all = json!({"toolpaths": 1, "show_tool": true, "tool_shaft": true, "tool_holder": true});
+  assert_eq!(lines(&mut sb, all), without + 13);
+  // Toolpath Visibility ▸ Show Toolpath unchecked: the stock stays, the paths go
+  let bare = lines(&mut sb, json!({"toolpaths": 1, "hide_paths": true}));
+  assert!(bare < without, "{bare} of {without}");
+  let opts = crate::scene::view_options(&s, &shaft).unwrap();
   let scene = sb.build(&s, &opts).0;
   let tp = &s.toolpaths[0];
   let i = tp.moves.iter().position(|m| !m.rapid).unwrap();
   let tip = tp.moves[i - 1].to;
-  let ring = &scene.lines[scene.lines.len() - 7];
+  let ring = &scene.lines[scene.lines.len() - 3];
   for p in &ring.points {
     let d = DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64) - tip;
     assert!(d.z.abs() < 1e-3 && (d.truncate().length() - 3.0).abs() < 1e-3, "{d:?}");

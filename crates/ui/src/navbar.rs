@@ -656,23 +656,66 @@ pub fn grid_menu(app: &mut App, ui: &mut egui::Ui, adaptive_now: f64) {
   }
 }
 
-/// The Manufacture workspace's extra navigation bar icon, after Viewports.
+/// Tool Visibility, one of the Manufacture workspace's navigation bar icons.
 pub const TOOL_VISIBILITY: &str = "Tool Visibility";
 
-/// Tool Visibility's fly-out, Fusion's two check boxes: Show Tool draws the shown toolpath's
-/// tool at its first cut; Show Tool on Cursor (Ctrl+T), which snaps the tool to the pointer for
-/// clearance checks, is greyed: FissionOxide doesn't draw a tool under the pointer.
-pub const TOOL_MENU: [&str; 2] = ["Show Tool", "Show Tool on Cursor"];
+/// The Manufacture workspace's navigation bar icons after the usual ones, in Fusion's order, each
+/// with a fly-out arrow.
+pub const CAM_ICONS: [(Icon, &str); 6] = [
+  (Icon::ToolpathVisibility, "Toolpath Visibility"),
+  (Icon::SyncSetup, "Synchronize Active Setup"),
+  (Icon::StockVisibility, "Stock Visibility"),
+  (Icon::MachineVisibility, "Machine Visibility"),
+  (Icon::ToolVisibility, TOOL_VISIBILITY),
+  (Icon::TurningProfileVisibility, "Turning Profile Visibility"),
+];
+
+/// Tool Visibility's fly-out, Fusion's narrow list of check boxes: Show Tool draws the shown
+/// toolpath's tool at its first cut, Show Tool Holder and Show Tool Shaft its holder and shaft
+/// (all three checked to start); Show Tool on Cursor (Ctrl+T), which snaps the tool to the
+/// pointer for clearance checks, is greyed: FissionOxide doesn't draw a tool under the pointer.
+pub const TOOL_MENU: [&str; 4] = ["Show Tool", "Show Tool Holder", "Show Tool Shaft", "Show Tool on Cursor"];
+
+/// How wide the CAM icons' fly-outs are (Fusion's Tool Visibility list is about 150 px).
+pub const CAM_MENU_WIDTH: f32 = 156.0;
+
+/// The fly-out of the CAM icon `i` of [`CAM_ICONS`]. Fusion's other fly-outs aren't recorded yet:
+/// each holds its icon's one switch, greyed where FissionOxide has nothing to show (no machine
+/// models, no turning).
+pub fn cam_menu(app: &mut App, ui: &mut egui::Ui, i: usize) {
+  ui.set_width(CAM_MENU_WIDTH);
+  let greyed = |ui: &mut egui::Ui, label: &str, why: &str| {
+    ui.add_enabled(false, egui::Checkbox::new(&mut false, label)).on_disabled_hover_text(why);
+  };
+  match i {
+    0 => {
+      let mut on = !app.cam_paths_hidden;
+      if ui.checkbox(&mut on, "Show Toolpath").changed() {
+        app.cam_paths_hidden = !on;
+      }
+    }
+    1 => greyed(ui, "Synchronize Active Setup", "FissionOxide's setups don't follow the browser yet"),
+    2 => {
+      let mut on = !app.cam_stock_hidden;
+      if ui.checkbox(&mut on, "Show Stock").changed() {
+        app.cam_stock_hidden = !on;
+      }
+    }
+    3 => greyed(ui, "Show Machine", "FissionOxide has no machine models yet"),
+    4 => tool_menu(app, ui),
+    _ => greyed(ui, "Show Turning Profile", "FissionOxide has no turning setups yet"),
+  }
+}
 
 pub fn tool_menu(app: &mut App, ui: &mut egui::Ui) {
-  ui.set_min_width(210.0);
+  ui.set_width(CAM_MENU_WIDTH);
   ui.checkbox(&mut app.cam_show_tool, TOOL_MENU[0]);
+  ui.add_enabled(app.cam_show_tool, egui::Checkbox::new(&mut app.cam_tool_holder, TOOL_MENU[1]));
+  ui.add_enabled(app.cam_show_tool, egui::Checkbox::new(&mut app.cam_tool_shaft, TOOL_MENU[2]));
   ui.horizontal(|ui| {
-    let mut on = false;
-    ui.add_enabled(false, egui::Checkbox::new(&mut on, TOOL_MENU[1]));
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-      ui.add_enabled(false, egui::Label::new(RichText::new("Ctrl+T").color(theme::MUTED)));
-    });
+    ui.add_enabled(false, egui::Checkbox::new(&mut false, TOOL_MENU[3]))
+      .on_disabled_hover_text("FissionOxide doesn't draw the tool under the pointer yet");
+    ui.add_enabled(false, egui::Label::new(RichText::new("Ctrl+T").color(theme::MUTED)));
   });
 }
 

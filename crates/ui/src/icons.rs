@@ -88,6 +88,17 @@ pub enum Icon {
   Viewports,
   /// The Manufacture navigation bar's Tool Visibility: an end mill, shank up.
   ToolVisibility,
+  /// The Manufacture navigation bar's Toolpath Visibility: a blue zigzag pass over a dashed
+  /// orange rapid.
+  ToolpathVisibility,
+  /// The Manufacture navigation bar's Synchronize Active Setup: two arrows chasing round.
+  SyncSetup,
+  /// The Manufacture navigation bar's Stock Visibility: a stock block, dashed edges.
+  StockVisibility,
+  /// The Manufacture navigation bar's Machine Visibility: a machine frame round a spindle.
+  MachineVisibility,
+  /// The Manufacture navigation bar's Turning Profile Visibility: a half profile on its axis.
+  TurningProfileVisibility,
   // timeline
   ToStart,
   StepBack,
@@ -1319,6 +1330,32 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.08, 0.12), (0.92, 0.12), (0.92, 0.88), (0.08, 0.88)], White);
       k.line((0.5, 0.12), (0.5, 0.88), Ink);
       k.line((0.08, 0.5), (0.92, 0.5), Ink);
+    }
+    Icon::ToolpathVisibility => {
+      k.dashed((0.1, 0.18), (0.9, 0.18), Orange);
+      k.path(&[(0.1, 0.36), (0.9, 0.36), (0.9, 0.56), (0.1, 0.56), (0.1, 0.76), (0.9, 0.76)], Blue);
+      k.thick((0.9, 0.18), (0.9, 0.36), Orange, 0.8);
+    }
+    Icon::SyncSetup => {
+      k.arc((0.5, 0.5), 0.32, 0.4, 2.9, Ink);
+      k.fill(&[(0.13, 0.5), (0.27, 0.38), (0.27, 0.6)], Ink);
+      k.arc((0.5, 0.5), 0.32, 3.54, 6.04, Blue);
+      k.fill(&[(0.87, 0.5), (0.73, 0.62), (0.73, 0.4)], Blue);
+    }
+    Icon::StockVisibility => {
+      k.block(0.1, 0.34, 0.66, 0.9, 0.24, BlueLight, Blue, BlueDark);
+      k.dashed((0.1, 0.34), (0.34, 0.1), Ink);
+      k.dashed((0.34, 0.1), (0.9, 0.1), Ink);
+    }
+    Icon::MachineVisibility => {
+      k.closed(&[(0.1, 0.92), (0.1, 0.08), (0.9, 0.08), (0.9, 0.92)], Ink);
+      k.solid(&[(0.4, 0.14), (0.6, 0.14), (0.6, 0.48), (0.4, 0.48)], White);
+      k.solid(&[(0.45, 0.48), (0.55, 0.48), (0.55, 0.62), (0.45, 0.62)], Fill);
+      k.solid(&[(0.18, 0.74), (0.82, 0.74), (0.82, 0.86), (0.18, 0.86)], Blue);
+    }
+    Icon::TurningProfileVisibility => {
+      k.dashed((0.06, 0.78), (0.94, 0.78), Ink);
+      k.path(&[(0.12, 0.78), (0.12, 0.42), (0.38, 0.42), (0.38, 0.22), (0.7, 0.22), (0.88, 0.4), (0.88, 0.78)], Blue);
     }
     Icon::ToolVisibility => {
       k.solid(&[(0.34, 0.06), (0.66, 0.06), (0.66, 0.46), (0.34, 0.46)], White);

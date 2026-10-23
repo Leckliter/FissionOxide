@@ -540,7 +540,7 @@ cmds! {
   "mesh.separate" => "Separate: split a mesh body into one body per connected shell", "{body, type?: shells, keep_body?}";
   "mesh.scale" => "Scale Mesh: scale mesh bodies about a point (default their centre), uniformly or per axis", "{bodies, center?: [x,y,z], scale_type?: uniform|non_uniform, factor? | x, y, z}";
   "surface.sweep" => "Surface body swept from sketch curves or profile boundaries along a path", "{sketch?, curves?, profiles?, path: sketch id, path_curves?: [id], orientation?: perpendicular|parallel}";
-  "surface.loft" => "Surface body lofted through sections: a sketch's profile boundary or curves, in order", "{sections: [sketch id | {sketch, profile?: [x,y], curves?: [id]}], closed?}";
+  "surface.loft" => "Surface body lofted through sections: a sketch's profile boundary or curves, in order, its sides following rails or the sections placed along a centre line", "{sections: [sketch id | {sketch, profile?: [x,y], curves?: [id]}], closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}}";
   "sketch.lift" => "3D Sketch: moves curves just drawn off the sketch plane by `offset` along its normal, as 3D sketch curves (a shape started on a model point off the plane); they are sweep paths and rails, never part of a profile", "{sketch?, curves: [id], offset}";
   "sketch.line3d" => "3D Sketch line: segments through world points, off the sketch plane (Fusion's 3D Sketch); they are sweep paths and rails, never part of a profile", "{sketch?, points: [[x,y,z], ...]}";
   "sketch.dimension_label" => "Move a placed sketch dimension's value (drag its text): where it sits sets its offset and side; null puts it back at the default", "{sketch?, constraint, at: [x,y] | null}";

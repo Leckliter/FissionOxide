@@ -199,3 +199,88 @@ fn the_ground_is_the_background_not_a_dark_slab() {
     assert!(darkest > 80, "a soft grey shadow, not a black one: {darkest}");
   }
 }
+
+/// A box from `lo` to `hi` with a flat normal per face.
+fn cube(lo: [f32; 3], hi: [f32; 3], id: u32) -> Mesh {
+  let mut m = Mesh { id, color: [186, 190, 196, 255], analyze: true, ..Default::default() };
+  let p = |x: usize, y: usize, z: usize| [[lo[0], hi[0]][x], [lo[1], hi[1]][y], [lo[2], hi[2]][z]];
+  let faces: [([f32; 3], [[usize; 3]; 4]); 6] = [
+    ([0.0, 0.0, 1.0], [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]]),
+    ([0.0, 0.0, -1.0], [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]]),
+    ([1.0, 0.0, 0.0], [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]]),
+    ([-1.0, 0.0, 0.0], [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]]),
+    ([0.0, 1.0, 0.0], [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]]),
+    ([0.0, -1.0, 0.0], [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]]),
+  ];
+  for (n, quad) in faces {
+    let base = m.positions.len() as u32;
+    for c in quad {
+      m.positions.push(p(c[0], c[1], c[2]));
+      m.normals.push(n);
+    }
+    m.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+  }
+  m
+}
+
+/// `ui:render:in-canvas-body-shading`: In-canvas Render on a new design's scene draws two boxes
+/// with the default appearance (Steel - Satin) as bright satin steel, light grey with highlights,
+/// over faint, soft shadows that stay near the boxes, as Fusion's.
+#[test]
+fn default_steel_renders_bright_with_faint_soft_shadows() {
+  let Ok(h) = fox_render_gl::headless::context() else {
+    eprintln!("skipped: no OpenGL context");
+    return;
+  };
+  let gl = &h.gl;
+  let Ok(mut r) = Renderer::new(gl) else { return };
+  let environment = Environment::new_design();
+  let grey = environment.background_color;
+  let env = EnvMap::build(&environment).unwrap();
+  let camera = RenderCamera::default();
+  let (w, hgt) = (320, 200);
+  let cam = Camera { target: [0.0, 0.0, 10.0], distance: 220.0, pitch: 0.5, ..Camera::default() };
+  let scene = Scene {
+    meshes: vec![cube([-45.0, -20.0, 0.0], [-5.0, 20.0, 30.0], 5), cube([5.0, -20.0, 0.0], [45.0, 20.0, 20.0], 6)],
+    ..Default::default()
+  };
+  let steel = fox_raytrace::material::default_material();
+  assert_eq!(steel.name, "Steel - Satin");
+  let materials = vec![Some(steel.clone()), Some(steel)];
+  let origins = vec![[-25.0, 0.0, 15.0], [25.0, 0.0, 10.0]];
+  r.set_scene(gl, &scene, false).unwrap();
+  let look = Look {
+    env: &env,
+    environment: &environment,
+    camera: &camera,
+    materials: &materials,
+    origins: &origins,
+    bounds: ([-45.0, -20.0, 0.0], [45.0, 20.0, 30.0]),
+    lights: &[],
+  };
+  r.set_look(gl, Some(&look)).unwrap();
+  r.draw(gl, &cam, w, hgt).unwrap();
+  let gpu = r.read_rgba(gl).unwrap();
+  let ids = r.read_ids(gl).unwrap();
+  if let Ok(dir) = std::env::var("FOX_PREVIEW_DIR") {
+    image::save_buffer(format!("{dir}/steel.png"), &gpu, w, hgt, image::ExtendedColorType::Rgba8).unwrap();
+  }
+  let px = |i: usize| &gpu[i * 4..i * 4 + 3];
+  let lum = |c: &[u8]| (c[0] as f32 * 0.2126 + c[1] as f32 * 0.7152 + c[2] as f32 * 0.0722) / 255.0;
+  // the bodies: light grey steel, not charcoal, with some highlight
+  let body: Vec<f32> = (0..ids.ids.len()).filter(|i| ids.ids[*i] != 0).map(|i| lum(px(i))).collect();
+  assert!(body.len() > 3000, "the boxes are on screen ({})", body.len());
+  let mean = body.iter().sum::<f32>() / body.len() as f32;
+  let darkest_face = body.iter().copied().fold(1.0, f32::min);
+  let brightest = body.iter().copied().fold(0.0, f32::max);
+  eprintln!("steel: mean {mean:.2}, darkest {darkest_face:.2}, brightest {brightest:.2}");
+  assert!(mean > 0.55, "bright satin steel, not near black: {mean}");
+  assert!(darkest_face > 0.3, "no charcoal faces: {darkest_face}");
+  // the ground: the grey background with a faint shadow that stays close to the boxes
+  let ground: Vec<usize> = (0..ids.ids.len()).filter(|i| ids.ids[*i] == 0).collect();
+  let shadowed = ground.iter().filter(|i| px(**i) != grey).count();
+  let darkest = ground.iter().map(|i| px(*i)[0]).min().unwrap();
+  eprintln!("ground: {shadowed} of {} shadowed, darkest {darkest}", ground.len());
+  assert!(darkest as f32 > grey[0] as f32 * 0.65, "a faint shadow, not a dark one: {darkest}");
+  assert!(shadowed * 5 < ground.len(), "the shadow doesn't run far across the ground: {shadowed}");
+}

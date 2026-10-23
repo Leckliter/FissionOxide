@@ -315,6 +315,8 @@ pub(crate) mod ffi {
     ) -> Result<UniquePtr<Shape>>;
     fn sweep_open(profile: &Shape, spine: &Shape, parallel: bool) -> Result<UniquePtr<Shape>>;
     fn loft_open(sections: &Shape, closed: bool) -> Result<UniquePtr<Shape>>;
+    fn loft_open_rails(sections: &Shape, rails: &Shape) -> Result<UniquePtr<Shape>>;
+    fn loft_open_centerline(sections: &Shape, centerline: &Shape) -> Result<UniquePtr<Shape>>;
   }
 }
 
