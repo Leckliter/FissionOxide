@@ -1627,6 +1627,57 @@ fn thicken_joined(skin: &Shape, t: f64, symmetric: bool, round: bool) -> Option<
   a.boolean(&b, BoolOp::Union).ok()
 }
 
+/// Curves' segments (one list per curve) joined end to end into chains.
+fn chains(mut pieces: Vec<Vec<Seg>>) -> Vec<Vec<Seg>> {
+  let near = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-6;
+  let ends = |v: &[Seg]| (v[0].start(), v[v.len() - 1].end());
+  let flip = |v: &[Seg]| v.iter().rev().map(Seg::reversed).collect::<Vec<_>>();
+  let mut out = Vec::new();
+  while let Some(mut chain) = pieces.pop() {
+    loop {
+      let (s, e) = ends(&chain);
+      let touches = |p: &Vec<Seg>| {
+        let (a, b) = ends(p);
+        near(a, e) || near(b, e) || near(a, s) || near(b, s)
+      };
+      let Some(i) = pieces.iter().position(touches) else { break };
+      let p = pieces.swap_remove(i);
+      let (a, b) = ends(&p);
+      chain = if near(a, e) {
+        chain.into_iter().chain(p).collect()
+      } else if near(b, e) {
+        chain.into_iter().chain(flip(&p)).collect()
+      } else if near(b, s) {
+        p.into_iter().chain(chain).collect()
+      } else {
+        flip(&p).into_iter().chain(chain).collect()
+      };
+    }
+    out.push(chain);
+  }
+  out
+}
+
+/// Split Face's Extend Splitting Tool for curves: a chain's end lines run on `by` past their
+/// open ends, so the tool crosses the faces (closed chains and curved ends stay as drawn).
+fn extend_ends(segs: &mut [Seg], by: f64) {
+  let (Some(first), Some(last)) = (segs.first().map(Seg::start), segs.last().map(Seg::end)) else { return };
+  if (first[0] - last[0]).hypot(first[1] - last[1]) < 1e-9 {
+    return;
+  }
+  let stretch = |from: [f64; 2], to: [f64; 2]| {
+    let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+    let len = dx.hypot(dy);
+    if len < 1e-12 { to } else { [to[0] + dx / len * by, to[1] + dy / len * by] }
+  };
+  if let Some(Seg::Line { a, b }) = segs.first_mut() {
+    *a = stretch(*b, *a);
+  }
+  if let Some(Seg::Line { a, b }) = segs.last_mut() {
+    *b = stretch(*a, *b);
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -1681,56 +1732,5 @@ mod tests {
     let line = serde_json::json!({"type": "two_edges", "a": {"sketch": 3, "curve": 3}, "b": {"type": "construction", "feature": 5}});
     let def: PointDef = serde_json::from_value(line).unwrap();
     assert_eq!(def.depends_on(), vec![FeatureId(3), FeatureId(5)]);
-  }
-}
-
-/// Curves' segments (one list per curve) joined end to end into chains.
-fn chains(mut pieces: Vec<Vec<Seg>>) -> Vec<Vec<Seg>> {
-  let near = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-6;
-  let ends = |v: &[Seg]| (v[0].start(), v[v.len() - 1].end());
-  let flip = |v: &[Seg]| v.iter().rev().map(Seg::reversed).collect::<Vec<_>>();
-  let mut out = Vec::new();
-  while let Some(mut chain) = pieces.pop() {
-    loop {
-      let (s, e) = ends(&chain);
-      let touches = |p: &Vec<Seg>| {
-        let (a, b) = ends(p);
-        near(a, e) || near(b, e) || near(a, s) || near(b, s)
-      };
-      let Some(i) = pieces.iter().position(touches) else { break };
-      let p = pieces.swap_remove(i);
-      let (a, b) = ends(&p);
-      chain = if near(a, e) {
-        chain.into_iter().chain(p).collect()
-      } else if near(b, e) {
-        chain.into_iter().chain(flip(&p)).collect()
-      } else if near(b, s) {
-        p.into_iter().chain(chain).collect()
-      } else {
-        flip(&p).into_iter().chain(chain).collect()
-      };
-    }
-    out.push(chain);
-  }
-  out
-}
-
-/// Split Face's Extend Splitting Tool for curves: a chain's end lines run on `by` past their
-/// open ends, so the tool crosses the faces (closed chains and curved ends stay as drawn).
-fn extend_ends(segs: &mut [Seg], by: f64) {
-  let (Some(first), Some(last)) = (segs.first().map(Seg::start), segs.last().map(Seg::end)) else { return };
-  if (first[0] - last[0]).hypot(first[1] - last[1]) < 1e-9 {
-    return;
-  }
-  let stretch = |from: [f64; 2], to: [f64; 2]| {
-    let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
-    let len = dx.hypot(dy);
-    if len < 1e-12 { to } else { [to[0] + dx / len * by, to[1] + dy / len * by] }
-  };
-  if let Some(Seg::Line { a, b }) = segs.first_mut() {
-    *a = stretch(*b, *a);
-  }
-  if let Some(Seg::Line { a, b }) = segs.last_mut() {
-    *b = stretch(*a, *b);
   }
 }

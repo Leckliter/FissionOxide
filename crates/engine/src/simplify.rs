@@ -159,7 +159,7 @@ fn recognise(s: &Session, b: BodyId) -> Result<Vec<Found>, CmdError> {
       .iter()
       .filter(|u| u.face == base && u.wire == w)
       .filter_map(|u| edges.iter().find(|e| e.id == u.edge))
-      .filter_map(|e| if e.faces[0] == base { Some(e.faces[1]) } else { Some(e.faces[0]) })
+      .map(|e| if e.faces[0] == base { e.faces[1] } else { e.faces[0] })
       .filter(|g| *g != base && *g != 0)
       .collect();
     if seeds.is_empty() || seeds.iter().any(|g| holes.contains(g)) {
