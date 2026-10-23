@@ -196,7 +196,10 @@ fn object_visibility_and_grid_spacing() {
   let yz = fox_kernel::Plane::YZ;
   let preview = lines(&mut b, &ViewOptions { grid_plane: Some(yz), hide_origin: true, ..Default::default() });
   let preview: Vec<_> = preview.iter().filter(|l| l.behind).collect();
-  assert_eq!(preview.len(), grid(&plain) - 3, "the same grid, without the origin stubs");
+  // a sketch's grid, without the origin stubs: finer and wider than the 3D one
+  let n = scene::grid_reach(&s, scene::sketch_grid_step(&s), true) as usize;
+  assert!(n > (grid(&plain) - 3) / 4, "{n}");
+  assert_eq!(preview.len(), 2 * (2 * n + 1), "a sketch's grid, without the origin stubs");
   assert!(preview.iter().all(|l| l.points.iter().all(|p| p[0].abs() < 1e-6)), "the grid lies in YZ");
 
   // hidden sketches stay shown while one is edited
@@ -204,6 +207,33 @@ fn object_visibility_and_grid_spacing() {
   run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [5, 5]}));
   let editing = b.build(&s, &ViewOptions { hide_sketches: true, ..Default::default() }).0;
   assert!(editing.lines.iter().any(|l| l.on_top), "the open sketch is drawn");
+}
+
+/// `ui:sketch:entry-scale-grid-steps` and `ui:sketch:axis-lines-in-sketch`: a sketch in an
+/// empty mm design has Fusion's 5 mm minor and 25 mm major grid steps, and with `grid_axes` its
+/// X axis is a red line and its Y axis a green one across the whole grid, along the sketch's own
+/// axes.
+#[test]
+fn a_sketch_grid_has_fusions_steps_and_red_and_green_axis_lines() {
+  let mut s = Session::default();
+  assert_eq!(scene::grid_step(&s), 10.0, "the 3D grid is unchanged");
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  assert_eq!(scene::grid_step(&s), 5.0);
+  let plane = s.model.sketches[&s.edit_sketch.unwrap()].plane;
+  let mut b = SceneBuilder::default();
+  let lines = b.build(&s, &ViewOptions { hide_origin: true, grid_axes: true, ..Default::default() }).0.lines;
+  let ext = scene::grid_reach(&s, 5.0, true) as f64 * 5.0;
+  assert!(ext >= 125.0, "the grid reaches Fusion's -125 label: {ext}");
+  let world = |p: [f64; 2]| plane.to_world(p).as_vec3().to_array();
+  for (col, a, b) in
+    [(scene::ORIGIN_X_COLOR, [-ext, 0.0], [ext, 0.0]), (scene::ORIGIN_Y_COLOR, [0.0, -ext], [0.0, ext])]
+  {
+    let axis: Vec<_> = lines.iter().filter(|l| l.color == col).collect();
+    assert_eq!(axis.len(), 1, "{col:?}");
+    assert_eq!(axis[0].points, vec![world(a), world(b)], "{col:?} runs along the sketch's axis");
+  }
+  let no_axes = b.build(&s, &ViewOptions { hide_origin: true, ..Default::default() }).0.lines;
+  assert!(!no_axes.iter().any(|l| l.color == scene::ORIGIN_X_COLOR));
 }
 
 /// While a sketch is edited, its fully constrained curves draw black and the free ones blue,

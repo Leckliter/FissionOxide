@@ -1006,6 +1006,115 @@ fn fillet_rows_before_and_after_the_first_pick() {
   assert!(typed.iter().any(|t| t == "2.00 mm"), "the setback box mirrors the radius: {typed:?}");
 }
 
+/// `ui:sketch:escape-ends-line-chain`: one Escape while the Line tool chains ends the chain and
+/// the command, as in Fusion; the lines drawn stay.
+#[test]
+fn one_escape_ends_a_line_chain_and_the_line_tool() {
+  use crate::viewport::Tool;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.app.set_tool(Tool::Line);
+  let c = h.app.canvas.center();
+  h.move_then_click(c);
+  h.move_then_click(c + vec2(120.0, -40.0));
+  h.frame(vec![Event::PointerMoved(c + vec2(180.0, 30.0))]);
+  h.frame(vec![]);
+  assert!(!h.app.tstate.is_empty(), "the chain's rubber band follows the pointer");
+  h.frame(vec![key(egui::Key::Escape)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.tool, Tool::Select, "one Escape ends the Line command");
+  assert!(h.app.tstate.is_empty());
+  assert_eq!(h.app.s.design.sketch(sk).unwrap().curves.len(), 1, "the line drawn stays");
+}
+
+impl Harness {
+  /// The text shapes drawn in a frame with `events` (with their angles).
+  fn frame_text_shapes(&mut self, events: Vec<Event>) -> Vec<egui::epaint::TextShape> {
+    fn walk(s: &egui::Shape, out: &mut Vec<egui::epaint::TextShape>) {
+      match s {
+        egui::Shape::Text(t) => out.push(t.clone()),
+        egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+        _ => {}
+      }
+    }
+    self.time += 1.0 / 60.0;
+    let input = RawInput {
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width, 900.0))),
+      time: Some(self.time),
+      events,
+      ..Default::default()
+    };
+    let app = &mut self.app;
+    let out = self.ctx.run_ui(input, |ui| app.draw(ui));
+    let mut all = Vec::new();
+    for c in &out.shapes {
+      walk(&c.shape, &mut all);
+    }
+    out.drop_without_applying_deltas();
+    all
+  }
+}
+
+/// `ui:sketch:rectangle-heads-up-layout`, `ui:sketch:heads-up-mm-decimals` and
+/// `ui:sketch:vertical-dimension-text`: a 2-point rectangle drawn from its lower left corner up
+/// and to the right shows its height box on the left edge (through the first corner) and its
+/// width box under the bottom edge, whichever has focus, each with three decimals in mm; typed
+/// sizes then dimension those same edges, the height's value turned to read upward.
+#[test]
+fn rectangle_boxes_and_dimensions_sit_on_the_first_corners_edges() {
+  use crate::viewport::Tool;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.app.cam_move = None;
+  h.app.set_tool(Tool::Rect);
+  let c = h.app.canvas.center();
+  let far = c + vec2(160.0, -120.0);
+  h.move_then_click(c);
+  h.frame(vec![Event::PointerMoved(far)]);
+  h.frame(vec![]);
+  let boxes = |h: &mut Harness| -> Vec<(Rect, String)> {
+    h.frame_texts(1.0 / 60.0, vec![]).into_iter().filter(|(_, t)| t.ends_with(" mm")).collect()
+  };
+  for focus in ["height", "width"] {
+    let b = boxes(&mut h);
+    assert_eq!(b.len(), 2, "{focus} focused: {b:?}");
+    for (_, t) in &b {
+      let decimals = t.trim_end_matches(" mm").split('.').nth(1).map_or(0, str::len);
+      assert_eq!(decimals, 3, "{t}");
+    }
+    let height = b.iter().find(|(r, _)| r.center().x < c.x).unwrap_or_else(|| panic!("{focus}: {b:?}"));
+    assert!(height.0.center().y < c.y && height.0.center().y > far.y, "{focus}: beside the left edge {b:?}");
+    let width = b.iter().find(|(r, _)| r.center().y > c.y).unwrap_or_else(|| panic!("{focus}: {b:?}"));
+    assert!(width.0.center().x > c.x && width.0.center().x < far.x, "{focus}: under the bottom edge {b:?}");
+    h.frame(vec![key(egui::Key::Tab)]);
+    h.frame(vec![]);
+  }
+  // typed: the height first (its box has focus again after two Tabs), then the width
+  h.frame(typing("30"));
+  h.frame(vec![]);
+  h.frame(vec![key(egui::Key::Tab)]);
+  h.frame(vec![]);
+  h.frame(typing("40"));
+  h.frame(vec![]);
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert_eq!(dims(&h.app, sk), [30.0, 40.0]);
+  h.frame(vec![Event::PointerMoved(c + vec2(300.0, 200.0))]);
+  let shapes = h.frame_text_shapes(vec![]);
+  let dim = |t: &str| shapes.iter().find(|s| s.galley.text() == t).unwrap_or_else(|| panic!("{t} is drawn"));
+  let (height, width) = (dim("30.00"), dim("40.00"));
+  assert!((height.angle + std::f32::consts::FRAC_PI_2).abs() < 1e-6, "30.00 reads upward: {}", height.angle);
+  assert_eq!(width.angle, 0.0, "40.00 reads level");
+  // the first corner was the lower left: the height is dimensioned on the left side
+  let (hb, wb) = (height.visual_bounding_rect(), width.visual_bounding_rect());
+  assert!(hb.center().x < c.x, "the height's value is left of the rectangle: {hb:?}");
+  assert!(wb.center().y > c.y, "the width's value is under it: {wb:?}");
+}
+
 /// Escape discards an unfinished spline of either kind and Enter commits it, as in Fusion (no
 /// kind commits on Escape).
 #[test]

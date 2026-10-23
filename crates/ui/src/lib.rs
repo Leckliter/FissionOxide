@@ -1653,6 +1653,11 @@ impl App {
       // the fillet or chamfer just applied stays; its value box closes and the tool ends
       sketch_modify::finish(self);
       self.tool = Tool::Select;
+    } else if self.tool == Tool::Line && !self.tstate.is_empty() {
+      // one Escape ends a line chain and the Line command with it, as in Fusion
+      self.end_hint();
+      viewport::reset_tool_state(self);
+      self.tool = Tool::Select;
     } else if !self.tstate.is_empty() {
       // an unfinished spline is discarded (Enter or its check mark commits it); with the
       // Select tool a stray pick state never keeps the selection
@@ -1977,6 +1982,13 @@ impl App {
       self.palette.slice = false;
       self.palette.sketch_3d = false;
       self.auto_look_at_sketch();
+      // in a design with no bodies Fusion also zooms out to its sketch scale: about 3.5 px per
+      // mm where the 3D view's home shows 5
+      if self.preferences.values.auto_look_at && self.s.model.bodies.is_empty() {
+        let mut to = self.view_now();
+        to.distance = SKETCH_ENTRY_VIEW_HEIGHT / (2.0 * (to.fov / 2.0).tan());
+        self.fly_to(to);
+      }
       self.tab = panels::Tab::Sketch;
       self.browser_sketches = Some(true);
       // as in Fusion, no tool is active until one is picked
@@ -2450,6 +2462,11 @@ fn raise_open_popups(ctx: &egui::Context) {
 
 /// How long a camera move takes (ViewCube, Home, Fit, Look At, a sketch opening and closing).
 const CAM_MOVE_SECS: f64 = 0.3;
+
+/// The height of the world (mm) Create Sketch shows in a design with no bodies: Fusion's
+/// sketch view on the ground plane of an empty mm design is about 3.5 px per mm, against the
+/// 3D home view's 5 (`Camera::default`'s 107 mm).
+const SKETCH_ENTRY_VIEW_HEIGHT: f64 = 153.0;
 
 /// The camera a fraction `k` of the way from `a` to `b`: the shorter way round in yaw and roll,
 /// and the distance changing by a steady factor. The projection switches on arrival.

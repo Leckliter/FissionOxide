@@ -147,6 +147,15 @@ pub fn length_text(unit: LengthUnit, mm: f64) -> String {
   format!("{} {}", length_number(unit, mm), unit.symbol())
 }
 
+/// A length (mm) in `unit` at the General precision with its trailing zeroes kept, as Fusion's
+/// live heads-up boxes show it ("22.833 mm", "15.750 mm"), never "-0.000".
+pub fn length_text_full(unit: LengthUnit, mm: f64) -> String {
+  let general = usize::from(DISPLAY.with(|p| p.get().general));
+  let s = format!("{:.*}", general, unit.from_mm(mm));
+  let zero = s.trim_start_matches('-').chars().all(|c| c == '0' || c == '.');
+  format!("{} {}", if zero { s.trim_start_matches('-') } else { &s }, unit.symbol())
+}
+
 /// The decimals an angle is shown with (Preferences' Angular precision, one by default).
 pub fn angle_decimals() -> usize {
   DISPLAY.with(|p| p.get().angular).into()

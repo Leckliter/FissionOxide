@@ -296,7 +296,7 @@ pub struct ViewOptions {
   /// options: what the sketch being edited draws.
   pub sketch_show: SketchShow,
   /// Draw the X (red) and Y (green) axis lines across the grid, as Fusion's Layout Grid in the
-  /// 3D view has them.
+  /// 3D view and an open sketch's grid have them.
   pub grid_axes: bool,
   /// Bodies drawn as ghosts ([`GHOST_COLOR`], dark edges): a Mirror's or pattern's previewed
   /// copies.
@@ -983,9 +983,25 @@ fn scene_size(s: &Session) -> f64 {
   s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0)
 }
 
-/// The grid's adaptive spacing: a tenth of the model's size, rounded to 1, 2 or 5 × 10^k.
+/// The grid's adaptive spacing: a tenth of the model's size, rounded to 1, 2 or 5 × 10^k; in a
+/// sketch the finer [`sketch_grid_step`].
 pub fn grid_step(s: &Session) -> f64 {
-  nice_step(scene_size(s) / 10.0)
+  if s.edit_sketch.is_some() { sketch_grid_step(s) } else { nice_step(scene_size(s) / 10.0) }
+}
+
+/// A sketch grid's adaptive spacing: a twentieth of the model's size, rounded to 1, 2 or 5 ×
+/// 10^k. Fusion's sketch on the ground plane of an empty mm design has minor lines every 5 mm
+/// and major (labelled) lines every 25 mm.
+pub fn sketch_grid_step(s: &Session) -> f64 {
+  nice_step(scene_size(s) / 20.0)
+}
+
+/// How many grid steps the grid reaches each way from the origin: the model's size, twice that
+/// in a sketch (Fusion's sketch grid fills the view: labels from -125 to 75 mm on entry in an
+/// empty mm design).
+pub fn grid_reach(s: &Session, step: f64, sketch: bool) -> i64 {
+  let size = scene_size(s) * if sketch { 2.0 } else { 1.0 };
+  ((size / step).ceil() as i64).clamp(2, 60)
 }
 
 /// The ground grid on the sketch plane (the XY plane outside a sketch, `on` when given), and
@@ -997,13 +1013,12 @@ fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Optio
     (None, Some(r)) => r.plane,
     (None, None) => Plane::XY,
   };
-  let size = scene_size(s);
-  let step = fixed.unwrap_or_else(|| grid_step(s));
-  let n = ((size / step).ceil() as i64).clamp(2, 60);
-  let ext = n as f64 * step;
-  // in a sketch (and its preview) the major lines (every fifth, the labelled ones) stand out
-  // more, as Fusion's do
+  // in a sketch (and its preview) the grid is finer and wider and the major lines (every fifth,
+  // the labelled ones) stand out more, as Fusion's do
   let editing = s.edit_sketch.is_some() || on.is_some();
+  let step = fixed.unwrap_or_else(|| if editing { sketch_grid_step(s) } else { grid_step(s) });
+  let n = grid_reach(s, step, editing);
+  let ext = n as f64 * step;
   let (major_col, minor_col) =
     if editing { ([168, 172, 178, 255], [222, 224, 228, 255]) } else { ([190, 193, 198, 255], [218, 220, 224, 255]) };
   for i in -n..=n {
@@ -1040,16 +1055,16 @@ fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Optio
   }
 }
 
-/// The Layout Grid's axis lines: world X in red and Y in green, across the grid's whole extent on
-/// the XY plane.
+/// The grid's axis lines, X in red and Y in green, across the grid's whole extent: the Layout
+/// Grid's on the XY plane, and an open sketch's along its own axes through its origin (Fusion
+/// draws them in a sketch whether or not the Origin folder is shown).
 fn grid_axis_lines(scene: &mut Scene, s: &Session, fixed: Option<f64>) {
+  let plane = s.edit_sketch.and_then(|e| s.model.sketches.get(&e)).map_or(Plane::XY, |r| r.plane);
   let step = fixed.unwrap_or_else(|| grid_step(s));
-  let ext = (((scene_size(s) / step).ceil() as i64).clamp(2, 60) as f64 * step) as f32;
-  for (a, b, col) in
-    [([-ext, 0.0, 0.0], [ext, 0.0, 0.0], ORIGIN_X_COLOR), ([0.0, -ext, 0.0], [0.0, ext, 0.0], ORIGIN_Y_COLOR)]
-  {
+  let ext = grid_reach(s, step, s.edit_sketch.is_some()) as f64 * step;
+  for (a, b, col) in [([-ext, 0.0], [ext, 0.0], ORIGIN_X_COLOR), ([0.0, -ext], [0.0, ext], ORIGIN_Y_COLOR)] {
     scene.lines.push(Polyline {
-      points: vec![a, b],
+      points: vec![plane.to_world(a).as_vec3().to_array(), plane.to_world(b).as_vec3().to_array()],
       color: col,
       width: 1.0,
       id: 0,

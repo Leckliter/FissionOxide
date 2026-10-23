@@ -271,8 +271,8 @@ enum Field {
 fn hud_fields(tool: Tool, n: usize) -> &'static [Field] {
   match (tool, n) {
     (Tool::Line, 1..) => &[Field::Length, Field::Angle],
-    // Fusion's 2-point rectangle focuses the box beside the cursor first (the height); the
-    // width's dimension sits under the bottom edge
+    // Fusion's 2-point rectangle focuses its height box first, on the vertical edge through the
+    // first corner; the width's box sits on the horizontal edge through it
     (Tool::Rect, 1) => &[Field::Height, Field::Width],
     (Tool::CenterRect, 1) => &[Field::Width, Field::Height],
     (Tool::Circle, 1) => &[Field::Diameter],
@@ -885,8 +885,9 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hide_construction_points: !vis.construction_points,
     grid_step: app.grid.step(),
     grid_plane: app.grid_preview,
-    // the Layout Grid carries Fusion's red X and green Y axis lines across it
-    grid_axes: app.s.edit_sketch.is_none() && app.grid_preview.is_none() && vis.origin_axes,
+    // the Layout Grid carries Fusion's red X and green Y axis lines across it (with the Origin
+    // folder's axes shown), and so does an open sketch's grid, Origin folder shown or not
+    grid_axes: app.s.edit_sketch.is_some() || (app.grid_preview.is_none() && vis.origin_axes),
     show_profiles_of: profiles_of,
     hide_profiles_of: app.hidden_profiles.clone(),
     hide_projected_of: app.sketch_rows.hidden_projected.clone(),
@@ -2199,14 +2200,14 @@ fn hud_sides_live(app: &App) -> usize {
 }
 
 /// A heads-up box's live value as Fusion shows it: a length with its unit at the document's
-/// display precision ("0.492 in"), an angle to one decimal with "deg" ("336.8 deg"), a count as it
+/// display precision, trailing zeroes kept ("0.492 in", "22.833 mm", "15.750 mm"), an angle to one decimal with "deg" ("336.8 deg"), a count as it
 /// is ("6"). Each is also a valid expression to type back.
 fn hud_display(unit: fox_engine::model::LengthUnit, field: Field, v: f64) -> String {
   match field {
     Field::Angle => format!("{v:.p$} deg", p = crate::units::angle_decimals()),
     Field::Sides => format!("{}", v.round() as i64),
     Field::Rho => format!("{v:.2}"),
-    _ => crate::units::length_text(unit, v),
+    _ => crate::units::length_text_full(unit, v),
   }
 }
 
@@ -2227,17 +2228,33 @@ fn lock_typed(
     lock_polygon(app, sk, &curves, locks);
     return;
   }
+  // a 2-point rectangle's dimensions go on the sides through its first corner, as Fusion's: the
+  // width on the bottom or top, the height on the left or right
+  let through_first: [Option<u32>; 2] = [Field::Width, Field::Height].map(|field| {
+    let (from, sketch) = (from?, app.s.design.sketch(sk).ok()?);
+    let (pair, axis) = if field == Field::Width { ([0, 2], 1) } else { ([3, 1], 0) };
+    let gap = |k: usize| -> Option<f64> {
+      let p = sketch.pos(*sketch.curve_points(fox_engine::sketch::CurveId(*curves.get(k)?)).first()?)?;
+      Some((p[axis] - from[axis]).abs())
+    };
+    let k = if gap(pair[1])? < gap(pair[0])? { pair[1] } else { pair[0] };
+    curves.get(k).copied()
+  });
   for (field, text) in locks {
     // rectangles are drawn bottom, right, top, left: the bottom sets the width, the right the
     // height (a 3-point rectangle's first side, then its second); a circle's diameter and an
     // arc's radius dimension the curve itself
     let (kind, curve) = match (app.tool, field) {
-      (Tool::Line | Tool::MidpointLine | Tool::Rect | Tool::CenterRect | Tool::Rect3, Field::Width | Field::Length)
+      (Tool::Rect, Field::Width | Field::Height) => {
+        let (i, fallback) = if *field == Field::Width { (0, curves.first()) } else { (1, curves.get(1)) };
+        ("distance", through_first[i].as_ref().or(fallback))
+      }
+      (Tool::Line | Tool::MidpointLine | Tool::CenterRect | Tool::Rect3, Field::Width | Field::Length)
         if !(app.tool == Tool::Rect3 && *field == Field::Width) =>
       {
         ("distance", curves.first())
       }
-      (Tool::Rect | Tool::CenterRect, Field::Height) | (Tool::Rect3, Field::Width) => ("distance", curves.get(1)),
+      (Tool::CenterRect, Field::Height) | (Tool::Rect3, Field::Width) => ("distance", curves.get(1)),
       // (the Circle tool draws a typed diameter with its dimension itself: `sketch.circle {diameter}`)
       (Tool::Circle2P | Tool::Circle3P, Field::Diameter) => ("diameter", curves.first()),
       (Tool::Arc3 | Tool::CenterArc | Tool::TangentArc, Field::Radius) => ("radius", curves.first()),
@@ -3384,8 +3401,8 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
       if let Some(s) = &shape {
         paint_dim(painter, s, DIM_INK);
       }
-      let rect = Rect::from_center_size(at, size);
-      text.paint(painter, rect.min + Vec2::new(4.0, 2.0), DIM_TEXT);
+      let vertical = shape.as_ref().is_some_and(|s| s.vertical);
+      text.paint_in(painter, dim_text_rect(at, size, vertical), vertical, DIM_TEXT);
     }
   }
 }
@@ -3447,7 +3464,8 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
           None => continue,
         },
       };
-      let r = Rect::from_center_size(at, size);
+      let vertical = shape.as_ref().is_some_and(|s| s.vertical);
+      let r = dim_text_rect(at, size, vertical);
       let resp = ui.interact(r, ui.id().with(("dim", c.id.0)), Sense::click_and_drag());
       // dragging the value moves it, as in Fusion: its new spot sets the offset and side
       if resp.drag_started()
@@ -3481,7 +3499,7 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       if let Some(s) = &shape {
         paint_dim(painter, s, if hot { DIM_INK_HOT } else { DIM_INK });
       }
-      text.paint(painter, r.min + Vec2::new(4.0, 2.0), if hot { DIM_TEXT_HOT } else { DIM_TEXT });
+      text.paint_in(painter, r, vertical, if hot { DIM_TEXT_HOT } else { DIM_TEXT });
       // Fusion's tooltip under the text names the parameter with its full value, light text on
       // its dark tooltip panel
       let resp = match dim_param_name(app, c.id.0) {
@@ -3621,12 +3639,45 @@ impl DimText {
     }
     painter.galley(at + Vec2::new(self.glyph_width(), 0.0), self.galley.clone(), col);
   }
+
+  /// Paints the text turned a quarter turn to read upward, as Fusion writes a vertical
+  /// dimension's value, centred in `r` (the box [`DimText::size`] turned on its side).
+  fn paint_up(&self, painter: &egui::Painter, r: Rect, col: Color32) {
+    let size = self.size();
+    // the text's own (x along it, y down across it) to the screen: x runs up, y to the right
+    let o = Pos2::new(r.center().x - size.y / 2.0, r.center().y + size.x / 2.0);
+    let to = |x: f32, y: f32| o + Vec2::new(y, -x);
+    let up = -std::f32::consts::FRAC_PI_2;
+    if let Some(lead) = &self.lead {
+      painter.add(egui::epaint::TextShape::new(to(0.0, 0.0), lead.clone(), col).with_angle(up));
+    }
+    let x = self.lead_width();
+    if self.glyph {
+      let r = self.em * 0.27;
+      let c = to(x + self.glyph_width() / 2.0 - 1.0, self.galley.size().y / 2.0);
+      painter.circle_stroke(c, r, Stroke::new(1.0, col));
+      let d = Vec2::new(r * 1.5, r * 1.5);
+      painter.line_segment([c - d, c + d], Stroke::new(1.0, col));
+    }
+    let at = to(x + self.glyph_width(), 0.0);
+    painter.add(egui::epaint::TextShape::new(at, self.galley.clone(), col).with_angle(up));
+  }
+
+  /// Paints the text in `r` (padded by 4 px along it and 2 across): turned to read upward for a
+  /// vertical dimension, else level.
+  fn paint_in(&self, painter: &egui::Painter, r: Rect, vertical: bool, col: Color32) {
+    if vertical { self.paint_up(painter, r, col) } else { self.paint(painter, r.min + Vec2::new(4.0, 2.0), col) }
+  }
+}
+
+/// A dimension value's box: `size` level, or on its side when the value reads upward.
+fn dim_text_rect(at: Pos2, size: Vec2, vertical: bool) -> Rect {
+  Rect::from_center_size(at, if vertical { Vec2::new(size.y, size.x) } else { size })
 }
 
 /// The positions (sketch units, mm) of the grid's major lines, which carry labels: every fifth
-/// line of the grid the scene draws for this step, within its extent.
-pub(crate) fn grid_label_positions(step: f64, size: f64) -> Vec<f64> {
-  let n = ((size / step).ceil() as i64).clamp(2, 60);
+/// line of the grid the scene draws for this step, out to its reach of `n` steps each way.
+pub(crate) fn grid_label_positions(step: f64, n: i64) -> Vec<f64> {
   (-n..=n).filter(|i| i % 5 == 0).map(|i| i as f64 * step).collect()
 }
 
@@ -3648,8 +3699,8 @@ pub(crate) struct GridLabel {
 /// Create Sketch's preview of a plane labels its grid the same way.
 pub(crate) fn grid_label_layout(app: &App, view: &View) -> Vec<GridLabel> {
   let Some(plane) = sketch_plane(app).map(|(_, p)| p).or(app.grid_preview) else { return Vec::new() };
-  let step = app.grid.step().unwrap_or_else(|| fox_engine::scene::grid_step(&app.s));
-  let size = app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0);
+  let step = app.grid.step().unwrap_or_else(|| fox_engine::scene::sketch_grid_step(&app.s));
+  let reach = fox_engine::scene::grid_reach(&app.s, step, true);
   let unit = app.s.design.units;
   let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
   let Some(o) = to_screen([0.0, 0.0]) else { return Vec::new() };
@@ -3660,7 +3711,7 @@ pub(crate) fn grid_label_layout(app: &App, view: &View) -> Vec<GridLabel> {
   let right = dir([step, 0.0], Vec2::new(1.0, 0.0));
   let up = dir([0.0, step], Vec2::new(0.0, -1.0));
   let mut out = Vec::new();
-  for t in grid_label_positions(step, size) {
+  for t in grid_label_positions(step, reach) {
     if t == 0.0 {
       continue;
     }
@@ -3700,6 +3751,9 @@ struct DimShape {
   arc: Vec<Pos2>,
   arrows: Vec<(Pos2, Vec2)>,
   label: Pos2,
+  /// A linear dimension whose line runs up the screen: Fusion turns its value to read upward
+  /// along it.
+  vertical: bool,
 }
 
 /// Dimension ink (Fusion draws dimensions in black).
@@ -3800,7 +3854,9 @@ fn linear_shape(
     lines.push([a - u * 14.0, a]);
     lines.push([b, b + u * 14.0]);
   }
-  Some(DimShape { lines, arc: Vec::new(), arrows, label: a + d / 2.0 })
+  // within a degree or so of straight up the screen
+  let vertical = d.x.abs() < 0.02 * d.y.abs();
+  Some(DimShape { lines, arc: Vec::new(), arrows, label: a + d / 2.0, vertical })
 }
 
 /// A radius or diameter dimension of the circle around `center` through `on`: arrows on the
@@ -3833,7 +3889,7 @@ fn radial_shape(
   if diameter {
     arrows.push((start, -u));
   }
-  Some(DimShape { lines: vec![[start, at - u * half]], arc: Vec::new(), arrows, label: at })
+  Some(DimShape { lines: vec![[start, at - u * half]], arc: Vec::new(), arrows, label: at, vertical: false })
 }
 
 /// Fusion's diameter dimension of a circle: a horizontal line through the centre with arrowheads
@@ -3846,7 +3902,7 @@ fn diameter_shape(center: [f64; 2], r: f64, to_screen: &dyn Fn([f64; 2]) -> Opti
   if !d.is_finite() || d.length() < 1e-6 {
     return None;
   }
-  Some(DimShape { lines: vec![[a, b]], arc: Vec::new(), arrows: vec![(a, -d), (b, d)], label: c })
+  Some(DimShape { lines: vec![[a, b]], arc: Vec::new(), arrows: vec![(a, -d), (b, d)], label: c, vertical: false })
 }
 
 /// A diameter line through the centre in the direction of `at` (inside the circle), arrowheads
@@ -3866,7 +3922,13 @@ fn diameter_shape_towards(
   if !d.is_finite() || d.length() < 1e-6 {
     return None;
   }
-  Some(DimShape { lines: vec![[a, b]], arc: Vec::new(), arrows: vec![(a, -d), (b, d)], label: to_screen(at)? })
+  Some(DimShape {
+    lines: vec![[a, b]],
+    arc: Vec::new(),
+    arrows: vec![(a, -d), (b, d)],
+    label: to_screen(at)?,
+    vertical: false,
+  })
 }
 
 /// An angle between two lines: an arc between them around where they meet, with extension lines
@@ -3931,7 +3993,7 @@ fn angular_shape(
   let os = to_screen(o)?;
   let w = (mid - os).normalized();
   let label = if w.is_finite() { mid + w * 16.0 } else { mid };
-  Some(DimShape { lines, arc, arrows, label })
+  Some(DimShape { lines, arc, arrows, label, vertical: false })
 }
 
 /// The leader graphics of dimension `k` (see [`DimShape`]); `size` is its value's box. A
@@ -4647,9 +4709,18 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
         rho_at = to_screen(m).map(|p| p + Vec2::new(0.0, 30.0));
         None
       }
-      // the 2-point rectangle's focused box floats beside the cursor (placed below)
-      (Tool::Rect, _, _) if fields.iter().position(|x| x == f) == Some(app.tstate.hud.active) => None,
-      (Tool::Rect | Tool::CenterRect, Field::Width | Field::Height, _) => {
+      // the 2-point rectangle's boxes, focused or not, sit on dimensions along the edges through
+      // its first corner, outside it: the height on that vertical edge, the width on that
+      // horizontal one, as Fusion's
+      (Tool::Rect, Field::Width | Field::Height, _) => {
+        let mid = [(last[0] + cur[0]) / 2.0, (last[1] + cur[1]) / 2.0];
+        if *f == Field::Width {
+          linear_shape(last, [cur[0], last[1]], [1.0, 0.0], mid, off, wpp, &to_screen)
+        } else {
+          linear_shape(last, [last[0], cur[1]], [0.0, 1.0], mid, off, wpp, &to_screen)
+        }
+      }
+      (Tool::CenterRect, Field::Width | Field::Height, _) => {
         // the width under the bottom edge and the height beside the right edge, between
         // extension lines, whichever way the rectangle was dragged
         let o = if app.tool == Tool::CenterRect { [2.0 * last[0] - cur[0], 2.0 * last[1] - cur[1]] } else { last };
@@ -4684,12 +4755,6 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     at[i] = under;
   }
   let n = fields.len();
-  // the 2-point rectangle's focused box sits just left of the cursor, as Fusion's does
-  if app.tool == Tool::Rect
-    && let Some(slot) = at.get_mut(app.tstate.hud.active.min(n - 1))
-  {
-    *slot = to_screen(raw).map(|p| p + Vec2::new(-56.0, 0.0));
-  }
   // Tab accepts the box's text and writes it back as Fusion spells it ("( 1 / 2 ) * 1 in")
   if tab.is_some()
     && let Some(accepted) = hud_accepted(app, app.tstate.hud.active.min(n - 1))
@@ -4853,7 +4918,7 @@ fn hud_angle_shape(
     arrows.push((arc[0], arc[0] - arc[1]));
     arrows.push((arc[k - 1], arc[k - 1] - arc[k - 2]));
   }
-  Some((DimShape { lines: Vec::new(), arc, arrows, label }, reference))
+  Some((DimShape { lines: Vec::new(), arc, arrows, label, vertical: false }, reference))
 }
 
 /// A line's heads-up length, as Fusion draws it: a linear dimension above the segment's middle,
@@ -4881,7 +4946,13 @@ fn chord_shape(a: [f64; 2], b: [f64; 2], to_screen: &dyn Fn([f64; 2]) -> Option<
   if !d.is_finite() || d.length() < 1e-6 {
     return None;
   }
-  Some(DimShape { lines: vec![[p, q]], arc: Vec::new(), arrows: vec![(p, -d), (q, d)], label: p + d / 2.0 })
+  Some(DimShape {
+    lines: vec![[p, q]],
+    arc: Vec::new(),
+    arrows: vec![(p, -d), (q, d)],
+    label: p + d / 2.0,
+    vertical: false,
+  })
 }
 
 /// An arc's heads-up angle: an arc glyph inside the arc, from its start through its sweep, with
@@ -4907,7 +4978,7 @@ fn hud_sweep_shape(
     arrows.push((arc[0], arc[0] - arc[1]));
     arrows.push((arc[k - 1], arc[k - 1] - arc[k - 2]));
   }
-  Some(DimShape { lines: vec![[o, at(a0, rr)?], [o, at(a0 + sweep, rr)?]], arc, arrows, label })
+  Some(DimShape { lines: vec![[o, at(a0, rr)?], [o, at(a0 + sweep, rr)?]], arc, arrows, label, vertical: false })
 }
 
 /// The 2-tangent circle the next click would place.
@@ -5921,9 +5992,9 @@ mod tests {
   /// The labelled grid positions are the major lines (every fifth) within the grid's extent.
   #[test]
   fn grid_labels_sit_on_the_major_lines() {
-    assert_eq!(grid_label_positions(10.0, 100.0), vec![-100.0, -50.0, 0.0, 50.0, 100.0]);
+    assert_eq!(grid_label_positions(10.0, 10), vec![-100.0, -50.0, 0.0, 50.0, 100.0]);
     // a tiny model still gets a 2-step grid: only the origin is a major line
-    assert_eq!(grid_label_positions(10.0, 1.0), vec![0.0]);
+    assert_eq!(grid_label_positions(10.0, 2), vec![0.0]);
   }
 
   /// As Fusion prints them: a bare number on every major line along both axes that is on
@@ -5947,9 +6018,12 @@ mod tests {
       assert!(!texts(true).is_empty() && !texts(false).is_empty(), "both axes are labelled: {labels:?}");
       assert!(labels.iter().all(|l| l.text != "0" && !l.text.contains("mm")), "{labels:?}");
       if faced {
-        // the ±100 lines are off screen at this zoom
-        assert_eq!(texts(true), ["-50", "50"]);
-        assert_eq!(texts(true), texts(false), "the same values along both axes");
+        // Fusion's sketch scale on entry (about 3.5 px per mm in its window, 3.9 in this 600 px
+        // high one) and its 25 mm major steps: every 25 mm out to ±100 across, ±75 up and down
+        let height = app.cam.view_height();
+        assert!((height - 153.0).abs() < 1e-6, "{height}");
+        assert_eq!(texts(true), ["-100", "-75", "-50", "-25", "25", "50", "75", "100"]);
+        assert_eq!(texts(false), ["-75", "-50", "-25", "25", "50", "75"]);
         for l in &labels {
           assert!((l.up - Vec2::new(0.0, -1.0)).length() < 1e-3, "{l:?}");
           assert!((l.right - Vec2::new(1.0, 0.0)).length() < 1e-3, "{l:?}");
@@ -6065,7 +6139,7 @@ mod tests {
     assert_eq!(f(Tool::MidpointLine, 1), [Length, Angle]);
     assert_eq!(f(Tool::Rect3, 1), [Length]);
     assert_eq!(f(Tool::Rect3, 2), [Width]);
-    // the 2-point rectangle focuses the box beside the cursor, its height, first
+    // the 2-point rectangle focuses its height box first
     assert_eq!(f(Tool::Rect, 1), [Height, Width]);
     assert_eq!(f(Tool::CenterRect, 1), [Width, Height]);
     // the 3-point arc's third step shows no box: the arc follows the pointer
@@ -6800,14 +6874,17 @@ mod tests {
   fn heads_up_boxes_read_as_fusions() {
     use fox_engine::model::LengthUnit;
     // units on lengths at the document's precision, one decimal and "deg" on angles
-    assert_eq!(hud_display(LengthUnit::Mm, Field::Length, 14.76), "14.76 mm");
+    assert_eq!(hud_display(LengthUnit::Mm, Field::Length, 14.76), "14.760 mm");
+    // three decimals in mm too, as Fusion's "22.833 mm" (`ui:sketch:heads-up-mm-decimals`)
+    assert_eq!(hud_display(LengthUnit::Mm, Field::Height, 22.8333), "22.833 mm");
+    assert_eq!(hud_display(LengthUnit::Mm, Field::Width, -0.0001), "0.000 mm");
     assert_eq!(hud_display(LengthUnit::In, Field::Length, 0.492 * 25.4), "0.492 in");
     assert_eq!(hud_display(LengthUnit::Mm, Field::Angle, 336.7876), "336.8 deg");
     assert_eq!(hud_display(LengthUnit::Mm, Field::Sides, 6.0), "6");
     // and each reads back as the value it shows
     let (mut app, sk) = sketching(Tool::Line);
     place_point(&mut app, sk, [0.0, 0.0], None);
-    typed(&mut app, ["14.76 mm", "336.8 deg"]);
+    typed(&mut app, ["14.760 mm", "336.8 deg"]);
     assert!((hud_value(&app, 0).unwrap() - 14.76).abs() < 1e-9);
     assert!((hud_value(&app, 1).unwrap() - 336.8f64.to_radians()).abs() < 1e-9);
   }
