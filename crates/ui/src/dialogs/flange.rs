@@ -359,7 +359,7 @@ impl Dialog {
       ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         let _ = ui.small_button("+").on_hover_text("Add");
-        if ui.small_button("✕").on_hover_text("Remove").clicked() {
+        if ui.small_button("🗙").on_hover_text("Remove").clicked() {
           clear = true;
         }
       });
@@ -418,7 +418,7 @@ impl Dialog {
       ("3-Bend Corner Override", vec![("Relief shape", "Default (Round with Radius)"), ("Relief radius", "Thickness")]),
     ];
     for (i, (name, rows)) in groups.iter().enumerate() {
-      let arrow = if self.flange.open[i] { "▾" } else { "▸" };
+      let arrow = if self.flange.open[i] { "⏷" } else { "⏵" };
       if ui
         .add(egui::Label::new(RichText::new(format!("{arrow} {name}")).strong()).sense(egui::Sense::click()))
         .clicked()

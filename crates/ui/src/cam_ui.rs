@@ -130,7 +130,7 @@ impl App {
   /// Runs the last setup's toolpaths through the stock and reports what it found.
   pub fn cam_simulate(&mut self) {
     if self.s.design.cam.is_empty() {
-      self.status = Some(("Create a setup first (SETUP ▸ New Setup)".into(), false));
+      self.status = Some(("Create a setup first (SETUP > New Setup)".into(), false));
       return;
     }
     if let Some(r) = self.run("cam.simulate", json!({})) {

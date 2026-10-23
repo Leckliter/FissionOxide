@@ -639,7 +639,7 @@ impl Dialog {
       for (i, _) in self.surf.rows[0].iter().enumerate() {
         ui.horizontal(|ui| {
           ui.label(egui::RichText::new(format!("Profile{}", i + 1)).color(theme::TEXT));
-          if ui.small_button("✕").on_hover_text("Remove this profile").clicked() {
+          if ui.small_button("🗙").on_hover_text("Remove this profile").clicked() {
             remove = Some(i);
           }
         });

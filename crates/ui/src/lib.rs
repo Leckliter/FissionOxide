@@ -402,7 +402,7 @@ pub struct App {
   pub(crate) bom: Option<bom_ui::Bom>,
   /// Insert > Sketch Library: the part picker and placing parts with clicks.
   pub(crate) library_ui: library_ui::LibraryUi,
-  /// View ▸ Render Components….
+  /// The Render Components window (no menu opens it: `view.render_components` runs from TEXT COMMANDS).
   pub(crate) render_components: explode_ui::RenderComponents,
   /// The Render workspace.
   pub render: render_ui::RenderUi,
@@ -1151,7 +1151,7 @@ impl App {
   pub fn cam_generate(&mut self, report: bool) {
     if self.s.design.cam.is_empty() {
       if report {
-        self.status = Some(("Create a setup first (SETUP ▸ New Setup)".into(), false));
+        self.status = Some(("Create a setup first (SETUP > New Setup)".into(), false));
       }
       return;
     }
@@ -1188,7 +1188,7 @@ impl App {
   /// Writes the last setup's G-code to a file the user picks.
   pub fn cam_post(&mut self) {
     if self.s.design.cam.is_empty() {
-      self.status = Some(("Create a setup first (SETUP ▸ New Setup)".into(), false));
+      self.status = Some(("Create a setup first (SETUP > New Setup)".into(), false));
       return;
     }
     let st = self.s.design.cam.last().map(|st| st.post.clone()).unwrap_or_default();
@@ -2326,6 +2326,7 @@ impl App {
     if std::mem::take(&mut self.close_menus) {
       egui::Popup::close_all(&ctx);
     }
+    raise_open_popups(&ctx);
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {
@@ -2393,6 +2394,18 @@ impl App {
       }
     });
     ctx.request_repaint_after(std::time::Duration::from_millis(16));
+  }
+}
+
+/// Keeps every open drop-down and menu above the window it came from. egui moves a modal window
+/// (Preferences, Save, Export) to the top on each click inside it, and a list reopened by a quick
+/// click (pressed and released between two frames) keeps its old place under the modal: it would
+/// be open but hidden, and the next click would land on the window instead.
+fn raise_open_popups(ctx: &egui::Context) {
+  let layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().collect());
+  let open: Vec<egui::LayerId> = layers.into_iter().filter(|l| egui::Popup::is_id_open(ctx, l.id)).collect();
+  if !open.is_empty() {
+    ctx.memory_mut(|m| open.into_iter().for_each(|l| m.areas_mut().move_to_top(l)));
   }
 }
 

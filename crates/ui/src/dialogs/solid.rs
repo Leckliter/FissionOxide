@@ -235,7 +235,7 @@ impl Dialog {
             }
           }
         });
-        if creating && rows.len() > 1 && ui.small_button("✕").on_hover_text("Remove this set").clicked() {
+        if creating && rows.len() > 1 && ui.small_button("🗙").on_hover_text("Remove this set").clicked() {
           remove = Some(i);
         }
       });
@@ -628,7 +628,8 @@ impl Dialog {
       }
       ui.add_enabled(false, egui::Button::new("+").small())
         .on_disabled_hover_text("Selection sets with their own distances need chamfer sets in the engine");
-      if creating && ui.add_enabled(n > 0, egui::Button::new("✕").small()).on_hover_text("Clear this set").clicked() {
+      if creating && ui.add_enabled(n > 0, egui::Button::new("🗙").small()).on_hover_text("Clear this set").clicked()
+      {
         clear = true;
       }
     });

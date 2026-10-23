@@ -97,7 +97,7 @@ impl Dialog {
     sel_chip(ui, accent, &text, !bodies.is_empty());
     ui.end_row();
     // the Features group: its heading across the dialog, then the types
-    ui.label(RichText::new("▾ Features").strong());
+    ui.label(RichText::new("⏷ Features").strong());
     ui.label("");
     ui.end_row();
     let found = self.rf_found(&mut app.s);

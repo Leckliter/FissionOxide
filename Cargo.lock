@@ -1769,6 +1769,7 @@ dependencies = [
  "log",
  "rfd",
  "serde_json",
+ "ttf-parser",
 ]
 
 [[package]]

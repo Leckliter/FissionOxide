@@ -34,7 +34,7 @@ cmds! {
   "new" => "Start a new design", "{name?}";
   "open" => "Open a design (.fox, .foxz) or any importable file as a new design", "{path}";
   "save" => "Save the design to a file (.fox JSON, or .foxz archive)", "{path?}";
-  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool, explode?: bool | {direction?, factor?, ...} (mesh formats: the exploded view's positions), units?: cm|mm|m|in|ft|yd|um|hm|mi|mil (sketch DXF, default mm), points?: bool, projected?: bool, construction?: bool (sketch DXF: which geometry to write, default all)}";
+  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz .fbx (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool, explode?: bool | {direction?, factor?, ...} (mesh formats: the exploded view's positions), units?: cm|mm|m|in|ft|yd|um|hm|mi|mil (sketch DXF, default mm), points?: bool, projected?: bool, construction?: bool (sketch DXF: which geometry to write, default all)}";
   "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (mesh bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, units?: mm|cm|m|in|ft (STL, OBJ, PLY), flip_up?: bool, rotate?: [x, y, z] angles about the mesh centre, translate?: [x, y, z], plane?}";
   "formats" => "Every file format with import/export support", "{}";
   "form.insert_tsm" => "Insert T-Spline: a T-Spline Mesh (.tsm) control cage becomes a smooth body (its Catmull-Clark limit surface, one face per region between star points)", "{path? | text?: the file's contents, name?}";

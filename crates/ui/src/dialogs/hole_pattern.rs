@@ -488,7 +488,7 @@ impl Dialog {
       egui::ComboBox::from_id_salt("holesize").selected_text(shown).width(140.0).show_ui(ui, |ui| {
         for (name, clear, drill, _) in SIZES {
           let d = if tap == "tapped" { drill } else { clear };
-          if ui.selectable_label(self.solid.hp.size == name, format!("{name}  (⌀ {d} mm)")).clicked() {
+          if ui.selectable_label(self.solid.hp.size == name, format!("{name}  (Ø {d} mm)")).clicked() {
             picked = Some((name, d));
           }
         }

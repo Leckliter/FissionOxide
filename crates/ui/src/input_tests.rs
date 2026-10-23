@@ -297,6 +297,10 @@ fn a_dialog_docks_top_right_when_it_opens_and_after_a_resize() {
 #[test]
 fn the_viewcube_home_button_and_faces_take_clicks() {
   let mut h = Harness::new();
+  // the offsets below are the Normal cube's: without the TEXT COMMANDS bar the canvas is tall
+  // enough for it
+  h.app.text_commands.open = false;
+  h.frame(vec![]);
   let canvas = h.app.canvas;
   let center = canvas.right_top() + vec2(-92.0, 80.0);
   h.app.cam.set_view(fox_engine::render::StandardView::Front);
@@ -3021,7 +3025,7 @@ fn the_material_browser_tree_has_one_library_per_row() {
     }
   }
   // the bottom toolbar is in the window, at its bottom, below the tree
-  let bar = row("📚 ▾");
+  let bar = row("📚 ⏷");
   assert!(bar.top() > rows[5].bottom() && bar.bottom() <= window.bottom(), "{bar:?} in {window:?}");
   assert!(window.bottom() - bar.bottom() < 24.0, "{bar:?} in {window:?}");
   assert!(window.bottom() <= 785.0, "the browser fits the window: {window:?}");

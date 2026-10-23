@@ -69,7 +69,7 @@ fn sel_list(ui: &mut egui::Ui, rows: &[(String, &str)]) -> ListAct {
       ui.spacing_mut().item_spacing.y = 2.0;
       ui.add_enabled(false, egui::Button::new("+").small())
         .on_disabled_hover_text("Each command makes one set in FissionOxide");
-      if ui.add_enabled(!rows.is_empty(), egui::Button::new("✕").small()).on_hover_text("Clear the selection").clicked()
+      if ui.add_enabled(!rows.is_empty(), egui::Button::new("🗙").small()).on_hover_text("Clear the selection").clicked()
       {
         act = ListAct::Clear;
       }

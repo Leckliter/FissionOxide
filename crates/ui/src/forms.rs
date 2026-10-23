@@ -3319,7 +3319,7 @@ pub static DRAWING_FCF: Form = Form {
     Input::Choice {
       key: "modifier",
       label: "Material condition",
-      options: &[("none", "None"), ("mmc", "MMC Ⓜ"), ("lmc", "LMC Ⓛ")],
+      options: &[("none", "None"), ("mmc", "MMC (M)"), ("lmc", "LMC (L)")],
     },
     Input::Text { key: "datums", label: "Datums", default: "A" },
     Input::Check { key: "composite", label: "Composite (lower tier)" },
@@ -3327,7 +3327,7 @@ pub static DRAWING_FCF: Form = Form {
     Input::Choice {
       key: "lower_modifier",
       label: "  Lower material condition",
-      options: &[("none", "None"), ("mmc", "MMC Ⓜ"), ("lmc", "LMC Ⓛ")],
+      options: &[("none", "None"), ("mmc", "MMC (M)"), ("lmc", "LMC (L)")],
     },
     Input::Text { key: "lower_datums", label: "  Lower datums", default: "A" },
     Input::Expr { key: "offset_x", label: "Frame offset X (sheet mm)", default: "12" },

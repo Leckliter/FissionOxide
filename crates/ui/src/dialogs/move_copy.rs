@@ -778,11 +778,11 @@ impl Dialog {
       }
       if picking {
         ui.label(egui::RichText::new("Select a point").color(crate::theme::MUTED).small());
-        if ui.small_button("✓").on_hover_text("Done").clicked() {
+        if ui.small_button("✔").on_hover_text("Done").clicked() {
           self.mv.picking_pivot = None;
         }
       } else if self.mv.pivot_at.is_some()
-        && ui.small_button("✕").on_hover_text("Back to the selection's centre").clicked()
+        && ui.small_button("🗙").on_hover_text("Back to the selection's centre").clicked()
       {
         self.mv.pivot_at = None;
         self.mv.pivot = None;

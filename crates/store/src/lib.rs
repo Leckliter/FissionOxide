@@ -1649,7 +1649,7 @@ pub fn compare_designs(a: &serde_json::Value, b: &serde_json::Value) -> Vec<Chan
         kind: "changed",
         what: "parameter",
         name: name_of(p),
-        detail: Some(format!("{} → {}", expr(old), expr(p))),
+        detail: Some(format!("{} ➡ {}", expr(old), expr(p))),
       }),
       _ => {}
     }

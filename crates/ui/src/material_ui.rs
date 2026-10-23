@@ -576,9 +576,9 @@ fn browser_contents(app: &mut App, ui: &mut egui::Ui, b: &mut Browser) {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
       let later = "isn't in FissionOxide yet";
-      ui.add_enabled(false, egui::Button::new("📚 ▾")).on_disabled_hover_text(format!("Creating libraries {later}"));
-      ui.add_enabled(false, egui::Button::new("＋ ▾")).on_disabled_hover_text(format!("Creating materials {later}"));
-      ui.add_enabled(false, egui::Button::new("▤")).on_disabled_hover_text(format!("The asset editor {later}"));
+      ui.add_enabled(false, egui::Button::new("📚 ⏷")).on_disabled_hover_text(format!("Creating libraries {later}"));
+      ui.add_enabled(false, egui::Button::new("+ ⏷")).on_disabled_hover_text(format!("Creating materials {later}"));
+      ui.add_enabled(false, egui::Button::new("☰")).on_disabled_hover_text(format!("The asset editor {later}"));
     });
   });
   ui.horizontal(|ui| {

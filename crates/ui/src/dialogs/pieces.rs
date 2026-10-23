@@ -73,7 +73,7 @@ impl Dialog {
       for k in 0..list.len() {
         ui.horizontal(|ui| {
           ui.label(format!("Piece {}", k + 1));
-          if ui.small_button("✕").on_hover_text("Keep this piece").clicked() {
+          if ui.small_button("🗙").on_hover_text("Keep this piece").clicked() {
             back = Some(k);
           }
         });

@@ -164,7 +164,7 @@ pub fn panel(app: &mut App, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                   ui.label(RichText::new(&n.title).strong());
                   ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Dismiss").clicked() {
+                    if ui.add(egui::Button::new("🗙").frame(false)).on_hover_text("Dismiss").clicked() {
                       dismiss_ids.push(n.id.clone());
                     }
                   });

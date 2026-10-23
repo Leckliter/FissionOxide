@@ -1024,13 +1024,13 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(9.0);
     let label = workspace_label(app);
     let font = egui::FontId::proportional(SWITCHER_FONT);
-    let ink = Color32::from_gray(30);
+    let ink = theme::SWITCHER_INK;
     let tw = ui.painter().layout_no_wrap(label.into(), font.clone(), ink).size().x;
     let (width, text_x, caret_x) = switcher_layout(tw);
     let (rect, resp) = ui.allocate_exact_size(vec2(width, 76.0), egui::Sense::click());
-    let fill = if resp.hovered() { theme::HOVER } else { Color32::from_rgb(248, 248, 248) };
+    let fill = if resp.hovered() { theme::HOVER } else { theme::SWITCHER };
     let p = ui.painter();
-    p.rect(rect, 4.0, fill, Stroke::new(1.0, Color32::from_gray(196)), egui::StrokeKind::Inside);
+    p.rect(rect, 4.0, fill, Stroke::new(1.0, theme::SWITCHER_LINE), egui::StrokeKind::Inside);
     let at = pos2(rect.left() + text_x, rect.center().y);
     p.text(at, egui::Align2::LEFT_CENTER, label, font.clone(), ink);
     // the font has no semi-bold face: a second pass a little over gives the weight

@@ -164,7 +164,8 @@ pub(crate) fn view_action(app: &mut App, i: usize) {
     6 => app.data.toggle(),
     7 => app.show_perf = !app.show_perf,
     8 => {
-      // Fusion's default layout: everything shows but the data panel and the overlay
+      // Fusion's default layout: everything shows but the data panel and the overlay, TEXT
+      // COMMANDS as its header bar
       app.show_viewcube = true;
       app.browser_open = true;
       app.show_comments = true;
@@ -172,7 +173,8 @@ pub(crate) fn view_action(app: &mut App, i: usize) {
       app.show_toolbar = true;
       app.data.open = false;
       app.show_perf = false;
-      app.text_commands.open = false;
+      app.text_commands.open = true;
+      app.text_commands.expanded = false;
     }
     _ => {}
   }
@@ -189,7 +191,7 @@ pub(crate) fn view_keys(app: &mut App, ctx: &egui::Context) -> bool {
   false
 }
 
-/// File ▸ View, then FissionOxide's Explode and Render Components.
+/// File ▸ View: Fusion's nine Hide / Show entries and Reset to Default Layout, nothing else.
 pub(crate) fn view_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(260.0);
   for (i, (label, key, on)) in view_entries(app).into_iter().enumerate() {
@@ -199,7 +201,6 @@ pub(crate) fn view_menu(app: &mut App, ui: &mut egui::Ui) {
       view_action(app, i);
     }
   }
-  crate::explode_ui::view_menu(app, ui);
 }
 
 /// File ▸ View ▸ Show Performance Overlay: the frame rate and time at the canvas's top-left.
