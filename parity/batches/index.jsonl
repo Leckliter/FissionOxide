@@ -137,7 +137,7 @@
 {"name": "ui-reverify-workspaces-1", "items": 6, "status": "done", "pr": "e8236e0", "fixer": "cloud session_011FS5U3z2DCbXi3MMr8WmRB (2026-10-23)"}
 {"name": "ui-reverify-toolbar-1", "items": 6, "status": "done", "pr": "d0d14d1", "fixer": "cloud task_081bcd2e (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-reverify-dialogs-5", "items": 2, "status": "done", "pr": "2a7c4f8", "fixer": "cloud session_01Gmao523y7ai2Mujz7C4fR9"}
-{"name": "ui-reverify-mesh-1", "items": 5, "status": "done", "pr": "ae7c1dd", "fixer": "cloud task_27591c2d (requested 2026-10-23 by the coordinator)"}
+{"name": "ui-reverify-mesh-1", "items": 5, "status": "done", "pr": "c4bf275", "fixer": "cloud task_27591c2d (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-reverify-mesh-2", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_28b09f29 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-reverify-dialogs-6", "items": 6, "status": "done", "pr": "a16168e", "fixer": "cloud task_32bd4ad7 (requested 2026-10-23 by the coordinator)", "note": "5 of 6 fixed; ui:chrome:export-dialog left mismatch (proprietary formats, see its history)"}
 {"name": "ui-reverify-render-2", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_996c0a03 (requested 2026-10-23 by the coordinator)"}
