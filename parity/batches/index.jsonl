@@ -1,22 +1,22 @@
-{"name": "ui-browser", "items": 3, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/105"}
-{"name": "ui-navbar", "items": 3, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/104"}
-{"name": "ui-open-and-save-bugs", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/100"}
-{"name": "ui-select-and-marking", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/101"}
-{"name": "ui-sketch-feedback", "items": 2, "status": "fixing", "pr": null}
-{"name": "ui-timeline", "items": 3, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/102"}
-{"name": "ui-toolbar-customize", "items": 3, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/103"}
-{"name": "ui-viewcube-camera", "items": 10, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/107"}
-{"name": "ui-context-menus", "items": 4, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/106"}
-{"name": "ui-feature-dialogs", "items": 4, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/111"}
-{"name": "ui-hole-and-pattern", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/113"}
-{"name": "ui-inspect-and-views", "items": 4, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/110"}
-{"name": "ui-move-triad", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/109"}
-{"name": "ui-preferences-undo", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/108"}
-{"name": "ui-sketch-tools", "items": 5, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/112"}
-{"name": "ui-chrome-polish", "items": 3, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/122"}
-{"name": "ui-components", "items": 3, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/117"}
-{"name": "ui-sketch-polish", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/115"}
-{"name": "ui-units-and-parameters", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/119"}
+{"name": "ui-browser", "items": 3, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/105", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-navbar", "items": 3, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/104", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-open-and-save-bugs", "items": 2, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/100", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-select-and-marking", "items": 2, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/101", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-sketch-feedback", "items": 2, "status": "done", "pr": null, "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-timeline", "items": 3, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/102", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-toolbar-customize", "items": 3, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/103", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-viewcube-camera", "items": 10, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/107", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-context-menus", "items": 4, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/106", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-feature-dialogs", "items": 4, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/111", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-hole-and-pattern", "items": 2, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/113", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-inspect-and-views", "items": 4, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/110", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-move-triad", "items": 2, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/109", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-preferences-undo", "items": 2, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/108", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-sketch-tools", "items": 5, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/112", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-chrome-polish", "items": 3, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/122", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-components", "items": 3, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/117", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-sketch-polish", "items": 2, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/115", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
+{"name": "ui-units-and-parameters", "items": 2, "status": "done", "pr": "https://github.com/Leckliter/FissionOxide/pull/119", "note": "closed by the coordinator 2026-10-22: rows verified or matching; still-open rows moved to ui-legacy-leftovers"}
 {"name": "ui-browser-rows", "items": 5, "status": "done", "pr": "bbdd100", "fixer": "cloud task_7bb7463a (requested 2026-10-21)"}
 {"name": "ui-chrome-menus-2", "items": 8, "status": "done", "pr": "338d628", "fixer": "cloud task_f5017049 (requested 2026-10-21)"}
 {"name": "ui-cursor-prompts", "items": 3, "status": "done", "pr": "83ec5da", "fixer": "cloud task_08b16fd9 (requested 2026-10-21)"}
@@ -141,3 +141,4 @@
 {"name": "ui-reverify-mesh-2", "items": 5, "status": "ready", "pr": null}
 {"name": "ui-reverify-dialogs-6", "items": 6, "status": "ready", "pr": null}
 {"name": "ui-reverify-render-2", "items": 3, "status": "ready", "pr": null}
+{"name": "ui-legacy-leftovers", "items": 9, "status": "ready", "pr": null}
