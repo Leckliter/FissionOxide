@@ -139,7 +139,7 @@
 {"name": "ui-reverify-dialogs-5", "items": 2, "status": "done", "pr": "2a7c4f8", "fixer": "cloud session_01Gmao523y7ai2Mujz7C4fR9"}
 {"name": "ui-reverify-mesh-1", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_27591c2d (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-reverify-mesh-2", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_28b09f29 (requested 2026-10-23 by the coordinator)"}
-{"name": "ui-reverify-dialogs-6", "items": 6, "status": "done", "pr": "098cbe9", "fixer": "cloud task_32bd4ad7 (requested 2026-10-23 by the coordinator)", "note": "5 of 6 fixed; ui:chrome:export-dialog left mismatch (proprietary formats, see its history)"}
+{"name": "ui-reverify-dialogs-6", "items": 6, "status": "done", "pr": "a16168e", "fixer": "cloud task_32bd4ad7 (requested 2026-10-23 by the coordinator)", "note": "5 of 6 fixed; ui:chrome:export-dialog left mismatch (proprietary formats, see its history)"}
 {"name": "ui-reverify-render-2", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_996c0a03 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-legacy-leftovers", "items": 9, "status": "done", "pr": "3f4db5c", "fixer": "cloud task_aca51e60 (requested 2026-10-23 by the coordinator)", "note": "4 rows verified via newer keys, 5 fixing-merged (2 with code changes, 3 already on main)"}
 {"name": "ui-reverify-chrome-3", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_a598c0fe (requested 2026-10-23 by the coordinator)"}
