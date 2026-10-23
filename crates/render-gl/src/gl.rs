@@ -37,6 +37,39 @@ void main() {
 }
 "#;
 
+/// Texture coordinates of a projected texture: `proj_uv(point - origin, normal)`. Mirrors
+/// `fox_raytrace::texture::project` and `fox_render::TexProjection::uv`.
+pub(crate) const PROJ_UV: &str = r#"
+uniform ivec2 u_proj;
+uniform vec4 u_tex_xf;
+uniform vec3 u_tex_misc;
+vec2 planar(vec3 p, int axis) {
+  return axis == 0 ? p.yz : (axis == 1 ? p.xz : p.xy);
+}
+vec2 proj_uv(vec3 p, vec3 n) {
+  float scale = max(u_tex_xf.x, 1e-3);
+  vec2 raw;
+  if (u_proj.x == 0) {
+    vec3 a = abs(n);
+    int axis = (a.x >= a.y && a.x >= a.z) ? 0 : (a.y >= a.z ? 1 : 2);
+    raw = planar(p, axis) / scale;
+  } else if (u_proj.x == 1) {
+    raw = planar(p, u_proj.y) / scale;
+  } else {
+    vec2 q = u_proj.y == 0 ? p.yz : (u_proj.y == 1 ? p.zx : p.xy);
+    float h = u_proj.y == 0 ? p.x : (u_proj.y == 1 ? p.y : p.z);
+    float u = atan(q.y, q.x) / 6.283185307 + 0.5;
+    if (u_proj.x == 2) {
+      raw = vec2(u, h / scale);
+    } else {
+      raw = vec2(u, acos(clamp(h / max(length(p), 1e-9), -1.0, 1.0)) / 3.141592654);
+    }
+  }
+  float s = u_tex_xf.y, c = u_tex_xf.z;
+  return vec2(raw.x * c - raw.y * s, raw.x * s + raw.y * c) + u_tex_misc.xy;
+}
+"#;
+
 /// The CPU rasterizer's `raster_tri` shading, per fragment.
 const MESH_FS: &str = r#"
 uniform vec3 u_key;
@@ -53,6 +86,9 @@ uniform int u_mode;
 uniform vec4 u_param;
 uniform vec4 u_param2;
 uniform float u_fade;
+uniform int u_tex_on;
+uniform sampler2D u_tex;
+uniform vec3 u_origin;
 in vec3 v_nrm;
 in vec3 v_wpos;
 in vec3 v_col;
@@ -61,6 +97,7 @@ layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_id;
 ID_COLOR
 OBJ_SHADOW
+PROJ_UV
 vec3 safe_norm(vec3 v) {
   float l = length(v);
   return l > 0.0 ? v / l : vec3(0.0);
@@ -72,6 +109,11 @@ void main() {
   vec3 n = safe_norm(v_nrm);
   vec3 view = u_persp == 1 ? safe_norm(u_eye - v_wpos) : u_head;
   if (dot(n, view) < 0.0) n = -n;
+  if (u_tex_on == 1 && !hl) {
+    // rows run top-down on the CPU, bottom-up here
+    vec2 uv = proj_uv(v_wpos - u_origin, n);
+    base = texture(u_tex, vec2(uv.x, 1.0 - uv.y)).rgb;
+  }
   // the CPU renderer's soft shading (see fox_render): plenty of ambient, a gentle key light
   float diff = 0.36 * max(dot(n, u_key), 0.0) + 0.24 * max(dot(n, u_head), 0.0) + 0.15 * max(dot(n, u_fill), 0.0);
   vec3 h = safe_norm(u_key + view);
@@ -400,6 +442,7 @@ struct GpuMesh {
   analyze: bool,
   unanalyzed: bool,
   unlit: bool,
+  texture: Option<fox_render::MeshTexture>,
 }
 
 struct GpuInstances {
@@ -580,6 +623,8 @@ pub struct Renderer {
   /// drawing again.
   light_vp: Option<glam::Mat4>,
   shadow_dirty: bool,
+  /// The meshes' textures ([`fox_render::Mesh::texture`]), by tile key.
+  textures: std::collections::HashMap<String, glow::Texture>,
 }
 
 fn unit(c: [u8; 4]) -> [f32; 4] {
@@ -604,7 +649,7 @@ impl Renderer {
     };
     let mvp = ["u_vp", "u_size"];
     let mesh_header = format!("{header}{}", crate::effects::defines());
-    let mesh_fs = MESH_FS.replace("OBJ_SHADOW", crate::effects::SHADOW_GLSL);
+    let mesh_fs = MESH_FS.replace("OBJ_SHADOW", crate::effects::SHADOW_GLSL).replace("PROJ_UV", PROJ_UV);
     let mesh = program(
       gl,
       &mesh_header,
@@ -631,6 +676,12 @@ impl Renderer {
         "u_light_vp",
         "u_to_light",
         "u_shadow_texel",
+        "u_tex_on",
+        "u_tex",
+        "u_proj",
+        "u_tex_xf",
+        "u_tex_misc",
+        "u_origin",
       ],
     )?;
     let line = program(gl, header, LINE_VS, LINE_FS, &["u_vp", "u_size", "u_hidden", "u_hidden_alpha"])?;
@@ -709,6 +760,7 @@ impl Renderer {
         fx: None,
         light_vp: None,
         shadow_dirty: true,
+        textures: std::collections::HashMap::new(),
       };
       Ok(r)
     }
@@ -739,6 +791,7 @@ impl Renderer {
         g.analyze = m.analyze;
         g.unanalyzed = m.unanalyzed;
         g.unlit = m.unlit;
+        g.texture = m.texture.clone();
       }
     } else {
       for m in self.meshes.drain(..) {
@@ -749,6 +802,7 @@ impl Renderer {
         self.meshes.push(g);
       }
     }
+    self.upload_textures(gl, scene)?;
     if let Some(l) = self.lines.take() {
       free_instances(gl, l);
     }
@@ -766,6 +820,25 @@ impl Renderer {
     self.light_vp =
       scene.post.object_shadow.then(|| fox_render::shadow_light(&scene.meshes)).flatten().map(|m| m.as_mat4());
     self.shadow_dirty = true;
+    Ok(())
+  }
+
+  /// Uploads the scene's textures not on the GPU yet, and frees those it no longer uses.
+  fn upload_textures(&mut self, gl: &Gl, scene: &Scene) -> Result<(), String> {
+    let used: Vec<&fox_render::Tile> =
+      scene.meshes.iter().filter_map(|m| m.texture.as_ref()).map(|t| &*t.tile).collect();
+    let gone: Vec<String> = self.textures.keys().filter(|k| !used.iter().any(|t| t.key == **k)).cloned().collect();
+    for k in gone {
+      if let Some(t) = self.textures.remove(&k) {
+        unsafe { gl.delete_texture(t) };
+      }
+    }
+    for t in used {
+      if !self.textures.contains_key(&t.key) {
+        let tex = upload_tile(gl, t)?;
+        self.textures.insert(t.key.clone(), tex);
+      }
+    }
     Ok(())
   }
 
@@ -1098,6 +1171,23 @@ impl Renderer {
         gl.uniform_1_f32(p.loc("u_fade"), self.analysis_fade);
         let shadowed = shadow_map.is_some() && m.analyze && m.color[3] == 255;
         gl.uniform_1_i32(p.loc("u_obj_shadow"), shadowed as i32);
+        let tex = m.texture.as_ref().filter(|_| mode != 4).and_then(|t| Some((t, *self.textures.get(&t.tile.key)?)));
+        match tex {
+          Some((t, tex)) => {
+            let pr = &t.projection;
+            let (s, c) = pr.rotation.to_radians().sin_cos();
+            gl.active_texture(glow::TEXTURE3);
+            gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            gl.active_texture(glow::TEXTURE0);
+            gl.uniform_1_i32(p.loc("u_tex"), 3);
+            gl.uniform_1_i32(p.loc("u_tex_on"), 1);
+            gl.uniform_2_i32(p.loc("u_proj"), pr.kind, pr.axis);
+            gl.uniform_4_f32_slice(p.loc("u_tex_xf"), &[pr.scale, s, c, 0.0]);
+            gl.uniform_3_f32_slice(p.loc("u_tex_misc"), &[pr.offset[0], pr.offset[1], 0.0]);
+            gl.uniform_3_f32_slice(p.loc("u_origin"), &pr.origin);
+          }
+          None => gl.uniform_1_i32(p.loc("u_tex_on"), 0),
+        }
         gl.bind_vertex_array(Some(m.vao));
         for r in runs {
           gl.draw_elements(glow::TRIANGLES, r.len() as i32, glow::UNSIGNED_INT, (r.start * 4) as i32);
@@ -1119,6 +1209,7 @@ impl Renderer {
       gl.uniform_1_i32(p.loc("u_has_hl"), 0);
       gl.uniform_1_i32(p.loc("u_vcolor"), 0);
       gl.uniform_1_i32(p.loc("u_mode"), 5);
+      gl.uniform_1_i32(p.loc("u_tex_on"), 0);
       gl.uniform_4_f32_slice(p.loc("u_param"), &[0.0; 4]);
       for m in &self.quads {
         gl.uniform_4_f32_slice(p.loc("u_color"), &unit(m.color));
@@ -1418,6 +1509,9 @@ impl Renderer {
       }
       gl.delete_buffer(self.quad);
       gl.delete_vertex_array(self.empty_vao);
+      for (_, t) in self.textures.drain() {
+        gl.delete_texture(t);
+      }
     }
   }
 }
@@ -1494,7 +1588,39 @@ fn upload_mesh(gl: &Gl, m: &fox_render::Mesh) -> Result<GpuMesh, String> {
       analyze: m.analyze,
       unanalyzed: m.unanalyzed,
       unlit: m.unlit,
+      texture: m.texture.clone(),
     })
+  }
+}
+
+/// A texture tile as an RGBA8 texture that repeats, sampled as stored (sRGB, like the mesh
+/// colours the shader works in).
+fn upload_tile(gl: &Gl, t: &fox_render::Tile) -> Result<glow::Texture, String> {
+  if t.width == 0 || t.height == 0 || t.rgba.len() < (t.width * t.height * 4) as usize {
+    return Err(format!("texture '{}' has no texels", t.key));
+  }
+  unsafe {
+    let tex = gl.create_texture()?;
+    gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+    gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 4);
+    gl.tex_image_2d(
+      glow::TEXTURE_2D,
+      0,
+      glow::RGBA8 as i32,
+      t.width as i32,
+      t.height as i32,
+      0,
+      glow::RGBA,
+      glow::UNSIGNED_BYTE,
+      glow::PixelUnpackData::Slice(Some(&t.rgba)),
+    );
+    gl.generate_mipmap(glow::TEXTURE_2D);
+    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32);
+    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::REPEAT as i32);
+    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::REPEAT as i32);
+    gl.bind_texture(glow::TEXTURE_2D, None);
+    Ok(tex)
   }
 }
 

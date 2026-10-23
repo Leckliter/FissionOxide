@@ -52,12 +52,19 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
   })
 }
 
-/// Changes the design's render data as one undo step, without regenerating.
+/// Changes the design's render data as one undo step, without regenerating. A change to the
+/// materials or what they are on is a new revision: the viewport draws them.
 fn edit<T>(s: &mut Session, label: &str, f: impl FnOnce(&mut RenderDoc) -> Result<T, CmdError>) -> Result<T, CmdError> {
   if s.cmd_label.is_none() {
     s.cmd_label = Some(label.to_string());
   }
-  s.edit_deferred(|d| f(&mut d.render))
+  let looks = |r: &RenderDoc| (r.materials.clone(), r.bodies.clone(), r.faces.clone());
+  let before = looks(&s.design.render);
+  let out = s.edit_deferred(|d| f(&mut d.render))?;
+  if looks(&s.design.render) != before {
+    s.revision += 1;
+  }
+  Ok(out)
 }
 
 // ---------------------------------------------------------------- materials
@@ -329,7 +336,7 @@ fn material_apply(s: &mut Session, p: &Value) -> CmdResult {
 }
 
 /// Each face material as it resolves now: (body, face id, material name, index in the list).
-fn face_materials(s: &Session) -> Vec<(BodyId, u32, String, usize)> {
+pub(crate) fn face_materials(s: &Session) -> Vec<(BodyId, u32, String, usize)> {
   let mut out = Vec::new();
   for (i, fm) in s.design.render.faces.iter().enumerate() {
     let Some(b) = s.model.body(fm.face.body) else { continue };
@@ -752,6 +759,61 @@ pub fn render_scene(s: &Session, camera: RenderCamera, only: Option<&[BodyId]>) 
 
 /// The material of every face of the shown bodies, for the GPU viewport: (body, face) → material,
 /// and each body's own.
+/// What the modeling viewport draws bodies and faces in, as Fusion draws an applied appearance in
+/// every workspace: each body's render material, else its appearance's (a library appearance with
+/// a texture, as Wood - Oak, brings its grain), and the faces with a material or appearance of
+/// their own (a face's render material over its appearance). Bodies without either are left out:
+/// they keep the default look.
+pub fn drawn_materials(s: &Session) -> (HashMap<BodyId, Material>, HashMap<(BodyId, u32), Material>) {
+  let d = &s.design;
+  let mut bodies = HashMap::new();
+  let mut faces = HashMap::new();
+  for (b, f, name, _) in face_materials(s) {
+    if let Some(m) = d.render.material(&name) {
+      faces.insert((b, f), m);
+    }
+  }
+  for body in &s.model.bodies {
+    let own = d.render.body_material(body.id).and_then(|n| d.render.material(n));
+    if let Some(m) = own.or_else(|| d.body_color(body.id).map(fox_raytrace::material::for_color)) {
+      bodies.insert(body.id, m);
+    }
+    for (f, c) in crate::views::body_face_colors(s, body.id) {
+      faces.entry((body.id, f)).or_insert_with(|| fox_raytrace::material::for_color(c));
+    }
+  }
+  (bodies, faces)
+}
+
+/// The tile a material's texture is drawn from in the modeling viewport, made once per texture
+/// (`cache`); `None` without a texture or when its image can't be read.
+pub fn texture_tile(
+  m: &Material,
+  cache: &mut HashMap<String, Option<Arc<fox_render::Tile>>>,
+) -> Option<Arc<fox_render::Tile>> {
+  let spec = m.texture.as_ref()?;
+  let key = format!("{:?}|{:?}|{:?}", spec.source, m.color, spec.color2);
+  cache
+    .entry(key.clone())
+    .or_insert_with(|| {
+      let t = fox_raytrace::Texture::for_material(m)?.ok()?;
+      Some(Arc::new(fox_render::Tile { key, width: t.width, height: t.height, rgba: t.to_srgb8() }))
+    })
+    .clone()
+}
+
+/// A material's texture projection, centred on `origin`, for the modeling viewport.
+pub fn tex_projection(spec: &TextureSpec, origin: [f32; 3]) -> fox_render::TexProjection {
+  fox_render::TexProjection {
+    kind: spec.projection.index(),
+    axis: spec.axis.index() as i32,
+    scale: spec.scale,
+    rotation: spec.rotation,
+    offset: spec.offset,
+    origin,
+  }
+}
+
 pub fn viewport_materials(s: &Session) -> (HashMap<BodyId, Material>, HashMap<(BodyId, u32), Material>) {
   let mut bodies = HashMap::new();
   let mut faces = HashMap::new();
@@ -1046,15 +1108,48 @@ pub fn body_texture(s: &Session, body: BodyId) -> Option<TextureSpec> {
   body_material(s, body).texture
 }
 
-/// `{body, projection?, axis?, scale?, rotation?, offset?, reset?}`: changes how the body's
-/// texture is mapped. The body's material becomes a design material (a library one is copied in
-/// under its name) and is put on the body, so the change stays with the design.
+/// A face's own material: its render material, else what its appearance renders as (`None`: it
+/// shows its body's).
+pub fn face_material(s: &Session, body: BodyId, face: u32) -> Option<Material> {
+  let own = face_materials(s).into_iter().rev().find(|(b, f, ..)| *b == body && *f == face);
+  if let Some(m) = own.and_then(|(.., name, _)| s.design.render.material(&name)) {
+    return Some(m);
+  }
+  crate::views::body_face_colors(s, body).get(&face).map(|c| fox_raytrace::material::for_color(*c))
+}
+
+/// The texture Texture Map Controls edits for a face: its own material's when that has one, else
+/// its body's. The flag says whether it is the face's own.
+pub fn face_texture(s: &Session, body: BodyId, face: u32) -> Option<(TextureSpec, bool)> {
+  match face_material(s, body, face).and_then(|m| m.texture) {
+    Some(t) => Some((t, true)),
+    None => body_texture(s, body).map(|t| (t, false)),
+  }
+}
+
+/// `{body, face?, projection?, axis?, scale?, rotation?, offset?, reset?}`: changes how the
+/// body's texture is mapped, or with `face` (a face id) the texture of that face's own material
+/// (a face without one maps its body's). The material becomes a design material (a library one
+/// is copied in under its name) and is put on the body or face, so the change stays with the
+/// design.
 fn texture_map(s: &mut Session, p: &Value) -> CmdResult {
   let body = BodyId(req_u32(p, "body")?);
   if s.model.body(body).is_none() {
     return Err(CmdError::new(format!("no body {}", body.0)));
   }
-  let mut m = body_material(s, body);
+  let face = match p.get("face").filter(|f| !f.is_null()) {
+    None => None,
+    Some(f) => {
+      let id = f.as_u64().ok_or(CmdError::new("'face' must be a face id"))? as u32;
+      let r = face_ref(s, &json!({"body": body.0, "face": id}))?;
+      // a face without a textured material of its own maps its body's texture
+      face_texture(s, body, id).filter(|t| t.1).map(|_| (id, r))
+    }
+  };
+  let mut m = match &face {
+    Some((id, _)) => face_material(s, body, *id).unwrap_or_else(|| body_material(s, body)),
+    None => body_material(s, body),
+  };
   let Some(old) = m.texture.clone() else {
     return Err(CmdError::new(format!("{}'s appearance '{}' has no texture to map", s.body_name(body), m.name)));
   };
@@ -1085,11 +1180,22 @@ fn texture_map(s: &mut Session, p: &Value) -> CmdResult {
   if own.is_none() {
     m.category = "Design".into();
   }
-  let assigned = s.design.render.body_material(body).is_some_and(|n| n.eq_ignore_ascii_case(&m.name));
-  let out = json!({
+  // the face (or body) wears the material: a face whose texture came from its appearance gets it
+  // as its render material
+  let face_has = |s: &Session, id: u32| {
+    face_materials(s).into_iter().rev().find(|(b, f, ..)| *b == body && *f == id).is_some_and(|x| x.2 == m.name)
+  };
+  let assigned = match &face {
+    Some((id, _)) => face_has(s, *id),
+    None => s.design.render.body_material(body).is_some_and(|n| n.eq_ignore_ascii_case(&m.name)),
+  };
+  let mut out = json!({
     "body": body.0, "material": m.name, "projection": t.projection, "axis": t.axis, "scale": t.scale,
     "rotation": t.rotation, "offset": t.offset,
   });
+  if let Some((id, _)) = &face {
+    out["face"] = json!(id);
+  }
   if t != old || own.is_none() || !assigned {
     edit(s, "Texture Map Controls", |r| {
       let name = m.name.clone();
@@ -1098,8 +1204,13 @@ fn texture_map(s: &mut Session, p: &Value) -> CmdResult {
         None => r.materials.push(m),
       }
       if !assigned {
-        r.bodies.retain(|x| x.body != body);
-        r.bodies.push(BodyMaterial { body, material: name });
+        match face {
+          Some((_, fr)) => r.faces.push(FaceMaterial { face: fr, material: name }),
+          None => {
+            r.bodies.retain(|x| x.body != body);
+            r.bodies.push(BodyMaterial { body, material: name });
+          }
+        }
       }
       Ok(())
     })?;

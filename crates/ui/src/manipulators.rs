@@ -308,7 +308,7 @@ pub fn snap(v: f64, step: f64) -> f64 {
 }
 
 /// An angle brought into (-π, π].
-fn wrap(a: f64) -> f64 {
+pub(crate) fn wrap(a: f64) -> f64 {
   let t = std::f64::consts::TAU;
   let r = a.rem_euclid(t);
   if r > std::f64::consts::PI { r - t } else { r }

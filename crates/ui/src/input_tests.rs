@@ -3616,6 +3616,77 @@ fn texture_map_controls_change_the_projection() {
   assert_eq!(spec.projection, Projection::Cylindrical);
 }
 
+/// `ui:render:texture-map-controls`: TEXTURE MAP CONTROLS puts Fusion's manipulator on the
+/// textured body: dragging its ring turns the texture, its centre square slides it and its arrow
+/// sizes it, the canvas showing each change at once; Cancel leaves the material as it was. A
+/// face wearing a texture of its own maps that one.
+#[test]
+fn texture_map_controls_handles_turn_slide_and_size_the_texture() {
+  use crate::render_ui::RenderCmd;
+  let mut h = Harness::new();
+  let (body, top) = render_box(&mut h);
+  h.app.run("render.material.apply", json!({"material": "Wood - Oak", "body": body.0})).unwrap();
+  h.app.s.selection = vec![fox_engine::Sel::Body { body }];
+  RenderCmd::TextureMap.run(&mut h.app);
+  h.app.s.selection = vec![fox_engine::Sel::Body { body }];
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let spec = |h: &Harness| h.app.render.texture_map.as_ref().unwrap().spec.clone().unwrap();
+  let start = spec(&h);
+  let (_, _, back) = h.app.cam.basis();
+  let f = crate::render_tools::map_frame(&h.app.s, body, &start, back).unwrap();
+  assert!(f.n.dot(back).abs() > 0.5, "a box projection shows the side facing the camera most");
+  // the ring's knob, a quarter turn round: the texture turns by about that much
+  let ud = f.u * (-(start.rotation as f64).to_radians()).cos() + f.v * (-(start.rotation as f64).to_radians()).sin();
+  let knob = f.origin + f.n.cross(ud) * f.radius;
+  let quarter = f.origin - ud * f.radius;
+  let (a, b) = (on_screen(&h.app, knob), on_screen(&h.app, quarter));
+  h.drag(a, b);
+  let turned = spec(&h);
+  let d = ((turned.rotation - start.rotation) as f64 + 540.0).rem_euclid(360.0) - 180.0;
+  assert!((d.abs() - 90.0).abs() < 8.0, "turned {d} degrees");
+  // the centre square slides it
+  let o = on_screen(&h.app, f.origin);
+  h.drag(o, o + vec2(40.0, 0.0));
+  let slid = spec(&h);
+  assert_ne!(slid.offset, turned.offset);
+  assert_eq!(slid.rotation, turned.rotation);
+  // the canvas shows the mapping being edited
+  let opts = crate::viewport::scene_options(&mut h.app);
+  let (mut scene, picks) = h.app.scene.build(&h.app.s, &opts);
+  crate::render_tools::preview_texture_map(&mut h.app, &mut scene, &picks);
+  let shown = scene.meshes.iter().find_map(|m| m.texture.as_ref()).unwrap().projection;
+  assert_eq!((shown.rotation, shown.offset), (slid.rotation, slid.offset));
+  // the arrow's square head sizes it: dragged twice as far out, the texture doubles
+  let ud = f.u * (-(slid.rotation as f64).to_radians()).cos() + f.v * (-(slid.rotation as f64).to_radians()).sin();
+  let head = f.origin + ud * f.radius * 0.6;
+  h.drag(on_screen(&h.app, head), on_screen(&h.app, f.origin + ud * f.radius * 1.2));
+  let sized = spec(&h);
+  assert!((sized.scale / slid.scale - 2.0).abs() < 0.2, "{} -> {}", slid.scale, sized.scale);
+  // Cancel: the material is untouched
+  let cancel = h.find(vec![], "Cancel").unwrap();
+  h.move_then_click(cancel.center());
+  assert!(h.app.render.texture_map.is_none());
+  assert_eq!(fox_engine::rendering::body_texture(&h.app.s, body).unwrap(), start);
+  // a face in walnut of its own: the dialog maps the walnut, and OK keeps it on that face
+  h.app.run("render.material.apply", json!({"material": "Wood - Walnut", "faces": [{"body": body.0, "face": top}]}));
+  h.app.s.selection = vec![fox_engine::Sel::Face { body, face: top }];
+  RenderCmd::TextureMap.run(&mut h.app);
+  h.app.s.selection = vec![fox_engine::Sel::Face { body, face: top }];
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  assert!(!t.iter().any(|x| x == "No texture"), "{t:?}");
+  assert_eq!(h.app.render.texture_map.as_ref().unwrap().face, Some(top));
+  h.app.render.texture_map.as_mut().unwrap().spec.as_mut().unwrap().scale = 77.0;
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  assert_eq!(fox_engine::rendering::face_texture(&h.app.s, body, top).unwrap().0.scale, 77.0);
+  assert_eq!(fox_engine::rendering::body_texture(&h.app.s, body).unwrap(), start);
+}
+
 /// `ui:render:dielectric-priority`: OPTICAL OVERRIDES > Dielectric Priority Control gives the
 /// picked bodies a priority.
 #[test]

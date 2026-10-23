@@ -259,3 +259,96 @@ fn texture_map_controls_change_a_bodys_mapping() {
   let lib = fox_raytrace::material::find("Wood - Oak").unwrap().texture.unwrap();
   assert_eq!(rendering::body_texture(&s, fox_model::BodyId(b)).unwrap(), lib);
 }
+
+/// One box, 60 x 40 x 5.
+fn slab() -> Session {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 60, "depth": 40, "height": 5}));
+  s
+}
+
+/// The body meshes the scene draws: (colour, texture's scale if it has one).
+fn drawn(s: &Session) -> Vec<([u8; 3], Option<f32>)> {
+  let (scene, _) = crate::scene::SceneBuilder::default().build(s, &crate::scene::ViewOptions::default());
+  scene
+    .meshes
+    .iter()
+    .filter(|m| m.analyze)
+    .map(|m| ([m.color[0], m.color[1], m.color[2]], m.texture.as_ref().map(|t| t.projection.scale)))
+    .collect()
+}
+
+/// `ui:render:appearance-not-drawn`: a material put on a body or a face is drawn in the modeling
+/// viewport at once (its colour, and its texture laid over it), as Fusion draws an applied
+/// appearance in every workspace; taking it off brings the default look back.
+#[test]
+fn applied_materials_are_drawn_in_the_viewport() {
+  let mut s = slab();
+  let b = s.model.bodies[0].id.0;
+  let plain = drawn(&s);
+  assert!(plain.iter().all(|m| m.1.is_none()), "{plain:?}");
+  let oak = fox_raytrace::material::find("Wood - Oak").unwrap();
+  let rev = s.revision;
+  run(&mut s, "render.material.apply", json!({"material": "Wood - Oak", "body": b}));
+  assert!(s.revision > rev, "the viewport sees the change");
+  let scale = oak.texture.as_ref().unwrap().scale;
+  assert!(drawn(&s).iter().all(|m| *m == (oak.color, Some(scale))), "{:?}", drawn(&s));
+  // a face of its own: gold, untextured, over the oak
+  let gold = fox_raytrace::material::find("Gold - Polished").unwrap();
+  run(&mut s, "render.material.apply", json!({"material": "Gold - Polished", "faces": [{"point": [0, 0, 5]}]}));
+  let d = drawn(&s);
+  assert!(d.contains(&(gold.color, None)) && d.contains(&(oak.color, Some(scale))), "{d:?}");
+  run(&mut s, "render.material.apply", json!({"body": b}));
+  run(&mut s, "render.material.apply", json!({"faces": [{"point": [0, 0, 5]}]}));
+  assert_eq!(drawn(&s), plain);
+  // undo brings it back
+  s.undo();
+  assert!(drawn(&s).contains(&(gold.color, None)));
+}
+
+/// A face has one appearance, a body one: the one applied last, from either palette, shows.
+#[test]
+fn the_appearance_applied_last_wins() {
+  let mut s = slab();
+  let b = s.model.bodies[0].id.0;
+  run(&mut s, "render.material.apply", json!({"material": "Wood - Oak", "body": b}));
+  run(&mut s, "body.appearance", json!({"body": b, "appearance": "ABS (Red)"}));
+  assert!(s.design.render.body_material(fox_model::BodyId(b)).is_none());
+  assert_eq!(rendering::body_material(&s, fox_model::BodyId(b)).name, "ABS (Red)");
+  run(&mut s, "render.material.apply", json!({"material": "Gold - Polished", "faces": [{"point": [0, 0, 5]}]}));
+  run(&mut s, "face.appearance", json!({"faces": [{"point": [0, 0, 5]}], "appearance": "Copper"}));
+  assert!(s.design.render.faces.is_empty());
+  // the Design palette's Wood - Oak brings its grain too
+  run(&mut s, "body.appearance", json!({"body": b, "appearance": "Wood - Oak"}));
+  let oak = fox_raytrace::material::find("Wood - Oak").unwrap();
+  assert!(drawn(&s).contains(&(oak.color, Some(oak.texture.unwrap().scale))));
+}
+
+/// `ui:render:texture-map-controls`: a face wearing a textured material of its own has that
+/// texture mapped, not its body's; a face without one maps its body's.
+#[test]
+fn texture_map_controls_map_a_faces_own_texture() {
+  let mut s = slab();
+  let b = s.model.bodies[0].id.0;
+  let r = run(&mut s, "render.material.apply", json!({"material": "Wood - Walnut", "faces": [{"point": [0, 0, 5]}]}));
+  let face = r["faces"][0]["face"].as_u64().unwrap() as u32;
+  let body = fox_model::BodyId(b);
+  let (t, own) = rendering::face_texture(&s, body, face).unwrap();
+  assert!(own && t.scale == 40.0);
+  let out = run(&mut s, "render.texture_map", json!({"body": b, "face": face, "scale": 90, "rotation": 15}));
+  assert_eq!((out["material"].as_str(), out["face"].as_u64()), (Some("Wood - Walnut"), Some(face as u64)));
+  let (t, _) = rendering::face_texture(&s, body, face).unwrap();
+  assert_eq!((t.scale, t.rotation), (90.0, 15.0));
+  assert!(s.design.render.body_material(body).is_none(), "the body keeps its own look");
+  // a face whose appearance (Wood - Oak from the Design palette) brings the texture gets it as
+  // its render material
+  let r = run(&mut s, "face.appearance", json!({"faces": [{"point": [0, 0, 5]}], "appearance": "Wood - Oak"}));
+  let face = r["faces"][0]["face"].as_u64().unwrap() as u32;
+  run(&mut s, "render.texture_map", json!({"body": b, "face": face, "scale": 25}));
+  assert_eq!(rendering::face_texture(&s, body, face).unwrap().0.scale, 25.0);
+  assert!(s.design.render.faces.iter().any(|f| f.material == "Wood - Oak"));
+  // taken off, the face has nothing to map: its body has no texture either
+  run(&mut s, "face.appearance", json!({"faces": [{"body": b, "face": face}]}));
+  assert!(rendering::face_texture(&s, body, face).is_none());
+  assert!(s.execute("render.texture_map", &json!({"body": b, "face": face, "scale": 25})).is_err());
+}

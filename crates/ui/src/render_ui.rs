@@ -225,6 +225,8 @@ pub struct RenderUi {
   rename: Option<(u32, String)>,
   /// The environment map of the look, by what it was built from.
   env_cache: Option<(String, Arc<EnvMap>)>,
+  /// Texture tiles for TEXTURE MAP CONTROLS' canvas preview.
+  pub(crate) tiles: HashMap<String, Option<Arc<fox_engine::render::Tile>>>,
 }
 
 impl Default for RenderUi {
@@ -262,6 +264,7 @@ impl Default for RenderUi {
       gallery_view: None,
       rename: None,
       env_cache: None,
+      tiles: HashMap::new(),
     }
   }
 }
@@ -326,10 +329,27 @@ pub fn shading(app: &App) -> bool {
 /// Fusion's Render canvas while In-canvas Render is off: a flat grey.
 pub const CANVAS_GREY: [u8; 3] = [204, 204, 204];
 
+/// Whether the scene's Background is its environment while In-canvas Render is off in the
+/// Render workspace: Fusion draws the environment (Warm Light, ...) behind the normally shaded
+/// model, Flatten Ground and all.
+pub fn wants_env_backdrop(app: &App) -> bool {
+  app.render.active
+    && !shading(app)
+    && app.drawing.is_none()
+    && app.render.environment(&app.s.design.render.environment).background == Background::Environment
+}
+
+/// [`wants_env_backdrop`] where it can be drawn: on the GPU (the CPU rasterizer keeps the flat
+/// grey canvas).
+pub fn env_backdrop(app: &App) -> bool {
+  wants_env_backdrop(app) && crate::gpu::active(app)
+}
+
 /// The canvas colour in the Render workspace while In-canvas Render is off: the scene's Solid
-/// Color background when it has one, else Fusion's flat grey.
+/// Color background when it has one, else Fusion's flat grey (`None` where the environment is
+/// drawn behind the model instead).
 pub fn canvas_background(app: &App) -> Option<[u8; 3]> {
-  if !app.render.active || shading(app) || app.drawing.is_some() {
+  if !app.render.active || shading(app) || app.drawing.is_some() || env_backdrop(app) {
     return None;
   }
   let env = app.render.environment(&app.s.design.render.environment);
@@ -350,6 +370,9 @@ pub fn look_key(app: &App) -> Value {
 /// Splits body meshes whose faces have different materials and gives every mesh its material,
 /// for the GPU viewport. Selected faces (drawn in the selection colour) keep the usual shading.
 pub fn viewport_look(app: &mut App, scene: &mut Scene, picks: &PickTable) -> Option<LookData> {
+  if env_backdrop(app) {
+    return backdrop_look(app, scene);
+  }
   if !shading(app) {
     return None;
   }
@@ -437,6 +460,31 @@ pub fn viewport_look(app: &mut App, scene: &mut Scene, picks: &PickTable) -> Opt
   let env = app.render.env_map(&environment)?;
   let lights = s.design.render.lights.clone();
   Some(LookData { env, environment, camera, materials, origins, bounds, lights })
+}
+
+/// The look that draws only the environment behind the scene ([`wants_env_backdrop`]): every mesh
+/// keeps its usual shading, and no ground shadow is laid under the model.
+pub fn backdrop_look(app: &mut App, scene: &Scene) -> Option<LookData> {
+  let s = &app.s;
+  let mut environment = app.render.environment(&s.design.render.environment);
+  environment.ground = false;
+  let camera = app.render.cam_edit.or(s.design.render.camera).unwrap_or_default();
+  let bounds = s
+    .model
+    .bounds()
+    .map(|(lo, hi)| (lo.as_vec3().to_array(), hi.as_vec3().to_array()))
+    .unwrap_or(([-50.0; 3], [50.0; 3]));
+  let n = scene.meshes.len();
+  let env = app.render.env_map(&environment)?;
+  Some(LookData {
+    env,
+    environment,
+    camera,
+    materials: vec![None; n],
+    origins: vec![[0.0; 3]; n],
+    bounds,
+    lights: Vec::new(),
+  })
 }
 
 // ---------------------------------------------------------------- windows
@@ -532,6 +580,33 @@ fn apply(app: &mut App, material: Option<&str>) {
   }
 }
 
+/// The Appearance window's "In this design" lines: "Body1 — Steel - Satin" for each shown body,
+/// and "Body1 (2 faces) — Wood - Oak" for its faces that have another material.
+pub(crate) fn in_this_design(app: &App) -> Vec<String> {
+  let (_, faces) = fox_engine::rendering::drawn_materials(&app.s);
+  let mut out = Vec::new();
+  for b in app.s.model.bodies.iter().filter(|b| app.s.body_visible(b.id)) {
+    let name = app.s.body_name(b.id);
+    let own = fox_engine::rendering::body_material(&app.s, b.id).name;
+    out.push(format!("{name} — {own}"));
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    let mut on_body: Vec<(&u32, &Material)> =
+      faces.iter().filter(|((fb, _), _)| *fb == b.id).map(|((_, f), m)| (f, m)).collect();
+    on_body.sort_by_key(|(f, _)| **f);
+    for (_, m) in on_body {
+      match counts.iter_mut().find(|c| c.0 == m.name) {
+        Some(c) => c.1 += 1,
+        None => counts.push((m.name.clone(), 1)),
+      }
+    }
+    for (m, n) in counts {
+      let faces = if n == 1 { "1 face".to_string() } else { format!("{n} faces") };
+      out.push(format!("{name} ({faces}) — {m}"));
+    }
+  }
+  out
+}
+
 fn appearance_window(app: &mut App, ctx: &egui::Context) {
   let mut open = app.render.appearance_open;
   if !open {
@@ -607,20 +682,13 @@ fn appearance_window(app: &mut App, ctx: &egui::Context) {
         edit = Some(m);
       }
     });
-    // in this design
-    let used: Vec<(u32, String)> = app
-      .s
-      .model
-      .bodies
-      .iter()
-      .filter(|b| app.s.body_visible(b.id))
-      .map(|b| (b.id.0, fox_engine::rendering::body_material(&app.s, b.id).name))
-      .collect();
+    // in this design: each body's material, then those of faces with one of their own
+    let used = in_this_design(app);
     if !used.is_empty() {
       ui.separator();
       ui.label(RichText::new("In this design").strong());
-      for (b, m) in used {
-        ui.label(format!("{} — {m}", app.s.body_name(BodyId(b))));
+      for line in used {
+        ui.label(line);
       }
     }
   });
@@ -1136,5 +1204,102 @@ mod tests {
     assert!(!app.render.active);
     let (mut scene, picks) = app.scene.build(&app.s, &ViewOptions::default());
     assert!(viewport_look(&mut app, &mut scene, &picks).is_none());
+  }
+
+  /// `ui:render:flatten-ground`: with Background Environment the canvas draws the environment
+  /// behind the model with In-canvas Render off too (the bodies keep their usual shading and no
+  /// ground shadow is laid), and the look follows Flatten Ground.
+  #[test]
+  fn an_environment_background_is_drawn_with_in_canvas_render_off() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 20, "depth": 20, "height": 10}));
+    crate::panels::switch_workspace(&mut app, "Render");
+    // a new design's Solid Color: the flat grey
+    assert!(!wants_env_backdrop(&app));
+    assert_eq!(canvas_background(&app), Some(CANVAS_GREY));
+    app.run("render.environment", json!({"preset": "sunset", "background": "environment"}));
+    assert!(wants_env_backdrop(&app));
+    let (scene, _) = app.scene.build(&app.s, &ViewOptions::default());
+    let look = backdrop_look(&mut app, &scene).unwrap();
+    assert_eq!(look.materials.len(), scene.meshes.len());
+    assert!(look.materials.iter().all(Option::is_none), "the bodies keep their shading");
+    assert!(!look.environment.ground && look.environment.background == Background::Environment);
+    assert_eq!(look.environment.preset, raytrace::Preset::Sunset);
+    // the viewport rebuilds when Flatten Ground is ticked
+    let k0 = crate::viewport::view_params(&app);
+    app.run("render.environment", json!({"flatten_ground": true}));
+    assert_ne!(crate::viewport::view_params(&app), k0);
+    assert!(backdrop_look(&mut app, &scene).unwrap().environment.flatten_ground);
+    // In-canvas Render draws it with the materials instead
+    RenderCmd::InCanvas.run(&mut app);
+    assert!(!wants_env_backdrop(&app));
+  }
+
+  /// The body meshes of the scene as drawn: (colour, has a texture).
+  fn drawn(app: &mut App) -> Vec<([u8; 3], bool)> {
+    let (scene, _) = app.scene.build(&app.s, &ViewOptions::default());
+    scene
+      .meshes
+      .iter()
+      .filter(|m| m.analyze)
+      .map(|m| ([m.color[0], m.color[1], m.color[2]], m.texture.is_some()))
+      .collect()
+  }
+
+  /// Fusion redraws a body or face in an appearance as soon as it is applied, in every workspace
+  /// and with In-canvas Render off: Wood - Oak shows its colour and grain.
+  #[test]
+  fn an_applied_appearance_is_drawn_at_once() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 40, "depth": 40, "height": 20}));
+    let body = app.s.model.bodies[0].id;
+    crate::panels::switch_workspace(&mut app, "Render");
+    assert!(!shading(&app));
+    let oak =
+      fox_engine::rendering::raytrace::material::library().into_iter().find(|m| m.name == "Wood - Oak").unwrap();
+    let rev = app.s.revision;
+    app.s.selection = vec![Sel::Body { body }];
+    apply(&mut app, Some("Wood - Oak"));
+    assert!(app.s.revision > rev, "a new material is a new revision, so the viewport redraws");
+    app.s.selection.clear();
+    assert_eq!(drawn(&mut app), vec![(oak.color, true)], "the box in oak, with its grain");
+    assert!(in_this_design(&app).contains(&format!("{} — Wood - Oak", app.s.body_name(body))));
+    crate::panels::switch_workspace(&mut app, "Design");
+    assert_eq!(drawn(&mut app), vec![(oak.color, true)], "and so in DESIGN");
+    // the projection centres on the body, as the Render workspace's
+    let (scene, _) = app.scene.build(&app.s, &ViewOptions::default());
+    let t = scene.meshes[0].texture.as_ref().unwrap();
+    assert_eq!(t.projection.origin, [0.0, 0.0, 10.0]);
+    assert_eq!(t.projection.scale, oak.texture.as_ref().unwrap().scale);
+    // one face in another appearance: the rest stays oak
+    crate::panels::switch_workspace(&mut app, "Render");
+    let r = app.run("render.material.apply", json!({"material": "Gold - Polished", "faces": [{"point": [0, 0, 20]}]}));
+    let face = r.unwrap()["faces"][0]["face"].as_u64().unwrap() as u32;
+    // applied through the palette to the selected face, as the verifier did
+    app.run("render.material.apply", json!({"faces": [{"body": body.0, "face": face}]}));
+    app.s.selection = vec![Sel::Face { body, face }];
+    apply(&mut app, Some("Gold - Polished"));
+    app.s.selection.clear();
+    let gold = fox_engine::rendering::raytrace::material::library()
+      .into_iter()
+      .find(|m| m.name == "Gold - Polished")
+      .unwrap()
+      .color;
+    let d = drawn(&mut app);
+    assert!(d.contains(&(gold, false)) && d.contains(&(oak.color, true)), "{d:?}");
+    assert!(
+      in_this_design(&app).iter().any(|l| l.ends_with("(1 face) — Gold - Polished")),
+      "{:?}",
+      in_this_design(&app)
+    );
+    // the Design palette's appearance is the one applied last: it replaces the render material
+    app.run("body.appearance", json!({"body": body.0, "appearance": "Copper"}));
+    let copper =
+      fox_engine::rendering::raytrace::material::library().into_iter().find(|m| m.name == "Copper").unwrap().color;
+    let d = drawn(&mut app);
+    assert!(d.contains(&(copper, false)) && !d.iter().any(|x| x.0 == oak.color), "{d:?}");
+    // and Wood - Oak from the Design palette draws its grain too
+    app.run("body.appearance", json!({"body": body.0, "appearance": "Wood - Oak"}));
+    assert!(drawn(&mut app).contains(&(oak.color, true)));
   }
 }

@@ -347,9 +347,46 @@ pub struct SceneBuilder {
   explode: Option<(u64, fox_model::explode::ExplodedView, HashMap<BodyId, DVec3>)>,
   /// The flat pattern environment's drawing, for the revision it was worked out at.
   flat: Option<(u64, Option<crate::flat::FlatDraw>)>,
+  /// Appearance textures' tiles (see [`crate::rendering::texture_tile`]), kept across revisions.
+  tiles: HashMap<String, Option<std::sync::Arc<fox_render::Tile>>>,
 }
 
 impl SceneBuilder {
+  /// Lays their material's texture over a body's meshes (`body` is its tessellation) that are
+  /// drawn in that material's own colour: not a selected, previewed, faded or analysed one. A
+  /// mesh's material is its first face's (`material_of` a face id).
+  fn texture_meshes<'m>(
+    &mut self,
+    meshes: &mut [Mesh],
+    body: &TriMesh,
+    picks: &PickTable,
+    material_of: impl Fn(u32) -> Option<&'m fox_raytrace::Material>,
+  ) {
+    let mut origin = None;
+    for mesh in meshes {
+      let first = mesh.tri_ids.first().copied().unwrap_or(mesh.id);
+      let Some(Pick::Face { face, .. }) = picks.get(first) else { continue };
+      let Some(m) = material_of(face) else { continue };
+      let Some(spec) = &m.texture else { continue };
+      if mesh.color[..3] != m.color || !mesh.colors.is_empty() {
+        continue;
+      }
+      let Some(tile) = crate::rendering::texture_tile(m, &mut self.tiles) else { continue };
+      // the projection centres on the body's box, as the Render workspace's
+      let o = *origin.get_or_insert_with(|| {
+        let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+        for p in &body.positions {
+          for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+          }
+        }
+        [0, 1, 2].map(|k| if lo[k] <= hi[k] { (lo[k] + hi[k]) / 2.0 } else { 0.0 })
+      });
+      mesh.texture = Some(fox_render::MeshTexture { tile, projection: crate::rendering::tex_projection(spec, o) });
+    }
+  }
+
   /// Draws the design's flat pattern for its environment; returns the body it stands for.
   fn draw_flat(
     &mut self,
@@ -410,6 +447,8 @@ impl SceneBuilder {
       scene.background_bottom = SKETCH_BACKGROUND;
     }
     let offsets = self.explode_offsets(s, opts);
+    // applied appearances and render materials, drawn in every workspace
+    let (drawn_bodies, drawn_faces) = crate::rendering::drawn_materials(s);
 
     // a version comparison replaces the bodies
     if let Some(d) = &s.diff {
@@ -449,7 +488,7 @@ impl SceneBuilder {
       let own = if opts.component_colors {
         component_color(s.design.component_of(body.id).map(|c| c.id))
       } else {
-        s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR)
+        drawn_bodies.get(&body.id).map(|m| [m.color[0], m.color[1], m.color[2], 255]).unwrap_or(BODY_COLOR)
       };
       let base = tint(own);
       let base = if ghost { GHOST_COLOR } else { base };
@@ -467,7 +506,8 @@ impl SceneBuilder {
         })
         .collect();
       let first = scene.meshes.len();
-      let mut face_cols = crate::views::body_face_colors(s, body.id);
+      let mut face_cols: HashMap<u32, [u8; 3]> =
+        drawn_faces.iter().filter(|((b, _), _)| *b == body.id).map(|((_, f), m)| (*f, m.color)).collect();
       for (b, f, c) in &opts.tint_faces {
         if *b == body.id {
           face_cols.insert(*f, [c[0], c[1], c[2]]);
@@ -509,6 +549,11 @@ impl SceneBuilder {
         .or(ghost.then_some(GHOST_COLOR[3]))
         .or(hidden_selected.then_some(HIDDEN_SELECTED_ALPHA));
       let unanalyzed = !opts.analysis_view.covers(body.id);
+      if !ghost && !opts.component_colors {
+        self.texture_meshes(&mut scene.meshes[first..], m, &picks, |f| {
+          drawn_faces.get(&(body.id, f)).or_else(|| drawn_bodies.get(&body.id))
+        });
+      }
       for mesh in &mut scene.meshes[first..] {
         mesh.analyze = true;
         mesh.unanalyzed = unanalyzed;
@@ -551,6 +596,9 @@ impl SceneBuilder {
         for mesh in &mut scene.meshes[first..] {
           for p in mesh.positions.iter_mut() {
             *p = (fox_kernel::glam::Vec3::from(*p) + o).to_array();
+          }
+          if let Some(t) = &mut mesh.texture {
+            t.projection.origin = (fox_kernel::glam::Vec3::from(t.projection.origin) + o).to_array();
           }
         }
       }
@@ -1349,6 +1397,7 @@ fn mesh_of(m: &TriMesh, tri_ids: Vec<u32>, color: [u8; 4], hover: Option<u32>) -
     analyze: false,
     unanalyzed: false,
     unlit: false,
+    texture: None,
   }
 }
 
@@ -2067,6 +2116,7 @@ fn simulated_stock(scene: &mut Scene, s: &Session) {
     analyze: false,
     unanalyzed: false,
     unlit: false,
+    texture: None,
   });
 }
 

@@ -242,6 +242,30 @@ mod tests {
     }
   }
 
+  /// The modeling viewport's projection (`fox_render::TexProjection`) is this one.
+  #[test]
+  fn the_viewport_projects_textures_alike() {
+    let p = Vec3::new(12.0, -7.0, 31.0);
+    for projection in [Projection::Box, Projection::Planar, Projection::Cylindrical, Projection::Spherical] {
+      for axis in [Axis::X, Axis::Y, Axis::Z] {
+        let spec =
+          TextureSpec { projection, axis, scale: 15.0, rotation: 30.0, offset: [0.25, -0.5], ..TextureSpec::default() };
+        let view = fox_render::TexProjection {
+          kind: projection.index(),
+          axis: axis.index() as i32,
+          scale: spec.scale,
+          rotation: spec.rotation,
+          offset: spec.offset,
+          origin: [1.0, 2.0, 3.0],
+        };
+        let n = Vec3::new(0.3, -0.8, 0.5).normalize();
+        let a = project(&spec, p - Vec3::new(1.0, 2.0, 3.0), n);
+        let b = view.uv(p, n);
+        assert!((a - b).length() < 1e-4, "{projection:?} {axis:?}: {a} vs {b}");
+      }
+    }
+  }
+
   #[test]
   fn box_projection_follows_the_normal() {
     let spec = TextureSpec { scale: 10.0, ..TextureSpec::default() };

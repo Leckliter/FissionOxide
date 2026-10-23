@@ -166,6 +166,32 @@ fn gpu_matches_cpu() {
   r.destroy(&h.gl);
 }
 
+/// An appearance's texture over a body looks the same on the GPU, and follows the hover.
+#[test]
+fn textures_match_cpu() {
+  let Ok(h) = fox_render_gl::headless::context() else { return };
+  let Ok(mut r) = Renderer::new(&h.gl) else { return };
+  // a coarse 4 x 4 checker (soft edges would differ by the GPU's mipmaps only at the seams)
+  let n = 4u32;
+  let rgba =
+    (0..n * n).flat_map(|i| if (i % n + i / n).is_multiple_of(2) { [230, 190, 120, 255] } else { [90, 60, 30, 255] });
+  let tile = std::sync::Arc::new(fox_render::Tile { key: "checker".into(), width: n, height: n, rgba: rgba.collect() });
+  let mut s = scene();
+  for (m, kind) in [(0, 1), (1, 0)] {
+    let projection = fox_render::TexProjection { kind, scale: 40.0, rotation: 20.0, ..Default::default() };
+    s.meshes[m].texture = Some(fox_render::MeshTexture { tile: tile.clone(), projection });
+    s.meshes[m].colors.clear();
+  }
+  for (name, cam) in cams() {
+    let cpu = fox_render::render(&s, &cam, 320, 240);
+    let gpu = r.render(&h.gl, &s, &cam, 320, 240).expect("gpu render");
+    let d = compare(&cpu, &gpu);
+    eprintln!("{name} textured: {:.2}% colour, {:.2}% ids differ", d.color * 100.0, d.ids * 100.0);
+    assert!(d.color < 0.05, "{name} textured: {:.2}% of pixels differ in colour", d.color * 100.0);
+  }
+  r.destroy(&h.gl);
+}
+
 #[test]
 fn picks_are_exact_and_hover_reuses_meshes() {
   let Ok(h) = fox_render_gl::headless::context() else { return };

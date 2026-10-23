@@ -123,9 +123,6 @@ uniform vec4 u_mat2;
 uniform vec3 u_emit;
 uniform int u_tex_on;
 uniform sampler2D u_tex;
-uniform ivec2 u_proj;
-uniform vec4 u_tex_xf;
-uniform vec3 u_tex_misc;
 uniform vec3 u_origin;
 uniform vec4 u_hl_color;
 uniform uint u_hl;
@@ -140,32 +137,7 @@ layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_id;
 ID_COLOR
 COMMON
-vec2 planar(vec3 p, int axis) {
-  return axis == 0 ? p.yz : (axis == 1 ? p.xz : p.xy);
-}
-// mirrors fox_raytrace::texture::project
-vec2 proj_uv(vec3 p, vec3 n) {
-  float scale = max(u_tex_xf.x, 1e-3);
-  vec2 raw;
-  if (u_proj.x == 0) {
-    vec3 a = abs(n);
-    int axis = (a.x >= a.y && a.x >= a.z) ? 0 : (a.y >= a.z ? 1 : 2);
-    raw = planar(p, axis) / scale;
-  } else if (u_proj.x == 1) {
-    raw = planar(p, u_proj.y) / scale;
-  } else {
-    vec2 q = u_proj.y == 0 ? p.yz : (u_proj.y == 1 ? p.zx : p.xy);
-    float h = u_proj.y == 0 ? p.x : (u_proj.y == 1 ? p.y : p.z);
-    float u = atan(q.y, q.x) / (2.0 * PI) + 0.5;
-    if (u_proj.x == 2) {
-      raw = vec2(u, h / scale);
-    } else {
-      raw = vec2(u, acos(clamp(h / max(length(p), 1e-9), -1.0, 1.0)) / PI);
-    }
-  }
-  float s = u_tex_xf.y, c = u_tex_xf.z;
-  return vec2(raw.x * c - raw.y * s, raw.x * s + raw.y * c) + u_tex_misc.xy;
-}
+PROJ_UV
 vec2 env_brdf(float nv, float r) {
   vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
   vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
@@ -353,6 +325,7 @@ impl Pbr {
     let fs = PBR_FS
       .replace("COMMON", &common)
       .replace("ID_COLOR", crate::gl::ID_COLOR)
+      .replace("PROJ_UV", crate::gl::PROJ_UV)
       .replace("MAX_LIGHTS", &MAX_LIGHTS.to_string());
     let common_u =
       ["u_env", "u_env_levels", "u_env_rot", "u_sh", "u_exposure", "u_tone", "u_shadow", "u_light_vp", "u_shadow_on"];

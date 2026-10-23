@@ -965,6 +965,7 @@ pub fn draw(scene: &mut fox_render::Scene, picks: &mut crate::scene::PickTable, 
     analyze: false,
     unanalyzed: false,
     unlit: false,
+    texture: None,
   });
   if v.mesh || values.is_none() {
     // element edges of the boundary

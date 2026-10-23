@@ -550,7 +550,7 @@ cmds! {
   "render.light.delete" => "Delete a light", "{name}";
   "render.priority" => "Dielectric Priority Control: give transparent bodies a priority 0, 1 or 2; where they overlap the higher one's glass fills the overlap", "{bodies: [id], priority: 0|1|2}";
   "render.priorities" => "Bodies with a dielectric priority above 0", "{}";
-  "render.texture_map" => "Texture Map Controls: a body's texture projection (automatic|planar|box|spherical|cylindrical), axis, size (mm per repeat), turn (deg) and shift (repeats); reset puts it back. Changes the body's material (copied into the design when it's a library one)", "{body, projection?, axis?: x|y|z, scale?, rotation?, offset?: [u, v], reset?: bool}";
+  "render.texture_map" => "Texture Map Controls: a body's (or with face, that face's own) texture projection (automatic|planar|box|spherical|cylindrical), axis, size (mm per repeat), turn (deg) and shift (repeats); reset puts it back. Changes the material (copied into the design when it's a library one)", "{body, face?, projection?, axis?: x|y|z, scale?, rotation?, offset?: [u, v], reset?: bool}";
   "design.material" => "The root component's physical material (what bodies outside components, or in components naming none, are made of; Preferences > Material sets it for new designs); no material reads it", "{material?}";
 }
 

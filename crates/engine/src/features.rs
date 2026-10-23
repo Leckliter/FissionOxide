@@ -384,6 +384,8 @@ fn appearance(s: &mut Session, p: &Value) -> CmdResult {
     for b in &bodies {
       d.body_settings_mut(*b).color = color;
     }
+    // a body has one appearance, the one applied last: a render material on it goes
+    d.render.bodies.retain(|m| !bodies.contains(&m.body));
     Ok(())
   })?;
   Ok(json!({"bodies": bodies.iter().map(|b| b.0).collect::<Vec<_>>(), "color": color}))

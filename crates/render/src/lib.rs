@@ -11,10 +11,12 @@
 use glam::{DMat4, DVec3, DVec4, Vec3};
 
 mod post;
+mod texture;
 pub use post::{
   AA_EDGE, AO_RADII, AO_STRENGTH, Dome, Post, SHADOW_BIAS, SHADOW_DARKEN, SHADOW_LEAN, SHADOW_MIN_COS, SHADOW_SIZE,
   ShadowMap, ao_at, casts_shadow, shadow_light, shadow_texel, to_light,
 };
+pub use texture::{MeshTexture, TexProjection, Tile};
 
 /// Hostile-size guard for frames.
 pub const MAX_DIM: u32 = 8192;
@@ -301,6 +303,9 @@ pub struct Mesh {
   /// Drawn in its colour without lighting (a sketch profile, which Fusion shades the same from
   /// every angle).
   pub unlit: bool,
+  /// An appearance's texture over the surface, standing in for `color` (highlighted triangles
+  /// keep their highlight).
+  pub texture: Option<MeshTexture>,
 }
 
 impl Mesh {
@@ -881,6 +886,11 @@ impl Effects {
           ..(*m).clone()
         };
         r.color = [r.color[0], r.color[1], r.color[2], 255];
+        // a texture is mirrored with the surface
+        if let Some(t) = &mut r.texture {
+          let o = &mut t.projection.origin;
+          o[2] = 2.0 * z0 - o[2] - 2.0 * lift;
+        }
         added.push(r);
       }
     }
@@ -982,6 +992,7 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
     paper: m.analyze && style.line_drawing(),
     unlit: m.unlit,
     shadow: shadows.as_ref().filter(|_| casts_shadow(m)),
+    texture: None,
   };
   for m in scene.meshes.iter().filter(|m| !m.transparent()) {
     if m.analyze && !style.shaded() && !style.line_drawing() {
@@ -1196,7 +1207,11 @@ fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, ligh
       continue;
     }
     // a highlighted (hovered) triangle shows its highlight, not the vertex colours
-    let shade = Shade { vertex_colors: per_vertex && !shade.paper && m.highlight != Some(id), ..shade };
+    let shade = Shade {
+      vertex_colors: per_vertex && !shade.paper && m.highlight != Some(id),
+      texture: m.texture.as_ref().filter(|_| !shade.paper && m.highlight != Some(id)),
+      ..shade
+    };
     for i in 1..poly.len() - 1 {
       raster_tri(f, [poly[0], poly[i], poly[i + 1]], id, color, cam, eye, lights, shade);
     }
@@ -1244,6 +1259,8 @@ struct Shade<'a> {
   unlit: bool,
   /// Object Shadow's map, for a body surface.
   shadow: Option<&'a ShadowMap>,
+  /// The mesh's texture ([`Mesh::texture`]).
+  texture: Option<&'a MeshTexture>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1332,8 +1349,11 @@ fn raster_tri(
       let diff = 0.36 * n.dot(key).max(0.0) + 0.24 * n.dot(head).max(0.0) + 0.15 * n.dot(fill).max(0.0);
       let half = (key + view).normalize_or_zero();
       let spec = n.dot(half).max(0.0).powf(40.0) * 0.12;
-      let base =
-        if shade.vertex_colors { v[0].col * b0 as f32 + v[1].col * b1 as f32 + v[2].col * b2 as f32 } else { base };
+      let base = match shade.texture {
+        Some(t) => t.color_at(wpos, n),
+        None if shade.vertex_colors => v[0].col * b0 as f32 + v[1].col * b1 as f32 + v[2].col * b2 as f32,
+        None => base,
+      };
       let c = match shade.analysis {
         _ if shade.paper || shade.unlit => base,
         None => base * (0.5 + diff) + Vec3::splat(spec),
@@ -1502,6 +1522,7 @@ mod tests {
       analyze: false,
       unanalyzed: false,
       unlit: false,
+      texture: None,
     }
   }
 
@@ -1530,6 +1551,36 @@ mod tests {
     cam.set_view(StandardView::Bottom);
     let f = render(&scene, &cam, 200, 100);
     assert_eq!(f.pick(100.0, 50.0, 0, |_| true), 1);
+  }
+
+  /// A textured mesh shows its texture's texels where they fall, not its flat colour, except on
+  /// a highlighted (hovered) face.
+  #[test]
+  fn textures_stand_in_for_the_mesh_colour() {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Top);
+    cam.distance = 100.0;
+    cam.ortho = true;
+    // black and white halves across x, one repeat over the quad's 20 mm
+    let rgba = [255u8, 0].iter().flat_map(|v| [*v, *v, *v, 255]).collect();
+    let tile = std::sync::Arc::new(Tile { key: "halves".into(), width: 2, height: 1, rgba });
+    let projection = TexProjection { scale: 20.0, origin: [-10.0, -10.0, 0.0], ..TexProjection::default() };
+    let mut m = quad(0.0, [255, 0, 0, 255], 1);
+    m.texture = Some(MeshTexture { tile, projection });
+    let f = render(&Scene { meshes: vec![m.clone()], ..Default::default() }, &cam, 200, 200);
+    let px = |f: &Frame, x: f64| {
+      let (sx, sy, _) = cam.project(DVec3::new(x, 0.0, 0.0), 200, 200).unwrap_or_default();
+      let i = (sy as usize * 200 + sx as usize) * 4;
+      [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2]]
+    };
+    let (left, right) = (px(&f, -7.0), px(&f, 7.0));
+    assert!(left[0] > 200 && left[1] > 200, "white on the left: {left:?}");
+    assert!(right[0] < 100 && right[1] < 100, "black on the right: {right:?}");
+    m.highlight = Some(1);
+    m.highlight_color = [0, 0, 255, 255];
+    let f = render(&Scene { meshes: vec![m], ..Default::default() }, &cam, 200, 200);
+    let hl = px(&f, -7.0);
+    assert!(hl[2] > hl[0], "the highlight shows over the texture: {hl:?}");
   }
 
   /// A hollow marker is a ring of its colour around a white disc (Fusion's sketch point); it

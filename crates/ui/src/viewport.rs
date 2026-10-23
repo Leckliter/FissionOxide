@@ -532,6 +532,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= crate::form_ui::overlay(app, &resp, &painter, &ctx, &project, &ray);
   consumed |= crate::handles::show(app, &resp, &painter, &ctx, &project, &ray, step);
+  consumed |= crate::render_tools::texture_map_handles(app, &resp, &painter, &project, &ray);
   crate::dialogs::surface::patch_overlay(app, &painter, &project);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
   if app.objects.joints || app.objects.joint_origins {
@@ -968,6 +969,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
       .unwrap_or_default(),
     display: (app.display.ground(), app.display.environment),
     bodies_hidden: app.ctx_menu.bodies_hidden,
+    texture_map: crate::render_tools::texture_map_key(app),
   };
   if crate::gpu::active(app) {
     crate::gpu::set_quads(app, &key.quads);
@@ -984,6 +986,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     d.add_cut_ghost(&mut scene);
   }
   crate::navbar::dress(app, &mut scene);
+  crate::render_tools::preview_texture_map(app, &mut scene, &picks);
   if let Some(c) = crate::render_ui::canvas_background(app) {
     // the Render workspace's own background, not the dome
     scene.post.dome = None;
@@ -1201,7 +1204,7 @@ fn dark_view(mut v: serde_json::Value, ctx: &egui::Context) -> serde_json::Value
 }
 
 /// The section and analysis settings as render parameters.
-fn view_params(app: &App) -> serde_json::Value {
+pub(crate) fn view_params(app: &App) -> serde_json::Value {
   let mut v = crate::analyses::render_params(app).unwrap_or(json!({}));
   // a Sweep's or Loft's Analysis tab shows its analysis while the dialog is open
   if let Some(a) = app.dialog.as_ref().and_then(|d| d.tab_analysis())
@@ -1237,7 +1240,7 @@ fn view_params(app: &App) -> serde_json::Value {
   if let Some(sl) = slice_params(app) {
     v["slice"] = sl;
   }
-  if crate::render_ui::shading(app) {
+  if crate::render_ui::shading(app) || crate::render_ui::wants_env_backdrop(app) {
     v["render_look"] = crate::render_ui::look_key(app);
   }
   if let Some(c) = crate::render_ui::canvas_background(app) {

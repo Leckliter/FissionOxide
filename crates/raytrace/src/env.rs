@@ -448,12 +448,24 @@ pub fn preset_map(p: Preset) -> (u32, u32, Vec<Vec3>) {
     ],
     Preset::Dark => vec![softbox(-150.0, 20.0, 10.0, Vec3::splat(12.0)), softbox(150.0, 20.0, 10.0, Vec3::splat(8.0))],
     Preset::Soft => vec![softbox(0.0, 90.0, 40.0, Vec3::splat(1.5))],
+    // Fusion's Warm Light: a warm studio, a broad amber key low on one side and a soft fill
+    Preset::Sunset => {
+      vec![softbox(-100.0, 30.0, 22.0, Vec3::new(9.0, 6.0, 3.4)), softbox(60.0, 45.0, 26.0, Vec3::new(2.4, 2.0, 1.5))]
+    }
     _ => Vec::new(),
   };
   let (sun, sun_color, sun_size) = match p {
     Preset::Sky => (Some((-60f32, 45f32)), Vec3::new(1.0, 0.95, 0.88) * 900.0, 1.5f32),
-    Preset::Sunset => (Some((-100f32, 6f32)), Vec3::new(1.0, 0.6, 0.3) * 500.0, 1.8f32),
     _ => (None, Vec3::ZERO, 0.0),
+  };
+  // the studios' floor: a pool of light under the lights, fading out toward the horizon, so the
+  // ground reads as a floor (and Flatten Ground lays the pool under the model)
+  let pool: Option<Vec3> = match p {
+    Preset::Studio => Some(lin([164, 164, 166])),
+    Preset::Soft => Some(lin([200, 200, 200])),
+    Preset::Sunset => Some(lin([214, 178, 138])),
+    Preset::Dark => Some(lin([46, 46, 50])),
+    _ => None,
   };
   let sun_dir = sun.map(|(az, el)| {
     let (az, el) = (f32::to_radians(az), f32::to_radians(el));
@@ -491,9 +503,9 @@ pub fn preset_map(p: Preset) -> (u32, u32, Vec<Vec3>) {
         }
         Preset::Sunset => {
           if up >= 0.0 {
-            lin([250, 160, 90]).lerp(lin([60, 70, 120]), up.powf(0.4)) * 1.2
+            lin([246, 196, 140]).lerp(lin([222, 204, 184]), up.powf(0.5))
           } else {
-            lin([70, 50, 40]).lerp(lin([30, 26, 24]), (-up).powf(0.5))
+            lin([150, 120, 96]).lerp(lin([112, 86, 66]), (-up).powf(0.5))
           }
         }
         Preset::Dark => {
@@ -505,6 +517,13 @@ pub fn preset_map(p: Preset) -> (u32, u32, Vec<Vec3>) {
         }
         Preset::White => Vec3::ONE,
       };
+      if let Some(pool) = pool
+        && up < 0.0
+      {
+        // brightest straight down, gone by 45° below the horizon
+        let t = smoothstep(0.7, 0.97, -up);
+        c = c.lerp(pool, t);
+      }
       for b in &boxes {
         c += b.at(d);
       }
@@ -559,6 +578,27 @@ mod tests {
     // far away on the ground it nears the horizon
     let far = Vec3::new(0.0, 1.0, -0.01).normalize();
     assert!(flat_dir(o, far, 0.0, Vec3::ZERO, 40.0).z > -0.02);
+  }
+
+  /// The studios have a floor: a pool of light straight down, darker toward the horizon, so
+  /// Flatten Ground has something to lay under the model. Warm Light's is warm and light, not
+  /// the near-black of a sunset's ground.
+  #[test]
+  fn studio_floors_have_a_pool_of_light_under_the_model() {
+    for p in [Preset::Studio, Preset::Soft, Preset::Sunset] {
+      let env = EnvMap::build(&Environment { preset: p, ..Environment::default() }).unwrap();
+      let down = env.lookup(Vec3::new(0.0, 0.0, -1.0));
+      let near = env.lookup(Vec3::new(1.0, 0.0, -0.2).normalize());
+      assert!(down.length() > near.length() * 1.2, "{p:?}: {down} straight down, {near} near the horizon");
+    }
+    let warm = EnvMap::build(&Environment { preset: Preset::Sunset, ..Environment::default() }).unwrap();
+    let floor = warm.lookup(Vec3::new(1.0, 0.0, -0.3).normalize());
+    assert!(floor.x > 0.15 && floor.x > floor.z, "{floor}");
+    // seen from a camera over the model, the flattened ground under it shows the pool
+    let o = Vec3::new(0.0, -100.0, 50.0);
+    let d = (Vec3::new(0.0, 5.0, 0.0) - o).normalize();
+    let flat = warm.lookup_flat(o, d, 0.0, Vec3::ZERO, 30.0);
+    assert!(flat.length() > warm.lookup(d).length() * 1.2, "{flat} vs {}", warm.lookup(d));
   }
 
   #[test]

@@ -514,6 +514,8 @@ struct RenderKey {
   display: (Option<f32>, navbar::Environment),
   /// The Bodies folder's eye is off: no body is drawn.
   bodies_hidden: bool,
+  /// The mapping TEXTURE MAP CONTROLS previews on the canvas.
+  texture_map: String,
 }
 
 impl App {

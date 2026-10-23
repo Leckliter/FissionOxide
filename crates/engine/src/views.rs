@@ -150,11 +150,22 @@ fn face_appearance(s: &mut Session, p: &Value) -> CmdResult {
   // what the faces had before goes
   let old: Vec<usize> =
     face_colors(s).into_iter().filter(|(b, f, ..)| ids.contains(&(*b, *f))).map(|(.., i)| i).collect();
+  // and so does a render material on them: a face has one appearance, the one applied last
+  let old_render: Vec<usize> = crate::rendering::face_materials(s)
+    .into_iter()
+    .filter(|(b, f, ..)| ids.contains(&(*b, *f)))
+    .map(|(.., i)| i)
+    .collect();
   s.edit(|d| {
     let mut i = 0;
     d.face_appearances.retain(|_| {
       i += 1;
       !old.contains(&(i - 1))
+    });
+    let mut i = 0;
+    d.render.faces.retain(|_| {
+      i += 1;
+      !old_render.contains(&(i - 1))
     });
     if let Some(c) = color {
       d.face_appearances.extend(refs.into_iter().map(|face| FaceAppearance { face, color: c }));
