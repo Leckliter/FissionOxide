@@ -1,0 +1,10 @@
+{
+  "ui:toolbar:workspace-menu-style": "ui-reverify-chrome-3",
+  "ui:documents:tab-overflow-menu": "ui-reverify-chrome-3",
+  "ui:shortcuts:sketch-keys-from-3d": "ui-reverify-shortcuts-1",
+  "ui:shortcuts:offset-from-3d-dialog": "ui-reverify-shortcuts-1",
+  "ui:dialogs:replace-face-plane-target": "ui-reverify-dialogs-7",
+  "ui:surface:sweep-loft-missing": "ui-reverify-dialogs-7",
+  "ui:render:in-canvas-body-shading": "ui-reverify-workspaces-2",
+  "ui:manufacture:navbar-cam-icons": "ui-reverify-workspaces-2"
+}

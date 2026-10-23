@@ -1,6 +1,31 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 22:10, session "Re-verification sweep, verifier 6"
+## Last stop: 2026-10-23, 09:45, session "Incremental re-verification, verifier 7"
+
+Built `main` at `905a4701` (no build fix needed) and re-checked the 36 checkable `fixing-merged` keys from
+the wave-38..42 fixers: 29 verified, 7 reopened, 1 new row (report
+`parity/reports/2026-10-23-reverify-incremental.md`). New wave-44 batches, all `ready` with no fixer (keys in
+`map-wave44.json`): `ui-reverify-chrome-3` (2: workspace list's subscription badge, tabs overflowing at
+1215 px), `ui-reverify-shortcuts-1` (2: sketch keys from 3D leave no tool running after the plane pick, the
+waiting OFFSET's extra Distance row), `ui-reverify-dialogs-7` (2: Replace Face's construction-plane target
+from the canvas, surface Loft rails) and `ui-reverify-workspaces-2` (2: In-canvas Render's near-black bodies
+(P1, new), Manufacture's navbar CAM icons).
+
+Left `fixing-merged` (none checkable here): `ui:marking-menu:flick`, `ui:chrome:comments-expand`,
+`ui:sketch:vertical-on-horizontal-line`, `ui:timeline:feature-owner-component`. Next verifier: re-check what
+the wave-42 / wave-43 / wave-44 fixers mark `fixing-merged` (wave-42 and the legacy leftovers were assigned
+to cloud fixers in `16305bf7`), area by area; with fewer than five waiting, confirm and rebatch the open
+mismatches whose batch is `done`; otherwise the next prober area is the ASSEMBLY row in `coverage.md` (needs
+two saved designs; never in Fusion's cloud).
+
+Where the documents stand: Fusion snapped left (x 0..1215, its minimum width) on "Untitled*(1)" in DESIGN,
+otherwise untouched (OFFSET cancelled, CONSTRUCT opened, Manufacture and RENDER visited, In-canvas Render
+started and stopped). FissionOxide (`905a4701`) at x 0..1215 with the Data Panel closed, tabs "Untitled",
+"Untitled(1)", "Untitled(2)", "Untitled(3)*" (Body1 = a box with a boss joined with a second box, Plane1,
+three sketches). Trap: Fusion will not size below 1215 px, so the "907 px" in older rows is screenshot px;
+compare widths in screenshot px with both windows at 1215 px.
+
+## Earlier stop: 2026-10-22, 22:10, session "Re-verification sweep, verifier 6"
 
 Built `main` at `dadbcad3` (no build fix needed), then `d2202676` and `3aa0fa4c` as merges arrived. Re-checked mesh 21,
 dialogs 18, navbar 3, sketch 1, render 2, 4 singles and 8 chrome keys (ui-reverify-chrome-1): 42 verified, 15 reopened, 4 new rows (report

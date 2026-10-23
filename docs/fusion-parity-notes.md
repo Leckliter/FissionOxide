@@ -665,3 +665,12 @@ extra icon, no Scale Mesh arrow, mesh menus and shading, Mirror originals, Remov
 Measure into a dimension box, angle decimals, an applied appearance not drawn (P1), texture handles, the
 environment background, Export types. Four wave-42 batches (`ui-reverify-mesh-1`, `ui-reverify-mesh-2`,
 `ui-reverify-dialogs-6`, `ui-reverify-render-2`); report `parity/reports/2026-10-22-reverify-mesh-dialogs-render.md`.
+
+## 2026-10-23, verifier 7: incremental re-verification
+Built `905a4701` and re-checked the 36 checkable keys the wave-38..42 fixers had marked fixing-merged: 29
+verified, 7 reopened, 1 new row (In-canvas Render shades default bodies near black where Fusion's are bright
+steel). Reopened: the workspace list's badge, tabs overflowing at Fusion's minimum width, sketch keys from 3D
+not running their tool after the plane pick, the waiting OFFSET's Distance row, Replace Face's plane target
+from the canvas, surface Loft rails, Manufacture's navbar CAM icons. Four wave-44 batches
+(`ui-reverify-chrome-3`, `ui-reverify-shortcuts-1`, `ui-reverify-dialogs-7`, `ui-reverify-workspaces-2`);
+report `parity/reports/2026-10-23-reverify-incremental.md`.

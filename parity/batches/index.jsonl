@@ -142,3 +142,7 @@
 {"name": "ui-reverify-dialogs-6", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_32bd4ad7 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-reverify-render-2", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_996c0a03 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-legacy-leftovers", "items": 9, "status": "fixing", "pr": null, "fixer": "cloud task_aca51e60 (requested 2026-10-23 by the coordinator)"}
+{"name": "ui-reverify-chrome-3", "items": 2, "status": "ready", "pr": null}
+{"name": "ui-reverify-shortcuts-1", "items": 2, "status": "ready", "pr": null}
+{"name": "ui-reverify-dialogs-7", "items": 2, "status": "ready", "pr": null}
+{"name": "ui-reverify-workspaces-2", "items": 2, "status": "ready", "pr": null}
