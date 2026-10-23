@@ -3034,6 +3034,8 @@ impl Dialog {
       Kind::Section => !self.plane.is_null(),
       // Remove Features applies from its own Remove button
       Kind::Form(f) if crate::forms::close_only(f) => false,
+      // Fusion's Isoparametric Curve has OK live from the start
+      Kind::Form(f) if f.cmd == "sketch.isoparametric_curve" => true,
       // Trim previews its tool's cut, but OK waits for a piece to remove
       Kind::Form(f) if f.cmd == crate::forms::TRIM_CMD => {
         self.ready() && self.form_value("remove").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
@@ -5326,6 +5328,24 @@ impl Dialog {
     &mut self.palette
   }
 
+  /// The sketch Mirror's, patterns' and Scale's active selection row (0 the objects).
+  #[cfg(test)]
+  pub(crate) fn set_pick_row(&mut self, row: usize) {
+    self.pick_row = row;
+  }
+
+  /// The sketch pattern's or Scale's picked centre point.
+  #[cfg(test)]
+  pub(crate) fn center_pick(&self) -> Option<Sel> {
+    self.center
+  }
+
+  /// The sketch curves picked as objects.
+  #[cfg(test)]
+  pub(crate) fn objects(&self) -> Vec<u32> {
+    self.curves.clone()
+  }
+
   /// Puts back what the dialog changed in the app while open (Measure's selection filter and picks).
   pub(crate) fn leave(&mut self, app: &mut App) {
     // an edit closed some other way keeps what it shows and rolls forward
@@ -6254,7 +6274,9 @@ mod tests {
     let (cmd, p) = d.command().unwrap();
     // Fusion's sample text, 10 mm (0.394 in) tall, in its default font, the height an expression
     assert_eq!((cmd, &p["text"], &p["height"]), ("sketch.text", &json!("Sample Text"), &json!("10 mm")));
-    assert_eq!(p["font"], json!(crate::forms::default_font()));
+    // Fusion's Font starts on Arial, first in the list, on any machine
+    assert_eq!(p["font"], json!("Arial"));
+    assert_eq!(crate::forms::font_choices()[0], ("Arial".to_string(), "Arial".to_string()));
     assert_eq!(p["at"], json!([10.0, 15.0]));
     // the rotate handle turns the text: a dial at the frame's first corner
     let mut app = App::with_session(Session::default());
@@ -6298,6 +6320,10 @@ mod tests {
     assert_eq!((d.count.as_str(), d.choice, d.angle.as_str()), ("3", "full", "360 deg"));
     assert_eq!(d.prompt(false).as_deref(), Some("Select sketch objects to pattern"));
     d.curves = vec![circle];
+    // before the centre is picked nothing previews and no quantity box shows (Fusion)
+    assert!(d.handles(&app.s).is_empty() && d.command().is_some() && !d.ready());
+    d.preview(&mut app.s);
+    assert!(!d.applied && d.preview_curves().is_empty());
     let origin = app.s.design.sketch(sk).unwrap().points.iter().find(|p| p.x == 0.0 && p.y == 0.0).unwrap().id;
     d.center = Some(Sel::SketchPoint { sketch: sk, point: origin });
     d.at = ["0".into(), "0".into()];
@@ -6312,7 +6338,7 @@ mod tests {
     // the quantity dot at the next instance round the centre, with the quantity's floating box
     let h = d.handles(&app.s);
     assert_eq!(h.len(), 1);
-    assert!(matches!(h[0].head, crate::handles::Head::Dot));
+    assert!(matches!(h[0].head, crate::handles::Head::Spin));
     assert_eq!(d.handle_field(0).map(|f| f.clone()), Some("3".to_string()));
     d.set_handle(&app.s, 0, std::f64::consts::TAU / 6.0, 0.01);
     assert_eq!(d.count, "6");
@@ -6428,6 +6454,61 @@ mod tests {
     assert!(!d.form.filter_faces(&crate::forms::SK_INTERSECT));
     d.form.values[2] = json!("faces");
     assert!(d.form.filter_faces(&crate::forms::SK_INTERSECT));
+  }
+
+  /// `ui:sketch:project-include-menu`: none of the Project / Include dialogs has a Preview box;
+  /// Spun Profile's Geometry and Axis are Select rows taking the picks in turn, with Projection
+  /// Link live (unticked, plain curves); Isoparametric Curve's rows and OK are live.
+  #[test]
+  fn project_include_dialogs_are_fusions() {
+    use crate::forms::{self, Input};
+    for f in [
+      &forms::SK_INTERSECT,
+      &forms::SK_SPUN_PROFILE,
+      &forms::SK_INCLUDE,
+      &forms::SK_PROJECT_SURFACE,
+      &forms::SK_INTERSECTION_CURVE,
+      &forms::SK_ISOPARAMETRIC,
+    ] {
+      assert!(forms::always_previews(f) || forms::no_preview(f), "{} shows a Preview box", f.name);
+    }
+    let f = &forms::SK_SPUN_PROFILE;
+    let keys: Vec<&str> = f.inputs.iter().map(|i| i.key()).collect();
+    assert_eq!(keys, ["bodies", "filter", "associative", "axis", "project_axis", "centerline", "tolerance", "flip"]);
+    assert!(
+      matches!(f.inputs[0], Input::Pick { multi: true, .. }) && matches!(f.inputs[3], Input::Pick { multi: false, .. })
+    );
+    assert!(forms::greyed(f, "associative").is_none());
+    let iso = &forms::SK_ISOPARAMETRIC;
+    assert!(forms::greyed(iso, "curve").is_none() && forms::greyed(iso, "associative").is_none());
+    assert!(Dialog::blank(Kind::Form(iso)).ok_enabled(), "Fusion's OK is live");
+
+    // a body, then (the Axis row active) a sketch line: the outline spins about the line
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    app.run("sketch.circle", json!({"center": [15, 0], "radius": 5})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("extrude", json!({"sketch": 1, "distance": 4})).unwrap();
+    let body = app.s.model.bodies[0].id;
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    let line = app.run("sketch.line", json!({"points": [[0, -10], [0, 10]]})).unwrap()["curves"][0].as_u64().unwrap();
+    let mut d = Dialog::open(&mut app, Kind::Form(f));
+    assert_eq!(d.form.row, 0, "Geometry is the active row");
+    app.s.selection = vec![Sel::Body { body }];
+    d.sync_selection(&app.s);
+    assert!(!d.ready(), "OK waits for the axis");
+    d.form.row = 3;
+    let line_sel = Sel::SketchCurve { sketch: sk, curve: fox_engine::sketch::CurveId(line as u32) };
+    app.s.selection = vec![Sel::Body { body }, line_sel];
+    d.sync_selection(&app.s);
+    assert!(d.ready());
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!(
+      (cmd, &p["bodies"], &p["axis"]),
+      ("sketch.spun_profile", &json!([body.0]), &json!({"sketch": sk.0, "curve": line}))
+    );
+    apply(&mut app.s, &mut d);
   }
 
   /// PROJECT's Selection Filter: Specified Entities (faces and edges) first and lit, then

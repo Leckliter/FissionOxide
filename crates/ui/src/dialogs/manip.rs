@@ -443,10 +443,12 @@ impl Dialog {
     Some(([pts.iter().map(|p| p[0]).sum::<f64>() / n, pts.iter().map(|p| p[1]).sum::<f64>() / n], r.plane))
   }
 
-  /// Sketch Circular Pattern: a dot at the next instance for the quantity (its floating box has
-  /// the spinner), round the centre through the objects' centre, and for the Angle and
-  /// Symmetric distributions a dial for the total angle.
+  /// Sketch Circular Pattern, once the centre is picked: Fusion's rotate icon at the next
+  /// instance for the quantity (its floating box has the spinner), round the centre through the
+  /// objects' centre, and for the Angle and Symmetric distributions a dial for the total angle.
   fn sk_circ_handles(&self, s: &Session) -> Option<Vec<Handle>> {
+    // nothing until the centre is picked, as Fusion shows neither the instances nor the box
+    self.center.as_ref()?;
     let (c, plane) = self.sketch_objects_centre(s)?;
     let at = [self.at[0].trim().parse::<f64>().ok()?, self.at[1].trim().parse::<f64>().ok()?];
     let centre = plane.to_world(at);
@@ -457,7 +459,8 @@ impl Dialog {
     let n = count_of(&self.count);
     let step = circ_step(total, n);
     let axis = plane.normal();
-    let mut out = vec![Handle::dial(centre, axis, zero, r, step, format!("{n} instances")).dot()];
+    // Fusion's rotate icon at the next instance (its box beside it), without a circle or spoke
+    let mut out = vec![Handle::dial(centre, axis, zero, r, step, format!("{n} instances")).spin()];
     if self.choice != "full" {
       out.push(Handle::dial(centre, axis, zero, r, total, deg(total)));
     }

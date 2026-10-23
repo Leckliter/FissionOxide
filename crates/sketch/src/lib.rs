@@ -41,7 +41,7 @@ pub use curve3d::{Curve3d, Curve3dKind, CurveSource};
 pub use edit::PatternDir;
 pub use ellipse::{Ellipse2, ellipse_arc_beziers};
 pub use flatlink::{FlatId, SketchFlat};
-pub use fonts::{font_dirs, system_fonts};
+pub use fonts::{ARIAL, font_dirs, system_fonts};
 pub use infer::{InferTolerance, Inferred};
 pub use profile::{Loop, Profile, Seg, SegSrc, find_profiles};
 pub use quintic::{QUINTIC_POINTS, quintic_at, quintic_beziers, quintic_spans};

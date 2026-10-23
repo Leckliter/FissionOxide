@@ -425,6 +425,25 @@ fn spun_profile_flips_to_the_other_side() {
   assert!(xs.iter().all(|x| *x <= 1e-9) && xs.iter().any(|x| (x + 20.0).abs() < 1e-6), "{xs:?}");
 }
 
+/// Spun Profile with Projection Link unticked: the same outline as plain curves, not linked to
+/// the body (no spun entry, nothing follows it).
+#[test]
+fn spun_profile_without_the_projection_link_is_plain_curves() {
+  let mut s = Session::default();
+  let xz = json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}});
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [15, 0], "radius": 5}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 4}));
+  run(&mut s, "sketch.create", xz);
+  let body = s.model.bodies[0].id.0;
+  let r = run(&mut s, "sketch.spun_profile", json!({"bodies": [body], "axis": "z", "associative": false}));
+  // the four sides and the centre line, a profile, and no spun entry
+  assert_eq!((ids(&r["curves"]).len(), r["profiles"].as_u64()), (5, Some(1)), "{r}");
+  assert!(r.get("spun").is_none());
+  assert!(s.design.sketch(s.edit_sketch.unwrap()).unwrap().spuns.is_empty());
+}
+
 /// The Centerline linetype is independent of the construction flag, as Fusion's Linetype
 /// toggles are: a centerline is reference geometry (it forms no profile) drawn dash-dot, and
 /// Normal/Construction on it keeps the flag and draws it with even dashes.

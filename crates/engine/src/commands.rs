@@ -123,7 +123,7 @@ cmds! {
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default +Y), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
   "sketch.project" => "Project a body's silhouette (or one face's edges, or the edges given, which follow the body) into the sketch", "{body, face?, edges?: [id], associative?}";
-  "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true)}";
+  "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true), associative?: false for plain curves that don't follow the bodies (default true)}";
   "extrude" => "Extrude sketch profiles or planar faces", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, faces?: [{body, face} | {point}] (planar faces, in place of a sketch's profiles), distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body|to_vertex, to?: face (flat or curved) | {body} | point for to_vertex ({at} | {vertex: edge, end?} | {center: edge} | {point: id}; stops on the plane through it parallel to the sketch), start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect|new_component, component_name?: (new_component; default the next ComponentN), targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, symmetric?: bool (angle turns each way), angle2? (two sides: the angle the other way), operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y], end_condition?: free|point_sharp|point_tangent, weight?}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
@@ -3213,6 +3213,13 @@ fn spun_profile(s: &mut Session, p: &Value) -> CmdResult {
   let shapes: Vec<&fox_kernel::Shape> =
     bodies.iter().filter_map(|b| s.model.body(BodyId(*b))).map(|b| &b.shape).collect();
   let outline = fox_model::regen::spun_outline(&shapes, o, d, &plane, flip, centerline).map_err(CmdError::new)?;
+  // without the projection link (Fusion's Projection Link unticked) the outline is plain fixed
+  // curves that no longer follow the bodies
+  if !p.get("associative").and_then(Value::as_bool).unwrap_or(true) {
+    let curves = s.edit(move |d| Ok(d.sketch_mut(sk)?.add_outline(&outline)?))?;
+    let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
+    return Ok(json!({"curves": curves.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}));
+  }
   let id = s.edit(move |d| {
     let sketch = d.sketch_mut(sk)?;
     let id = sketch.add_spun(bodies, axis, flip, centerline);

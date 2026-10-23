@@ -2221,6 +2221,30 @@ mod tests {
     assert!(app.s.edit_sketch.is_none(), "OK finishes the sketch");
   }
 
+  /// `ui:sketch:constraint-glyph-context-menu`: right after a constraint (Fix/UnFix) the ring's
+  /// Repeat names it, not the last drawing tool, and repeats it.
+  #[test]
+  fn repeat_after_a_constraint_repeats_the_constraint() {
+    let mut app = App::with_session(Session::default());
+    let ctx = egui::Context::default();
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.expect("sketching");
+    run(&mut app, &ctx, Action::Cmd(Cmd::SketchTool(Tool::Line)));
+    app.run("sketch.line", json!({"points": [[5, 5], [15, 5]]}));
+    let curve = app.s.design.sketch(sk).unwrap().curves[0].id;
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
+    run(&mut app, &ctx, Action::Cmd(Cmd::Constraint("fix")));
+    assert_eq!(app.last_cmd, Some(Cmd::Constraint("fix")));
+    let fix = app.s.design.sketch(sk).unwrap().constraints[0].id;
+    app.s.selection = vec![Sel::SketchConstraint { sketch: sk, constraint: fix }];
+    let cx = context(&app);
+    let ring = ring(&app, &cx);
+    assert_eq!(ring[0].as_ref().map(|i| i.label.as_str()), Some("Repeat Fix/UnFix"));
+    app.set_tool(Tool::Select);
+    run(&mut app, &ctx, Action::Repeat(Cmd::Constraint("fix")));
+    assert_eq!(app.tool, Tool::Constrain("fix"));
+  }
+
   #[test]
   fn recent_commands_are_listed_with_their_keys() {
     let mut app = App::with_session(Session::default());

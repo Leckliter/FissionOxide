@@ -3318,3 +3318,52 @@ fn sketch_3d_hides_the_grid_while_line_runs() {
   h.frame(vec![]);
   assert!(grid(&h));
 }
+
+/// `ui:sketch:circular-pattern-rows`: with the Circular Pattern's Center Point row active, a click
+/// on the centre two concentric circles share picks it as the centre (the circles stay the
+/// objects).
+#[test]
+fn the_centre_of_concentric_circles_is_picked_as_the_pattern_centre() {
+  use crate::dialogs::Kind;
+  use crate::viewport::Tool;
+  use fox_engine::Sel;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  // two circles drawn from the same centre, as the Circle tool snaps the second to the first's
+  h.app.set_tool(Tool::Circle);
+  let c = h.app.canvas.center() + vec2(60.0, -40.0);
+  h.move_then_click(c);
+  h.move_then_click(c + vec2(30.0, 0.0));
+  h.move_then_click(c);
+  h.move_then_click(c + vec2(60.0, 0.0));
+  h.app.set_tool(Tool::Select);
+  h.frame(vec![]);
+  let s = h.app.s.design.sketch(sk).unwrap().clone();
+  assert_eq!(s.curves.len(), 2, "two circles");
+  let centres: Vec<_> = s
+    .curves
+    .iter()
+    .filter_map(|c| match c.kind {
+      fox_engine::sketch::CurveKind::Circle { center, .. } => Some(center),
+      _ => None,
+    })
+    .collect();
+  let small = s.curves[0].id;
+  h.app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve: small }];
+  h.app.start(Kind::SkCircPattern);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  if let Some(d) = h.app.dialog.as_mut() {
+    d.set_pick_row(1);
+  }
+  let plane = h.app.s.model.sketches[&sk].plane;
+  let at = s.pos(centres[0]).unwrap();
+  let p = h.screen(plane.to_world(at));
+  h.move_then_click(p);
+  let d = h.app.dialog.as_ref().expect("the dialog stays open");
+  assert!(d.center_pick().is_some(), "the shared centre is the Center Point: {:?}", h.app.s.selection);
+  assert_eq!(d.objects(), vec![small.0], "the small circle stays the object");
+}

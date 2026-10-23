@@ -49,11 +49,13 @@ pub enum Shape {
 /// How a handle's head is drawn: an arrowhead for a distance or angle, a dot for a count,
 /// Fusion's white disc with a dark dot riding a dark arc for Draft's angle, and a hollow white
 /// arrow (shown, not dragged) for Draft's pull direction; Extrude's taper is a white disc with a
-/// black dot on a short grey arc, without a label.
+/// black dot on a short grey arc, without a label. A spin (the sketch Circular Pattern's
+/// quantity) is Fusion's rotate icon alone, without the dial's circle or spoke.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Head {
   Arrow,
   Dot,
+  Spin,
   Disc,
   Pull,
   Taper,
@@ -82,6 +84,11 @@ impl Handle {
   /// The same handle drawn as a count (a dot).
   pub fn dot(self) -> Handle {
     Handle { head: Head::Dot, ..self }
+  }
+
+  /// The same dial drawn as Fusion's rotate icon alone (no circle or spoke drawn).
+  pub fn spin(self) -> Handle {
+    Handle { head: Head::Spin, ..self }
   }
 
   /// The same dial drawn as Draft's disc on an arc, turning in steps of `snap` radians.
@@ -209,9 +216,13 @@ fn place(h: &Handle, right: DVec3, project: &dyn Fn(DVec3) -> Option<Pos2>) -> O
         let dir = if d.is_finite() { d } else { Vec2::new(1.0, 0.0) };
         return Some(Placed { line, circle: Vec::new(), head, dir, grab, on_track: false });
       }
-      let circle: Vec<Pos2> = (0..=64).filter_map(|k| at(std::f64::consts::TAU * k as f64 / 64.0)).collect();
+      let spin = h.head == Head::Spin;
+      let circle: Vec<Pos2> =
+        if spin { Vec::new() } else { (0..=64).filter_map(|k| at(std::f64::consts::TAU * k as f64 / 64.0)).collect() };
       let disc = h.head == Head::Disc;
-      let line: Vec<Pos2> = if disc {
+      let line: Vec<Pos2> = if spin {
+        Vec::new()
+      } else if disc {
         // the disc rides a half circle either side of zero (Draft's pull direction)
         let half = std::f64::consts::FRAC_PI_2;
         (0..=32).filter_map(|k| at(-half + 2.0 * half * k as f64 / 32.0)).collect()
@@ -371,6 +382,26 @@ fn draw_taper(painter: &egui::Painter, p: &Placed, blue: bool, faded: bool) {
   }
 }
 
+/// Fusion's rotate icon: a curved arrow three quarters of the way round, on a white disc.
+fn draw_spin(painter: &egui::Painter, at: Pos2, ink: Color32) {
+  painter.circle_filled(at, 10.0, Color32::WHITE);
+  painter.circle_stroke(at, 10.0, Stroke::new(1.0, Color32::from_gray(150)));
+  let r = 5.5;
+  let (a0, a1) = (-0.25 * std::f32::consts::PI, 1.25 * std::f32::consts::PI);
+  let pt = |a: f32| at + Vec2::new(a.cos(), -a.sin()) * r;
+  let arc: Vec<Pos2> = (0..=16).map(|k| pt(a0 + (a1 - a0) * k as f32 / 16.0)).collect();
+  painter.add(egui::Shape::line(arc, Stroke::new(1.6, ink)));
+  // the arrowhead at the arc's end, along its tangent
+  let tip = pt(a1);
+  let along = Vec2::new(-a1.sin(), -a1.cos());
+  let side = Vec2::new(-along.y, along.x);
+  painter.add(egui::Shape::convex_polygon(
+    vec![tip + along * 4.0, tip + side * 3.0, tip - side * 3.0],
+    ink,
+    Stroke::NONE,
+  ));
+}
+
 fn draw(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool, label: bool) {
   if h.head == Head::Taper {
     return draw_taper(painter, p, active, false);
@@ -395,6 +426,7 @@ fn draw(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool
       painter.circle_filled(b, 6.0, col);
       painter.circle_stroke(b, 6.0, Stroke::new(1.5, Color32::WHITE));
     }
+    Head::Spin => draw_spin(painter, b, if lit { ACTIVE } else { Color32::from_gray(70) }),
     Head::Disc | Head::Pull | Head::Taper => {}
   }
   let at = label_at(p);

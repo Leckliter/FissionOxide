@@ -105,7 +105,15 @@ fn read(path: &Path) -> Result<Arc<[u8]>, SketchError> {
   Ok(Arc::from(std::fs::read(path).map_err(|e| what(&e))?))
 }
 
-/// The bytes of font `font`: "sans" (or empty), "mono", a path to a font file, or the name of
+/// Fusion's default text font, always offered.
+pub const ARIAL: &str = "Arial";
+
+/// Font files (by name) drawn in place of Arial when it isn't installed, best first: Arial's
+/// metric-compatible clones, then common sans faces.
+const ARIAL_STAND_INS: &[&str] =
+  &["LiberationSans-Regular", "Arimo-Regular", "Arimo", "LiberationSans", "DejaVuSans", "FreeSans", "NotoSans-Regular"];
+
+/// The bytes of font `font`: "Arial" (with a stand-in where it isn't installed), "sans" (or empty), "mono", a path to a font file, or the name of
 /// one in the system's font folders.
 pub(crate) fn font_data(font: &str) -> Result<FontData, SketchError> {
   match font {
@@ -122,6 +130,18 @@ pub(crate) fn font_data(font: &str) -> Result<FontData, SketchError> {
   } else {
     system_fonts().into_iter().find(|(n, _)| n.eq_ignore_ascii_case(font)).map(|(_, p)| p)
   };
+  // Arial (Fusion's default) where the system lacks it: a font drawn to the same metrics, else
+  // another installed sans, else the built-in sans
+  let file = file.or_else(|| {
+    if !font.eq_ignore_ascii_case(ARIAL) {
+      return None;
+    }
+    let fonts = system_fonts();
+    ARIAL_STAND_INS.iter().find_map(|a| fonts.iter().find(|(n, _)| n.eq_ignore_ascii_case(a)).map(|(_, p)| p.clone()))
+  });
+  if file.is_none() && font.eq_ignore_ascii_case(ARIAL) {
+    return Ok(FontData::Builtin(epaint_default_fonts::UBUNTU_LIGHT));
+  }
   let Some(file) = file else {
     return Err(SketchError::InvalidValue(format!(
       "unknown font '{font}' (sans, mono, a font file, or a font in the system's font folders)"
@@ -157,6 +177,9 @@ mod tests {
     assert!(s.add_text(PtSpec::At(0.0, 0.0), "x", junk.to_str().unwrap(), 5.0, 0.0).is_err());
     assert!(s.add_text(PtSpec::At(0.0, 0.0), "x", "no-such-font-anywhere", 5.0, 0.0).is_err());
     let _ = std::fs::remove_dir_all(&dir);
+    // Arial, Fusion's default, draws on any machine (a stand-in where it isn't installed)
+    assert!(s.add_text(PtSpec::At(0.0, 0.0), "Ag", ARIAL, 5.0, 0.0).is_ok());
+    assert!(s.add_text(PtSpec::At(0.0, 0.0), "Ag", "arial", 5.0, 0.0).is_ok());
     // listing the system's fonts never fails, whatever the machine has
     let _ = system_fonts();
     assert!(!font_dirs().is_empty());

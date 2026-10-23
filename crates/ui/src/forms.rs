@@ -218,6 +218,9 @@ pub enum Fits {
   Body,
   /// A face, flat or curved, or a plane (as [`Fits::Plane`]): a surface to replace faces with.
   Surface,
+  /// An axis to turn about: a straight or circular edge (`{body, edge}`), a construction axis
+  /// (`{axis}`), an origin axis or a sketch line (`{sketch, curve}`).
+  Axis,
 }
 
 /// What a construction pick ([`Input::Construct`]) takes.
@@ -808,6 +811,7 @@ impl State {
     let v = match form.inputs.get(row) {
       Some(Input::Pick { fits: Fits::Plane | Fits::Surface, .. }) => plane,
       Some(Input::Pick { fits: Fits::Direction, .. }) => plane.or(axis),
+      Some(Input::Pick { fits: Fits::Axis, .. }) => axis,
       _ => None,
     };
     let Some(v) = v.map(|v| json!(v)).filter(|v| *v != self.values[row]) else { return false };
@@ -1349,6 +1353,9 @@ fn pick_sel(v: &Value) -> Option<Sel> {
   if let Some(f) = get("feature").or(get("axis")) {
     return Some(Sel::Feature { feature: FeatureId(f) });
   }
+  if let (Some(sketch), Some(curve)) = (get("sketch"), get("curve")) {
+    return Some(Sel::SketchCurve { sketch: FeatureId(sketch), curve: fox_engine::sketch::CurveId(curve) });
+  }
   let body = BodyId(get("body")?);
   match (get("face"), get("edge")) {
     (Some(face), _) => Some(Sel::Face { body, face }),
@@ -1381,6 +1388,20 @@ fn fit_value(fits: Fits, sel: &Sel, s: &Session) -> Option<Value> {
     }),
     Fits::Body => match *sel {
       Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } => Some(json!(body.0)),
+      _ => None,
+    },
+    Fits::Axis => match *sel {
+      Sel::Edge { body, edge } => {
+        let e = s.model.body(body)?.edges().iter().find(|e| e.id == edge)?;
+        matches!(e.kind, fox_engine::kernel::CurveKind::Line | fox_engine::kernel::CurveKind::Circle)
+          .then(|| json!({"body": body.0, "edge": edge}))
+      }
+      Sel::Feature { feature } if s.model.axes.contains_key(&feature) => Some(json!({"axis": feature.0})),
+      Sel::SketchCurve { sketch, curve } => {
+        let c = s.design.sketch(sketch).ok()?.curve(curve)?;
+        matches!(c.kind, fox_engine::sketch::CurveKind::Line { .. })
+          .then(|| json!({"sketch": sketch.0, "curve": curve.0}))
+      }
       _ => None,
     },
   }
@@ -3075,30 +3096,36 @@ pub static DRAWING_BREAK: Form = Form {
   picks_model: false,
 };
 
-/// The fonts the Font drop-down always offers: the two built in; the system's fonts (Fusion
-/// lists them, "Arial" first) are added when the row is drawn (see [`font_choices`]).
+/// The fonts the Font drop-down always offers after the system's: the two built in (see
+/// [`font_choices`]).
 const TEXT_FONTS: &[(&str, &str)] = &[("sans", "Sans (Ubuntu Light)"), ("mono", "Mono (Hack)")];
 
 /// Fusion's default font.
-pub const DEFAULT_FONT: &str = "Arial";
+pub const DEFAULT_FONT: &str = fox_engine::sketch::ARIAL;
 
-/// The Font drop-down's choices: Arial first when the system has it (Fusion's default), the
-/// other system fonts by name, then the built-in two. Found once per run.
+/// The Font drop-down's choices: Arial first, always (Fusion's default; where the system lacks
+/// it the text draws in a stand-in), the other system fonts by name, then the built-in two.
+/// Found once per run.
 pub fn font_choices() -> &'static [(String, String)] {
   static FONTS: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
   FONTS.get_or_init(|| {
-    let mut names: Vec<String> = fox_engine::sketch::system_fonts().into_iter().map(|(n, _)| n).collect();
-    names.sort_by_key(|n| (!n.eq_ignore_ascii_case(DEFAULT_FONT), n.to_lowercase()));
+    let mut names: Vec<String> = fox_engine::sketch::system_fonts()
+      .into_iter()
+      .map(|(n, _)| n)
+      .filter(|n| !n.eq_ignore_ascii_case(DEFAULT_FONT))
+      .collect();
+    names.sort_by_key(|n| n.to_lowercase());
     names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-    let mut out: Vec<(String, String)> = names.into_iter().map(|n| (n.clone(), n)).collect();
+    let mut out = vec![(DEFAULT_FONT.to_string(), DEFAULT_FONT.to_string())];
+    out.extend(names.into_iter().map(|n| (n.clone(), n)));
     out.extend(TEXT_FONTS.iter().map(|(k, l)| (k.to_string(), l.to_string())));
     out
   })
 }
 
-/// The font a new Text starts with: Arial when the system has it, else the built-in sans.
+/// The font a new Text starts with: Arial, as in Fusion.
 pub fn default_font() -> &'static str {
-  if font_choices().iter().any(|(k, _)| k == DEFAULT_FONT) { DEFAULT_FONT } else { "sans" }
+  DEFAULT_FONT
 }
 
 pub static SK_TEXT_EDIT: Form = Form {
@@ -3677,7 +3704,7 @@ pub fn prefill(form: &Form, state: &mut State, s: &Session) {
     return;
   }
   if std::ptr::eq(form, &SK_TEXT) {
-    // Fusion's new text is in Arial (when the system has it)
+    // Fusion's new text is in Arial
     if let Some(i) = form.inputs.iter().position(|x| x.key() == "font")
       && let Some(slot) = state.values.get_mut(i)
     {
@@ -3931,8 +3958,9 @@ pub static SK_INTERSECT: Form = Form {
   picks_model: true,
 };
 
-/// Project / Include > Spun Profile, with Fusion's rows (Project Axis and Tolerance are greyed:
-/// the engine draws the outline exactly and adds the axis as a centre line).
+/// Project / Include > Spun Profile, with Fusion's rows: Geometry and Axis are Select rows that
+/// take the picks in turn (Project Axis and Tolerance are greyed: the engine draws the outline
+/// exactly and adds the axis as a centre line).
 pub static SK_SPUN_PROFILE: Form = Form {
   title: "SPUN PROFILE",
   name: "Spun Profile",
@@ -3941,10 +3969,10 @@ pub static SK_SPUN_PROFILE: Form = Form {
   cmd: "sketch.spun_profile.form",
   fixed: &[],
   inputs: &[
-    Input::Bodies { key: "bodies", label: "Geometry", required: true },
+    Input::Pick { key: "bodies", label: "Geometry", fits: Fits::Body, multi: true, prompt: "Select geometry to spin" },
     Input::Icons { key: "filter", label: "Selection Filter", options: GEOMETRY_FILTERS },
     Input::CheckOn { key: "associative", label: "Projection Link" },
-    Input::Axis { key: "axis", label: "Axis" },
+    Input::Pick { key: "axis", label: "Axis", fits: Fits::Axis, multi: false, prompt: "Select axis" },
     Input::CheckOn { key: "project_axis", label: "Project Axis" },
     Input::CheckOn { key: "centerline", label: "Add Centerline" },
     Input::Expr { key: "tolerance", label: "Tolerance", default: "0 mm" },
@@ -3953,8 +3981,8 @@ pub static SK_SPUN_PROFILE: Form = Form {
   picks_model: true,
 };
 
-/// Project / Include > Isoparametric Curve: Fusion's dialog, greyed until the kernel can
-/// evaluate a face's iso-curves (the engine has no command for it yet).
+/// Project / Include > Isoparametric Curve: Fusion's dialog; OK reports that the kernel can't
+/// evaluate a face's iso-curves yet.
 pub static SK_ISOPARAMETRIC: Form = Form {
   title: "ISOPARAMETRIC CURVE",
   name: "Isoparametric Curve",
@@ -4083,9 +4111,10 @@ pub fn preview_off(form: &Form) -> bool {
   mesh_form(form)
 }
 
-/// Forms with no Preview check box that don't preview (Convert Mesh): OK applies them.
+/// Forms with no Preview check box that don't preview (Convert Mesh; Isoparametric Curve, whose
+/// OK is live, as Fusion's is, and reports that FissionOxide can't make one yet): OK applies them.
 pub fn no_preview(form: &Form) -> bool {
-  form.cmd == "mesh.convert"
+  matches!(form.cmd, "mesh.convert" | "sketch.isoparametric_curve")
 }
 
 /// A drop-down's first value when it isn't the first in the list (Reduce's Type: Proportion).
@@ -4097,7 +4126,7 @@ fn initial_choice(form: &Form, key: &str) -> Option<&'static str> {
 }
 
 /// Forms whose Fusion dialog has no Preview check box: they always preview (the surface MODIFY
-/// dialogs among them).
+/// dialogs and the sketch's Project / Include dialogs among them).
 pub fn always_previews(form: &Form) -> bool {
   matches!(
     form.cmd,
@@ -4113,6 +4142,11 @@ pub fn always_previews(form: &Form) -> bool {
       | "surface.stitch"
       | UNSTITCH_CMD
       | REVERSE_CMD
+      | "sketch.intersect.form"
+      | "sketch.spun_profile.form"
+      | "sketch.include"
+      | "sketch.project_to_surface"
+      | "sketch.intersection_curve"
   )
 }
 
@@ -4131,7 +4165,6 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
     ("sketch.project_to_surface" | "sketch.intersection_curve", "associative") => {
       Some("These curves always follow the model in FissionOxide")
     }
-    ("sketch.spun_profile.form", "associative") => Some("A spun profile always follows its bodies in FissionOxide"),
     ("sketch.spun_profile.form", "project_axis") => Some("Projecting the axis isn't in FissionOxide yet"),
     ("sketch.spun_profile.form", "tolerance") => {
       Some("The outline is drawn exactly; a tolerance isn't in FissionOxide yet")
@@ -4147,9 +4180,6 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
     ("split_face", "extend") => Some("A splitting plane always extends across the faces in FissionOxide"),
     ("remove_features.form", "chamfer" | "extrude" | "revolve" | "other") => {
       Some("Recognising these features isn't in FissionOxide yet: it finds fillets and holes")
-    }
-    ("sketch.isoparametric_curve", "curve" | "associative") => {
-      Some("Isoparametric curves aren't in FissionOxide yet: the kernel can't evaluate a face's iso-curves")
     }
     _ => None,
   }

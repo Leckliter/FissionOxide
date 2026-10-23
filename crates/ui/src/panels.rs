@@ -750,7 +750,8 @@ impl Cmd {
   /// Commands that the marking menu's Repeat can run again.
   pub(crate) fn repeatable(self) -> bool {
     match self {
-      Cmd::NewSketch | Cmd::Dialog(_) => true,
+      // a constraint is a command too: Fusion's Repeat names the one just used
+      Cmd::NewSketch | Cmd::Dialog(_) | Cmd::Constraint(_) => true,
       Cmd::SketchTool(t) => t != Tool::Select,
       _ => false,
     }
