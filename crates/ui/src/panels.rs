@@ -766,6 +766,8 @@ impl Cmd {
     match self {
       // a constraint is a command too: Fusion's Repeat names the one just used
       Cmd::NewSketch | Cmd::Dialog(_) | Cmd::Constraint(_) => true,
+      // Insert Mesh (and the other inserts) too: right after one the ring's Repeat names it
+      Cmd::Insert(_) => true,
       Cmd::SketchTool(t) => t != Tool::Select,
       _ => false,
     }
@@ -1274,6 +1276,10 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
   let drawing = app.drawing.is_some();
   if w == "Render" && !app.render.active {
     crate::render_ui::enter(app);
+  }
+  // a docked TEXTURE MAP CONTROLS (opened from a body menu or the SETUP tab) stays behind
+  if app.render.active != (w == "Render") {
+    app.render.texture_map = None;
   }
   app.render.active = w == "Render";
   app.anim.active = w == "Animation";

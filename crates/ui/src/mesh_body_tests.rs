@@ -151,8 +151,7 @@ fn an_open_mesh_row_warns_and_a_closed_one_does_not() {
 #[test]
 fn mesh_bodies_draw_smooth_unless_flat_shaded() {
   let mut app = mesh_and_box();
-  let m = mesh_body(&app);
-  let normals = |app: &App, flat: Vec<fox_engine::model::BodyId>| -> usize {
+  let normals = |app: &App, m: fox_engine::model::BodyId, flat: Vec<fox_engine::model::BodyId>| -> usize {
     let opts = fox_engine::scene::ViewOptions { flat_meshes: flat, ..Default::default() };
     let (scene, picks) = fox_engine::scene::SceneBuilder::default().build(&app.s, &opts);
     let mesh = scene
@@ -160,15 +159,32 @@ fn mesh_bodies_draw_smooth_unless_flat_shaded() {
       .iter()
       .find(|x| x.tri_ids.first().and_then(|id| picks.get(*id)).is_some_and(|p| select::pick_body(&p) == Some(m)))
       .unwrap();
-    // distinct normal directions: a flat L-prism has its 8 face normals, a smooth one more
     let mut seen: Vec<[i32; 3]> = mesh.normals.iter().map(|n| n.map(|c| (c * 100.0).round() as i32)).collect();
     seen.sort();
     seen.dedup();
     seen.len()
   };
-  let smooth = normals(&app, Vec::new());
-  let flat = normals(&app, vec![m]);
-  assert!(flat <= 8 && smooth > flat, "flat {flat}, smooth {smooth}");
+  // the L-prism's edges are all 90 deg: smooth shading keeps its 8 flat faces and crisp edges
+  let m = mesh_body(&app);
+  let (smooth, flat) = (normals(&app, m, Vec::new()), normals(&app, m, vec![m]));
+  assert!(flat <= 8 && smooth == flat, "flat {flat}, smooth {smooth}");
+  // a tessellated cylinder is smooth round its side, its rims stay sharp
+  app.run("cylinder", json!({"radius": 10, "height": 5}));
+  let c = app.s.model.bodies.last().unwrap().id;
+  app.run("mesh.tessellate", json!({"body": c.0}));
+  assert!(app.s.model.body(c).unwrap().is_mesh());
+  let (smooth, flat) = (normals(&app, c, Vec::new()), normals(&app, c, vec![c]));
+  assert!(smooth > flat, "flat {flat}, smooth {smooth}");
+  let opts = fox_engine::scene::ViewOptions::default();
+  let (scene, picks) = fox_engine::scene::SceneBuilder::default().build(&app.s, &opts);
+  let mesh = scene
+    .meshes
+    .iter()
+    .find(|x| x.tri_ids.first().and_then(|id| picks.get(*id)).is_some_and(|p| select::pick_body(&p) == Some(c)))
+    .unwrap();
+  // every normal is the axis (a cap's) or square to it (the side's): none leans across a rim
+  let crisp = |k: usize| mesh.normals.iter().all(|n| n[k].abs() > 0.999 || n[k].abs() < 1e-3);
+  assert!((0..3).any(crisp), "a rim is rounded");
   crate::panels::run_mesh_cmd(&mut app, m, crate::panels::MeshCmd::FlatShaded);
   assert_eq!(app.ctx_menu.flat_shaded, [m]);
 }

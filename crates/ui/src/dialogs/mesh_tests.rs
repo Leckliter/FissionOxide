@@ -65,8 +65,18 @@ fn convert_mesh_has_no_preview_and_makes_a_new_body() {
   let mut d = Dialog::blank(Kind::Form(f));
   assert!(!d.live.on);
   assert_eq!((value(&d, f, "operation"), value(&d, f, "method")), (json!("parametric"), json!("faceted")));
-  assert!(forms::greyed_option(f, "method", "organic").is_some());
+  // Fusion's Method row: Faceted and Prismatic, Prismatic with the subscription badge
+  let methods: Vec<&str> = f
+    .inputs
+    .iter()
+    .find_map(|i| match i {
+      forms::Input::Icons { key: "method", options, .. } => Some(options.iter().map(|o| o.0).collect()),
+      _ => None,
+    })
+    .expect("the Method row");
+  assert_eq!(methods, ["faceted", "prismatic"]);
   assert!(forms::greyed_option(f, "method", "prismatic").is_none());
+  assert!(forms::badged_option(f, "method", "prismatic") && !forms::badged_option(f, "method", "faceted"));
   s.selection = vec![Sel::Body { body: b }];
   d.form.sync(f, &s, None);
   assert_eq!(d.prompt(true).as_deref(), Some("Adjust conversion settings"));

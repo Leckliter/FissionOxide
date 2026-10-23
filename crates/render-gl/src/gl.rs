@@ -252,6 +252,10 @@ uniform vec4 u_color;
 // world units per pixel: at distance 1 in perspective, everywhere in orthographic
 uniform float u_world_px;
 uniform float u_nudge;
+// the line's width (pixels), and the cosine below which an edge is drawn wherever the eye is
+// (an outline's creases; -2 for none)
+uniform float u_width;
+uniform float u_crease;
 layout(location = 1) in vec3 a_a;
 layout(location = 2) in vec3 a_b;
 layout(location = 3) in vec3 a_n0;
@@ -265,7 +269,7 @@ void main() {
   v_id = f0 ? a_ids.x : a_ids.y;
   v_dashed = 0.0;
   v_along = 0.0;
-  if (f0 == f1) {
+  if (f0 == f1 && dot(a_n0, a_n1) >= u_crease) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
   }
@@ -273,7 +277,7 @@ void main() {
   vec3 n = normalize(a_n0 + a_n1);
   float ka = u_world_px * u_nudge * (u_persp == 1 ? distance(u_eye, a_a) : 1.0);
   float kb = u_world_px * u_nudge * (u_persp == 1 ? distance(u_eye, a_b) : 1.0);
-  line_quad(a_a + n * ka, a_b + n * kb, 1.0, -2e-5, 0.0);
+  line_quad(a_a + n * ka, a_b + n * kb, u_width, -2e-5, 0.0);
 }
 "#;
 
@@ -600,6 +604,8 @@ pub struct Renderer {
   markers: Option<GpuInstances>,
   /// The body surfaces' fold edges, when the style draws silhouettes.
   folds: Option<GpuInstances>,
+  /// The outlined meshes' fold edges and the outline's colour ([`fox_render::Mesh::outline`]).
+  outlines: Option<(GpuInstances, [u8; 4])>,
   background_colors: [[u8; 4]; 2],
   analysis: Option<Analysis>,
   /// [`Scene::analysis_fade`].
@@ -701,6 +707,8 @@ impl Renderer {
         "u_color",
         "u_world_px",
         "u_nudge",
+        "u_width",
+        "u_crease",
       ],
     )?;
     let marker = program(gl, header, MARKER_VS, MARKER_FS, &mvp)?;
@@ -745,6 +753,7 @@ impl Renderer {
         lines: None,
         markers: None,
         folds: None,
+        outlines: None,
         background_colors: [[0, 0, 0, 255]; 2],
         analysis: None,
         analysis_fade: 0.0,
@@ -782,6 +791,13 @@ impl Renderer {
     }
     if scene.style.silhouettes() && self.folds.is_none() {
       self.folds = Some(upload_instances(gl, self.quad, &pack::folds(&scene.meshes), FOLD_STRIDE, fold_attribs)?);
+    }
+    // outlines follow the selection: built afresh each scene (only the outlined meshes')
+    if let Some((f, _)) = self.outlines.take() {
+      free_instances(gl, f);
+    }
+    if let Some((inst, color)) = pack::outline_folds(&scene.meshes) {
+      self.outlines = Some((upload_instances(gl, self.quad, &inst, FOLD_STRIDE, fold_attribs)?, color));
     }
     if same {
       for (g, m) in self.meshes.iter_mut().zip(&scene.meshes) {
@@ -1075,6 +1091,7 @@ impl Renderer {
       if style.silhouettes() {
         self.draw_silhouettes(gl, &view, cam, size, &vp, false);
       }
+      self.draw_outlines(gl, &view, cam, size, &vp);
 
       // transparent meshes test against the depth but don't write it
       gl.depth_func(glow::LESS);
@@ -1320,6 +1337,8 @@ impl Renderer {
       let world_px = if cam.ortho { per_px * cam.distance as f32 } else { per_px };
       gl.uniform_1_f32(p.loc("u_world_px"), world_px);
       gl.uniform_1_f32(p.loc("u_nudge"), fox_render::SILHOUETTE_NUDGE_PX);
+      gl.uniform_1_f32(p.loc("u_width"), 1.0);
+      gl.uniform_1_f32(p.loc("u_crease"), -2.0);
       gl.bind_vertex_array(Some(inst.vao));
       gl.bind_buffer(glow::ARRAY_BUFFER, Some(inst.vbo));
       if hidden {
@@ -1330,6 +1349,42 @@ impl Renderer {
         gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, r.len() as i32);
       }
       gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
+      gl.bind_buffer(glow::ARRAY_BUFFER, None);
+    }
+  }
+
+  /// The outlined meshes' silhouettes and creases, in the outline's colour, whatever the style
+  /// (see [`fox_render::outline_lines`]).
+  fn draw_outlines(&self, gl: &Gl, view: &View, cam: &Camera, size: [f32; 2], vp: &[f32; 16]) {
+    let (p, Some((inst, color))) = (&self.silhouette, &self.outlines) else { return };
+    // creases show from any side: no cone culling
+    let runs = merged(inst.chunks[1].iter().filter(|b| view.sees(b, REACH_PX)).map(|b| b.range.clone()));
+    if runs.is_empty() {
+      return;
+    }
+    let toward = cam.basis().2.as_vec3();
+    unsafe {
+      gl.use_program(Some(p.program));
+      gl.uniform_matrix_4_f32_slice(p.loc("u_vp"), false, vp);
+      gl.uniform_2_f32(p.loc("u_size"), size[0], size[1]);
+      gl.uniform_1_i32(p.loc("u_hidden"), 0);
+      gl.uniform_1_f32(p.loc("u_hidden_alpha"), 1.0);
+      gl.uniform_1_i32(p.loc("u_persp"), !cam.ortho as i32);
+      gl.uniform_3_f32_slice(p.loc("u_eye"), &view.eye.to_array());
+      gl.uniform_3_f32_slice(p.loc("u_toward"), &toward.to_array());
+      gl.uniform_4_f32_slice(p.loc("u_color"), &unit(*color));
+      let per_px = cam.view_height() as f32 / cam.distance as f32 / size[1];
+      let world_px = if cam.ortho { per_px * cam.distance as f32 } else { per_px };
+      gl.uniform_1_f32(p.loc("u_world_px"), world_px);
+      gl.uniform_1_f32(p.loc("u_nudge"), fox_render::SILHOUETTE_NUDGE_PX);
+      gl.uniform_1_f32(p.loc("u_width"), fox_render::OUTLINE_WIDTH);
+      gl.uniform_1_f32(p.loc("u_crease"), fox_render::OUTLINE_CREASE_COS);
+      gl.bind_vertex_array(Some(inst.vao));
+      gl.bind_buffer(glow::ARRAY_BUFFER, Some(inst.vbo));
+      for r in runs {
+        fold_attribs(gl, (r.start * FOLD_STRIDE * 4) as i32);
+        gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, r.len() as i32);
+      }
       gl.bind_buffer(glow::ARRAY_BUFFER, None);
     }
   }
@@ -1491,7 +1546,8 @@ impl Renderer {
     for m in self.meshes.drain(..).chain(self.quads.drain(..)) {
       free_mesh(gl, m);
     }
-    for i in [self.lines.take(), self.markers.take(), self.folds.take()].into_iter().flatten() {
+    let outlines = self.outlines.take().map(|o| o.0);
+    for i in [self.lines.take(), self.markers.take(), self.folds.take(), outlines].into_iter().flatten() {
       free_instances(gl, i);
     }
     if let Some(t) = self.target.take() {

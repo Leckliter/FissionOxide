@@ -149,6 +149,7 @@ pub fn draw(d: &DiffView, scene: &mut Scene) {
         unanalyzed: false,
         unlit: false,
         texture: None,
+        outline: None,
       });
     }
     for e in &p.edges {

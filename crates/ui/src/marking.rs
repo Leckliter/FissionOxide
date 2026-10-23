@@ -1057,6 +1057,10 @@ fn run(app: &mut App, ctx: &egui::Context, action: Action) {
       app.s.selection = vec![Sel::Body { body }];
       crate::clipboard::copy(app, ctx);
     }
+    Action::Mesh(body, panels::MeshCmd::Cut) => {
+      app.s.selection = vec![Sel::Body { body }];
+      crate::clipboard::cut(app, ctx);
+    }
     Action::Mesh(body, cmd) => panels::run_mesh_cmd(app, body, cmd),
     Action::Body(body, panels::RowCmd::Rename) | Action::RenameBody(body) => {
       app.rename = Some((crate::RenameTarget::Body(body.0), app.s.body_name(body)));
@@ -2315,11 +2319,19 @@ mod tests {
         "Direct Edit",
       ]
     );
+    // Physical Material, Texture Map Controls, Cut and Direct Edit are enabled, as Fusion's;
+    // FissionOxide has no body groups or selection sets yet
     let greyed: Vec<&str> = list.iter().flatten().filter(|i| !i.enabled).map(|i| i.label.as_str()).collect();
-    assert_eq!(
-      greyed,
-      ["Move to Group", "Create Selection Set", "Physical Material", "Texture Map Controls", "Cut", "Direct Edit"]
-    );
+    assert_eq!(greyed, ["Move to Group", "Create Selection Set"]);
+    let ctx = egui::Context::default();
+    run(&mut app, &ctx, Action::Mesh(mesh, panels::MeshCmd::TextureMap));
+    assert!(app.render.texture_map.is_some() && app.s.selection == [Sel::Body { body: mesh }]);
+    app.render.texture_map = None;
+    run(&mut app, &ctx, Action::Mesh(mesh, panels::MeshCmd::Cut));
+    assert_eq!((app.clipboard.clone(), app.clip_cut), (Some(crate::clipboard::Clip::Bodies(vec![mesh])), true));
+    run(&mut app, &ctx, Action::Mesh(mesh, panels::MeshCmd::PhysicalMaterial));
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(Kind::Material));
+    app.cancel_dialog();
     // Flat Shaded toggles the body's shading; Opacity Control's levels set its opacity
     run(&mut app, &egui::Context::default(), Action::Mesh(mesh, panels::MeshCmd::FlatShaded));
     assert_eq!(app.ctx_menu.flat_shaded, [mesh]);
@@ -2327,5 +2339,16 @@ mod tests {
     assert_eq!(app.ctx_menu.opacity, [(mesh, 128)]);
     run(&mut app, &egui::Context::default(), Action::Mesh(mesh, panels::MeshCmd::Rename));
     assert_eq!(app.rename.as_ref().map(|r| r.1.as_str()), Some("lprism"));
+    run(&mut app, &ctx, Action::Mesh(mesh, panels::MeshCmd::DirectEdit));
+    assert!(app.mesh_edit.active && app.mesh_edit.body == Some(mesh), "DIRECT MESH EDITING opens");
+  }
+
+  /// Right after Insert Mesh the ring's north slot is Fusion's "Repeat Insert Mesh".
+  #[test]
+  fn the_ring_repeats_insert_mesh() {
+    let mut app = crate::mesh_body_tests::mesh_and_box();
+    assert_eq!(ring_labels(&app)[0], "", "nothing to repeat yet");
+    panels::Cmd::Insert(crate::insert_window::Target::Mesh).run(&mut app);
+    assert_eq!(ring_labels(&app)[0], "Repeat Insert Mesh");
   }
 }

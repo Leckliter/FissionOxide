@@ -189,6 +189,13 @@ impl Dialog {
           self.manip.anchor = self.body_scale_anchor(s).map(|(o, d)| (key, o, d));
         }
       }
+      // Scale Mesh's arrow: from the bodies' centre, measured before the preview scales them
+      Kind::Form(f) if f.cmd == SCALE_MESH_CMD && !self.applied => {
+        let key = self.form_value("bodies").cloned().unwrap_or(Value::Null);
+        if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
+          self.manip.anchor = mesh_scale_anchor(s, &key).map(|(o, d)| (key, o, d));
+        }
+      }
       // the offset curves stay as they are under the preview
       Kind::SkOffset => {
         let key = self.anchor_key();
@@ -342,6 +349,20 @@ impl Dialog {
     // Hole: the depth arrow on the placed hole (see [`super::hole_pattern`])
     if self.kind == Kind::Hole {
       return self.hole_manipulator(s);
+    }
+    // Scale Mesh (uniform): the arrow from the bodies' centre, the factor times their reach long
+    if let Kind::Form(f) = self.kind
+      && f.cmd == SCALE_MESH_CMD
+    {
+      if self.form_value("scale_type").and_then(Value::as_str) == Some("non_uniform") {
+        return None;
+      }
+      let bodies = self.form_value("bodies").filter(|b| b.as_array().is_some_and(|a| !a.is_empty()))?;
+      let (_, origin, reach) = self.manip.anchor.as_ref().filter(|a| a.0 == *bodies)?;
+      let r = reach.length();
+      let e = self.form_value("factor")?.as_str()?;
+      let f = fox_engine::expr::eval(e, fox_engine::expr::Kind::Unitless, &s.model.params).ok()?;
+      return Some(Manipulator { origin: *origin, dir: *reach / r, value: f * r });
     }
     // Extend: the distance along the arrow out of the first edge
     if let Kind::Form(f) = self.kind
@@ -735,6 +756,12 @@ impl Dialog {
       // a hem has some length, and so does a hole
       Kind::Hem => self.distance = mm(self.unit, v.max(step.max(1e-3))),
       Kind::Hole => self.b = mm(self.unit, v.max(step.max(1e-3))),
+      // Scale Mesh's factor to two decimals, never zero or negative (as Scale's)
+      Kind::Form(f) if f.cmd == SCALE_MESH_CMD => {
+        let Some(r) = self.manip.anchor.as_ref().map(|a| a.2.length()).filter(|r| *r > 1e-9) else { return false };
+        let Some(i) = f.inputs.iter().position(|x| x.key() == "factor") else { return false };
+        self.form.values[i] = json!(format!("{:.2}", (v / r).max(0.01)));
+      }
       // Extend doesn't go backwards
       Kind::Form(f) if f.cmd == crate::forms::EXTEND_CMD => {
         let Some(i) = f.inputs.iter().position(|x| x.key() == "distance") else { return false };
@@ -1099,6 +1126,24 @@ pub(super) fn anchor(s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
   let at = (v(0, &m.positions) + v(1, &m.positions) + v(2, &m.positions)) / 3.0;
   let n = (v(0, &m.normals) + v(1, &m.normals) + v(2, &m.normals)).try_normalize()?;
   Some((at, n))
+}
+
+/// Scale Mesh's command: the form gets Scale's arrow.
+const SCALE_MESH_CMD: &str = "mesh.scale";
+
+/// Scale Mesh: the arrow's foot (the bodies' centre, where the engine scales about) and the world
+/// X axis as long as the bodies reach from it (the arrow is that long at a factor of 1).
+fn mesh_scale_anchor(s: &Session, bodies: &Value) -> Option<(DVec3, DVec3)> {
+  let meshes: Vec<_> =
+    bodies.as_array()?.iter().filter_map(|b| s.model.body(BodyId(b.as_u64()? as u32))?.mesh()).collect();
+  let points = || meshes.iter().flat_map(|m| m.positions.iter()).map(|p| DVec3::from(p.map(f64::from)));
+  let (lo, hi) = points().fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(lo, hi), p| (lo.min(p), hi.max(p)));
+  if !lo.is_finite() {
+    return None;
+  }
+  let at = (lo + hi) / 2.0;
+  let reach = points().map(|p| (p - at).length()).fold(0.0, f64::max);
+  Some((at, DVec3::X * if reach < 1e-6 { 10.0 } else { reach }))
 }
 
 /// Extend's arrow: the middle of the edge `key` names, pointing away from its face across the

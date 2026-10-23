@@ -159,6 +159,23 @@ mod tests {
     assert!((volume(&app) - 16000.0).abs() < 1e-3, "{}", volume(&app));
     d.withdraw(&mut app.s);
 
+    // Scale Mesh's arrow: from the bodies' centre, as long as they reach at 1.00; dragged to
+    // twice that, a factor of 2.00 in the row and its floating box; none for Non-Uniform
+    let mut d = Dialog::open(&mut app, Kind::Form(&SCALE_MESH));
+    d.refresh_manip(&app.s);
+    let m = d.manipulator(&app.s).expect("the scale arrow on the mesh");
+    let (lo, hi) = app.s.model.bodies[0].shape.mass().map(|m| (m.bbox_min, m.bbox_max)).unwrap();
+    let centre = [0, 1, 2].map(|k| (lo[k] + hi[k]) / 2.0);
+    assert!((m.origin - fox_engine::kernel::glam::DVec3::from(centre)).length() < 1e-3, "{:?} {centre:?}", m.origin);
+    assert!(m.value > 1.0 && (m.dir.length() - 1.0).abs() < 1e-9);
+    assert_eq!(d.value_box_field().cloned().as_deref(), Some("1.00"));
+    d.set_manipulator(2.0 * m.value, 0.0);
+    assert_eq!(d.form_value("factor"), Some(&json!("2.00")));
+    assert!((d.manipulator(&app.s).unwrap().value - 2.0 * m.value).abs() < 1e-6);
+    set(&mut d, &SCALE_MESH, "scale_type", json!("non_uniform"));
+    assert!(d.manipulator(&app.s).is_none() && d.value_box_field().is_none());
+    d.cancel(&mut app.s);
+
     // Separate: one shell has nothing to separate
     app.s.selection = vec![Sel::Body { body: b }];
     let mut d = Dialog::open(&mut app, Kind::Form(&MESH_SEPARATE));

@@ -408,6 +408,8 @@ pub struct App {
   close_menus: bool,
   /// What Ctrl+C copied, for Ctrl+V.
   pub(crate) clipboard: Option<clipboard::Clip>,
+  /// The clipboard's bodies were cut (a body menu's Cut): Paste moves them rather than copying.
+  pub(crate) clip_cut: bool,
   /// Installed plugins: the Plugins window, their toolbar tabs and command dialogs.
   pub(crate) plugins: plugins_ui::PluginsUi,
   /// Manage Materials' Material Browser, while open.
@@ -506,6 +508,8 @@ struct RenderKey {
   ghosts: Vec<u32>,
   /// Mesh bodies drawn flat-shaded.
   flat: Vec<u32>,
+  /// Selected bodies drawn outlined rather than filled (Generate Face Groups' mesh).
+  outlined: Vec<u32>,
   /// Faces a dialog previews in a colour of their own (Unfold's bends).
   tints: Vec<(u32, u32)>,
   /// Faces and sketches highlighted from the timeline.
@@ -731,6 +735,7 @@ impl App {
       help: help::Help::default(),
       close_menus: false,
       clipboard: None,
+      clip_cut: false,
       plugins: plugins_ui::PluginsUi::default(),
       material_browser: None,
       bom: None,

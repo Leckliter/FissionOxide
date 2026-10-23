@@ -500,6 +500,11 @@ pub fn backdrop_look(app: &mut App, scene: &Scene) -> Option<LookData> {
 pub fn windows(app: &mut App, ctx: &egui::Context) {
   poll_job(app, ctx);
   if !app.render.active {
+    // a body menu's Texture Map Controls docks it in the other workspaces too
+    if app.dialog.is_some() {
+      app.render.texture_map = None;
+    }
+    crate::render_tools::texture_map_dialog(app, ctx);
     return;
   }
   // a command dialog (Physical Material, Move/Copy) takes the docked dialogs' place

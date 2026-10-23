@@ -415,8 +415,19 @@ pub fn lines(lines: &[Polyline]) -> Instances {
 /// The fold edges of the body surfaces (the meshes marked `analyze`), for the silhouette pass:
 /// all in the group of depth-tested lines with ids.
 pub fn folds(meshes: &[Mesh]) -> Instances {
+  folds_of(meshes.iter().filter(|m| m.analyze))
+}
+
+/// The fold edges of the outlined meshes ([`Mesh::outline`]) and the outline's colour (the
+/// first one's), for the outline pass; `None` when nothing is outlined.
+pub fn outline_folds(meshes: &[Mesh]) -> Option<(Instances, [u8; 4])> {
+  let color = meshes.iter().find_map(|m| m.outline)?;
+  Some((folds_of(meshes.iter().filter(|m| m.outline.is_some())), color))
+}
+
+fn folds_of<'a>(meshes: impl Iterator<Item = &'a Mesh>) -> Instances {
   let mut data = Vec::new();
-  for m in meshes.iter().filter(|m| m.analyze) {
+  for m in meshes {
     for FoldEdge { a, b, normals: [n0, n1], ids } in fox_render::fold_edges(m) {
       data.extend_from_slice(&[a[0], a[1], a[2], b[0], b[1], b[2]]);
       data.extend_from_slice(&[n0[0], n0[1], n0[2], n1[0], n1[1], n1[2]]);

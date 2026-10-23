@@ -306,6 +306,10 @@ pub struct Mesh {
   /// An appearance's texture over the surface, standing in for `color` (highlighted triangles
   /// keep their highlight).
   pub texture: Option<MeshTexture>,
+  /// Outlined in this colour whatever the visual style: its silhouette and its sharp creases
+  /// ([`OUTLINE_CREASE_COS`]), [`OUTLINE_WIDTH`] wide. A body a dialog picked that Fusion
+  /// outlines rather than fills (Generate Face Groups' mesh).
+  pub outline: Option<[u8; 4]>,
 }
 
 impl Mesh {
@@ -1014,7 +1018,8 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
       draw_hidden(&mut f, l, &vp, style.hidden_alpha());
     }
   }
-  for l in scene.lines.iter().filter(|l| !l.on_top).chain(&silhouettes) {
+  let outlined = outline_lines(scene, cam, h);
+  for l in scene.lines.iter().filter(|l| !l.on_top).chain(&silhouettes).chain(&outlined) {
     draw_polyline(&mut f, l, &vp);
   }
   for mk in scene.markers.iter().filter(|m| !m.on_top) {
@@ -1065,6 +1070,54 @@ pub fn silhouette_lines(scene: &Scene, cam: &Camera, height: u32) -> Vec<Polylin
           points: vec![nudge(e.a, n), nudge(e.b, n)],
           color: SILHOUETTE_COLOR,
           width: 1.0,
+          id,
+          on_top: false,
+          dashed: false,
+          dash_dot: false,
+          behind: false,
+        });
+      }
+    }
+  }
+  out
+}
+
+/// How wide (pixels) a [`Mesh::outline`] is drawn.
+pub const OUTLINE_WIDTH: f32 = 2.0;
+
+/// The cosine of the angle past which two triangles' shared edge is part of a
+/// [`Mesh::outline`] wherever the eye is (a crease: an STL box's edges, 30 deg and sharper).
+pub const OUTLINE_CREASE_COS: f32 = 0.866;
+
+/// Whether an outlined mesh's fold edge is drawn from `eye`: on the silhouette, or a crease.
+pub fn outlines(e: &FoldEdge, eye: Eye) -> Option<u32> {
+  let crease = Vec3::from(e.normals[0]).dot(Vec3::from(e.normals[1])) < OUTLINE_CREASE_COS;
+  e.silhouette(eye).or(crease.then_some(e.ids[0]))
+}
+
+/// The outlines of the scene's outlined meshes ([`Mesh::outline`]) from a camera, for a picture
+/// `height` pixels high: their silhouettes and creases, nudged off the surface as silhouettes are.
+pub fn outline_lines(scene: &Scene, cam: &Camera, height: u32) -> Vec<Polyline> {
+  let eye = Eye::of(cam);
+  let per_px = cam.view_height() as f32 / cam.distance as f32 / height.max(1) as f32;
+  let nudge = |p: [f32; 3], out: Vec3| {
+    let p = Vec3::from(p);
+    let world_px = match eye {
+      Eye::Point(e) => per_px * p.distance(e),
+      Eye::Toward(_) => per_px * cam.distance as f32,
+    };
+    (p + out * world_px * SILHOUETTE_NUDGE_PX).to_array()
+  };
+  let mut out = Vec::new();
+  for m in &scene.meshes {
+    let Some(color) = m.outline else { continue };
+    for e in fold_edges_cached(m).iter() {
+      if let Some(id) = outlines(e, eye) {
+        let n = (Vec3::from(e.normals[0]) + Vec3::from(e.normals[1])).normalize_or_zero();
+        out.push(Polyline {
+          points: vec![nudge(e.a, n), nudge(e.b, n)],
+          color,
+          width: OUTLINE_WIDTH,
           id,
           on_top: false,
           dashed: false,
@@ -1523,6 +1576,7 @@ mod tests {
       unanalyzed: false,
       unlit: false,
       texture: None,
+      outline: None,
     }
   }
 
@@ -1852,6 +1906,44 @@ mod tests {
       assert_eq!(&f.rgba[(100 * 200 + 100) * 4..(100 * 200 + 100) * 4 + 3], &[255, 255, 255], "{style:?}");
       assert_eq!(f.pick(100.0, 100.0, 0, |_| true), 1);
     }
+  }
+
+  /// An outlined mesh (Generate Face Groups' pick) keeps its colour inside and gets a blue
+  /// outline in Shaded, which draws no silhouettes of its own: its sides and its rims (creases).
+  #[test]
+  fn an_outlined_mesh_is_drawn_with_a_blue_outline_not_filled() {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Front);
+    cam.target = [0.0, 0.0, 10.0];
+    cam.ortho = true;
+    cam.distance = 60.0;
+    let blue = [87, 144, 219, 255];
+    let draw = |outline| {
+      let scene = Scene {
+        meshes: vec![Mesh { outline, ..cylinder(10.0, 20.0, 48) }],
+        background_top: [200; 4],
+        background_bottom: [200; 4],
+        style: VisualStyle::Shaded,
+        ..Default::default()
+      };
+      render(&scene, &cam, 200, 200)
+    };
+    let is_blue = |f: &Frame, x: u32, y: u32| {
+      let i = ((y * 200 + x) * 4) as usize;
+      let p = &f.rgba[i..i + 3];
+      p[2] > 180 && p[0] < 130
+    };
+    let near_blue = |f: &Frame, x: f64, y: f64| {
+      ((x - 2.0) as u32..=(x + 2.0) as u32).any(|x| ((y - 2.0) as u32..=(y + 2.0) as u32).any(|y| is_blue(f, x, y)))
+    };
+    let px = |p: DVec3| cam.project(p, 200, 200).unwrap();
+    let (side, rim) = (px(DVec3::new(10.0, 0.0, 10.0)), px(DVec3::new(0.0, -10.0, 20.0)));
+    let plain = draw(None);
+    assert!(!near_blue(&plain, side.0, side.1) && !near_blue(&plain, rim.0, rim.1), "no outline unless asked");
+    let f = draw(Some(blue));
+    assert!(near_blue(&f, side.0, side.1), "the side's silhouette is blue");
+    assert!(near_blue(&f, rim.0, rim.1), "the top rim (a crease) is blue");
+    assert!(!is_blue(&f, 100, 100) && f.rgba[((100 * 200 + 100) * 4) as usize] > 120, "red inside, not filled blue");
   }
 
   /// Fusion's dash patterns: 9 on, 3 off for construction; 9 on, 3 off, 6 on, 3 off for a

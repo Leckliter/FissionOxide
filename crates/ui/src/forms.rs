@@ -2184,7 +2184,6 @@ pub static MESH_CONVERT: Form = Form {
           Icon::ConvertPrismatic,
           "Prismatic\nConverts planar regions of the mesh to planar faces on the new solid",
         ),
-        ("organic", Icon::ConvertOrganic, "Organic\nConverts the mesh to smooth surfaces on the new solid"),
       ],
     },
   ],
@@ -4050,9 +4049,6 @@ pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static st
     ("joint_origin", "mode", "between" | "two_edge") => {
       Some("Only the Simple mode is in FissionOxide yet: a joint origin sits on one picked face")
     }
-    ("mesh.convert", "method", "organic") => {
-      Some("Organic conversion isn't in FissionOxide yet: the kernel can't fit smooth surfaces to a mesh")
-    }
     ("plane", "extent", "to_object") if method(form) == Some("angle") => {
       Some("A plane at angle to an object isn't in FissionOxide yet")
     }
@@ -4060,6 +4056,12 @@ pub fn greyed_option(form: &Form, key: &str, option: &str) -> Option<&'static st
     ("plane", "resize", "custom") => Some("A custom size isn't in FissionOxide yet"),
     _ => None,
   }
+}
+
+/// Whether one option of a form's icon row carries Fusion's blue subscription badge (Convert
+/// Mesh's Prismatic). The option stays pickable.
+pub fn badged_option(form: &Form, key: &str, option: &str) -> bool {
+  matches!((form.cmd, key, option), ("mesh.convert", "method", "prismatic"))
 }
 
 /// Why a form's input is drawn greyed: what FissionOxide can't act on yet, or always does.

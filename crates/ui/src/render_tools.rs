@@ -133,6 +133,15 @@ impl TextureMapForm {
   }
 }
 
+/// Opens the docked TEXTURE MAP CONTROLS on the selected body (a body menu's Texture Map
+/// Controls, in any workspace), closing the other docked dialogs.
+pub(crate) fn open_texture_map(app: &mut App) {
+  let sel = app.s.selection.clone();
+  close_docked(app);
+  app.s.selection = sel;
+  app.render.texture_map = Some(TextureMapForm::default());
+}
+
 /// The docked TEXTURE MAP CONTROLS dialog: Object, Projection, Axis, Scale, Rotation, Offset and
 /// Reset; OK changes the body's texture mapping.
 pub(crate) fn texture_map_dialog(app: &mut App, ctx: &egui::Context) {

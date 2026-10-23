@@ -123,10 +123,6 @@ pub(super) fn paint(k: &Pen, icon: Icon) {
       k.line((0.12, 0.36), (0.9, 0.2), GREY);
     }
     Icon::ConvertPrismatic => k.block(0.12, 0.36, 0.68, 0.92, 0.22, BlueLight, Blue, BlueDark),
-    Icon::ConvertOrganic => {
-      k.ellipse((0.5, 0.56), 0.38, 0.32, Some(BlueLight), Blue);
-      k.ellipse((0.4, 0.44), 0.12, 0.07, Some(Light), BlueLight);
-    }
     _ => {}
   }
 }

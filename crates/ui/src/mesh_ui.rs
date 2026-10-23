@@ -107,6 +107,16 @@ pub static SECTION_SKETCH: Form = Form {
   picks_model: true,
 };
 
+/// The bodies drawn outlined in selection blue rather than filled: GENERATE FACE GROUPS' picked
+/// meshes, as Fusion shows them while it is open.
+pub(crate) fn outlined_bodies(app: &App) -> Vec<BodyId> {
+  let Some(d) = app.dialog.as_ref().filter(|d| d.kind == crate::dialogs::Kind::Form(&GENERATE_FACE_GROUPS)) else {
+    return Vec::new();
+  };
+  let picked = d.form_value("bodies").and_then(Value::as_array).cloned().unwrap_or_default();
+  picked.iter().filter_map(|b| Some(BodyId(b.as_u64()? as u32))).collect()
+}
+
 /// The mesh forms.
 pub(crate) fn is_mesh_form(form: &Form) -> bool {
   [&TESSELLATE, &REPAIR, &GENERATE_FACE_GROUPS, &COMBINE_FACE_GROUPS, &SECTION_SKETCH]

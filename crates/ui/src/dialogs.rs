@@ -3572,6 +3572,7 @@ impl Dialog {
                 why = w;
                 icon_row::greyed(k, *icon, name)
               }
+              None if crate::forms::badged_option(f, key, k) => icon_row::badged(k, *icon, name),
               None => icon_row::choice(k, *icon, name),
             })
             .collect();
@@ -5864,6 +5865,14 @@ impl Dialog {
       Kind::Fillet | Kind::Chamfer => Some(&mut self.radius),
       Kind::SkScale => Some(&mut self.a),
       Kind::Scale if self.choice != "non_uniform" => Some(&mut self.a),
+      // Scale Mesh's factor, while its arrow shows
+      Kind::Form(f) if f.cmd == "mesh.scale" && self.form_value("scale_type") != Some(&json!("non_uniform")) => {
+        let i = f.inputs.iter().position(|x| x.key() == "factor")?;
+        match &mut self.form.values[i] {
+          Value::String(t) => Some(t),
+          _ => None,
+        }
+      }
       // an edge flange's Height, in the box on its arrow
       Kind::Flange if self.choice == "edge" => Some(&mut self.distance),
       // a hem's length, in the box on its arrow ("Thickness * 4")

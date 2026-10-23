@@ -467,7 +467,6 @@ pub enum Icon {
   FillMinimal,
   ConvertFaceted,
   ConvertPrismatic,
-  ConvertOrganic,
   // the Render workspace
   /// Lights: a sun.
   Sun,
@@ -1811,8 +1810,7 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     | Icon::FillUniform
     | Icon::FillMinimal
     | Icon::ConvertFaceted
-    | Icon::ConvertPrismatic
-    | Icon::ConvertOrganic => mesh::paint(&k, icon),
+    | Icon::ConvertPrismatic => mesh::paint(&k, icon),
     Icon::BaseMesh
     | Icon::DirectEdit
     | Icon::Repair

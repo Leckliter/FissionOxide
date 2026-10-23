@@ -496,6 +496,22 @@ mod tests {
     ] {
       assert!(texts.iter().any(|x| x == t), "{t} in {texts:?}");
     }
+    // while it is open the picked mesh is outlined in selection blue, not filled
+    app.s.selection = vec![Sel::Body { body: mesh }];
+    app.dialog = Some(d);
+    assert_eq!(mesh_ui::outlined_bodies(&app), [mesh]);
+    let opts = crate::viewport::scene_options(&mut app);
+    let (scene, picks) = fox_engine::scene::SceneBuilder::default().build(&app.s, &opts);
+    let of_mesh = |m: &&fox_engine::render::Mesh| {
+      m.tri_ids.first().and_then(|id| picks.get(*id)).is_some_and(|p| crate::select::pick_body(&p) == Some(mesh))
+    };
+    let drawn: Vec<_> = scene.meshes.iter().filter(of_mesh).collect();
+    assert!(!drawn.is_empty());
+    for m in drawn {
+      assert_ne!(m.color, fox_engine::scene::SELECT_COLOR, "not filled blue");
+      assert_eq!(m.outline, Some(fox_engine::scene::SELECT_COLOR));
+    }
+    let mut d = app.dialog.take().unwrap();
     d.ok_requested = true;
     show(&mut app, &mut d);
     assert_eq!(app.s.design.features.last().unwrap().name, "GenerateFaceGroups1");

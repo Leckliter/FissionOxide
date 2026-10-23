@@ -2,7 +2,8 @@
 //! Ctrl+V pastes a copy and opens the Move dialog with its triad to place it (Initial Position
 //! for a component, which gets another occurrence of itself); Ctrl+Shift+V (Paste New) makes an
 //! independent copy of a component. Cancel removes the paste. In a sketch, Ctrl+V pastes copies
-//! of the copied curves and opens Move/Copy on them.
+//! of the copied curves and opens Move/Copy on them. A body menu's Cut puts the bodies on the
+//! clipboard the same way; the paste then moves them, with no copy left behind.
 
 use fox_engine::Sel;
 use fox_engine::model::{BodyId, ComponentId, FeatureId};
@@ -78,7 +79,18 @@ pub(crate) fn copy(app: &mut App, ctx: &egui::Context) {
   // the system clipboard gets a note too: the window only hears Ctrl+V while it holds something
   ctx.copy_text(format!("FissionOxide: {what}"));
   app.clipboard = Some(clip);
+  app.clip_cut = false;
   app.status = Some((format!("Copied {what}"), false));
+}
+
+/// A body menu's Cut (Ctrl+X): the bodies go on the clipboard, and the next paste moves them.
+pub(crate) fn cut(app: &mut App, ctx: &egui::Context) {
+  copy(app, ctx);
+  if let Some(Clip::Bodies(b)) = &app.clipboard {
+    app.clip_cut = true;
+    let what = if b.len() == 1 { app.s.body_name(b[0]) } else { format!("{} bodies", b.len()) };
+    app.status = Some((format!("Cut {what}"), false));
+  }
 }
 
 /// Ctrl+V, or Ctrl+Shift+V (`new`, Paste New).
@@ -106,6 +118,22 @@ pub(crate) fn paste(app: &mut App, new: bool) {
     }
     _ if app.s.edit_sketch.is_some() => {
       app.hint("Paste: finish the sketch to paste bodies or components");
+      return;
+    }
+    // cut bodies are moved where the paste puts them, once: the clipboard empties
+    Clip::Bodies(b) if app.clip_cut => {
+      let sel = bodies(b);
+      app.clipboard = None;
+      app.clip_cut = false;
+      if sel.is_empty() {
+        app.hint("Paste: what was cut is gone");
+        return;
+      }
+      app.end_hint();
+      app.cancel_dialog();
+      app.tool = Tool::Select;
+      app.s.selection = sel;
+      app.start(Kind::Move);
       return;
     }
     Clip::Bodies(b) => (bodies(b), Paste::Copy, "bodies"),
@@ -170,6 +198,23 @@ mod tests {
     assert_eq!(app.s.model.bodies.len(), 2, "the copy is there");
     app.cancel_dialog();
     assert_eq!(app.s.model.bodies.len(), 1, "Cancel removes it");
+  }
+
+  #[test]
+  fn pasting_cut_bodies_moves_them_without_a_copy() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let b = body(&app);
+    app.s.selection = vec![Sel::Body { body: b }];
+    cut(&mut app, &ctx);
+    assert_eq!((app.clipboard.clone(), app.clip_cut), (Some(Clip::Bodies(vec![b])), true));
+    assert_eq!(app.s.model.bodies.len(), 1, "the body stays until it is pasted");
+    paste(&mut app, false);
+    let d = app.dialog.as_ref().expect("Move/Copy opens");
+    assert_eq!((d.kind, d.paste()), (Kind::Move, None));
+    assert_eq!(app.s.selection, [Sel::Body { body: b }]);
+    assert_eq!(app.s.model.bodies.len(), 1, "no copy");
+    assert!(app.clipboard.is_none() && !app.clip_cut, "a cut pastes once");
   }
 
   #[test]

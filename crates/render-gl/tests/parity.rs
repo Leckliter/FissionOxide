@@ -192,6 +192,44 @@ fn textures_match_cpu() {
   r.destroy(&h.gl);
 }
 
+/// An outlined mesh (Generate Face Groups' pick) draws its blue silhouette on the GPU as on the
+/// CPU, in Shaded, which draws no silhouettes of its own.
+#[test]
+fn outlines_match_cpu() {
+  let h = match fox_render_gl::headless::context() {
+    Ok(h) => h,
+    Err(e) => {
+      eprintln!("skipped: no OpenGL context ({e})");
+      return;
+    }
+  };
+  let mut r = match Renderer::new(&h.gl) {
+    Ok(r) => r,
+    Err(e) => {
+      eprintln!("skipped: {e}");
+      return;
+    }
+  };
+  let blue = [87, 144, 219, 255];
+  let mut s = scene();
+  s.style = VisualStyle::Shaded;
+  s.meshes[1].colors.clear();
+  let is_blue = |f: &Frame| (0..f.rgba.len() / 4).filter(|&i| f.rgba[i * 4 + 2] > 180 && f.rgba[i * 4] < 130).count();
+  for (name, cam) in cams().into_iter().filter(|(n, _)| *n != "inside") {
+    s.meshes[1].outline = None;
+    let plain = r.render(&h.gl, &s, &cam, 320, 240).expect("gpu render");
+    s.meshes[1].outline = Some(blue);
+    let cpu = fox_render::render(&s, &cam, 320, 240);
+    let gpu = r.render(&h.gl, &s, &cam, 320, 240).expect("gpu render");
+    let d = compare(&cpu, &gpu);
+    eprintln!("{name} outlined: {:.2}% colour, {:.2}% ids differ", d.color * 100.0, d.ids * 100.0);
+    let (with, without) = (is_blue(&gpu), is_blue(&plain));
+    assert!(with > without + 100, "{name}: the outline is drawn ({with} blue pixels, {without} without it)");
+    assert!(d.color < 0.03, "{name}: {:.2}% of pixels differ in colour", d.color * 100.0);
+  }
+  r.destroy(&h.gl);
+}
+
 #[test]
 fn picks_are_exact_and_hover_reuses_meshes() {
   let Ok(h) = fox_render_gl::headless::context() else { return };

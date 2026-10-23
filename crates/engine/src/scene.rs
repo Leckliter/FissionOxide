@@ -275,6 +275,9 @@ pub struct ViewOptions {
   /// Mesh bodies drawn flat-shaded (a mesh body's Flat Shaded); the rest draw smooth, as Fusion
   /// draws mesh bodies.
   pub flat_meshes: Vec<BodyId>,
+  /// Selected bodies drawn in their own colour with a selection-blue outline rather than filled
+  /// blue: the mesh GENERATE FACE GROUPS picked, as Fusion shows it.
+  pub outline_bodies: Vec<BodyId>,
   /// Construction planes left out (the one an Offset Plane dialog previews, which the UI fills
   /// itself).
   pub hide_planes: Vec<FeatureId>,
@@ -486,8 +489,9 @@ impl SceneBuilder {
       let smooth = (body.is_mesh() && !opts.flat_meshes.contains(&body.id))
         .then(|| self.smooth.entry(body.id).or_insert_with(|| smooth_shaded(m)).clone());
       let m = smooth.as_ref().unwrap_or(m);
+      let outlined = opts.outline_bodies.contains(&body.id);
       let tint = |c: [u8; 4]| {
-        let c = if selected_bodies.contains(&body.id) { SELECT_COLOR } else { c };
+        let c = if selected_bodies.contains(&body.id) && !outlined { SELECT_COLOR } else { c };
         let c = if opts.peek.contains(&body.id) { mix(c, HOVER_COLOR, 0.6) } else { c };
         if editing { mix(c, [255, 255, 255, 255], 0.35) } else { c }
       };
@@ -564,6 +568,9 @@ impl SceneBuilder {
       for mesh in &mut scene.meshes[first..] {
         mesh.analyze = true;
         mesh.unanalyzed = unanalyzed;
+        if outlined {
+          mesh.outline = Some(SELECT_COLOR);
+        }
         if let Some(a) = alpha {
           mesh.color[3] = a;
         }
@@ -1393,25 +1400,42 @@ pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
   }
 }
 
-/// A mesh with each vertex's normal averaged over the triangles meeting at its point (area
-/// weighted), so a mesh body draws smooth across its facets.
+/// Facets meeting at more than this angle keep a crisp edge between them when a mesh body is
+/// smooth-shaded: an STL box or prism draws flat faces and sharp corners, as Fusion's.
+const CREASE_DEG: f32 = 30.0;
+
+/// A mesh with each vertex's normal averaged (area weighted) over the triangles meeting at its
+/// point whose facets turn less than [`CREASE_DEG`] from its own, so a mesh body draws smooth
+/// across its facets but keeps its sharp edges. A mesh body's tessellation gives each facet (or
+/// each merged planar region) vertices of its own, so a vertex has one side of an edge.
 fn smooth_shaded(m: &TriMesh) -> TriMesh {
+  use fox_kernel::glam::Vec3;
   let key = |p: &[f32; 3]| p.map(|c| (c * 1e4).round() as i64);
-  let mut sums: HashMap<[i64; 3], fox_kernel::glam::Vec3> = HashMap::new();
-  for t in m.indices.chunks_exact(3) {
-    let [a, b, c] = [t[0], t[1], t[2]].map(|i| m.positions.get(i as usize).copied().unwrap_or_default());
-    let (va, vb, vc) =
-      (fox_kernel::glam::Vec3::from(a), fox_kernel::glam::Vec3::from(b), fox_kernel::glam::Vec3::from(c));
-    let n = (vb - va).cross(vc - va);
-    for p in [a, b, c] {
-      *sums.entry(key(&p)).or_default() += n;
+  let at = |i: u32| Vec3::from(m.positions.get(i as usize).copied().unwrap_or_default());
+  // each triangle's normal, as long as twice its area
+  let facets: Vec<Vec3> = m.indices.chunks_exact(3).map(|t| (at(t[1]) - at(t[0])).cross(at(t[2]) - at(t[0]))).collect();
+  let mut meeting: HashMap<[i64; 3], Vec<Vec3>> = HashMap::new();
+  let mut own = vec![Vec3::ZERO; m.positions.len()];
+  for (t, n) in m.indices.chunks_exact(3).zip(&facets) {
+    for &i in t {
+      meeting.entry(key(&at(i).to_array())).or_default().push(*n);
+      if let Some(o) = own.get_mut(i as usize) {
+        *o += *n;
+      }
     }
   }
+  let cos = CREASE_DEG.to_radians().cos();
   let normals = m
     .positions
     .iter()
     .zip(&m.normals)
-    .map(|(p, n)| sums.get(&key(p)).and_then(|s| s.try_normalize()).map_or(*n, |s| s.to_array()))
+    .zip(&own)
+    .map(|((p, n), o)| {
+      let Some(o) = o.try_normalize() else { return *n };
+      let sum: Vec3 =
+        meeting.get(&key(p)).into_iter().flatten().filter(|f| f.try_normalize().is_some_and(|f| f.dot(o) >= cos)).sum();
+      sum.try_normalize().map_or(*n, |s| s.to_array())
+    })
     .collect();
   TriMesh { normals, ..m.clone() }
 }
@@ -1431,6 +1455,7 @@ fn mesh_of(m: &TriMesh, tri_ids: Vec<u32>, color: [u8; 4], hover: Option<u32>) -
     unanalyzed: false,
     unlit: false,
     texture: None,
+    outline: None,
   }
 }
 
@@ -2182,6 +2207,7 @@ fn simulated_stock(scene: &mut Scene, s: &Session) {
     unanalyzed: false,
     unlit: false,
     texture: None,
+    outline: None,
   });
 }
 

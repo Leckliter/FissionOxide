@@ -1,5 +1,6 @@
 //! A mesh body's right-click menu, as Fusion's: the browser row's, and the canvas list's (the same
-//! entries plus Find in Browser). Rows FissionOxide can't run yet are listed greyed.
+//! entries plus Find in Browser). Rows FissionOxide can't run yet (Move to Group and Create
+//! Selection Set: it has no body groups or selection sets) are listed greyed.
 
 use fox_engine::Sel;
 use fox_engine::model::BodyId;
@@ -17,9 +18,11 @@ pub(crate) enum MeshCmd {
   Configure,
   PhysicalMaterial,
   Appearance,
+  TextureMap,
   Properties,
   SaveAsMesh,
   Copy,
+  Cut,
   Delete,
   Remove,
   Rename,
@@ -29,6 +32,7 @@ pub(crate) enum MeshCmd {
   FindInBrowser,
   FindInWindow,
   FlatShaded,
+  DirectEdit,
   /// The canvas list's Opacity Control levels (percent).
   OpacityTo(u8),
   /// Listed, greyed, as Fusion has it but FissionOxide doesn't yet.
@@ -69,13 +73,13 @@ pub(crate) fn mesh_body_menu(app: &App, body: BodyId, canvas: bool) -> Vec<Optio
     None,
     row(Icon::PhysMaterial, "Physical Material", None, MeshCmd::PhysicalMaterial),
     row(Icon::Appearance, "Appearance", Some("A"), MeshCmd::Appearance),
-    greyed(Icon::Decal, "Texture Map Controls", None),
+    row(Icon::Decal, "Texture Map Controls", None, MeshCmd::TextureMap),
     row(Icon::Properties, "Properties", None, MeshCmd::Properties),
     None,
     row(Icon::ConvertMesh, "Save As Mesh", None, MeshCmd::SaveAsMesh),
     None,
     row(Icon::Body, "Copy", Some("Ctrl+C"), MeshCmd::Copy),
-    greyed(Icon::Body, "Cut", Some("Ctrl+X")),
+    row(Icon::Body, "Cut", Some("Ctrl+X"), MeshCmd::Cut),
     row(Icon::Remove, "Delete", Some("Del"), MeshCmd::Delete),
     row(Icon::RemoveBody, "Remove", None, MeshCmd::Remove),
     row(Icon::Params, "Rename", None, MeshCmd::Rename),
@@ -94,19 +98,14 @@ pub(crate) fn mesh_body_menu(app: &App, body: BodyId, canvas: bool) -> Vec<Optio
     row(Icon::Fit, "Find in Window", None, MeshCmd::FindInWindow),
     None,
     row(Icon::Display, if flat { "Flat Shaded  ✔" } else { "Flat Shaded" }, None, MeshCmd::FlatShaded),
-    greyed(Icon::DirectEdit, "Direct Edit", None),
+    row(Icon::DirectEdit, "Direct Edit", None, MeshCmd::DirectEdit),
   ]);
-  // physical materials belong to components in FissionOxide
-  if app.s.design.component_of(body).is_none()
-    && let Some(Some(m)) = v.iter_mut().find(|i| i.as_ref().is_some_and(|i| i.cmd == MeshCmd::PhysicalMaterial))
-  {
-    m.enabled = false;
-  }
   v
 }
 
 /// Runs a mesh body menu command (Rename and Opacity Control need the row; see
-/// [`mesh_context_menu`]).
+/// [`mesh_context_menu`]). Copy and Cut here leave the system clipboard alone (it needs the
+/// window).
 pub(crate) fn run_mesh_cmd(app: &mut App, body: BodyId, cmd: MeshCmd) {
   let only = vec![Sel::Body { body }];
   match cmd {
@@ -132,12 +131,26 @@ pub(crate) fn run_mesh_cmd(app: &mut App, body: BodyId, cmd: MeshCmd) {
       app.s.selection = only;
       app.start(Kind::Inspect);
     }
+    MeshCmd::TextureMap => {
+      app.s.selection = only;
+      crate::render_tools::open_texture_map(app);
+    }
     MeshCmd::SaveAsMesh => marking::save_as_mesh(app, body),
     MeshCmd::Copy => {
       // the browser and canvas menus copy through `crate::clipboard::copy`, which needs the
       // window; without one the body still goes on the clipboard
       app.s.selection = only;
       app.clipboard = crate::clipboard::clip_of(app);
+      app.clip_cut = false;
+    }
+    MeshCmd::Cut => {
+      app.s.selection = only;
+      app.clipboard = crate::clipboard::clip_of(app);
+      app.clip_cut = app.clipboard.is_some();
+    }
+    MeshCmd::DirectEdit => {
+      app.s.selection = only;
+      crate::panels::Cmd::MeshEdit(crate::mesh_ui::Act::DirectEdit).run(app);
     }
     MeshCmd::Delete => {
       app.s.selection = only;
@@ -188,13 +201,9 @@ pub(super) fn mesh_context_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id,
     match it.cmd {
       MeshCmd::Opacity => browser_edit::opacity_menu(app, ui, &[body]),
       _ if !it.enabled => {
-        ui.add_enabled_ui(false, |ui| menu_item(ui, it.icon, &it.label, it.key)).inner.on_disabled_hover_text(
-          if it.cmd == MeshCmd::PhysicalMaterial {
-            "Create a component from the body to give it a physical material"
-          } else {
-            "Not in FissionOxide yet"
-          },
-        );
+        ui.add_enabled_ui(false, |ui| menu_item(ui, it.icon, &it.label, it.key))
+          .inner
+          .on_disabled_hover_text("Not in FissionOxide yet");
       }
       _ => {
         if menu_item(ui, it.icon, &it.label, it.key).clicked() {
@@ -209,6 +218,10 @@ pub(super) fn mesh_context_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id,
     Some(MeshCmd::Copy) => {
       app.s.selection = vec![Sel::Body { body }];
       crate::clipboard::copy(app, ui.ctx());
+    }
+    Some(MeshCmd::Cut) => {
+      app.s.selection = vec![Sel::Body { body }];
+      crate::clipboard::cut(app, ui.ctx());
     }
     Some(cmd) => run_mesh_cmd(app, body, cmd),
     None => {}
