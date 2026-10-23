@@ -20,7 +20,7 @@ pub enum Continuity {
 impl Shape {
   /// A patch over the closed boundary `edges`: each edge with its continuity and, unless it is
   /// [`Continuity::Connected`], the face beside it; the patch also passes through the `interior`
-  /// curves (rails).
+  /// curves (rails) and points (vertices).
   pub fn patch_with(edges: &[(Shape, Continuity, Option<Shape>)], interior: &[Shape]) -> Result<Shape> {
     if edges.is_empty() {
       return Err(KernelError::Input("pick the boundary edges".into()));

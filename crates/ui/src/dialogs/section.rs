@@ -153,8 +153,8 @@ impl Dialog {
       }
       ui.end_row();
       Self::choose(ui, "Section Color", "section-color", &mut self.choice, &COLORS, &mut dirty);
-      ui.label("");
-      ui.checkbox(&mut self.flag, "Show Hatch");
+      ui.label("Show Hatch");
+      ui.checkbox(&mut self.flag, "");
       ui.end_row();
       self.dirty |= dirty;
     }

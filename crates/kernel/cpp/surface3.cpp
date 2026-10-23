@@ -82,7 +82,8 @@ TopoDS_Wire as_wire(const TopoDS_Shape &s) {
 
 // boundary: a compound of the boundary edges, in order; orders: one per edge (0 connected,
 // 1 tangent, 2 curvature); supports: a compound holding, in order, the face beside each edge
-// whose order isn't 0; interior: a compound of curves the patch passes through (may be empty).
+// whose order isn't 0; interior: a compound of curves and vertices the patch passes through (may
+// be empty).
 std::unique_ptr<Shape> patch_with(const Shape &boundary, const Shape &supports, rust::Slice<const uint8_t> orders,
                                   const Shape &interior) {
   try {
@@ -106,6 +107,10 @@ std::unique_ptr<Shape> patch_with(const Shape &boundary, const Shape &supports, 
     if (n == 0) throw std::runtime_error("the boundary has no edges");
     for (TopExp_Explorer ex(interior.s, TopAbs_EDGE); ex.More(); ex.Next()) {
       fill.Add(TopoDS::Edge(ex.Current()), GeomAbs_C0, Standard_False);
+    }
+    // points on their own (not an edge's ends)
+    for (TopExp_Explorer ex(interior.s, TopAbs_VERTEX, TopAbs_EDGE); ex.More(); ex.Next()) {
+      fill.Add(BRep_Tool::Pnt(TopoDS::Vertex(ex.Current())));
     }
     fill.Build();
     if (!fill.IsDone()) throw std::runtime_error("the patch could not be computed");

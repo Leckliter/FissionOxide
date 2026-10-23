@@ -3,7 +3,7 @@
 //! from (chained) edges, Offset with an Offset Type, and the surface Sweep and Loft.
 
 use fox_kernel::glam::DVec3;
-use fox_model::surface::{Continuity, OffsetCorners, RuledType, SurfaceSection};
+use fox_model::surface::{Continuity, OffsetCorners, PatchRail, RuledType, SurfaceSection};
 use fox_model::{BodyId, EdgeRef, FeatureId, FeatureKind};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
@@ -81,7 +81,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         }
         Some(v) => vec![continuity(v)?; edges.len()],
       };
-      add_feature(s, FeatureKind::Patch { edges, sketch, continuity, flip: flag("flip") })
+      let interior = list(p, "interior", |v| patch_rail(s, v))?;
+      add_feature(s, FeatureKind::Patch { edges, sketch, continuity, flip: flag("flip"), interior })
     })(),
     // the two-edge form stays for designs and scripts that use it
     "surface.ruled" if p.get("edges").is_some() => (|| {
@@ -175,6 +176,32 @@ fn point(v: &Value) -> Option<[f64; 2]> {
 
 fn list<T>(p: &Value, k: &str, mut f: impl FnMut(&Value) -> Result<T, CmdError>) -> Result<Vec<T>, CmdError> {
   p.get(k).and_then(Value::as_array).into_iter().flatten().map(&mut f).collect()
+}
+
+/// One of Patch's Interior Rails/Points: a body edge `{body, edge}`, a sketch curve `{sketch,
+/// curve}`, a sketch point `{sketch, point}` or a point `{at: [x, y, z]}` / `[x, y, z]`.
+fn patch_rail(s: &Session, v: &Value) -> Result<PatchRail, CmdError> {
+  let at = v.get("at").unwrap_or(v);
+  if let Some(a) = at.as_array() {
+    let xyz: Vec<f64> = a.iter().filter_map(Value::as_f64).collect();
+    let [x, y, z] = xyz[..] else { return Err(CmdError::new("a point is [x, y, z]")) };
+    return Ok(PatchRail::Point { at: [x, y, z] });
+  }
+  if v.get("sketch").is_some() {
+    let sketch = FeatureId(req_u32(v, "sketch")?);
+    if v.get("point").is_some() {
+      let point = fox_sketch::PointId(req_u32(v, "point")?);
+      let r = s.model.sketches.get(&sketch).ok_or(CmdError::new("that sketch has no solved geometry"))?;
+      let q = r.sketch.pos(point).ok_or(CmdError::new("that sketch has no such point"))?;
+      return Ok(PatchRail::Point { at: r.plane.to_world(q).to_array() });
+    }
+    let curve = CurveId(req_u32(v, "curve")?);
+    if s.design.sketch(sketch)?.curve(curve).is_none() {
+      return Err(CmdError::new(format!("the sketch has no curve {}", curve.0)));
+    }
+    return Ok(PatchRail::Curve { sketch, curve });
+  }
+  Ok(PatchRail::Edge { edge: edge_ref_of(s, v)? })
 }
 
 fn continuity(v: &Value) -> Result<Continuity, CmdError> {

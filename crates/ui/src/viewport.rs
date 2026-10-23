@@ -3160,7 +3160,8 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
             refused = false;
           }
           let r = match &param {
-            Some(name) => r.on_hover_text(format!("{name} : {text}")),
+            // dark with white text, as the dimension's hover tooltip
+            Some(name) => crate::navbar::dark_tip(r, &format!("{name} : {text}")),
             None => r,
           };
           if fresh {

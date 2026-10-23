@@ -250,8 +250,8 @@ impl Dialog {
       }
       "draft" => {
         range_row(ui, "Draft Angle", &mut a.angle, -45.0..=45.0);
-        ui.label("");
-        ui.checkbox(&mut a.tolerance, "Tolerance");
+        ui.label("Tolerance");
+        ui.checkbox(&mut a.tolerance, "");
         ui.end_row();
         if a.tolerance {
           range_row(ui, "Tolerance", &mut a.tol, -5.0..=5.0);
@@ -268,8 +268,8 @@ impl Dialog {
         });
         ui.end_row();
         slider_row(ui, "Rotate", &mut a.rotate, -180.0..=180.0, 1, " deg");
-        ui.label("");
-        ui.checkbox(&mut a.mirror, "Apply Mirror");
+        ui.label("Apply Mirror");
+        ui.checkbox(&mut a.mirror, "");
         ui.end_row();
       }
       "isocurve" => {
@@ -411,9 +411,9 @@ fn opacity_row(ui: &mut egui::Ui, v: &mut f64) {
 
 /// A check box FissionOxide can't act on yet, greyed with the reason as its tooltip.
 fn greyed_check(ui: &mut egui::Ui, label: &str) {
-  ui.label("");
+  ui.label(label);
   let mut off = false;
-  ui.add_enabled_ui(false, |ui| ui.checkbox(&mut off, label)).inner.on_disabled_hover_text(MESH_ONLY);
+  ui.add_enabled_ui(false, |ui| ui.checkbox(&mut off, "")).inner.on_disabled_hover_text(MESH_ONLY);
   ui.end_row();
 }
 

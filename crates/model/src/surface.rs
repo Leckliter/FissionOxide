@@ -193,3 +193,15 @@ pub struct SurfaceSection {
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub curves: Vec<CurveId>,
 }
+
+/// A curve or point a patch passes through (Fusion's Patch Interior Rails/Points).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PatchRail {
+  /// A body edge.
+  Edge { edge: crate::EdgeRef },
+  /// A sketch curve.
+  Curve { sketch: FeatureId, curve: CurveId },
+  /// A point in space (a sketch point or vertex where it was picked).
+  Point { at: [f64; 3] },
+}

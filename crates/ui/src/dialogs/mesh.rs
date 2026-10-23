@@ -117,8 +117,8 @@ impl Dialog {
       ("mesh.tessellate", "quads") => {
         if self.group_open("Refinement Settings", true, ui) {
           let mut b = false;
-          ui.label("");
-          ui.add_enabled_ui(false, |ui| ui.checkbox(&mut b, label))
+          ui.label(label);
+          ui.add_enabled_ui(false, |ui| ui.checkbox(&mut b, ""))
             .inner
             .on_disabled_hover_text("Mesh bodies are triangles in FissionOxide: quads aren't made yet");
           ui.end_row();

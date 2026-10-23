@@ -177,3 +177,27 @@ fn sweep_and_loft_make_open_surfaces() {
   assert!(close(m.area, 60.0, 1e-3), "{m:?}");
   assert!(s.execute("surface.loft", &json!({"sections": [a]})).is_err());
 }
+
+/// Patch's Interior Rails/Points: a point above the cone's end lifts the patch through it; a
+/// sketch point and a sketch curve are taken too.
+#[test]
+fn patch_passes_through_interior_points() {
+  let mut s = Session::default();
+  cone(&mut s);
+  run(
+    &mut s,
+    "surface.patch",
+    json!({"edges": [{"point": [5, 0, 10]}], "chain": true, "interior": [{"at": [0, 0, 13]}]}),
+  );
+  let top = s.model.bodies.last().unwrap().shape.mass().unwrap().bbox_max.z;
+  assert!(top > 12.0, "{top}");
+  let fid = s.design.features.last().unwrap().id;
+  let k = &s.design.feature(fid).unwrap().kind;
+  assert!(matches!(k, fox_model::FeatureKind::Patch { interior, .. } if interior.len() == 1), "{k:?}");
+  // a sketch curve that isn't there is refused
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.line", json!({"points": [[0, 0], [1, 0]]}));
+  let sk = s.design.features.last().unwrap().id;
+  let bad = json!({"edges": [{"point": [5, 0, 10]}], "chain": true, "interior": [{"sketch": sk.0, "curve": 999}]});
+  assert!(s.execute("surface.patch", &bad).is_err());
+}

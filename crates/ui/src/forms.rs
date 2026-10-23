@@ -356,6 +356,10 @@ pub struct State {
   pub page: usize,
   /// While the rows are drawn: the section they are under is unfolded.
   pub section_open: bool,
+  /// Patch: the picks its Interior Rails/Points row holds, and whether that row takes the next
+  /// picks (else they go to Boundary Edges; see `crate::dialogs::surface::sync_rails`).
+  pub rails: Vec<Sel>,
+  pub rails_active: bool,
 }
 
 impl State {
@@ -413,6 +417,8 @@ impl State {
       derived: Map::new(),
       page: 0,
       section_open: true,
+      rails: Vec::new(),
+      rails_active: false,
     }
   }
 
@@ -699,6 +705,7 @@ impl State {
         }
       }
       _ if crate::mesh_ui::is_mesh_form(form) => crate::mesh_ui::sync(form, self, &before, s),
+      "surface.patch.form" => crate::dialogs::surface::sync_rails(form, self, &before, s),
       _ => {}
     }
     self.sync_picks(form, s);
@@ -1183,6 +1190,8 @@ impl State {
       lead.extend(curves.into_iter().map(|c| Sel::SketchCurve { sketch: sk, curve: fox_engine::sketch::CurveId(c) }));
     }
     lead.extend(out);
+    // (Patch's interior picks)
+    lead.extend(self.rails.iter().filter(|r| !lead.contains(r)).copied().collect::<Vec<_>>());
     lead
   }
 

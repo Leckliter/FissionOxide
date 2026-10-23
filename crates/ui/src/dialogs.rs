@@ -3248,13 +3248,13 @@ impl Dialog {
           self.dirty = true;
         }
         ui.end_row();
-        ui.label("");
-        if ui.checkbox(&mut self.symmetric[0], "Symmetric").changed() {
+        ui.label("Symmetric");
+        if ui.checkbox(&mut self.symmetric[0], "").changed() {
           self.dirty = true;
         }
         ui.end_row();
-        ui.label("");
-        if ui.checkbox(&mut self.join, "Join instances").changed() {
+        ui.label("Join instances");
+        if ui.checkbox(&mut self.join, "").changed() {
           self.dirty = true;
         }
         ui.end_row();
@@ -4372,9 +4372,9 @@ impl Dialog {
 
   /// A check box FissionOxide can't act on yet, drawn greyed with the reason as its tooltip.
   fn check_greyed(ui: &mut egui::Ui, label: &str, why: &str) {
-    ui.label("");
+    ui.label(label);
     let mut off = false;
-    ui.add_enabled_ui(false, |ui| ui.checkbox(&mut off, label)).inner.on_disabled_hover_text(why);
+    ui.add_enabled_ui(false, |ui| ui.checkbox(&mut off, "")).inner.on_disabled_hover_text(why);
     ui.end_row();
   }
 

@@ -4177,3 +4177,64 @@ fn hide_trailing_zeroes_is_live_on_unit_display() {
   assert_eq!(h.app.preferences.draft.min_precision, 1);
   assert!(h.app.preferences.draft.hide_zeroes);
 }
+
+/// `ui:sketch:dim-edit-tooltip-style`: the edit box of a dimension being edited names its
+/// parameter ("d1 : 40 mm") on the dark tooltip panel with white text, as the hover tooltip does.
+#[test]
+fn the_dimension_edit_boxs_tooltip_is_dark() {
+  use crate::theme;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  let line = h.app.run("sketch.line", json!({"points": [[-20, 0], [20, 0]]})).unwrap();
+  let c = line["curves"][0].clone();
+  h.app.run("sketch.dimension", json!({"type": "distance", "curves": [c], "value": "40"})).unwrap();
+  h.frame(vec![]);
+  let sk = h.app.s.edit_sketch.expect("editing the sketch");
+  let cid = h.app.s.design.sketch(sk).unwrap().constraints.last().unwrap().id.0;
+  h.app.dim_edit = Some((cid, "40 mm".into(), egui::pos2(500.0, 400.0)));
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let shown = h.rest_rects(egui::pos2(540.0, 400.0), 1.2);
+  let tip = shown.iter().find(|(_, t)| t == "d1 : 40 mm").map(|(r, _)| *r);
+  let tip = tip.unwrap_or_else(|| panic!("the parameter tooltip: {shown:?}"));
+  let shapes = h.frame_shapes(0.1);
+  assert!(
+    shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.fill == theme::TOOLTIP && r.rect.contains_rect(tip))),
+    "a dark panel behind the tooltip"
+  );
+  let color = shapes.iter().find_map(|s| match s {
+    egui::Shape::Text(t) if t.galley.text() == "d1 : 40 mm" => Some(text_color(t)),
+    _ => None,
+  });
+  assert_eq!(color, Some(theme::TOOLTIP_TITLE));
+}
+
+/// `ui:dialogs:move-rows-after-pick`: MOVE/COPY in 3D opens with Move Object, Selection, Move
+/// Type and Set Pivot only; the distances, angles and Create Copy (its label in the label column)
+/// come with the first body picked.
+#[test]
+fn move_rows_wait_for_a_pick_in_3d() {
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+  h.app.s.selection.clear();
+  h.frame(vec![]);
+  h.app.start(crate::dialogs::Kind::Move);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let has = |shown: &[(Rect, String)], t: &str| shown.iter().any(|(_, s)| s == t);
+  let shown = h.frame_texts(1.0 / 60.0, vec![]);
+  assert!(has(&shown, "Move Type") && has(&shown, "Set Pivot"), "{shown:?}");
+  assert!(!has(&shown, "X Distance") && !has(&shown, "Create Copy"), "no value rows before a pick");
+  let body = h.app.s.model.bodies[0].id;
+  h.app.s.selection = vec![fox_engine::Sel::Body { body }];
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let shown = h.frame_texts(1.0 / 60.0, vec![]);
+  assert!(has(&shown, "X Distance") && has(&shown, "Z Angle"), "{shown:?}");
+  let copy = shown.iter().find(|(_, s)| s == "Create Copy").map(|(r, _)| *r).expect("Create Copy");
+  let label = shown.iter().find(|(_, s)| s == "X Distance").map(|(r, _)| *r).unwrap();
+  assert!(copy.left() <= label.right(), "in the label column: {copy:?} vs {label:?}");
+}

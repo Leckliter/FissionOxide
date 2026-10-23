@@ -1714,6 +1714,9 @@ pub enum FeatureKind {
     /// Reverse the patch's normal.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     flip: bool,
+    /// Curves and points the patch passes through (Interior Rails/Points).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    interior: Vec<surface::PatchRail>,
   },
   /// Sews surface bodies into one (a solid when they close up).
   Stitch {

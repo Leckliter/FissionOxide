@@ -22,8 +22,8 @@ impl Dialog {
     ui.label("Select");
     sel_chip(ui, self.accent(), &chip_text(self.bodies.len(), "Bodies"), !self.bodies.is_empty());
     ui.end_row();
-    ui.label("");
-    if ui.checkbox(&mut self.flag2, "Include Coincident Faces").changed() {
+    ui.label("Include Coincident Faces");
+    if ui.checkbox(&mut self.flag2, "").changed() {
       self.report = None;
     }
     ui.end_row();
@@ -66,8 +66,8 @@ impl Dialog {
     let overlap = rows.iter().any(|r| r.get("coincident").is_none());
     if overlap {
       // adds each overlap as a static body (in a new component when ticked)
-      ui.label("");
-      ui.checkbox(&mut self.flag, "Create components");
+      ui.label("Create components");
+      ui.checkbox(&mut self.flag, "");
       ui.end_row();
       ui.label("");
       if panels::secondary_button(ui, "Create Bodies").clicked() {

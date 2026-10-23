@@ -66,3 +66,27 @@ fn open_sweep_and_loft_make_surfaces_from_curves() {
   assert_eq!(loft.solid_count(), 0);
   assert!((loft.mass().unwrap().area - 60.0).abs() < 1e-3, "{}", loft.mass().unwrap().area);
 }
+
+#[test]
+fn a_patch_passes_through_interior_points_and_rails() {
+  // a flat 10 x 10 square at z = 0
+  let xy = Plane::from_normal(DVec3::ZERO, DVec3::Z, DVec3::X).unwrap();
+  let corners = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+  let sides: Vec<(Shape, Continuity, Option<Shape>)> = (0..4)
+    .map(|i| {
+      let seg = Seg::Line { a: corners[i], b: corners[(i + 1) % 4] };
+      (Shape::path(&xy, &[seg]).unwrap(), Continuity::Connected, None)
+    })
+    .collect();
+  let flat = Shape::patch_with(&sides, &[]).unwrap();
+  assert!(flat.mass().unwrap().bbox_max.z.abs() < 1e-3);
+  // a point above the middle lifts it
+  let lifted = Shape::patch_with(&sides, &[Shape::vertex(DVec3::new(5.0, 5.0, 3.0)).unwrap()]).unwrap();
+  assert!(lifted.mass().unwrap().bbox_max.z > 2.5, "{}", lifted.mass().unwrap().bbox_max.z);
+  // and so does an arched rail across it
+  let xz = Plane::from_normal(DVec3::new(0.0, 5.0, 0.0), DVec3::NEG_Y, DVec3::X).unwrap();
+  let arc = Seg::Arc { center: [5.0, 0.0], radius: 5.0, start_angle: 0.0, sweep: std::f64::consts::PI };
+  let rail = Shape::path(&xz, &[arc]).unwrap();
+  let arched = Shape::patch_with(&sides, &[rail]).unwrap();
+  assert!(arched.mass().unwrap().bbox_max.z > 3.0, "{}", arched.mass().unwrap().bbox_max.z);
+}

@@ -3,11 +3,12 @@
 //! a continuity per boundary edge, Ruled grown from edges, and the surface Sweep and Loft.
 
 use fox_kernel::Shape;
+use fox_kernel::glam::DVec3;
 use fox_sketch::CurveId;
 
 use super::extra::sketch_wires;
 use super::{Ctx, FResult, SketchResult, ke, pick_profiles};
-use crate::surface::{Continuity, RuledType};
+use crate::surface::{Continuity, PatchRail, RuledType};
 use crate::{FeatureId, FeatureKind};
 
 /// The curves a surface is made from: each picked profile's boundary loops as wires, and the
@@ -82,7 +83,7 @@ impl Ctx<'_> {
         self.new_surface(id, faces)?;
         Ok(None)
       }
-      FeatureKind::Patch { edges, sketch, continuity, flip } => {
+      FeatureKind::Patch { edges, sketch, continuity, flip, interior } => {
         let mut parts = Vec::new();
         if let Some(sk) = sketch {
           let sk = self.state.sketches.get(sk).ok_or("its sketch failed")?.clone();
@@ -101,11 +102,28 @@ impl Ctx<'_> {
         if parts.is_empty() {
           return Err("pick the boundary edges or a sketch".into());
         }
-        let face = if parts.iter().all(|p| p.1 == Continuity::Connected) {
+        let mut rails = Vec::new();
+        for r in interior.iter_mut() {
+          match r {
+            PatchRail::Edge { edge } => {
+              let (bi, info) = self.edge_info(edge)?;
+              rails.push(self.state.bodies[bi].shape.edge_shape(info.id).map_err(ke)?);
+            }
+            PatchRail::Curve { sketch, curve } => {
+              let sk = self.state.sketches.get(sketch).ok_or("a rail's sketch failed")?;
+              if sk.sketch.curve(*curve).is_none() {
+                return Err("a rail's sketch curve no longer exists".into());
+              }
+              rails.extend(sketch_wires(&sk.plane, &sk.sketch, &[*curve])?);
+            }
+            PatchRail::Point { at } => rails.push(Shape::vertex(DVec3::from(*at)).map_err(ke)?),
+          }
+        }
+        let face = if rails.is_empty() && parts.iter().all(|p| p.1 == Continuity::Connected) {
           Shape::compound(parts.iter().map(|p| &p.0)).map_err(ke)?.patch().map_err(ke)?
         } else {
           let list: Vec<_> = parts.into_iter().map(|(e, c, f)| (e, c.kernel(), f)).collect();
-          Shape::patch_with(&list, &[]).map_err(ke)?
+          Shape::patch_with(&list, &rails).map_err(ke)?
         };
         let face = if *flip { face.reversed().map_err(ke)? } else { face };
         self.new_body(id, face);

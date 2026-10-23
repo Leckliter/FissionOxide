@@ -133,6 +133,51 @@ fn form_cmd(kind: Kind) -> Option<&'static str> {
   }
 }
 
+/// Patch's Interior Rails/Points: while its row is active, what is picked since (an edge not on
+/// the boundary, a sketch curve or point, a vertex) is a rail or point; the boundary keeps the
+/// other edges. Rails no longer selected drop out.
+pub(crate) fn sync_rails(form: &crate::forms::Form, st: &mut crate::forms::State, before: &[Value], s: &Session) {
+  let at = |k: &str| form.inputs.iter().position(|x| x.key() == k);
+  let (Some(ei), Some(ri)) = (at("edges"), at("interior")) else { return };
+  st.rails.retain(|r| s.selection.contains(r));
+  let edge = |sel: &Sel| match *sel {
+    Sel::Edge { body, edge } => Some(json!({"body": body.0, "edge": edge})),
+    _ => None,
+  };
+  if st.rails_active {
+    let boundary = before.get(ei).and_then(Value::as_array).cloned().unwrap_or_default();
+    for sel in &s.selection {
+      let fits = match sel {
+        Sel::Edge { .. } => edge(sel).is_some_and(|e| !boundary.contains(&e)),
+        Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::Vertex { .. } => true,
+        _ => false,
+      };
+      if fits && !st.rails.contains(sel) {
+        st.rails.push(*sel);
+      }
+    }
+  }
+  let rails: Vec<Value> = st.rails.iter().filter_map(edge).collect();
+  if let Some(a) = st.values[ei].as_array_mut() {
+    a.retain(|v| !rails.contains(v));
+  }
+  let values: Vec<Value> = st
+    .rails
+    .iter()
+    .filter_map(|r| match *r {
+      Sel::Edge { .. } => edge(r),
+      Sel::SketchCurve { sketch, curve } => Some(json!({"sketch": sketch.0, "curve": curve.0})),
+      Sel::SketchPoint { sketch, point } => Some(json!({"sketch": sketch.0, "point": point.0})),
+      Sel::Vertex { body, edge, end } => {
+        let e = s.model.body(body)?.edges().iter().find(|e| e.id == edge)?;
+        Some(json!({"at": (if end { e.end } else { e.start }).to_array()}))
+      }
+      _ => None,
+    })
+    .collect();
+  st.values[ri] = json!(values);
+}
+
 /// Is the form row `key` of a surface form shown? Its value rows wait for the first pick.
 pub(crate) fn form_row_shown<'a>(cmd: &str, key: &str, get: &dyn Fn(&str) -> Option<&'a Value>) -> bool {
   let picked = |k: &str| get(k).and_then(Value::as_array).is_some_and(|a| !a.is_empty());
@@ -173,6 +218,9 @@ pub(crate) fn form_command(cmd: &str, p: &Value) -> (&'static str, Value) {
   match cmd {
     "surface.patch.form" => {
       let mut q = json!({"edges": get("edges").unwrap_or(json!([])), "chain": flag("chain"), "flip": flag("flip")});
+      if let Some(rails) = p.get("interior").and_then(Value::as_array).filter(|a| !a.is_empty()) {
+        q["interior"] = json!(rails);
+      }
       let cont: Vec<Value> = p.get("continuity").and_then(Value::as_array).cloned().unwrap_or_default();
       if flag("group") {
         q["continuity"] = cont.first().cloned().unwrap_or(json!("connected"));
@@ -681,10 +729,14 @@ impl Dialog {
       ("surface.patch.form", "edges") => {
         ui.label("Boundary Edges");
         let n = count(self, "edges");
-        if n == 0 {
-          sel_chip_lit(ui, accent, "", true, false);
+        let active = !self.form.rails_active;
+        let chip = if n == 0 {
+          sel_chip_lit(ui, accent, if active { "" } else { "Select" }, active, false)
         } else {
-          sel_chip(ui, accent, &format!("{n} selected"), true);
+          sel_chip(ui, accent, &format!("{n} selected"), true)
+        };
+        if !active && chip.interact(egui::Sense::click()).on_hover_text("Pick boundary edges").clicked() {
+          self.form.rails_active = false;
         }
         ui.end_row();
       }
@@ -707,11 +759,24 @@ impl Dialog {
         }
         self.form.values[i] = json!(list);
       }
+      // picks go here while the row is active (a click on its chip), as in Fusion
       ("surface.patch.form", "interior") => {
         ui.label("Interior Rails/Points");
-        ui.add_enabled_ui(false, |ui| sel_chip(ui, accent, "Select", false))
-          .inner
-          .on_disabled_hover_text("Interior rails and points aren't in FissionOxide's Patch dialog yet");
+        let n = count(self, "interior");
+        let active = self.form.rails_active;
+        let text = if n > 0 {
+          format!("{n} selected")
+        } else if active {
+          String::new()
+        } else {
+          "Select".into()
+        };
+        let chip = sel_chip_lit(ui, accent, &text, active || n > 0, n > 0);
+        if !active
+          && chip.interact(egui::Sense::click()).on_hover_text("Pick curves and points to pass through").clicked()
+        {
+          self.form.rails_active = true;
+        }
         ui.end_row();
       }
       ("surface.patch.form", "flip") => {
@@ -1163,6 +1228,43 @@ mod tests {
     assert!(d.applied && d.error.is_none(), "{:?}", d.error);
     let disc = std::f64::consts::PI * 25.0;
     assert!(app.s.model.bodies.last().unwrap().shape.mass().unwrap().area > disc + 5.0, "a dome");
+    d.cancel(&mut app.s);
+  }
+
+  /// `ui:surface:patch-interior-rails`: with Interior Rails/Points active, a sketch curve picked
+  /// is a rail the patch passes through; the boundary keeps its edges, and a boundary edge
+  /// picked again stays on the boundary.
+  #[test]
+  fn patch_routes_picks_to_its_interior_rails() {
+    let mut app = App::with_session(Session::default());
+    cone(&mut app);
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 12], "normal": [0, 0, 1], "x": [1, 0, 0]}})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    let made = app.run("sketch.line", json!({"points": [[-1, 0], [1, 0]]})).unwrap();
+    let curve = fox_engine::sketch::CurveId(made["curves"][0].as_u64().unwrap() as u32);
+    app.run("sketch.finish", json!({})).unwrap();
+    app.s.selection.clear();
+    let mut d = Dialog::open(&mut app, Kind::Form(&crate::forms::PATCH));
+    let rim = rim(&app);
+    app.s.selection = vec![rim];
+    d.sync_selection(&app.s);
+    d.form.rails_active = true;
+    app.s.selection = vec![rim, Sel::SketchCurve { sketch: sk, curve }];
+    d.sync_selection(&app.s);
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!(cmd, "surface.patch");
+    assert_eq!(p["edges"].as_array().unwrap().len(), 1, "{p}");
+    assert_eq!(p["interior"], json!([{"sketch": sk.0, "curve": curve.0}]));
+    d.preview(&mut app.s);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    let top = app.s.model.bodies.last().unwrap().shape.mass().unwrap().bbox_max.z;
+    assert!(top > 11.0, "the patch rises to the rail: {top}");
+    assert!(matches!(last_kind(&app), FeatureKind::Patch { interior, .. } if interior.len() == 1));
+    // the rail dropped from the selection leaves the row
+    d.withdraw(&mut app.s);
+    app.s.selection = vec![rim];
+    d.sync_selection(&app.s);
+    assert!(d.command().unwrap().1.get("interior").is_none());
     d.cancel(&mut app.s);
   }
 

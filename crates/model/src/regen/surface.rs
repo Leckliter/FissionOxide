@@ -405,7 +405,14 @@ mod tests {
     let mut sk = Sketch::new();
     sk.add_rectangle([0.0, 0.0], [10.0, 10.0]).unwrap();
     let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: sk, links: Vec::new() }).unwrap();
-    d.add_feature(FeatureKind::Patch { edges: vec![], sketch: Some(s), continuity: vec![], flip: false }).unwrap();
+    d.add_feature(FeatureKind::Patch {
+      edges: vec![],
+      sketch: Some(s),
+      continuity: vec![],
+      flip: false,
+      interior: vec![],
+    })
+    .unwrap();
     let m = regenerate(&mut d);
     let b = &m.bodies[0];
     let e = b.edges().iter().find(|e| (e.mid - DVec3::new(10.0, 5.0, 0.0)).length() < 1e-6).unwrap();
@@ -499,7 +506,14 @@ mod tests {
       let mut sk = Sketch::new();
       sk.add_rectangle([0.0, 0.0], [10.0, 10.0]).unwrap();
       let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: sk, links: Vec::new() }).unwrap();
-      d.add_feature(FeatureKind::Patch { edges: vec![], sketch: Some(s), continuity: vec![], flip: false }).unwrap();
+      d.add_feature(FeatureKind::Patch {
+        edges: vec![],
+        sketch: Some(s),
+        continuity: vec![],
+        flip: false,
+        interior: vec![],
+      })
+      .unwrap();
       let body = regenerate(&mut d).bodies[0].id;
       d.add_feature(FeatureKind::Thicken {
         faces: vec![],

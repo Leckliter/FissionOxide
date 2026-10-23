@@ -884,8 +884,9 @@ impl Dialog {
     if self.editing.is_none() || self.mv.adds {
       self.set_pivot_row(app, ui);
     }
-    // in a sketch the distances, angles and Create Copy wait for a pick, as in Fusion
-    if sketch && !self.move_picked() {
+    // the distances, angles and Create Copy wait for a pick, as in Fusion; Paste and Edit Move
+    // start with their objects and keep their rows
+    if (sketch || (self.mv.paste.is_none() && self.editing.is_none())) && !self.move_picked() {
       return;
     }
     let n = if sketch { 2 } else { 3 };
@@ -950,8 +951,9 @@ impl Dialog {
     }
     // Edit Move has no Create Copy row, as in Fusion
     if self.mv.object != "faces" && self.mv.paste.is_none() && self.editing.is_none() {
-      ui.label("");
-      if ui.checkbox(&mut self.mv.copy, "Create Copy").changed() {
+      // the label in the label column, the box alone in the value column, as Fusion's
+      ui.label("Create Copy");
+      if ui.checkbox(&mut self.mv.copy, "").changed() {
         // copies leave the picks where they are: the centre is found afresh
         self.mv.pivot = None;
         self.dirty = true;
