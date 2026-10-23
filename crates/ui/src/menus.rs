@@ -1152,7 +1152,7 @@ const CAM_ACTIONS: &[E] = &[
 
 const CAM_MANAGE: &[E] = &[
   x("Form Mill", Icon::Revolve),
-  x("Solid Holder", Icon::Cylinder),
+  E::Sub("Solid Holder", CAM_SOLID_HOLDER),
   E::Sep,
   c("Tool Library", Icon::Configure, Cmd::CamTools),
   x("Machine Library", Icon::Configure),
@@ -1165,6 +1165,10 @@ const CAM_MANAGE: &[E] = &[
   x("Import Defaults", Icon::Import),
   x("Reset Defaults", Icon::Undo),
 ];
+
+/// MANAGE ▸ Solid Holder's submenu (Fusion shows the arrow; its entries weren't recorded, so
+/// this is the one command its name implies, not yet in FissionOxide).
+const CAM_SOLID_HOLDER: &[E] = &[x("Create Solid Holder", Icon::Cylinder)];
 
 const CAM_INSPECT: &[E] = &[
   c("Measure", Icon::Measure, D(Kind::Inspect)).k("I"),
@@ -3245,6 +3249,13 @@ mod tests {
     assert_eq!(cmd_of(Tab::Milling, "3D", "3D Contour"), Some(D(Kind::Form(&forms::CAM_CONTOUR3D))));
     assert_eq!(cmd_of(Tab::Turning, "TURNING", "Turning Part"), Some(D(Kind::Form(&forms::CAM_PART_OFF))));
     assert_eq!(cmd_of(Tab::Milling, "MANAGE", "Tool Library"), Some(Cmd::CamTools));
+    // MANAGE's Solid Holder opens a submenu (Fusion's "Solid Holder >")
+    let (own, _) = groups(Tab::Milling);
+    let manage = own.iter().find(|g| g.label == "MANAGE").unwrap();
+    assert!(
+      manage.menu.iter().any(|e| matches!(e, E::Sub("Solid Holder", sub) if !sub.is_empty())),
+      "Solid Holder is a submenu"
+    );
     assert_eq!(cmd_of(Tab::Fabrication, "CUTTING", "2D Cut (Laser, Plasma, Waterjet)"), Some(Cmd::Cut2d));
     // no MULTI-AXIS panel: its commands (and Steep and Shallow, Fixtures, Delete Setup) are off
     // the dropdowns but still found by the S toolbox

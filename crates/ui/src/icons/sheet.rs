@@ -79,6 +79,7 @@ const ALL: &[Icon] = &[
   Icon::Display,
   Icon::Grid,
   Icon::Viewports,
+  Icon::ToolVisibility,
   Icon::ToStart,
   Icon::StepBack,
   Icon::Play,

@@ -137,8 +137,8 @@ fn a_new_electronics_design_has_its_own_tab() {
   work(&mut h.app);
   ecad_chrome::new_electronics_design(&mut h.app, None);
   assert_eq!((h.app.docs.count(), h.app.docs.active()), (2, 1));
-  // numbered after the open "Untitled*", as Fusion numbers new tabs
-  assert_eq!(documents::tab_label(&h.app.s), "Untitled(1)");
+  // "Untitled" beside the part design's "Untitled*": Fusion numbers electronics documents apart
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled");
   assert_eq!(ecad_chrome::doc_kind(h.app.electronics.as_ref()), DocKind::Electronics);
   // the part design's tab is as it was, in the Design workspace
   documents::switch_to(&mut h.app, 0);
@@ -334,4 +334,55 @@ fn the_command_line_and_text_commands() {
   ecad_chrome::text_command(&mut h.app, &mut v, "print(1)");
   assert!(v.text_log.last().unwrap().contains("Python"));
   h.app.electronics = Some(v);
+}
+
+/// `ui:electronics:new-document-tab`: with Untitled and Untitled(1)..(3) designs open, New
+/// Electronics Design is still "Untitled"; a second one beside it is "Untitled(1)".
+#[test]
+fn electronics_documents_are_numbered_apart_from_designs() {
+  let mut h = Harness::new();
+  for _ in 0..3 {
+    documents::new_document(&mut h.app, fox_engine::model::DesignType::Part, None);
+  }
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled(3)");
+  ecad_chrome::new_electronics_design(&mut h.app, None);
+  assert_eq!(h.app.docs.count(), 5);
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled");
+  ecad_chrome::new_electronics_design(&mut h.app, None);
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled(1)");
+  ecad_chrome::new_editor(&mut h.app, Sheet::Schematic);
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled(2)");
+  // and Ctrl+N's design after them numbers among the designs: Untitled(4)
+  documents::new_document(&mut h.app, fox_engine::model::DesignType::Part, None);
+  assert_eq!(documents::tab_label(&h.app.s), "Untitled(4)");
+}
+
+/// `ui:electronics:schematic-close-prompt`: an untouched new schematic closes without asking;
+/// one with a change asks.
+#[test]
+fn an_untouched_schematic_closes_without_asking() {
+  let mut h = Harness::new();
+  ecad_chrome::new_editor(&mut h.app, Sheet::Schematic);
+  assert_eq!(h.app.docs.count(), 2);
+  documents::request_close(&mut h.app, 1);
+  assert_eq!(h.app.docs.closing, None, "no prompt");
+  assert_eq!(h.app.docs.count(), 1, "the tab closed");
+  let shown = h.texts();
+  assert!(!shown.iter().any(|t| t.starts_with("Save changes to")), "{shown:?}");
+  // a board likewise
+  ecad_chrome::new_editor(&mut h.app, Sheet::Board);
+  documents::request_close(&mut h.app, 1);
+  assert_eq!((h.app.docs.closing, h.app.docs.count()), (None, 1));
+  // a schematic with changes asks
+  ecad_chrome::new_editor(&mut h.app, Sheet::Schematic);
+  h.app.s.dirty = true;
+  documents::request_close(&mut h.app, 1);
+  assert_eq!(h.app.docs.closing, Some(1));
+  let shown = h.texts();
+  assert!(shown.iter().any(|t| t.starts_with("Save changes to Untitled")), "{shown:?}");
+  // and quitting with an untouched schematic open doesn't stop on it
+  documents::close_now(&mut h.app, 1);
+  ecad_chrome::new_editor(&mut h.app, Sheet::Schematic);
+  documents::switch_to(&mut h.app, 0);
+  assert_eq!(documents::first_asking(&h.app), None);
 }

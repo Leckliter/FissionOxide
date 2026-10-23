@@ -3412,6 +3412,86 @@ fn manufacture_has_no_timeline_and_new_setup_previews_its_stock() {
   assert!(!crate::viewport::scene_options(&mut h.app).toolpaths);
 }
 
+/// `ui:manufacture:cam-browser`: the Manufacture navigation bar gains Tool Visibility after the
+/// usual icons; its fly-out's Show Tool draws the tool, Show Tool on Cursor (Ctrl+T) is greyed.
+#[test]
+fn manufacture_adds_tool_visibility_to_the_navigation_bar() {
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 60, "depth": 40, "height": 20}));
+  h.frame(vec![]);
+  h.frame(vec![]);
+  let design = h.ctx.memory(|m| m.area_rect(egui::Id::new("navbar"))).expect("the navigation bar");
+  h.app.manufacture = true;
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let bar = h.ctx.memory(|m| m.area_rect(egui::Id::new("navbar"))).unwrap();
+  // one more icon, its caret and a separator: 28 + 10 + 7
+  assert!((bar.width() - design.width() - 45.0).abs() < 2.0, "{design:?} -> {bar:?}");
+  // the icon is the last but its caret
+  let icon = egui::pos2(bar.right() - 10.0 - 14.0, bar.center().y);
+  let tip = h.rest(icon, 1.5);
+  assert!(tip.iter().any(|t| t == crate::navbar::TOOL_VISIBILITY), "{tip:?}");
+  h.move_then_click(icon);
+  assert!(egui::Popup::is_id_open(&h.ctx, egui::Id::new("nav-tool-visibility")));
+  let shown: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
+  for t in ["Show Tool", "Show Tool on Cursor", "Ctrl+T"] {
+    assert!(shown.iter().any(|s| s == t), "{t}: {shown:?}");
+  }
+  let show = h.find(vec![], "Show Tool").unwrap();
+  h.move_then_click(show.center());
+  assert!(h.app.cam_show_tool, "Show Tool ticks");
+  if h.find(vec![], "Show Tool on Cursor").is_none() {
+    h.move_then_click(icon);
+  }
+  let cursor = h.find(vec![], "Show Tool on Cursor").unwrap();
+  h.move_then_click(cursor.center());
+  assert!(h.app.cam_show_tool, "the greyed row does nothing");
+  // drawn with the toolpaths
+  h.app.run("cam.setup", json!({}));
+  h.frame(vec![]);
+  assert!(crate::viewport::scene_options(&mut h.app).show_tool);
+  h.app.cam_setups_hidden = true;
+  assert!(!crate::viewport::scene_options(&mut h.app).show_tool, "nothing drawn with the setups hidden");
+  // the Design workspace's bar is the usual one
+  h.app.manufacture = false;
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let back = h.ctx.memory(|m| m.area_rect(egui::Id::new("navbar"))).unwrap();
+  assert!((back.width() - design.width()).abs() < 1.0);
+}
+
+/// `ui:manufacture:setup-dialog`: the Machine row is Fusion's "Select..." button (a machine
+/// picked shows its name before it), and Operation Type shows its icon.
+#[test]
+fn new_setups_machine_is_a_select_button() {
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 34, "depth": 20, "height": 10}));
+  h.app.manufacture = true;
+  h.frame(vec![]);
+  h.app.start(crate::dialogs::Kind::Form(&crate::forms::CAM_SETUP));
+  for _ in 0..4 {
+    h.frame(vec![]);
+  }
+  let shown: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
+  assert!(shown.iter().any(|t| t == crate::dialogs::cam_setup::SELECT_MACHINE), "{shown:?}");
+  assert!(!shown.iter().any(|t| t == "3-axis mill"), "no machine drop-down: {shown:?}");
+  assert!(shown.iter().any(|t| t.trim() == "Milling"), "{shown:?}");
+  assert_eq!(crate::dialogs::cam_setup::operation_type_icon("milling"), Some(crate::icons::Icon::ToolVisibility));
+  // Select... lists the machines; one picked shows its name and its travel rows
+  let select = h.find(vec![], crate::dialogs::cam_setup::SELECT_MACHINE).unwrap();
+  h.move_then_click(select.center());
+  assert!(egui::Popup::is_id_open(&h.ctx, egui::Id::new(crate::dialogs::cam_setup::MACHINE_MENU)));
+  let five = h.find(vec![], "5-axis, table/table (A tilt, C table)").expect("the machine list");
+  h.move_then_click(five.center());
+  let shown: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
+  assert!(shown.iter().any(|t| t == "5-axis, table/table (A tilt, C table)"), "{shown:?}");
+  assert!(shown.iter().any(|t| t == "Tilt travel from (°)"), "{shown:?}");
+  let (_, p) = h.app.dialog.as_ref().unwrap().command().unwrap();
+  assert_eq!(p["machine"], json!("table_table"));
+}
+
 #[test]
 fn escape_from_extrude_started_in_a_sketch_comes_back_to_the_sketch() {
   let mut h = Harness::new();

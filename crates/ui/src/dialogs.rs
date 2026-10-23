@@ -36,7 +36,7 @@ pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod auto_cut;
 mod body_picks;
-mod cam_setup;
+pub(crate) mod cam_setup;
 mod copies;
 mod edit_more;
 mod flange;
@@ -1619,7 +1619,7 @@ impl Dialog {
   }
 
   /// The command (name, params) this dialog applies.
-  fn command(&self) -> Option<(&'static str, Value)> {
+  pub(crate) fn command(&self) -> Option<(&'static str, Value)> {
     self.with_comp_name(self.command_base()).map(|(c, p)| (c, self.with_cut_targets(p)))
   }
 
@@ -3321,7 +3321,7 @@ impl Dialog {
       if !self.form.shown(f, i) || crate::forms::State::hidden(f, i) {
         continue;
       }
-      if self.setup_field(f, i, ui) {
+      if self.setup_field(f, i, ui, dirty) {
         continue;
       }
       if text_form && self.text_form_field(f, i, &params, ui, dirty) {

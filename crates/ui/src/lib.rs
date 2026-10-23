@@ -353,6 +353,8 @@ pub struct App {
   pub manufacture: bool,
   /// The CAM browser's Setups eye is off: no toolpaths or stock drawn.
   pub cam_setups_hidden: bool,
+  /// The navigation bar's Tool Visibility ▸ Show Tool (Manufacture): the shown toolpath's tool.
+  pub cam_show_tool: bool,
   /// The Form workspace's FORM tab, while open.
   pub form: form_ui::FormEdit,
   /// The tool library window, while open.
@@ -686,6 +688,7 @@ impl App {
       rebuild: None,
       manufacture: false,
       cam_setups_hidden: false,
+      cam_show_tool: false,
       form: form_ui::FormEdit::default(),
       tool_library: None,
       gpu: gpu::Gpu::new(None),

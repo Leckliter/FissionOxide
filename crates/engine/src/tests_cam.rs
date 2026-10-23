@@ -434,3 +434,37 @@ fn posts_write_the_toolpaths_moves() {
   assert!(s.execute("cam.post", &json!({"post": "nope"})).is_err());
   assert!(s.execute("cam.setup", &json!({"units": "furlongs"})).is_err());
 }
+
+/// Tool Visibility ▸ Show Tool: the first toolpath's tool drawn where its first cut starts, as
+/// rings of the tool's radius on the tool axis.
+#[test]
+fn show_tool_draws_the_tool_at_the_first_cut() {
+  let mut s = Session::default();
+  part(&mut s);
+  run(&mut s, "cam.setup", json!({}));
+  run(&mut s, "cam.pocket", json!({"floors": [{"point": [25, 20, 12]}], "tool_diameter": 6}));
+  run(&mut s, "cam.generate", json!({}));
+  let mut sb = crate::scene::SceneBuilder::default();
+  let lines = |sb: &mut crate::scene::SceneBuilder, p: Value| {
+    let opts = crate::scene::view_options(&s, &p).unwrap();
+    sb.build(&s, &opts).0.lines.len()
+  };
+  let without = lines(&mut sb, json!({"toolpaths": 1}));
+  assert!(crate::scene::view_options(&s, &json!({"toolpaths": 1, "show_tool": true})).unwrap().show_tool);
+  let with = lines(&mut sb, json!({"toolpaths": 1, "show_tool": true}));
+  // three rings (tip, flutes' end, shank) and four lines along it
+  assert_eq!(with, without + 7);
+  let opts = crate::scene::view_options(&s, &json!({"toolpaths": 1, "show_tool": true})).unwrap();
+  let scene = sb.build(&s, &opts).0;
+  let tp = &s.toolpaths[0];
+  let i = tp.moves.iter().position(|m| !m.rapid).unwrap();
+  let tip = tp.moves[i - 1].to;
+  let ring = &scene.lines[scene.lines.len() - 7];
+  for p in &ring.points {
+    let d = DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64) - tip;
+    assert!(d.z.abs() < 1e-3 && (d.truncate().length() - 3.0).abs() < 1e-3, "{d:?}");
+  }
+  // without toolpaths shown, no tool
+  let opts = crate::scene::view_options(&s, &json!({"show_tool": true})).unwrap();
+  assert!(sb.build(&s, &opts).0.lines.len() < without);
+}

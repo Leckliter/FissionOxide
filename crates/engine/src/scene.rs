@@ -236,6 +236,9 @@ pub struct ViewOptions {
   pub toolpaths: bool,
   /// Leave the stock box's outline out of the toolpaths (New Setup shows the stock itself).
   pub hide_stock: bool,
+  /// Draw the shown toolpath's tool at its first cutting move (the Manufacture navigation bar's
+  /// Tool Visibility ▸ Show Tool).
+  pub show_tool: bool,
   /// Draw the previewed 2D cut job (`cut.job.preview`) while it matches the design.
   pub cut: bool,
   /// Draw a simulation study's results (or mesh) instead of its bodies (the Simulation
@@ -819,6 +822,9 @@ impl SceneBuilder {
     }
     if opts.toolpaths {
       toolpath_lines(&mut scene, s, !opts.hide_stock);
+      if opts.show_tool {
+        tool_lines(&mut scene, s);
+      }
       simulated_stock(&mut scene, s);
     }
     if opts.cut {
@@ -1858,6 +1864,7 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
   }
   o.toolpaths = p.get("toolpaths").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   o.hide_stock = p.get("hide_stock").and_then(serde_json::Value::as_bool).unwrap_or(false);
+  o.show_tool = p.get("show_tool").and_then(serde_json::Value::as_bool).unwrap_or(false);
   o.cut = p.get("cut").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   if let Some(v) = p.get("sim").filter(|v| !v.is_null()) {
     o.sim = Some(crate::sim::view_of(s, v)?);
@@ -1969,6 +1976,52 @@ fn toolpath_lines(scene: &mut Scene, s: &Session, stock: bool) {
       let color = if rapid { [235, 150, 40, 255] } else { [30, 100, 230, 255] };
       line(scene, run, color, rapid, if rapid { 1.0 } else { 1.5 });
     }
+  }
+}
+
+/// The first toolpath's tool where its first cutting move starts, as a grey wireframe: the
+/// flutes' cylinder (its tip ring and the ring where the flutes end, four lines between) and
+/// the shank above, along the tool axis.
+fn tool_lines(scene: &mut Scene, s: &Session) {
+  let Some((tp, i)) = s.toolpaths.iter().find_map(|tp| tp.moves.iter().position(|m| !m.rapid).map(|i| (tp, i))) else {
+    return;
+  };
+  let tip = if i > 0 { tp.moves[i - 1].to } else { tp.moves[i].to };
+  let axis = tp.axes.get(i.saturating_sub(1)).copied().filter(|a| a.length() > 0.5).unwrap_or(DVec3::Z).normalize();
+  let r = (tp.tool.diameter / 2.0).max(0.1);
+  let flutes = if tp.tool.flute_length > 0.0 { tp.tool.flute_length } else { tp.tool.diameter * 3.0 };
+  let u = axis.any_orthonormal_vector();
+  let v = axis.cross(u);
+  let ring = |at: DVec3, r: f64| -> Vec<[f32; 3]> {
+    (0..=32)
+      .map(|k| {
+        let a = k as f64 / 32.0 * std::f64::consts::TAU;
+        (at + (u * a.cos() + v * a.sin()) * r).as_vec3().to_array()
+      })
+      .collect()
+  };
+  let grey = [110, 115, 125, 255];
+  let mut line = |points: Vec<[f32; 3]>| {
+    scene.lines.push(Polyline {
+      points,
+      color: grey,
+      width: 1.2,
+      id: 0,
+      on_top: true,
+      dashed: false,
+      dash_dot: false,
+      behind: false,
+    })
+  };
+  let top = tip + axis * flutes;
+  let shank = top + axis * flutes;
+  line(ring(tip, r));
+  line(ring(top, r));
+  line(ring(shank, r));
+  for k in 0..4 {
+    let a = k as f64 * std::f64::consts::FRAC_PI_2;
+    let d = (u * a.cos() + v * a.sin()) * r;
+    line(vec![(tip + d).as_vec3().to_array(), (shank + d).as_vec3().to_array()]);
   }
 }
 

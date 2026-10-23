@@ -98,6 +98,16 @@ pub(crate) struct Bom {
   pub error: Option<String>,
   /// The header being dragged to another place (Column Settings' Reset Order puts it back).
   dragging: Option<String>,
+  /// The table as last drawn.
+  pub drawn: Option<Drawn>,
+}
+
+/// Where the table's header row went and whether it overflows sideways (its horizontal scroll
+/// bar shows), with data or without.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Drawn {
+  pub header: Rect,
+  pub scrolls_sideways: bool,
 }
 
 /// Opens the palette (or brings back a folded or tucked one) with the design's rows.
@@ -297,10 +307,9 @@ fn palette(app: &mut App, b: &mut Bom, ctx: &egui::Context) -> bool {
         let (rect, _) = ui.allocate_exact_size(vec2(WIDTH, body), Sense::hover());
         ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
         let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-        if has_data(app, b) {
-          table(app, &mut inner, b);
-        } else {
-          empty_state(&mut inner, rect, app, b);
+        let below = table(app, &mut inner, b);
+        if !has_data(app, b) {
+          empty_state(&mut inner, below, app, b);
         }
         let sep = ui.allocate_exact_size(vec2(WIDTH, 1.0), Sense::hover()).0;
         ui.painter().rect_filled(sep, 0.0, theme::SEPARATOR);
@@ -470,9 +479,10 @@ fn column_settings(app: &mut App, ui: &mut egui::Ui, b: &mut Bom) {
   }
 }
 
-/// No data: the filing cabinet and Fusion's two lines.
+/// No data: the filing cabinet and Fusion's two lines, centred in `rect` (the body under the
+/// table's header row and scroll bar).
 fn empty_state(ui: &mut egui::Ui, rect: Rect, app: &App, b: &Bom) {
-  let c = rect.center() - vec2(0.0, 34.0);
+  let c = rect.center() - vec2(0.0, 25.0);
   filing_cabinet(ui.painter(), c);
   let (title, line) = if panels::is_unsaved(app) {
     (
@@ -515,11 +525,21 @@ fn col_width(column: &str) -> f32 {
   }
 }
 
-/// The table: a header row, then a row per component, scrolling both ways.
-fn table(app: &mut App, ui: &mut egui::Ui, b: &mut Bom) {
+/// The table: a header row, then a row per component, scrolling both ways with Fusion's solid
+/// scroll bars. Without data it is the header row alone, its horizontal scroll bar right under
+/// it as in Fusion; returns the body left below that for the empty state.
+fn table(app: &mut App, ui: &mut egui::Ui, b: &mut Bom) -> Rect {
   let cols = columns(&app.preferences.values);
   let total = CHECK_W + NAME_W + cols.iter().map(|c| col_width(c)).sum::<f32>();
-  egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+  let data = has_data(app, b);
+  let body = ui.max_rect();
+  ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+  let area = if data {
+    egui::ScrollArea::both().auto_shrink([false, false])
+  } else {
+    egui::ScrollArea::horizontal().auto_shrink([false, true])
+  };
+  let out = area.id_salt("bom-table").show(ui, |ui| {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     // the header row
     let (hr, _) = ui.allocate_exact_size(vec2(total.max(WIDTH), ROW), Sense::hover());
@@ -562,7 +582,8 @@ fn table(app: &mut App, ui: &mut egui::Ui, b: &mut Bom) {
     }
     // the rows
     let structured = b.view == View::Structured;
-    for (i, row) in b.rows.iter().enumerate() {
+    let rows = if data { &b.rows[..] } else { &[] };
+    for (i, row) in rows.iter().enumerate() {
       let (rr, resp) = ui.allocate_exact_size(vec2(total.max(WIDTH), ROW), Sense::hover());
       if resp.hovered() {
         ui.painter().rect_filled(rr, 0.0, theme::HOVER);
@@ -606,6 +627,11 @@ fn table(app: &mut App, ui: &mut egui::Ui, b: &mut Bom) {
   if !ui.ctx().input(|i| i.pointer.any_down()) {
     b.dragging = None;
   }
+  b.drawn = Some(Drawn {
+    header: Rect::from_min_size(out.inner_rect.min, vec2(out.inner_rect.width(), ROW)),
+    scrolls_sideways: out.content_size.x > out.inner_rect.width() + 0.5,
+  });
+  Rect::from_min_max(pos2(body.left(), ui.min_rect().bottom()), body.max)
 }
 
 fn head_text(ui: &egui::Ui, at: Pos2, text: &str) {

@@ -78,15 +78,20 @@ pub const NET_CLASS: &str = "sc2 Nets";
 // ---------------------------------------------------------------- new documents
 
 /// New Electronics Design: a new document tab with the start page; the open documents stay.
+/// Named "Untitled" (numbered among the open electronics documents only, as Fusion's).
 pub(crate) fn new_electronics_design(app: &mut App, unit: Option<LengthUnit>) {
+  let name = documents::next_untitled_among(app, true);
   documents::new_document(app, DesignType::Part, unit);
   app.electronics = Some(EcadView { page: Page::Start, text_open: true, ..EcadView::default() });
+  app.s.design.name = name;
 }
 
 /// New Schematic / New PCB: another tab with the editor on that sheet.
 pub(crate) fn new_editor(app: &mut App, sheet: Sheet) {
+  let name = documents::next_untitled_among(app, true);
   documents::new_document(app, DesignType::Part, None);
   app.electronics = Some(EcadView { page: Page::Editor, sheet, ..EcadView::default() });
+  app.s.design.name = name;
 }
 
 // ---------------------------------------------------------------- icons

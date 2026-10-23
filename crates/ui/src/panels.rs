@@ -2737,6 +2737,17 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
         let c = nav_caret(ui, "Viewports");
         egui::Popup::menu(&v).show(|ui| crate::viewports::menu(app, ui));
         egui::Popup::menu(&c).show(|ui| crate::viewports::menu(app, ui));
+        // the Manufacture workspace adds its CAM display icon after the usual ones
+        if app.manufacture {
+          nav_sep(ui);
+          let hint = crate::navbar::TOOL_VISIBILITY;
+          let t = tip(icons::icon_button(ui, Icon::ToolVisibility, 28.0, "", false, None), hint);
+          let c = nav_caret(ui, hint);
+          egui::Popup::menu(&t).id(egui::Id::new("nav-tool-visibility")).show(|ui| crate::navbar::tool_menu(app, ui));
+          egui::Popup::menu(&c)
+            .id(egui::Id::new("nav-tool-visibility-caret"))
+            .show(|ui| crate::navbar::tool_menu(app, ui));
+        }
       });
     });
 }
@@ -2789,6 +2800,20 @@ pub(crate) fn readout_anchor(canvas: Rect, palette: Option<Rect>) -> egui::Pos2 
     Some(p) if p.left() < at.x && p.bottom() > at.y - READOUT_H => egui::pos2(p.left() - 14.0, at.y),
     _ => at,
   }
+}
+
+/// The selection readout's bottom-right corner this frame: `readout_anchor` for the SKETCH
+/// PALETTE, and left of the BILL OF MATERIALS palette, which docks over the same corner.
+pub(crate) fn readout_pos(app: &App, ctx: &egui::Context) -> egui::Pos2 {
+  let palette =
+    app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
+  let mut at = readout_anchor(app.canvas, palette);
+  if app.bom.as_ref().is_some_and(|b| !b.tucked)
+    && let Some(bom) = ctx.memory(|m| m.area_rect(egui::Id::new("bom-palette")))
+  {
+    at.x = at.x.min(readout_anchor(app.canvas, Some(bom)).x);
+  }
+  at
 }
 
 /// The selection readout's line height.
@@ -3172,9 +3197,7 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
       t
     }
   };
-  let palette =
-    app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
-  let at = readout_anchor(app.canvas, palette);
+  let at = readout_pos(app, ctx);
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("selection-info")));
   // the readout moves left of the warning and error icons at the status bar's right end
   let icons = usize::from(app.warning_toast.is_some()) + usize::from(!app.error_toast.failed.is_empty());
@@ -3597,9 +3620,7 @@ pub fn warning_toast(app: &mut App, ctx: &egui::Context) {
   let now = ctx.input(|i| i.time);
   let since = *toast.since.get_or_insert(now);
   let toast = toast.clone();
-  let palette =
-    app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
-  let at = readout_anchor(app.canvas, palette);
+  let at = readout_pos(app, ctx);
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("warning-icon")));
   warning_glyph(&painter, Rect::from_min_size(at - Vec2::splat(WARNING_ICON), Vec2::splat(WARNING_ICON)));
   if now - since > TOAST_SECS {

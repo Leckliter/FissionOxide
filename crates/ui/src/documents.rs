@@ -115,9 +115,21 @@ pub(crate) fn tab_label(s: &Session) -> String {
 /// The name of a new tab's design, as Fusion numbers them: "Untitled", else the first of
 /// "Untitled(1)", "Untitled(2)"... that no open tab has.
 pub(crate) fn next_untitled(app: &App) -> String {
+  next_untitled_among(app, false)
+}
+
+/// [`next_untitled`] among the open designs (`electronics` false) or the open electronics
+/// documents: Fusion numbers the two apart, so a new electronics design beside an "Untitled"
+/// part design is "Untitled" too.
+pub(crate) fn next_untitled_among(app: &App, electronics: bool) -> String {
   let base = fox_engine::model::Design::default().name;
-  let names: Vec<String> =
-    app.docs.slots.iter().map(|d| doc_name(d.as_ref().map(|d| &d.s).unwrap_or(&app.s))).collect();
+  let names: Vec<String> = app
+    .docs
+    .slots
+    .iter()
+    .filter(|d| d.as_ref().map_or(app.electronics.is_some(), |d| d.electronics.is_some()) == electronics)
+    .map(|d| doc_name(d.as_ref().map(|d| &d.s).unwrap_or(&app.s)))
+    .collect();
   std::iter::once(base.clone())
     .chain((1..).map(|n| format!("{base}({n})")))
     .find(|c| !names.contains(c))
@@ -129,10 +141,17 @@ pub(crate) fn has_unsaved_work(s: &Session) -> bool {
   s.dirty
 }
 
-/// Whether the shown document asks before it closes or is replaced: unsaved changes, or an
-/// electronics document never saved (Fusion asks for a new Electronics Design too).
+/// Whether the shown document asks before it closes or is replaced: unsaved changes, or a new
+/// Electronics Design never saved (Fusion asks for one even untouched; an untouched new
+/// schematic or board closes without asking).
 fn asks_first(app: &App) -> bool {
-  has_unsaved_work(&app.s) || (app.electronics.is_some() && unsaved(&app.s))
+  has_unsaved_work(&app.s) || (asks_untouched(app.electronics.as_ref()) && unsaved(&app.s))
+}
+
+/// An electronics document that asks before closing even with no changes: the electronics
+/// design on its start page.
+fn asks_untouched(e: Option<&crate::ecad_ui::EcadView>) -> bool {
+  e.is_some_and(|v| v.page == crate::ecad_chrome::Page::Start)
 }
 
 /// Whether closing the shown document asks with the Save dialog (Don't Save added) rather than
@@ -143,11 +162,11 @@ fn saves_on_close(app: &App) -> bool {
 
 /// [`asks_first`] for a parked document.
 fn parked_asks_first(d: &Doc) -> bool {
-  has_unsaved_work(&d.s) || (d.electronics.is_some() && unsaved(&d.s))
+  has_unsaved_work(&d.s) || (asks_untouched(d.electronics.as_ref()) && unsaved(&d.s))
 }
 
 /// The first tab that would ask before closing, if any.
-fn first_asking(app: &App) -> Option<usize> {
+pub(crate) fn first_asking(app: &App) -> Option<usize> {
   (0..app.docs.slots.len()).find(|&i| match &app.docs.slots[i] {
     Some(d) => parked_asks_first(d),
     None => asks_first(app),

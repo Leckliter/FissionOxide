@@ -6,9 +6,27 @@
 use fox_engine::model::LengthUnit;
 use fox_engine::model::cam::Setup;
 
-use super::{Dialog, Kind, section_header, sel_chip_lit};
-use crate::forms::{self, Form, SETUP_PAGES};
+use serde_json::json;
+
+use super::{Dialog, Kind, choice, section_header, sel_chip_lit};
+use crate::forms::{self, Form, Input, SETUP_PAGES};
+use crate::icons::Icon;
 use crate::{App, theme};
+
+/// The Machine row's button, as Fusion labels it.
+pub(crate) const SELECT_MACHINE: &str = "Select...";
+
+/// The machine list the button opens.
+pub(crate) const MACHINE_MENU: &str = "setup-machine-menu";
+
+/// Operation Type's icons: an end mill for milling, a revolved part for turning.
+pub(crate) fn operation_type_icon(key: &str) -> Option<Icon> {
+  match key {
+    "milling" => Some(Icon::ToolVisibility),
+    "turning" => Some(Icon::Revolve),
+    _ => None,
+  }
+}
 
 impl Dialog {
   /// The open New Setup's form, if this is one.
@@ -62,7 +80,7 @@ impl Dialog {
   /// A New Setup row's place: the heading it starts (drawn here), and whether the row is drawn
   /// (on the tab showing, under an unfolded heading). The Stock Point picker is drawn here.
   /// True when the row is done with.
-  pub(super) fn setup_field(&mut self, f: &'static Form, i: usize, ui: &mut egui::Ui) -> bool {
+  pub(super) fn setup_field(&mut self, f: &'static Form, i: usize, ui: &mut egui::Ui, dirty: &mut bool) -> bool {
     if !forms::is_setup(f) {
       return false;
     }
@@ -85,7 +103,52 @@ impl Dialog {
       ui.end_row();
       return true;
     }
+    if let Input::Choice { key: "machine", label, options } = f.inputs[i] {
+      ui.label(label);
+      self.setup_machine(i, options, ui, dirty);
+      ui.end_row();
+      return true;
+    }
+    if let Input::Choice { key: "type", label, options } = f.inputs[i] {
+      // Fusion's Operation Type shows the type's icon before its name
+      ui.label(label);
+      let cur = self.form.values[i].as_str().unwrap_or("");
+      let mut sel: &'static str = options.iter().find(|(k, _)| *k == cur).map_or(options[0].0, |(k, _)| *k);
+      if choice::combo(ui, "setup-operation-type", options, &mut sel, operation_type_icon) {
+        *dirty = true;
+      }
+      self.form.values[i] = json!(sel);
+      ui.end_row();
+      return true;
+    }
     false
+  }
+
+  /// The Machine row: Fusion's "Select..." button, which picks the setup's machine from a list
+  /// (FissionOxide's machine kinematics stand in for Fusion's machine library). With none picked
+  /// the setup uses a generic 3-axis mill; a machine picked shows its name before the button.
+  fn setup_machine(
+    &mut self,
+    i: usize,
+    options: &'static [(&'static str, &'static str)],
+    ui: &mut egui::Ui,
+    dirty: &mut bool,
+  ) {
+    let cur = self.form.values[i].as_str().unwrap_or("").to_string();
+    ui.horizontal(|ui| {
+      if let Some((_, name)) = options.iter().skip(1).find(|(k, _)| *k == cur) {
+        ui.label(egui::RichText::new(*name).color(theme::TEXT));
+      }
+      let b = crate::panels::secondary_button(ui, SELECT_MACHINE);
+      egui::Popup::menu(&b).id(egui::Id::new(MACHINE_MENU)).show(|ui| {
+        for (k, name) in options {
+          if ui.selectable_label(cur == *k, *name).clicked() && cur != *k {
+            self.form.values[i] = json!(k);
+            *dirty = true;
+          }
+        }
+      });
+    });
   }
 
   /// The rows' first heading starts unfolded.

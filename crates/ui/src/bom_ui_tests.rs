@@ -260,3 +260,67 @@ fn column_settings_tick_columns_and_reorder_them_in_the_preferences() {
   app.preferences.values.bom_order = vec!["Weight".into(), "State".into()];
   assert_eq!(bom_ui::columns(&app.preferences.values)[0], "State");
 }
+
+#[test]
+fn the_empty_state_sits_under_the_header_row_and_its_scroll_bar() {
+  // never saved, with components: no rows, but the header row and horizontal scroll bar show
+  let mut h = Harness::new(assembly());
+  Cmd::Dialog(Kind::Bom).run(&mut h.app);
+  h.frame(vec![]);
+  h.frame(vec![]);
+  let b = h.app.bom.as_ref().unwrap();
+  assert!(!bom_ui::has_data(&h.app, b));
+  let drawn = b.drawn.expect("the table is drawn above the empty state");
+  let r = h.palette();
+  // under the header (30) and toolbar (36), the palette's full width
+  assert!((drawn.header.top() - (r.top() + 66.0)).abs() < 4.0, "{:?} in {r:?}", drawn.header);
+  assert!(drawn.header.width() > 440.0, "{:?}", drawn.header);
+  assert!(drawn.scrolls_sideways, "Description, Part Number ... run past the palette's edge");
+
+  // the select-all box and a header drag work without rows
+  let thumb = drawn.header.left() + 28.0 + 150.0 + 17.0;
+  let desc = drawn.header.left() + 28.0 + 150.0 + 34.0 + 34.0 + 40.0;
+  let y = drawn.header.center().y;
+  let drag = |pressed, x: f32| Event::PointerButton {
+    pos: egui::pos2(x, y),
+    button: egui::PointerButton::Primary,
+    pressed,
+    modifiers: Default::default(),
+  };
+  h.frame(vec![Event::PointerMoved(egui::pos2(desc, y))]);
+  h.frame(vec![drag(true, desc)]);
+  for k in 1..=8 {
+    h.frame(vec![Event::PointerMoved(egui::pos2(desc - k as f32 * ((desc - thumb) / 8.0), y))]);
+  }
+  h.frame(vec![drag(false, thumb)]);
+  h.frame(vec![]);
+  assert_eq!(bom_ui::columns(&h.app.preferences.values)[0], "Description", "the header row takes drags");
+  bom_ui::reset_order(&mut h.app);
+
+  // saved with data: the same header place, the rows under it
+  let mut h = Harness::new(saved(assembly()));
+  Cmd::Dialog(Kind::Bom).run(&mut h.app);
+  h.frame(vec![]);
+  h.frame(vec![]);
+  let drawn = h.app.bom.as_ref().unwrap().drawn.unwrap();
+  assert!((drawn.header.top() - (h.palette().top() + 66.0)).abs() < 4.0);
+  assert!(drawn.scrolls_sideways);
+}
+
+#[test]
+fn the_selection_readout_moves_left_of_the_palette() {
+  let mut h = Harness::new(App::with_session(Session::default()));
+  let home = crate::panels::readout_pos(&h.app, &h.ctx);
+  assert!((home.x - (h.app.canvas.right() - 14.0)).abs() < 1.0, "the canvas's corner without the palette");
+  Cmd::Dialog(Kind::Bom).run(&mut h.app);
+  h.frame(vec![]);
+  h.frame(vec![]);
+  let r = h.palette();
+  let at = crate::panels::readout_pos(&h.app, &h.ctx);
+  assert!(at.x < r.left(), "the readout {at:?} clear of the palette {r:?} and its Close");
+  // tucked into its tab: back to the corner
+  h.app.bom.as_mut().unwrap().tucked = true;
+  h.frame(vec![]);
+  let at = crate::panels::readout_pos(&h.app, &h.ctx);
+  assert!((at.x - home.x).abs() < 1.0);
+}

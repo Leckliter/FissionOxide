@@ -86,6 +86,8 @@ pub enum Icon {
   Display,
   Grid,
   Viewports,
+  /// The Manufacture navigation bar's Tool Visibility: an end mill, shank up.
+  ToolVisibility,
   // timeline
   ToStart,
   StepBack,
@@ -1317,6 +1319,13 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.08, 0.12), (0.92, 0.12), (0.92, 0.88), (0.08, 0.88)], White);
       k.line((0.5, 0.12), (0.5, 0.88), Ink);
       k.line((0.08, 0.5), (0.92, 0.5), Ink);
+    }
+    Icon::ToolVisibility => {
+      k.solid(&[(0.34, 0.06), (0.66, 0.06), (0.66, 0.46), (0.34, 0.46)], White);
+      k.solid(&[(0.38, 0.46), (0.62, 0.46), (0.62, 0.86), (0.5, 0.94), (0.38, 0.86)], Fill);
+      k.line((0.38, 0.58), (0.62, 0.5), Ink);
+      k.line((0.38, 0.7), (0.62, 0.62), Ink);
+      k.line((0.38, 0.82), (0.62, 0.74), Ink);
     }
     Icon::ToStart => {
       k.thick((0.22, 0.2), (0.22, 0.8), Ink, 1.4);

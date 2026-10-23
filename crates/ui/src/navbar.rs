@@ -656,6 +656,26 @@ pub fn grid_menu(app: &mut App, ui: &mut egui::Ui, adaptive_now: f64) {
   }
 }
 
+/// The Manufacture workspace's extra navigation bar icon, after Viewports.
+pub const TOOL_VISIBILITY: &str = "Tool Visibility";
+
+/// Tool Visibility's fly-out, Fusion's two check boxes: Show Tool draws the shown toolpath's
+/// tool at its first cut; Show Tool on Cursor (Ctrl+T), which snaps the tool to the pointer for
+/// clearance checks, is greyed: FissionOxide doesn't draw a tool under the pointer.
+pub const TOOL_MENU: [&str; 2] = ["Show Tool", "Show Tool on Cursor"];
+
+pub fn tool_menu(app: &mut App, ui: &mut egui::Ui) {
+  ui.set_min_width(210.0);
+  ui.checkbox(&mut app.cam_show_tool, TOOL_MENU[0]);
+  ui.horizontal(|ui| {
+    let mut on = false;
+    ui.add_enabled(false, egui::Checkbox::new(&mut on, TOOL_MENU[1]));
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+      ui.add_enabled(false, egui::Label::new(RichText::new("Ctrl+T").color(theme::MUTED)));
+    });
+  });
+}
+
 /// Layout Grid on or off. Fusion locks the grid's spacing as the grid goes on (Layout Grid Lock
 /// comes up checked) and drops the lock with the grid, whose row greys.
 pub fn set_layout_grid(app: &mut App, on: bool, adaptive_now: f64) {

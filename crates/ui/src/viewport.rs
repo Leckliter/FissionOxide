@@ -1217,6 +1217,9 @@ fn view_params(app: &App) -> serde_json::Value {
   crate::flat_ui::view_params(app, &mut v);
   if app.manufacture && !app.cam_setups_hidden {
     v["toolpaths"] = json!(app.s.toolpaths_of.map(|t| t.1));
+    if app.cam_show_tool {
+      v["show_tool"] = json!(true);
+    }
   }
   // New Setup shows its stock translucent (see `cam_ui::setup_preview`), not as the outline
   if crate::cam_ui::setup_preview_geometry(app).is_some() {

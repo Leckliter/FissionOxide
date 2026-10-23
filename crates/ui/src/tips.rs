@@ -1073,6 +1073,11 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick a revolved body; it becomes a holder in the tool library, checked for collisions like the \
        library's own holders.",
     ),
+    (_, "Create Solid Holder") => (
+      "Makes a tool holder from a body in the design.",
+      "Pick a revolved body; it becomes a holder in the tool library, checked for collisions like the \
+       library's own holders.",
+    ),
     (_, "Machine Library") => (
       "Opens the machines that setups can use.",
       "Browse, add and edit machines: their axes, travel limits and post-processor.",
