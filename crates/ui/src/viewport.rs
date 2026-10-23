@@ -464,6 +464,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     crate::library_ui::place_clicks(app, &resp, &painter, &|p| view.to_screen(&cam, p), &|p| view.ray(&cam, p));
   // the Origin folder's axes and point, under the sketch's own drawing
   crate::origin::overlay(app, &painter, &|p| view.to_screen(&cam, p));
+  crate::ucs_ui::overlay(app, &painter, &|p| view.to_screen(&cam, p));
+  crate::light_ui::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   plane_names_overlay(app, &painter, &|p| view.to_screen(&cam, p));
   if (app.s.edit_sketch.is_some() || app.grid_preview.is_some()) && grid_shown(app) && app.grid.reference_numbers {
     grid_labels(app, &painter, &view);
@@ -529,6 +531,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
   consumed |= !consumed && crate::dialogs::place_overlay(app, &resp, &painter, &project, &ray, step);
+  consumed |= crate::anim_ui::canvas(app, &resp, &painter, &ctx, &project, &ray);
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= crate::form_ui::overlay(app, &resp, &painter, &ctx, &project, &ray);
   consumed |= crate::handles::show(app, &resp, &painter, &ctx, &project, &ray, step);
@@ -554,6 +557,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= conic_rho_manip(app, &resp, &painter, &view);
   heads_up(app, &painter, &resp, &view, &ctx);
   measure_overlay(app, &painter, &view);
+  tool_on_cursor(app, &painter, &resp, &view);
   cursor_prompt(app, &resp);
   if let Some(Drag::Box { start, now }) = app.drag {
     let r = Rect::from_two_pos(start, now);
@@ -865,7 +869,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
   let hover_bodies = crate::select::hover_bodies(app);
   let mut peek = app.ctx_menu.peek.clone();
   peek.extend(hover_bodies.iter().filter(|b| !app.ctx_menu.peek.contains(b)));
-  ViewOptions {
+  let mut opts = ViewOptions {
     hover: if hover_bodies.is_empty() { app.hover } else { None },
     hide_edges: !app.visual_style.edges(),
     hide_grid: !grid_shown(app),
@@ -913,7 +917,10 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     component_colors: app.ctx_menu.component_colors,
     // the palette's Slice reaches the scene as the `slice` render parameter (see `slice_params`)
     ..analysis
-  }
+  };
+  // the Animation workspace draws the storyboard at the playhead
+  crate::anim_ui::dress_options(app, &mut opts);
+  opts
 }
 
 /// The sketch plane as a section plane with its normal towards `eye`, so the section cuts away
@@ -970,6 +977,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     display: (app.display.ground(), app.display.environment),
     bodies_hidden: app.ctx_menu.bodies_hidden,
     texture_map: crate::render_tools::texture_map_key(app),
+    anim: crate::anim_ui::render_key(app),
   };
   if crate::gpu::active(app) {
     crate::gpu::set_quads(app, &key.quads);
@@ -1194,6 +1202,31 @@ fn snap_3d_marker(app: &App, painter: &egui::Painter, view: &View, pos: Pos2) {
   }
 }
 
+/// Show Tool on Cursor: the shown toolpaths' tool stands with its tip where the pointer meets the
+/// model, along its tool axis, as Fusion snaps it there to check clearances.
+fn tool_on_cursor(app: &App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
+  if !(app.manufacture && !app.cam_setups_hidden && app.cam_show_tool && app.cam_tool_cursor) {
+    return;
+  }
+  let Some(pos) = resp.hover_pos() else { return };
+  let Some((_, axis, r, flutes)) = fox_engine::scene::shown_tool(&app.s) else { return };
+  let Some(tip) = tool_cursor_tip(app, view.ray(&app.cam, pos)) else { return };
+  let stroke = Stroke::new(1.2, Color32::from_rgb(110, 115, 125));
+  for line in fox_engine::scene::tool_wire(tip, axis, r, flutes, app.cam_tool_shaft, app.cam_tool_holder) {
+    let pts: Vec<Pos2> = line.iter().filter_map(|p| view.to_screen(&app.cam, *p)).collect();
+    if pts.len() == line.len() {
+      painter.add(egui::Shape::line(pts, stroke));
+    }
+  }
+}
+
+/// Where Show Tool on Cursor puts the tool's tip for a pointer ray: the nearest point of the
+/// model it meets.
+pub(crate) fn tool_cursor_tip(app: &App, (o, d): (DVec3, DVec3)) -> Option<DVec3> {
+  let d = d.try_normalize()?;
+  fox_engine::scene::ray_hits(&app.s, o, d).first().map(|(t, _)| o + d * *t)
+}
+
 /// The render parameters with the theme: Theme: Dark draws the canvas dark (see
 /// [`render_if_needed`]), so switching themes draws it again.
 fn dark_view(mut v: serde_json::Value, ctx: &egui::Context) -> serde_json::Value {
@@ -1219,7 +1252,8 @@ pub(crate) fn view_params(app: &App) -> serde_json::Value {
   crate::flat_ui::view_params(app, &mut v);
   if app.manufacture && !app.cam_setups_hidden {
     v["toolpaths"] = json!(app.s.toolpaths_of.map(|t| t.1));
-    if app.cam_show_tool {
+    // on the cursor the tool follows the pointer instead (see `tool_on_cursor`)
+    if app.cam_show_tool && !app.cam_tool_cursor {
       v["show_tool"] = json!(true);
       v["tool_holder"] = json!(app.cam_tool_holder);
       v["tool_shaft"] = json!(app.cam_tool_shaft);

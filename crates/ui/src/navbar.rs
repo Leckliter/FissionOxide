@@ -25,7 +25,7 @@ pub struct ObjectVisibility {
   pub construction_axes: bool,
   pub construction_points: bool,
   pub sketches: bool,
-  /// Kept, greyed: FissionOxide has no user coordinate systems.
+  /// The user coordinate systems' triads (see `ucs_ui`).
   pub user_coordinate_systems: bool,
   /// The saved joint origins' glyphs.
   pub joint_origins: bool,
@@ -69,7 +69,7 @@ impl ObjectVisibility {
       ("Construction Axes", &mut self.construction_axes, true),
       ("Construction Points", &mut self.construction_points, true),
       ("Sketches", &mut self.sketches, true),
-      ("User Coordinate Systems", &mut self.user_coordinate_systems, false),
+      ("User Coordinate Systems", &mut self.user_coordinate_systems, true),
       ("Joint Origins", &mut self.joint_origins, true),
       ("Joint Origin Axes", &mut self.joint_origin_axes, true),
       ("Joints", &mut self.joints, true),
@@ -676,8 +676,9 @@ pub const CAM_ICONS: [(Icon, &str); 6] = [
 
 /// Tool Visibility's fly-out, Fusion's narrow list of check boxes: Show Tool draws the shown
 /// toolpath's tool at its first cut, Show Tool Holder and Show Tool Shaft its holder and shaft
-/// (all three checked to start); Show Tool on Cursor (Ctrl+T), which snaps the tool to the
-/// pointer for clearance checks, is greyed: FissionOxide doesn't draw a tool under the pointer.
+/// (all three checked to start); Show Tool on Cursor (Ctrl+T), greyed while Show Tool is off,
+/// snaps the tool to the pointer over the model for clearance checks (see
+/// `viewport::tool_on_cursor`).
 pub const TOOL_MENU: [&str; 4] = ["Show Tool", "Show Tool Holder", "Show Tool Shaft", "Show Tool on Cursor"];
 
 /// How wide the CAM icons' fly-outs are (Fusion's Tool Visibility list is about 150 px).
@@ -716,10 +717,13 @@ pub fn tool_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.checkbox(&mut app.cam_show_tool, TOOL_MENU[0]);
   ui.add_enabled(app.cam_show_tool, egui::Checkbox::new(&mut app.cam_tool_holder, TOOL_MENU[1]));
   ui.add_enabled(app.cam_show_tool, egui::Checkbox::new(&mut app.cam_tool_shaft, TOOL_MENU[2]));
+  let on = app.cam_show_tool;
   ui.horizontal(|ui| {
-    ui.add_enabled(false, egui::Checkbox::new(&mut false, TOOL_MENU[3]))
-      .on_disabled_hover_text("FissionOxide doesn't draw the tool under the pointer yet");
-    ui.add_enabled(false, egui::Label::new(RichText::new("Ctrl+T").color(theme::MUTED)));
+    let mut cursor = on && app.cam_tool_cursor;
+    if ui.add_enabled(on, egui::Checkbox::new(&mut cursor, TOOL_MENU[3])).changed() {
+      app.cam_tool_cursor = cursor;
+    }
+    ui.add_enabled(on, egui::Label::new(RichText::new("Ctrl+T").color(if on { theme::TEXT } else { theme::MUTED })));
   });
 }
 

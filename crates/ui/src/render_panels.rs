@@ -4,7 +4,6 @@
 //! strip that takes the timeline's place.
 
 use egui::{Color32, Rect, RichText, Stroke, Vec2, pos2, vec2};
-use fox_engine::Sel;
 use fox_engine::rendering::raytrace::{Background, Environment, Preset, RenderCamera};
 
 use crate::icons::{self, Icon};
@@ -378,91 +377,8 @@ fn library_tab(ui: &mut egui::Ui, env: &mut Environment) {
 
 // ---------------------------------------------------------------- lights
 
-/// The NEW LIGHT dialog's values.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct LightForm;
-
-/// What a light can aim at: the selected faces, edges, vertices and bodies.
-pub(crate) fn light_targets(app: &App) -> usize {
-  app
-    .s
-    .selection
-    .iter()
-    .filter(|s| matches!(s, Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. } | Sel::Body { .. }))
-    .count()
-}
-
-/// Why NEW LIGHT's OK is greyed, if it is: nothing to aim at, or the design's eight lights.
-pub(crate) fn light_blocked(app: &App) -> Option<&'static str> {
-  if app.s.design.render.lights.len() >= fox_engine::rendering::raytrace::light::MAX_LIGHTS {
-    Some("A design takes up to eight lights")
-  } else if light_targets(app) == 0 {
-    Some("Select a face, edge, vertex or body for the light to aim at")
-  } else {
-    None
-  }
-}
-
-/// The docked NEW LIGHT dialog: Light Type and Target, OK and Cancel. OK places a photometric
-/// light off the target (see [`fox_engine::rendering::light_target`]).
-pub(crate) fn light_dialog(app: &mut App, ctx: &egui::Context) {
-  if app.render.light.is_none() {
-    return;
-  }
-  let targets = light_targets(app);
-  let blocked = light_blocked(app);
-  let mut cancel = false;
-  let mut ok = false;
-  let width = 300.0;
-  let accent = icons::accent_of(Icon::Sun);
-  egui::Area::new(egui::Id::new("new-light"))
-    .pivot(egui::Align2::RIGHT_TOP)
-    .default_pos(panels::dialog_dock(app.canvas, false))
-    .constrain(true)
-    .order(egui::Order::Foreground)
-    .show(ctx, |ui| {
-      panels::dialog_frame().show(ui, |ui| {
-        ui.set_width(width);
-        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        panels::dialog_header(ui, Icon::Sun, "NEW LIGHT", width);
-        egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 10, bottom: 8 }).show(ui, |ui| {
-          egui::Grid::new("new-light-grid").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
-            ui.label("Light Type");
-            egui::ComboBox::from_id_salt("light-type").selected_text("Photometric Light").width(150.0).show_ui(
-              ui,
-              |ui| {
-                let _ = ui.selectable_label(true, "Photometric Light");
-              },
-            );
-            ui.end_row();
-            ui.label("Target");
-            dialogs::sel_chip(ui, accent, &dialogs::chip_text(targets, "selected"), targets > 0);
-            ui.end_row();
-          });
-        });
-        (cancel, ok) = footer(ui, width, |ui| {
-          let cancel = panels::secondary_button(ui, "Cancel").clicked();
-          let resp = dialogs::ok_button(ui, accent, blocked.is_none());
-          match blocked {
-            None => (cancel, resp.clicked()),
-            Some(why) => {
-              resp.on_disabled_hover_text(why);
-              (cancel, false)
-            }
-          }
-        });
-      });
-    });
-  if ok && let Some(at) = fox_engine::rendering::light_target(&app.s, &app.s.selection) {
-    if app.run("render.light.add", serde_json::json!({"position": at})).is_some() {
-      app.render.light = None;
-    }
-    return;
-  }
-  if cancel {
-    app.render.light = None;
-  }
-}
+// NEW LIGHT and EDIT LIGHT live in `light_ui`.
+pub(crate) use crate::light_ui::{LightForm, light_dialog};
 
 // ---------------------------------------------------------------- save first
 

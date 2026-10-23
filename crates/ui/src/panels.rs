@@ -1279,7 +1279,11 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
   app.anim.active = w == "Animation";
   if !app.anim.active {
     app.anim.dialog = None;
+    app.anim.pending = None;
     app.anim.playing = None;
+  } else if app.anim.view_mark.is_none() {
+    // View records the camera's moves from here until the playhead moves
+    app.anim.view_mark = Some(app.cam);
   }
   if w == "Simulation" {
     if drawing {
@@ -1793,6 +1797,8 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       }
     }
   }
+  // the Render workspace's Lights, above Origin
+  crate::light_ui::browser(app, ui);
   // Origin
   let og = egui::Id::new("tree-origin");
   // a plane (or origin item) picked here stays picked until something else is selected

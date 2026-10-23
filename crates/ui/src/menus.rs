@@ -1166,9 +1166,9 @@ const CAM_MANAGE: &[E] = &[
   x("Reset Defaults", Icon::Undo),
 ];
 
-/// MANAGE ▸ Solid Holder's submenu (Fusion shows the arrow; its entries weren't recorded, so
-/// this is the one command its name implies, not yet in FissionOxide).
-const CAM_SOLID_HOLDER: &[E] = &[x("Create Solid Holder", Icon::Cylinder)];
+/// MANAGE ▸ Solid Holder's submenu: Fusion's one entry, Milling Tool Holder (a holder made from
+/// a solid body for the Tool Library; not yet in FissionOxide).
+const CAM_SOLID_HOLDER: &[E] = &[x("Milling Tool Holder", Icon::ToolHolder)];
 
 const CAM_INSPECT: &[E] = &[
   c("Measure", Icon::Measure, D(Kind::Inspect)).k("I"),
@@ -1253,19 +1253,19 @@ const RENDER: [Group; 4] = [
 const ANIM_STORYBOARD: &[E] = &[c("New Storyboard", Icon::Storyboard, Cmd::Anim(AnimCmd::NewStoryboard))];
 const ANIM_TRANSFORM: &[E] = &[
   c("Transform Components", Icon::TransformComponents, Cmd::Anim(AnimCmd::TransformComponents)).k("M"),
-  x("Restore Home", Icon::RestoreHome),
-  x("Auto Explode: One Level", Icon::Explode),
-  x("Auto Explode: All Levels", Icon::Explode).k("U"),
-  x("Manual Explode", Icon::ManualExplode).k("E"),
+  c("Restore Home", Icon::RestoreHome, Cmd::Anim(AnimCmd::RestoreHome)),
+  c("Auto Explode: One Level", Icon::Explode, Cmd::Anim(AnimCmd::ExplodeOne)),
+  c("Auto Explode: All Levels", Icon::Explode, Cmd::Anim(AnimCmd::ExplodeAll)).k("U"),
+  c("Manual Explode", Icon::ManualExplode, Cmd::Anim(AnimCmd::ManualExplode)).k("E"),
   c("Show/Hide", Icon::Eye, Cmd::Anim(AnimCmd::ShowHide)),
-  x("Appearance", Icon::Appearance),
+  c("Appearance", Icon::Appearance, Cmd::Anim(AnimCmd::Appearance)),
 ];
-const ANIM_ANNOTATION: &[E] = &[x("Create Callout", Icon::Callout)];
-const ANIM_VIEW: &[E] = &[x("View", Icon::AnimView).k("Ctrl+R")];
-const ANIM_PUBLISH: &[E] = &[x("Publish Video", Icon::Video).k("P")];
+const ANIM_ANNOTATION: &[E] = &[c("Create Callout", Icon::Callout, Cmd::Anim(AnimCmd::Callout))];
+const ANIM_VIEW: &[E] = &[c("View", Icon::AnimView, Cmd::Anim(AnimCmd::View)).k("Ctrl+R")];
+const ANIM_PUBLISH: &[E] = &[c("Publish Video", Icon::Video, Cmd::Anim(AnimCmd::Publish)).k("P")];
 
-/// The Animation workspace's ANIMATION tab. FissionOxide runs New Storyboard, Transform
-/// Components (its dialog) and Show/Hide; the rest are listed as Fusion lists them.
+/// The Animation workspace's ANIMATION tab: every command records actions in the storyboard
+/// (see `anim_ui`).
 const ANIMATION: [Group; 5] = [
   Group { label: "STORYBOARD", quick: &["New Storyboard"], menu: ANIM_STORYBOARD },
   Group {
@@ -3256,6 +3256,10 @@ mod tests {
       manage.menu.iter().any(|e| matches!(e, E::Sub("Solid Holder", sub) if !sub.is_empty())),
       "Solid Holder is a submenu"
     );
+    // ... of one entry, Milling Tool Holder with a holder icon
+    let holder: Vec<(&str, Icon)> =
+      CAM_SOLID_HOLDER.iter().filter_map(|e| if let E::I(i) = e { Some((i.label, i.icon)) } else { None }).collect();
+    assert_eq!(holder, [("Milling Tool Holder", Icon::ToolHolder)]);
     assert_eq!(cmd_of(Tab::Fabrication, "CUTTING", "2D Cut (Laser, Plasma, Waterjet)"), Some(Cmd::Cut2d));
     // no MULTI-AXIS panel: its commands (and Steep and Shallow, Fixtures, Delete Setup) are off
     // the dropdowns but still found by the S toolbox

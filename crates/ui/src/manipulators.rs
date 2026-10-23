@@ -514,6 +514,28 @@ fn world_size(project: &dyn Fn(DVec3) -> Option<Pos2>, right: DVec3, at: DVec3, 
   (per_unit > 1e-9).then(|| px / per_unit)
 }
 
+/// The triad shown now: the open command dialog's, else the Animation workspace's (Transform
+/// Components, Manual Explode), else EDIT LIGHT's.
+fn current(app: &App) -> Option<Triad> {
+  app
+    .dialog
+    .as_ref()
+    .and_then(|d| d.triad(&app.s))
+    .or_else(|| crate::anim_ui::triad(app))
+    .or_else(|| crate::light_ui::triad(app))
+}
+
+/// Takes a triad edit into whichever dialog shows the triad.
+pub(crate) fn apply_edit(app: &mut App, edit: TriadEdit) {
+  if let Some(d) = app.dialog.as_mut() {
+    d.set_triad(&app.s, edit);
+  } else if crate::anim_ui::triad(app).is_some() {
+    crate::anim_ui::set_triad(app, edit);
+  } else {
+    crate::light_ui::set_triad(app, edit);
+  }
+}
+
 /// Shows the open dialog's triad and runs its drags. `project` maps world points to the screen,
 /// `ray` screen points to pointer rays, and moves snap to `step`. Returns true while the triad
 /// has the pointer.
@@ -535,7 +557,7 @@ pub(crate) fn triad(
     // the drag let go: its value stays in a box that takes typing
     app.manip.typed = Some(Typed { handle: done.handle, text: String::new() });
   }
-  let Some(t) = app.dialog.as_ref().and_then(|d| d.triad(&app.s)) else {
+  let Some(t) = current(app) else {
     app.manip.typed = None;
     return false;
   };
@@ -546,13 +568,11 @@ pub(crate) fn triad(
     if let Some(p) = resp.interact_pointer_pos() {
       let (o, d) = ray(p);
       let turn = app.increments.angular_step(ANGLE_STEP);
-      if let Some(edit) = drag.update(o, d, step, turn)
-        && let Some(dlg) = app.dialog.as_mut()
-      {
-        dlg.set_triad(&app.s, edit);
+      if let Some(edit) = drag.update(o, d, step, turn) {
+        apply_edit(app, edit);
       }
     }
-    let shown = app.dialog.as_ref().and_then(|d| d.triad(&app.s)).unwrap_or(t);
+    let shown = current(app).unwrap_or(t);
     let l = layout(&shown, size, (right, up), project);
     draw(painter, &l, Some(handle));
     readout(painter, &shown, handle, &l, project);
@@ -621,10 +641,8 @@ fn value_box(app: &mut App, ctx: &egui::Context, t: &Triad, l: &Layout, project:
   if commit {
     // the Enter is this box's, not the dialog's OK
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-    if let Some(edit) = parse_typed(&app.s, b.handle, &b.text).and_then(|v| typed_edit(t, b.handle, &v))
-      && let Some(dlg) = app.dialog.as_mut()
-    {
-      dlg.set_triad(&app.s, edit);
+    if let Some(edit) = parse_typed(&app.s, b.handle, &b.text).and_then(|v| typed_edit(t, b.handle, &v)) {
+      apply_edit(app, edit);
     }
     // show the value as applied
     b.text.clear();

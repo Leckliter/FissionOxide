@@ -9,6 +9,7 @@
 // `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+pub mod animation;
 pub mod arrange;
 pub mod assembly;
 pub mod bounding;
@@ -43,6 +44,7 @@ pub mod sim;
 pub mod subassembly;
 pub mod surface;
 pub mod thread;
+pub mod ucs;
 pub mod units;
 
 use serde::{Deserialize, Serialize};
@@ -177,6 +179,12 @@ pub struct Design {
   /// what bodies with no material of their own or of their component are made of; empty = steel.
   #[serde(default, skip_serializing_if = "String::is_empty")]
   pub material: String,
+  /// The Animation workspace's storyboards (display only, never in the timeline).
+  #[serde(default, skip_serializing_if = "animation::Animation::is_empty")]
+  pub animation: animation::Animation,
+  /// User coordinate systems (display frames, never in the timeline).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub user_coordinate_systems: Vec<ucs::UserCoordinateSystem>,
   #[serde(default)]
   next_id: u32,
 }
@@ -2744,6 +2752,8 @@ impl Design {
       design_type: DesignType::Part,
       flat_pattern: None,
       material: String::new(),
+      animation: animation::Animation::default(),
+      user_coordinate_systems: Vec::new(),
       next_id: 1,
     }
   }

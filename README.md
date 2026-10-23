@@ -1160,8 +1160,13 @@ Switch the workspace to **Render** for pictures of the design. The RENDER tab ha
   (f-stop and focus distance), exposure and tone mapping. **Flatten Ground** projects the
   environment's lower half onto the ground so the model stands on it. A new design starts, as
   in Fusion, on a grey Solid Color background.
-- **Light**: NEW LIGHT places a photometric point light (lumens, colour) off the picked face,
-  edge, vertex or body, up to eight per design; both renderers light the model with them.
+- **Light**: NEW LIGHT places a photometric point light off the picked face, edge, vertex or
+  body (its Position row sets how far; the yellow wire-sphere glyph and the canvas's lighting
+  preview it live), up to eight per design; both renderers light the model with them. OK
+  opens EDIT LIGHT: position and rotation (typed, or dragged with the triad and rings on the
+  glyph; Flip Direction), intensity in candela or lumens, and the colour as a temperature in
+  kelvin or as RGB. The browser's **Lights** folder lists them (its check box lights the
+  canvas with them, its eye shows their glyphs; double-click a light to edit it).
 - **Texture Map Controls**: a textured body's projection (Planar, Box, Spherical,
   Cylindrical, Automatic), axis, size, turn and shift, and Reset.
 - **Dielectric Priority Control**: priorities 0, 1, 2 for transparent bodies; where they
@@ -1188,6 +1193,39 @@ The denoiser is an edge-avoiding à-trous filter guided by albedo, normals and d
 pure-Rust learned denoiser exists). Lights are points (no spots or area lights besides emissive
 materials) and cast no shadow on the ground's shadow catcher; the viewport's lights cast no
 shadows, and its glass shows the environment rather than the model behind it.
+
+## Animation
+
+Switch the workspace to **Animation** for assembly animations. Each **storyboard** (New
+Storyboard: Clean, or Start from end of previous) has its own timeline of actions, saved with
+the design and never touching the design timeline; every ANIMATION command records actions from
+the playhead and moves the playhead to where they end:
+
+- **Transform Components** (M): pick components and drag the triad (arrows, planes, rings) to
+  move and turn them; OK records the move.
+- **Restore Home** puts the picked (or every moved) component back; **Auto Explode: One
+  Level / All Levels** (U) spreads components apart along the way they lie (the canvas toolbar's
+  Explode Scale re-records them further apart, Show Trails draws their paths); **Manual
+  Explode** (E) spreads them along X, Y or Z by a distance (typed or dragged on its arrow).
+- **Show/Hide** fades the picked components out or in; **Appearance** fades them to an opacity.
+- **Create Callout**: click a point on the model, type the text; the callout moves with its
+  part. **View** (Ctrl+R) records the camera's move to where it is now.
+- **Publish Video** (P): the current storyboard or all of them, at the canvas's size or 720p /
+  1080p, as a Motion JPEG `.avi`.
+
+The ANIMATION TIMELINE shows a track per component (and one for the views), each action a bar:
+click to pick (Delete deletes), drag to move, drag its right end to lengthen. Play, Go to start
+and Go to end run the storyboard; the canvas follows its views. The same from a script
+(`animation.*`):
+
+```sh
+fissionoxide-cli exec asm.fox '{"cmd": "animation.explode", "levels": "all"}' --save asm.fox
+fissionoxide-cli exec asm.fox '{"cmd": "animation.publish", "path": "asm.avi", "width": 1280, "height": 720}'
+```
+
+User coordinate systems (`ucs.create`, `ucs.list`, `ucs.rename`, `ucs.visible`, `ucs.delete`)
+are named frames saved with the design; the canvas draws them while the navigation bar's
+Object Visibility ▸ User Coordinate Systems is on.
 
 ## Viewport renderer
 

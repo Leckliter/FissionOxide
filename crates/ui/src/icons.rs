@@ -512,6 +512,8 @@ pub enum Icon {
   ExternalLink,
   /// The profile menu's Sign Out: a door with an arrow leaving it.
   SignOut,
+  /// MANAGE ▸ Solid Holder ▸ Milling Tool Holder: a tool holder, taper up, flange and nose below.
+  ToolHolder,
 }
 
 #[derive(Clone, Copy)]
@@ -3260,6 +3262,12 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.path(&[(0.56, 0.3), (0.56, 0.12), (0.12, 0.12), (0.12, 0.88), (0.56, 0.88), (0.56, 0.7)], Ink);
       k.line((0.34, 0.5), (0.9, 0.5), Ink);
       k.path(&[(0.74, 0.34), (0.9, 0.5), (0.74, 0.66)], Ink);
+    }
+    Icon::ToolHolder => {
+      k.solid(&[(0.38, 0.06), (0.62, 0.06), (0.7, 0.38), (0.3, 0.38)], Light);
+      k.solid(&[(0.16, 0.38), (0.84, 0.38), (0.84, 0.52), (0.16, 0.52)], Dark);
+      k.solid(&[(0.3, 0.52), (0.7, 0.52), (0.6, 0.84), (0.4, 0.84)], Fill);
+      k.thick((0.5, 0.84), (0.5, 0.97), Ink, 1.6);
     }
   }
 }

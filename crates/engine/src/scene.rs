@@ -313,6 +313,9 @@ pub struct ViewOptions {
   pub tint_faces: Vec<(BodyId, u32, [u8; 4])>,
   /// INSPECT ▸ Display Component Colors: each body in its component's [`component_color`].
   pub component_colors: bool,
+  /// Bodies drawn moved and turned: where an Animation storyboard has them (see
+  /// [`crate::animation`]), applied after any exploded-view offset.
+  pub transforms: HashMap<BodyId, fox_kernel::glam::DAffine3>,
 }
 
 /// What the Sketch Palette shows of the sketch being edited (every option on by default, as
@@ -606,6 +609,12 @@ impl SceneBuilder {
           }
         }
       }
+      let moved = opts.transforms.get(&body.id).copied();
+      if let Some(m) = moved {
+        for mesh in &mut scene.meshes[first..] {
+          move_mesh(mesh, &m);
+        }
+      }
       // mesh bodies draw smooth, with no face edges to pick, as Fusion's
       if !opts.hide_edges && !body.is_mesh() && !hidden_selected {
         let edges = self.edges.entry(body.id).or_insert_with(|| {
@@ -626,6 +635,10 @@ impl SceneBuilder {
           };
           let points = match offset {
             Some(o) => points.into_iter().map(|p| (fox_kernel::glam::Vec3::from(p) + o.as_vec3()).to_array()).collect(),
+            None => points,
+          };
+          let points = match moved {
+            Some(m) => points.into_iter().map(|p| move_point(&m, p)).collect(),
             None => points,
           };
           let (color, width) = if selected.contains(&pick) {
@@ -918,6 +931,22 @@ impl SceneBuilder {
         o
       }
     }
+  }
+}
+
+/// A point moved by `m`.
+fn move_point(m: &fox_kernel::glam::DAffine3, p: [f32; 3]) -> [f32; 3] {
+  m.transform_point3(DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64)).as_vec3().to_array()
+}
+
+/// A mesh moved and turned by `m`: its points moved, its normals turned.
+pub(crate) fn move_mesh(mesh: &mut fox_render::Mesh, m: &fox_kernel::glam::DAffine3) {
+  for p in mesh.positions.iter_mut() {
+    *p = move_point(m, *p);
+  }
+  for n in mesh.normals.iter_mut() {
+    let v = m.transform_vector3(DVec3::new(n[0] as f64, n[1] as f64, n[2] as f64));
+    *n = v.normalize_or_zero().as_vec3().to_array();
   }
 }
 
@@ -2038,34 +2067,37 @@ fn toolpath_lines(scene: &mut Scene, s: &Session, stock: bool, paths: bool) {
   }
 }
 
-/// The first toolpath's tool where its first cutting move starts, as a grey wireframe: the
-/// flutes' cylinder (its tip ring and the ring where the flutes end, four lines between) and
-/// the shank above, along the tool axis.
-fn tool_lines(scene: &mut Scene, s: &Session, shaft: bool, holder: bool) {
-  let Some((tp, i)) = s.toolpaths.iter().find_map(|tp| tp.moves.iter().position(|m| !m.rapid).map(|i| (tp, i))) else {
-    return;
-  };
+/// The shown toolpaths' tool, as Show Tool draws it: where its tip is at the first cut, its axis,
+/// radius and flute length.
+pub fn shown_tool(s: &Session) -> Option<(DVec3, DVec3, f64, f64)> {
+  let (tp, i) = s.toolpaths.iter().find_map(|tp| tp.moves.iter().position(|m| !m.rapid).map(|i| (tp, i)))?;
   let tip = if i > 0 { tp.moves[i - 1].to } else { tp.moves[i].to };
   let axis = tp.axes.get(i.saturating_sub(1)).copied().filter(|a| a.length() > 0.5).unwrap_or(DVec3::Z).normalize();
   let r = (tp.tool.diameter / 2.0).max(0.1);
   let flutes = if tp.tool.flute_length > 0.0 { tp.tool.flute_length } else { tp.tool.diameter * 3.0 };
+  Some((tip, axis, r, flutes))
+}
+
+/// A tool's wireframe with its tip at `tip`: the flutes' cylinder (rings at the tip and where the
+/// flutes end, four lines between), with `shaft` the shank running on as far again, and with
+/// `holder` a generic holder gripping its end.
+pub fn tool_wire(tip: DVec3, axis: DVec3, r: f64, flutes: f64, shaft: bool, holder: bool) -> Vec<Vec<DVec3>> {
   let u = axis.any_orthonormal_vector();
   let v = axis.cross(u);
-  let ring = |at: DVec3, r: f64| -> Vec<[f32; 3]> {
+  let ring = |at: DVec3, r: f64| -> Vec<DVec3> {
     (0..=32)
       .map(|k| {
         let a = k as f64 / 32.0 * std::f64::consts::TAU;
-        (at + (u * a.cos() + v * a.sin()) * r).as_vec3().to_array()
+        at + (u * a.cos() + v * a.sin()) * r
       })
       .collect()
   };
-  let grey = [110, 115, 125, 255];
-  let mut out: Vec<Vec<[f32; 3]>> = Vec::new();
-  let barrel = |out: &mut Vec<Vec<[f32; 3]>>, from: DVec3, to: DVec3, r: f64| {
+  let mut out: Vec<Vec<DVec3>> = Vec::new();
+  let barrel = |out: &mut Vec<Vec<DVec3>>, from: DVec3, to: DVec3, r: f64| {
     for k in 0..4 {
       let a = k as f64 * std::f64::consts::FRAC_PI_2;
       let d = (u * a.cos() + v * a.sin()) * r;
-      out.push(vec![(from + d).as_vec3().to_array(), (to + d).as_vec3().to_array()]);
+      out.push(vec![from + d, to + d]);
     }
   };
   let top = tip + axis * flutes;
@@ -2085,9 +2117,17 @@ fn tool_lines(scene: &mut Scene, s: &Session, shaft: bool, holder: bool) {
     out.push(ring(end, hr));
     out.push(ring(far, hr));
   }
-  for points in out {
+  out
+}
+
+/// The first toolpath's tool where its first cutting move starts, as a grey wireframe (see
+/// [`tool_wire`]), along the tool axis.
+fn tool_lines(scene: &mut Scene, s: &Session, shaft: bool, holder: bool) {
+  let Some((tip, axis, r, flutes)) = shown_tool(s) else { return };
+  let grey = [110, 115, 125, 255];
+  for points in tool_wire(tip, axis, r, flutes, shaft, holder) {
     scene.lines.push(Polyline {
-      points,
+      points: points.iter().map(|p| p.as_vec3().to_array()).collect(),
       color: grey,
       width: 1.2,
       id: 0,

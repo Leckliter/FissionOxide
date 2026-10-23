@@ -339,6 +339,7 @@ mod tests {
       display: (None, Default::default()),
       bodies_hidden: false,
       texture_map: String::new(),
+      anim: Vec::new(),
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

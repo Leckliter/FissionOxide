@@ -545,13 +545,32 @@ cmds! {
   "sketch.line3d" => "3D Sketch line: segments through world points, off the sketch plane (Fusion's 3D Sketch); they are sweep paths and rails, never part of a profile", "{sketch?, points: [[x,y,z], ...]}";
   "sketch.dimension_label" => "Move a placed sketch dimension's value (drag its text): where it sits sets its offset and side; null puts it back at the default", "{sketch?, constraint, at: [x,y] | null}";
   "render.lights" => "The lights placed in the render scene", "{}";
-  "render.light.add" => "New Light: a photometric point light at a position (mm), flux in lumens (default 100), colour sRGB; a design takes up to eight", "{position: [x,y,z], intensity?: lm, color?, name?, on?: bool}";
-  "render.light.edit" => "Change a light: move it, its flux (lm), colour or name, or switch it off", "{name, position?, intensity?, color?, rename?, on?: bool}";
+  "render.light.add" => "New Light: a photometric point light at a position (mm), flux in lumens (default 100) or candela, colour sRGB or a colour temperature (Color Mode Kelvin), aimed by rotation (degrees: Y tilts up from +X, Z turns about +Z); a design takes up to eight", "{position: [x,y,z], intensity?: lm, candela?, color?, kelvin?: K | null, rotation?: [x,y,z], name?, on?: bool}";
+  "render.light.edit" => "Change a light: move or aim it, its flux (lm or candela), colour or colour temperature, or name, or switch it off", "{name, position?, intensity?, candela?, color?, kelvin?: K | null, rotation?, rename?, on?: bool}";
   "render.light.delete" => "Delete a light", "{name}";
   "render.priority" => "Dielectric Priority Control: give transparent bodies a priority 0, 1 or 2; where they overlap the higher one's glass fills the overlap", "{bodies: [id], priority: 0|1|2}";
   "render.priorities" => "Bodies with a dielectric priority above 0", "{}";
   "render.texture_map" => "Texture Map Controls: a body's (or with face, that face's own) texture projection (automatic|planar|box|spherical|cylindrical), axis, size (mm per repeat), turn (deg) and shift (repeats); reset puts it back. Changes the material (copied into the design when it's a library one)", "{body, face?, projection?, axis?: x|y|z, scale?, rotation?, offset?: [u, v], reset?: bool}";
   "design.material" => "The root component's physical material (what bodies outside components, or in components naming none, are made of; Preferences > Material sets it for new designs); no material reads it", "{material?}";
+  "animation.storyboards" => "Animation workspace: the storyboards (one, Storyboard1, before any is made) with their actions and lengths", "{}";
+  "animation.storyboard.add" => "New Storyboard: Clean starts from the assembled design, Start from end of previous from where the storyboard before it ends", "{name?, type?: clean|start_from_end}";
+  "animation.transform" => "Transform Components: an action that turns (degrees about X, then Y, then Z, about pivot: default the components' centre) and moves (mm) components over time; display only", "{storyboard? (index or name, default the first), start? (s, default the storyboard's end), duration? (s, default 1), components?: [id | name], bodies?: [id], translate?: [x,y,z], rotate?: [x,y,z], pivot?: [x,y,z]}";
+  "animation.restore_home" => "Restore Home: actions taking the components (default every moved one) back where the design has them", "{storyboard?, start?, duration?, components?, bodies?}";
+  "animation.explode" => "Auto Explode: One Level / All Levels: the components (the children of one picked component, the picked ones, else the top-level ones) spread apart along the direction they lie in, an action each, level after level", "{storyboard?, start?, duration? (per level), components?, levels?: one|all, scale? (spacing, default 1)}";
+  "animation.manual_explode" => "Manual Explode: the components spread along a direction, the i-th of N (by position that way) moving i/N of the distance", "{storyboard?, start?, duration?, components?, bodies?, direction: x|y|z|-x|-y|-z|[x,y,z], distance: mm}";
+  "animation.visibility" => "Show/Hide: an action fading components out (hide) or in (show); by default it toggles what shows at its start", "{storyboard?, start?, duration?, components?, bodies?, show?: bool}";
+  "animation.opacity" => "Appearance: an action blending components' opacity to a value", "{storyboard?, start?, duration?, components?, bodies?, opacity: 0-1}";
+  "animation.callout" => "Create Callout: a text callout at a point on the model (moving with its body), shown from start", "{storyboard?, start? (default 0), point: [x,y,z], body?, text}";
+  "animation.view" => "View: an action gliding the camera (radians, mm) to `to` from `from` (default where the storyboard has it)", "{storyboard?, start?, duration?, to: {target, yaw, pitch, distance, fov?, ortho?}, from?}";
+  "animation.action.edit" => "Move an action (start), change its length (duration) or a callout's text", "{storyboard?, action, start?, duration?, text?}";
+  "animation.action.delete" => "Delete an action from a storyboard", "{storyboard?, action}";
+  "animation.pose" => "What a storyboard shows at a time: bodies moved (translation, rotation in degrees), shown or hidden, see-through, the callouts and the camera", "{storyboard?, time}";
+  "animation.publish" => "Publish Video: render the current storyboard (or all in turn) to a Motion JPEG .avi; frames take the storyboards' views, else camera (default the design fitted)", "{path, scope?: current|all, storyboard?, width? (default 1280), height? (default 720), fps? (default 30), camera?: {target, yaw, pitch, distance, fov?, ortho?}}";
+  "ucs.create" => "A user coordinate system: a named frame at origin with X along x and Z along z (made perpendicular); drawn while Object Visibility > User Coordinate Systems is on", "{name? (default UCS1, UCS2, ...), origin?: [x,y,z], x?: [x,y,z] (default world X), z?: [x,y,z] (default world Z)}";
+  "ucs.list" => "The design's user coordinate systems with their axes", "{}";
+  "ucs.delete" => "Delete a user coordinate system", "{name}";
+  "ucs.rename" => "Rename a user coordinate system", "{name, to}";
+  "ucs.visible" => "Show or hide one user coordinate system", "{name, visible: bool}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -633,6 +652,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::explode::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::animation::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::ucs::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::newcomp::run(s, name, p) {

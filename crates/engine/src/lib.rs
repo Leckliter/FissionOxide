@@ -17,6 +17,7 @@ pub mod config;
 mod cut;
 pub use cut::{CutLine, CutLineKind, CutPreview};
 pub mod analysis;
+pub mod animation;
 mod cut_service;
 pub mod diff;
 mod drag;
@@ -51,6 +52,7 @@ mod solid;
 mod step;
 mod subassembly;
 mod surface_create;
+mod ucs;
 pub use surface_create::chain_boundary;
 mod surfaces;
 mod trace;
@@ -552,7 +554,7 @@ impl Session {
   }
 
   /// [`Session::edit`] without the regeneration (see [`Session::begin`]).
-  fn edit_deferred<T>(&mut self, f: impl FnOnce(&mut Design) -> Result<T, CmdError>) -> Result<T, CmdError> {
+  pub(crate) fn edit_deferred<T>(&mut self, f: impl FnOnce(&mut Design) -> Result<T, CmdError>) -> Result<T, CmdError> {
     let before = self.design.clone();
     match f(&mut self.design) {
       Ok(v) => {
@@ -646,6 +648,8 @@ impl Session {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_animation;
 #[cfg(test)]
 mod tests_assembly;
 #[cfg(test)]

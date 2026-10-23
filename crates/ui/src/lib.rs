@@ -60,6 +60,7 @@ mod input_tests;
 mod insert_window;
 mod job_status;
 mod library_ui;
+mod light_ui;
 mod logo;
 mod manip_arrow;
 mod manipulators;
@@ -99,6 +100,7 @@ mod timeline_tests;
 mod tips;
 mod toolbox;
 mod trace;
+mod ucs_ui;
 mod units;
 mod updates;
 mod value_box;
@@ -362,6 +364,9 @@ pub struct App {
   /// unchecked (Manufacture).
   pub cam_paths_hidden: bool,
   pub cam_stock_hidden: bool,
+  /// Tool Visibility ▸ Show Tool on Cursor (Ctrl+T, needs Show Tool): the tool follows the pointer
+  /// over the model instead of standing at its first cut.
+  pub cam_tool_cursor: bool,
   /// The Form workspace's FORM tab, while open.
   pub form: form_ui::FormEdit,
   /// The tool library window, while open.
@@ -523,6 +528,8 @@ struct RenderKey {
   bodies_hidden: bool,
   /// The mapping TEXTURE MAP CONTROLS previews on the canvas.
   texture_map: String,
+  /// The Animation workspace's storyboard, playhead and previewed move.
+  anim: Vec<u64>,
 }
 
 impl App {
@@ -702,6 +709,7 @@ impl App {
       cam_tool_shaft: true,
       cam_paths_hidden: false,
       cam_stock_hidden: false,
+      cam_tool_cursor: false,
       form: form_ui::FormEdit::default(),
       tool_library: None,
       gpu: gpu::Gpu::new(None),
@@ -1328,6 +1336,10 @@ impl App {
     // Display Settings ▸ Enter/Exit Full Screen
     if pressed(Key::F, Modifiers::COMMAND | Modifiers::SHIFT) {
       navbar::toggle_full_screen(ctx);
+    }
+    // Manufacture's Tool Visibility ▸ Show Tool on Cursor (with Show Tool on)
+    if self.manufacture && self.cam_show_tool && pressed(Key::T, Modifiers::COMMAND) {
+      self.cam_tool_cursor = !self.cam_tool_cursor;
     }
     // Display Settings ▸ Visual Style: Ctrl+4 to Ctrl+9
     navbar::visual_style_keys(self, ctx);
@@ -2165,6 +2177,10 @@ impl App {
   }
 
   pub fn delete_selection(&mut self) {
+    // in the Animation workspace Delete takes the action picked on the timeline
+    if anim_ui::delete_selected(self) {
+      return;
+    }
     if let Some(sk) = self.s.edit_sketch {
       let mut curves = Vec::new();
       let mut points = Vec::new();

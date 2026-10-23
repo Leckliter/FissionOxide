@@ -218,6 +218,26 @@ fn lights_are_placed_edited_and_rendered() {
   assert_eq!(s.design.render.lights.len(), 8);
 }
 
+/// `ui:render:light-editing`: EDIT LIGHT's values: candela, a colour temperature and an aim.
+#[test]
+fn lights_take_candela_kelvin_and_rotation() {
+  let mut s = part();
+  let l = run(
+    &mut s,
+    "render.light.add",
+    json!({"position": [0, 0, 60], "candela": 1500, "kelvin": 3500, "rotation": [0, -90, 0]}),
+  );
+  assert!((l["intensity"].as_f64().unwrap() / (4.0 * std::f64::consts::PI) - 1500.0).abs() < 0.1, "{l}");
+  assert_eq!(l["kelvin"], 3500.0);
+  assert_eq!(l["rotation"], json!([0.0, -90.0, 0.0]));
+  let light = &s.design.render.lights[0];
+  assert_eq!(light.shade(), fox_raytrace::light::kelvin_rgb(3500.0));
+  // an RGB colour is Color Mode RGB
+  let l = run(&mut s, "render.light.edit", json!({"name": "Light1", "color": [10, 200, 30]}));
+  assert!(l["kelvin"].is_null(), "{l}");
+  assert!(s.execute("render.light.edit", &json!({"name": "Light1", "kelvin": 20})).is_err());
+}
+
 /// `ui:render:dielectric-priority`: bodies get priorities 0, 1 or 2, carried into the render scene.
 #[test]
 fn dielectric_priorities_reach_the_render_scene() {

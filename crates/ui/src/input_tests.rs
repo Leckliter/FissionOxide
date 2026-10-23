@@ -3463,8 +3463,9 @@ fn manufacture_has_no_timeline_and_new_setup_previews_its_stock() {
 /// `ui:manufacture:navbar-cam-icons`: the Manufacture navigation bar gains Fusion's six CAM
 /// icons after the usual ones, each with a fly-out arrow: Toolpath, Synchronize Active Setup,
 /// Stock, Machine, Tool and Turning Profile Visibility. Tool Visibility's fly-out is a narrow list
-/// of check boxes: Show Tool, Show Tool Holder, Show Tool Shaft (checked), and a greyed Show Tool
-/// on Cursor (Ctrl+T).
+/// of check boxes: Show Tool, Show Tool Holder, Show Tool Shaft (checked), and Show Tool on Cursor
+/// (Ctrl+T, greyed while Show Tool is off), which snaps the tool to the pointer over the model
+/// (`ui:manufacture:show-tool-on-cursor`).
 #[test]
 fn manufacture_adds_the_cam_icons_to_the_navigation_bar() {
   let mut h = Harness::new();
@@ -3516,6 +3517,15 @@ fn manufacture_adds_the_cam_icons_to_the_navigation_bar() {
   if h.find(vec![], "Show Tool").is_none() {
     h.move_then_click(tool);
   }
+  // greyed while Show Tool is off: Ctrl+T does nothing
+  h.frame(vec![Event::Key {
+    key: egui::Key::T,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::COMMAND,
+  }]);
+  assert!(!h.app.cam_tool_cursor);
   let show = h.find(vec![], "Show Tool").unwrap();
   h.move_then_click(show.center());
   assert!(h.app.cam_show_tool);
@@ -3530,10 +3540,26 @@ fn manufacture_adds_the_cam_icons_to_the_navigation_bar() {
   }
   let cursor = h.find(vec![], "Show Tool on Cursor").unwrap();
   h.move_then_click(cursor.center());
-  assert!(h.app.cam_show_tool && !h.app.cam_tool_holder, "the greyed row does nothing");
-  // drawn with the toolpaths, with what's ticked
+  assert!(h.app.cam_tool_cursor, "with Show Tool on, the row ticks");
+  // drawn with the toolpaths: on the cursor, not at the first cut
   h.app.run("cam.setup", json!({}));
   h.frame(vec![]);
+  assert!(!crate::viewport::scene_options(&mut h.app).show_tool);
+  h.app.run("cam.face", json!({"tool": {"diameter": 6}}));
+  h.app.run("cam.generate", json!({}));
+  assert!(fox_engine::scene::shown_tool(&h.app.s).is_some(), "{:?}", h.app.status);
+  let down = (fox_engine::kernel::glam::DVec3::new(10.0, 10.0, 100.0), -fox_engine::kernel::glam::DVec3::Z);
+  let tip = crate::viewport::tool_cursor_tip(&h.app, down).expect("over the model");
+  assert!((tip.z - 20.0).abs() < 1e-6, "the tip on the top face: {tip:?}");
+  // Ctrl+T puts it back at the first cut, with what's ticked
+  h.frame(vec![Event::Key {
+    key: egui::Key::T,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::COMMAND,
+  }]);
+  assert!(!h.app.cam_tool_cursor);
   let opts = crate::viewport::scene_options(&mut h.app);
   assert!(opts.show_tool && opts.tool_shaft && !opts.tool_holder);
   // Toolpath Visibility and Stock Visibility hide their parts
@@ -3610,7 +3636,9 @@ fn render_box(h: &mut Harness) -> (fox_engine::model::BodyId, u32) {
   (b.id, top)
 }
 
-/// `ui:render:lights-in-scene`: with a target picked NEW LIGHT's OK places a light over it.
+/// `ui:render:lights-in-scene`: with a target picked NEW LIGHT's OK places a light over it;
+/// `ui:render:light-editing`: the target adds Position, OK opens EDIT LIGHT at once and the
+/// browser gets a Lights folder above Origin.
 #[test]
 fn new_light_places_a_light_over_its_target() {
   use crate::render_ui::RenderCmd;
@@ -3618,16 +3646,56 @@ fn new_light_places_a_light_over_its_target() {
   let (body, top) = render_box(&mut h);
   RenderCmd::Lights.run(&mut h.app);
   h.frame(vec![]);
-  assert!(crate::render_panels::light_blocked(&h.app).is_some(), "nothing to aim at yet");
+  assert!(crate::light_ui::light_blocked(&h.app).is_some(), "nothing to aim at yet");
+  assert!(h.find(vec![], "Position").is_none(), "no Position before a target");
   h.app.s.selection = vec![fox_engine::Sel::Face { body, face: top }];
   h.frame(vec![]);
-  assert_eq!(crate::render_panels::light_blocked(&h.app), None);
+  assert_eq!(crate::light_ui::light_blocked(&h.app), None);
+  assert!(h.find(vec![], "Position").is_some(), "the target adds Position");
   let ok = h.find(vec![], "OK").unwrap();
   h.move_then_click(ok.center());
   let lights = &h.app.s.design.render.lights;
   assert_eq!(lights.len(), 1);
   assert!(lights[0].position[2] > 10.0, "above the top face: {:?}", lights[0].position);
-  assert!(h.app.render.light.is_none(), "OK closes the dialog");
+  assert!(h.app.s.selection.is_empty(), "the target face is dropped");
+  assert!(matches!(h.app.render.light, Some(crate::light_ui::LightForm::Edit(_))), "EDIT LIGHT opens");
+  h.frame(vec![]);
+  let t = render_texts(&mut h, 1.0 / 60.0);
+  for s in [
+    "EDIT LIGHT",
+    "Frame",
+    "Mode",
+    "Global",
+    "Position",
+    "Rotation",
+    "Flip Direction",
+    "Light properties",
+    "Intensity",
+    "Intensity unit",
+    "Candela",
+    "Distribution",
+    "Uniform",
+    "Shape",
+    "Point",
+    "Color Mode",
+    "Kelvin",
+    "Color Preset",
+    "Custom",
+    "Temperature",
+    "None",
+  ] {
+    assert!(t.iter().any(|x| x == s), "{s} in {t:?}");
+  }
+  // Intensity 1500 cd, the light aimed down (-90 about Y)
+  assert!(t.iter().any(|x| x == "1500.000") && t.iter().any(|x| x == " cd"), "{t:?}");
+  assert!(t.iter().any(|x| x == "-90.0") && t.iter().any(|x| x == " deg"), "{t:?}");
+  // the browser's Lights folder sits above Origin
+  let lights = h.find(vec![], "Lights").expect("the Lights folder");
+  let origin = h.find(vec![], "Origin").expect("Origin");
+  assert!(lights.center().y < origin.center().y);
+  let ok = h.find(vec![], "OK").unwrap();
+  h.move_then_click(ok.center());
+  assert!(h.app.render.light.is_none(), "EDIT LIGHT's OK closes it");
 }
 
 /// `ui:render:texture-map-controls`: SETUP > Texture Map Controls opens its dialog; with a

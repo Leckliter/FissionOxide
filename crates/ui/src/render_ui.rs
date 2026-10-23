@@ -108,7 +108,7 @@ impl RenderCmd {
       }
       RenderCmd::Lights => {
         crate::render_tools::close_docked(app);
-        app.render.light = Some(LightForm);
+        app.render.light = Some(LightForm::new());
       }
       RenderCmd::InCanvas => set_in_canvas(app, !app.render.in_canvas),
       RenderCmd::CaptureImage => crate::capture::open_image(app),
@@ -184,8 +184,12 @@ pub struct RenderUi {
   /// The docked SCENE SETTINGS dialog, and its tab.
   pub scene_open: bool,
   pub(crate) scene_tab: SceneTab,
-  /// The docked NEW LIGHT dialog.
+  /// The docked NEW LIGHT or EDIT LIGHT dialog.
   pub(crate) light: Option<LightForm>,
+  /// The browser's Lights folder: its check box (the lights light the scene) and its eye (their
+  /// glyphs show in the canvas).
+  pub(crate) lights_on: bool,
+  pub(crate) lights_shown: bool,
   /// The docked TEXTURE MAP CONTROLS, DIELECTRIC PRIORITY CONTROL and IN-CANVAS RENDER SETTINGS.
   pub(crate) texture_map: Option<TextureMapForm>,
   pub(crate) priority: Option<PriorityForm>,
@@ -239,6 +243,8 @@ impl Default for RenderUi {
       scene_open: false,
       scene_tab: SceneTab::Settings,
       light: None,
+      lights_on: true,
+      lights_shown: true,
       texture_map: None,
       priority: None,
       in_canvas_settings: None,
@@ -364,6 +370,7 @@ pub fn look_key(app: &App) -> Value {
     "env": app.render.environment(&r.environment),
     "camera": app.render.cam_edit.or(r.camera).map(|c| (c.exposure, c.tone_map)),
     "configuration": app.s.design.configurations.active().map(|c| c.name.clone()),
+    "lights": crate::light_ui::scene_lights(app),
   })
 }
 
@@ -458,7 +465,7 @@ pub fn viewport_look(app: &mut App, scene: &mut Scene, picks: &PickTable) -> Opt
   let environment = app.render.environment(&s.design.render.environment);
   let camera = app.render.cam_edit.or(s.design.render.camera).unwrap_or_default();
   let env = app.render.env_map(&environment)?;
-  let lights = s.design.render.lights.clone();
+  let lights = crate::light_ui::scene_lights(app);
   Some(LookData { env, environment, camera, materials, origins, bounds, lights })
 }
 

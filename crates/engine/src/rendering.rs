@@ -994,8 +994,23 @@ fn set_light_fields(l: &mut Light, p: &Value) -> Result<(), CmdError> {
   if let Some(v) = unit_num(p, "intensity", 0.0, 1e7)? {
     l.intensity = v;
   }
+  if let Some(cd) = unit_num(p, "candela", 0.0, 1e6)? {
+    l.intensity = Light::lumens_of(cd);
+  }
   if let Some(c) = p.get("color").filter(|c| !c.is_null()) {
     l.color = parse_color(c)?;
+    // an RGB colour given alone is Color Mode RGB
+    if p.get("kelvin").is_none() {
+      l.kelvin = None;
+    }
+  }
+  match p.get("kelvin") {
+    None => {}
+    Some(Value::Null) => l.kelvin = None,
+    Some(_) => l.kelvin = unit_num(p, "kelvin", 1000.0, 40000.0)?,
+  }
+  if p.get("rotation").is_some_and(|v| !v.is_null()) {
+    l.rotation = vec3_f32(p, "rotation")?;
   }
   if let Some(v) = flag(p, "on")? {
     l.on = v;
@@ -1221,10 +1236,14 @@ fn texture_map(s: &mut Session, p: &Value) -> CmdResult {
 /// Where NEW LIGHT puts a light aimed at the selection: off the picked faces along their
 /// normals, or above picked edges, vertices and bodies, a quarter of the model's size away.
 pub fn light_target(s: &Session, sel: &[crate::Sel]) -> Option<[f32; 3]> {
+  let (lo, hi) = s.model.bounds()?;
+  light_target_off(s, sel, (hi - lo).length().max(1.0) * 0.25)
+}
+
+/// [`light_target`] `off` mm away (0: the targets' own centre).
+pub fn light_target_off(s: &Session, sel: &[crate::Sel], off: f64) -> Option<[f32; 3]> {
   use crate::Sel;
   use fox_kernel::glam::DVec3;
-  let (lo, hi) = s.model.bounds()?;
-  let off = (hi - lo).length().max(1.0) * 0.25;
   let mut points = Vec::new();
   for x in sel {
     let p = match *x {
