@@ -266,7 +266,8 @@ pub(super) fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
     return;
   }
   let id = egui::Id::new("tree-sketches");
-  // the folder starts collapsed, opens on the sketch being edited and closes on Finish Sketch
+  // the folder starts collapsed (Create Sketch leaves it so), opens on Edit Sketch and closes on
+  // Finish Sketch
   if let Some(open) = app.browser_sketches.take() {
     ui.data_mut(|d| d.insert_temp(id.with("open"), open));
   }
@@ -293,7 +294,8 @@ pub(super) fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
   }
   for (fid, name) in sketches {
     let editing = app.s.edit_sketch == Some(fid);
-    let selected = editing || app.s.selection.contains(&Sel::Feature { feature: fid });
+    // the sketch being edited isn't selected in the browser, as in Fusion
+    let selected = app.s.selection.contains(&Sel::Feature { feature: fid });
     let st = app.s.model.status(fid).cloned().unwrap_or_default();
     let color = if st.error.is_some() {
       theme::ERROR

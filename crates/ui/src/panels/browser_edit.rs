@@ -419,6 +419,8 @@ mod input_tests {
           app.run(c, p).unwrap();
         }
       }
+      // the Bodies folder opened (it starts collapsed, as in Fusion)
+      ctx.data_mut(|d| d.insert_temp(egui::Id::new("tree-bodies").with("open"), true));
       let mut h = Harness { ctx, app, time: 0.0 };
       h.idle(3);
       h

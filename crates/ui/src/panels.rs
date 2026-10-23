@@ -2272,7 +2272,8 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
   // the folder's own eye: hiding it leaves each body's eye as it was
   let shown = !app.ctx_menu.bodies_hidden;
   let eye = folder_eye(ui, shown, bodies.iter().any(|b| !b.2));
-  let ev = tree_row(ui, id, 1, Some(true), eye, Icon::Folder, "Bodies", false, theme::TEXT);
+  // collapsed when the first body adds it, as in Fusion
+  let ev = tree_row(ui, id, 1, Some(false), eye, Icon::Folder, "Bodies", false, theme::TEXT);
   browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::Root);
   if ev.eye {
     app.ctx_menu.bodies_hidden = shown;
@@ -2289,7 +2290,7 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
       browser_rows::folder_context_menu(ui, &items, |cmd| browser_rows::run_bodies_folder_cmd(app, cmd));
     });
   }
-  if !is_open(ui, id, true) {
+  if !is_open(ui, id, false) {
     return;
   }
   for (bid, name, visible) in bodies {
@@ -3153,36 +3154,6 @@ pub fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
   )
 }
 
-/// The collapsed AUTODESK ASSISTANT tab on the right edge of the canvas, under the ViewCube.
-pub fn assistant_tab(app: &mut App, ctx: &egui::Context) {
-  let canvas = app.canvas;
-  egui::Area::new(egui::Id::new("assistant-tab"))
-    .fixed_pos(canvas.right_top() + vec2(-2.0, 210.0))
-    .pivot(egui::Align2::RIGHT_TOP)
-    .order(egui::Order::Middle)
-    .show(ctx, |ui| {
-      let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 260.0), egui::Sense::click());
-      let p = ui.painter();
-      p.rect_filled(rect, 2.0, if resp.hovered() { theme::HOVER } else { theme::FLOAT_HEADER });
-      let ink = theme::GROUP_LABEL;
-      for dy in [-3.0, 3.0] {
-        let t = rect.center_top() + vec2(dy, 14.0);
-        p.add(egui::Shape::convex_polygon(
-          vec![t + vec2(-3.0, 0.0), t + vec2(2.0, -4.0), t + vec2(2.0, 4.0)],
-          ink,
-          Stroke::NONE,
-        ));
-      }
-      let galley = p.layout_no_wrap("AUTODESK ASSISTANT".into(), egui::FontId::proportional(12.0), ink);
-      let w = galley.size().x;
-      let pos = pos2(rect.center().x - galley.size().y / 2.0, rect.top() + 36.0 + w);
-      p.add(egui::epaint::TextShape::new(pos, galley, ink).with_angle(-std::f32::consts::FRAC_PI_2));
-      if resp.clicked() {
-        app.status = Some(("The Autodesk Assistant isn't part of FissionOxide".into(), false));
-      }
-    });
-}
-
 /// Fusion's "Unsaved: Changes may be lost — Save" notice at the top of the canvas, shown for a
 /// changed design that has never been saved.
 /// The Home page shows none of it, as it shows nothing of the design underneath.
@@ -3252,7 +3223,7 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
 /// (`1 Face 1 Edge | Min Distance : 0.10 in`), `Multiple selections | 9` from three or more, a
 /// body's or feature's name. Only what is selected reads out: hovering a face, an edge or a
 /// browser or timeline row prints nothing, as in Fusion, except while a command dialog is
-/// picking, when the item under the pointer reads out as a click would pick it.
+/// picking, when the item under the pointer reads out as a click would pick it (Fillet aside).
 pub(crate) fn selection_text(app: &App) -> Option<String> {
   // Mirror's objects and plane read as one count
   if let Some(t) = app.dialog.as_ref().and_then(|d| d.mirror_status()) {
@@ -3274,7 +3245,10 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
       if picked.is_empty() {
         // a hovered item reads out only while a command is picking (PROJECT's Bodies filter reads
         // "Body1" over the body); with no command running hovering prints nothing, as in Fusion
-        app.dialog.as_ref()?;
+        // (not in FILLET, whose status bar stays empty until an edge is picked)
+        if !app.dialog.as_ref()?.hover_reads_out() {
+          return None;
+        }
         // what a click would pick: under the Bodies priority the body ("Body1"), not its face
         let h = app.hover?;
         let t = crate::select::targets(&app.s, h, app.sel_priority);

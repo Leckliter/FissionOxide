@@ -308,7 +308,7 @@ pub struct App {
   /// whose own eyes are on draw at the origin. Off by default, as in Fusion.
   pub(crate) origin_shown: bool,
   /// A pending open/closed state for the browser's Sketches folder: Edit Sketch opens it,
-  /// Finish Sketch collapses it (the browser applies and clears it).
+  /// Finish Sketch collapses it (the browser applies and clears it); Create Sketch leaves it.
   pub(crate) browser_sketches: Option<bool>,
   /// The format picked in the root row's Export... sub-menu, run once the menu closes.
   pub(crate) pending_export: Option<&'static str>,
@@ -1990,7 +1990,7 @@ impl App {
         self.fly_to(to);
       }
       self.tab = panels::Tab::Sketch;
-      self.browser_sketches = Some(true);
+      // the browser's Sketches folder stays as it was (collapsed when new), as in Fusion
       // as in Fusion, no tool is active until one is picked
       self.set_tool(Tool::Select);
       // unless a sketch key asked for the plane: its command runs in the new sketch
@@ -2321,7 +2321,6 @@ impl App {
       if self.show_navbar {
         panels::nav_bar(self, &ctx);
       }
-      panels::assistant_tab(self, &ctx);
       panels::sketch_palette(self, &ctx);
       mesh_ui::palette(self, &ctx);
       bom_ui::show(self, &ctx);

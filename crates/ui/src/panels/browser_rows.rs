@@ -1202,7 +1202,7 @@ mod tests {
     let mut app = App::with_session(Session::default());
     assert_eq!(app.browser_sketches, None);
     app.create_sketch(json!("xy"));
-    assert_eq!(app.browser_sketches, Some(true), "the folder opens on the sketch being edited");
+    assert_eq!(app.browser_sketches, None, "Create Sketch leaves the folder collapsed");
     let sk = app.s.edit_sketch.expect("sketching");
     app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 5]}));
     app.s.selection = vec![Sel::Feature { feature: sk }];

@@ -71,7 +71,8 @@ impl SketchPalette {
   }
 }
 
-/// The collapsed palette's tab: at the canvas's right edge, under the AUTODESK ASSISTANT tab.
+/// The collapsed palette's tab: at the canvas's right edge, under the ViewCube (Fusion draws no
+/// AUTODESK ASSISTANT tab there; the Assistant is in the Help menu).
 pub(crate) fn tab_rect(canvas: Rect) -> Rect {
   Rect::from_min_max(canvas.right_top() + vec2(-26.0, 478.0), canvas.right_top() + vec2(-2.0, 478.0 + 176.0))
 }
@@ -176,11 +177,11 @@ mod tests {
   }
 
   #[test]
-  fn the_tab_sits_at_the_canvas_edge_under_the_assistant_tab() {
+  fn the_tab_sits_at_the_canvas_edge_under_the_view_cube() {
     let canvas = Rect::from_min_size(pos2(0.0, 100.0), vec2(1000.0, 800.0));
     let t = tab_rect(canvas);
     assert_eq!(t.right(), 998.0);
-    assert!(t.top() > 100.0 + 210.0 + 260.0, "under the AUTODESK ASSISTANT tab");
+    assert!(t.top() > 100.0 + 210.0, "under the ViewCube");
     assert_eq!(t.width(), 24.0);
   }
 }

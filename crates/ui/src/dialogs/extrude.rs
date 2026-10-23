@@ -318,12 +318,12 @@ impl Dialog {
   }
 
   /// "N Profiles | Area : …" for the status bar while an extrude has profiles picked, in the
-  /// design's unit as Fusion shows it ("1 Profile | Area : 1.24 in^2"); Thread's face radius; Chamfer's "Chain".
+  /// design's unit as Fusion shows it ("1 Profile | Area : 1.24 in^2"); Thread's face radius; Chamfer's "Chain"; Fillet's "Edge".
   pub fn profile_status(&self, s: &Session) -> Option<String> {
     if let Some(t) = self.thread_status(s) {
       return Some(t);
     }
-    if let Some(t) = self.chamfer_status() {
+    if let Some(t) = self.chamfer_status().or_else(|| self.fillet_status()) {
       return Some(t.into());
     }
     if !matches!(self.kind, super::Kind::Extrude | super::Kind::Revolve) || self.profiles.is_empty() {

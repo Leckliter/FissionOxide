@@ -600,6 +600,18 @@ impl Dialog {
     }
   }
 
+  /// The status bar while Fillet has an edge picked: "Edge", as Fusion reads it out (hovered
+  /// edges read nothing, see [`Dialog::hover_reads_out`]).
+  pub(super) fn fillet_status(&self) -> Option<&'static str> {
+    (self.kind == super::Kind::Fillet && !self.edges.is_empty()).then_some("Edge")
+  }
+
+  /// Whether the item under the pointer reads out in the status bar while this dialog picks:
+  /// not in Fillet, where Fusion's status bar stays empty until an edge is picked.
+  pub(crate) fn hover_reads_out(&self) -> bool {
+    self.kind != super::Kind::Fillet
+  }
+
   // ---- chamfer ----
 
   /// The picked edges with their tangent chains (Fusion's Tangent Chain, on by default).

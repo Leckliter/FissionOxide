@@ -1125,9 +1125,20 @@ fn items_view(app: &mut App, ui: &mut egui::Ui, items: Vec<Value>, show_path: bo
   }
 }
 
-/// Fusion's "12/15/2025 1:34 AM" (UTC, as the hub's other times).
+/// Fusion's "12/15/2025 1:34 AM", in the machine's local time as Fusion shows it.
 pub(crate) fn us_time(t: u64) -> String {
-  let f = fox_engine::store::format_time(t);
+  us_time_at(t, local_offset(t))
+}
+
+/// The machine's offset from UTC, in seconds, at `t` (its time zone's daylight saving included).
+fn local_offset(t: u64) -> i64 {
+  let Ok(at) = jiff::Timestamp::from_second(t as i64) else { return 0 };
+  i64::from(jiff::tz::TimeZone::system().to_offset(at).seconds())
+}
+
+/// [`us_time`] at `offset` seconds from UTC.
+fn us_time_at(t: u64, offset: i64) -> String {
+  let f = fox_engine::store::format_time(t.saturating_add_signed(offset));
   let num = |a: usize, b: usize| f.get(a..b).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
   let (y, m, d, h, min) = (num(0, 4), num(5, 7), num(8, 10), num(11, 13), num(14, 16));
   let (h12, half) = match h {
@@ -2301,7 +2312,7 @@ mod tests {
 
   use super::{
     BUTTON_TIP, Card, CardTab, DEFAULT_PROJECT, ITEM_MENU, Naming, ProjectFilter, ProjectTab, Sort, UPLOAD_ID, View,
-    item_action, new_folder, open_card, project_cards, sort_items, updated, upload_dialog, us_time,
+    item_action, new_folder, open_card, project_cards, sort_items, updated, upload_dialog, us_time_at,
     work_out_references,
   };
 
@@ -2502,9 +2513,12 @@ mod tests {
 
   #[test]
   fn dates_read_as_fusions() {
-    assert_eq!(us_time(1_765_762_440), "12/15/2025 1:34 AM");
-    assert_eq!(us_time(1_772_456_700), "3/2/2026 1:05 PM");
-    assert_eq!(us_time(1_772_410_020), "3/2/2026 12:07 AM");
+    assert_eq!(us_time_at(1_765_762_440, 0), "12/15/2025 1:34 AM");
+    assert_eq!(us_time_at(1_772_456_700, 0), "3/2/2026 1:05 PM");
+    assert_eq!(us_time_at(1_772_410_020, 0), "3/2/2026 12:07 AM");
+    // `ui:data:recent-dates-local-time`: the save's local time, not UTC (-05:00 here)
+    assert_eq!(us_time_at(1_761_154_740, -5 * 3600), "10/22/2025 12:39 PM");
+    assert_eq!(us_time_at(1_761_187_500, -5 * 3600), "10/22/2025 9:45 PM");
   }
 
   #[test]

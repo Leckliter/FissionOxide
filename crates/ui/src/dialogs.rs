@@ -8258,6 +8258,26 @@ mod tests {
     assert_eq!(press_pull_kind(&Session::default()), Kind::PressPull);
   }
 
+  /// `ui:chrome:status-in-command-picks`: in FILLET a hovered edge reads nothing in the status
+  /// bar, and a picked one reads "Edge" (no count, no length), as in Fusion.
+  #[test]
+  fn fillet_status_is_empty_on_hover_and_edge_once_picked() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 40, "depth": 30, "height": 10}));
+    let b = app.s.model.bodies[0].id;
+    let e = app.s.model.bodies[0].edges()[0].id;
+    let d = Dialog::open(&mut app, Kind::Fillet);
+    assert!(d.edges.is_empty());
+    assert_eq!(d.profile_status(&app.s), None);
+    app.dialog = Some(d);
+    app.hover = Some(fox_engine::scene::Pick::Edge { body: b, edge: e });
+    assert_eq!(crate::panels::selection_text(&app), None, "hovering an edge prints nothing");
+    app.dialog = None;
+    app.s.selection = vec![Sel::Edge { body: b, edge: e }];
+    let d = Dialog::open(&mut app, Kind::Fillet);
+    assert_eq!(d.profile_status(&app.s).as_deref(), Some("Edge"), "a picked edge reads \"Edge\"");
+  }
+
   /// `ui:dialogs:chamfer-fields-2`: Chamfer starts at 0.00 in the document unit, previewing
   /// nothing and OK waiting until a distance is set; with an edge picked (Tangent Chain on) the
   /// status bar reads "Chain".

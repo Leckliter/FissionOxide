@@ -2622,6 +2622,28 @@ fn the_sketch_palette_has_no_footer_unless_preferred() {
   assert!(dof(&texts), "{texts:?}");
 }
 
+/// `ui:browser:folders-stay-collapsed`: Create Sketch adds the Sketches folder collapsed with
+/// nothing selected, and the first body adds the Bodies folder collapsed, as in Fusion; no
+/// AUTODESK ASSISTANT tab sits at the canvas's edge (`ui:chrome:assistant-side-tab`).
+#[test]
+fn new_sketches_and_bodies_folders_stay_collapsed() {
+  let mut h = Harness::new();
+  h.app.create_sketch(json!("xy"));
+  h.app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 30]}));
+  h.frame(vec![]);
+  let t = h.frame_texts(1.0 / 60.0, vec![]);
+  let has = |t: &[(Rect, String)], s: &str| t.iter().any(|(_, x)| x == s);
+  assert!(has(&t, "Sketches") && !has(&t, "Sketch1"), "the Sketches folder is collapsed: {t:?}");
+  assert!(!t.iter().any(|(_, x)| x.contains("ASSISTANT")), "no Assistant tab");
+  assert!(h.app.s.selection.is_empty());
+  h.app.finish_sketch();
+  h.app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
+  h.frame(vec![]);
+  let t = h.frame_texts(1.0 / 60.0, vec![]);
+  assert!(has(&t, "Bodies") && !has(&t, "Body1"), "the Bodies folder is collapsed: {t:?}");
+  assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("assistant-tab"))).is_none());
+}
+
 /// The Sketches folder and each sketch row carry an eye: the row's eye hides the sketch and
 /// leaves it selected, the folder's hides every sketch; hovering a sketch row lights it in the
 /// canvas with no tooltip and no status text.
@@ -2676,6 +2698,9 @@ fn bodies_folder_eye_waits_for_the_pointer_while_a_body_is_hidden() {
   h.frame(vec![Event::PointerMoved(away)]);
   h.frame(vec![]);
   let folder = egui::Id::new("tree-bodies");
+  // opened: the folder starts collapsed, as in Fusion
+  h.ctx.data_mut(|d| d.insert_temp(folder.with("open"), true));
+  h.frame(vec![]);
   let folder_eye = |h: &Harness| h.ctx.read_response(folder.with("eye")).is_some();
   assert!(folder_eye(&h), "with every body shown the folder's eye is drawn");
   // root, Document Settings, Units, Part Design, Named Views, Origin, then Bodies and Body1
