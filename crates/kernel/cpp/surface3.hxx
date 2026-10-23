@@ -13,5 +13,7 @@ std::unique_ptr<Shape> ruled_from_edge(const Shape &edge, const Shape &face, dou
                                        bool tangent);
 std::unique_ptr<Shape> sweep_open(const Shape &profile, const Shape &spine, bool parallel);
 std::unique_ptr<Shape> loft_open(const Shape &sections, bool closed);
+std::unique_ptr<Shape> loft_open_rails(const Shape &sections, const Shape &rails);
+std::unique_ptr<Shape> loft_open_centerline(const Shape &sections, const Shape &centerline);
 
 } // namespace fox

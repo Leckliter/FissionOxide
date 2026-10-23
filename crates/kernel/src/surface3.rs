@@ -67,4 +67,27 @@ impl Shape {
     let c = Shape::compound(sections)?;
     Shape::wrap(sys::loft_open(c.get()?, closed)?)
   }
+
+  /// An open surface through the section curves whose sides follow the rail wires (each must
+  /// touch every section), as Fusion's surface Loft with Rails.
+  pub fn loft_open_rails(sections: &[Shape], rails: &[Shape]) -> Result<Shape> {
+    if sections.len() < 2 {
+      return Err(KernelError::Input("a loft needs at least two profiles".into()));
+    }
+    if rails.is_empty() {
+      return Err(KernelError::Input("no rails".into()));
+    }
+    let (c, r) = (Shape::compound(sections)?, Shape::compound(rails)?);
+    Shape::wrap(sys::loft_open_rails(c.get()?, r.get()?)?)
+  }
+
+  /// An open surface through the section curves placed along a centre line wire, as Fusion's
+  /// surface Loft with a Centerline.
+  pub fn loft_open_centerline(sections: &[Shape], centerline: &Shape) -> Result<Shape> {
+    if sections.len() < 2 {
+      return Err(KernelError::Input("a loft needs at least two profiles".into()));
+    }
+    let c = Shape::compound(sections)?;
+    Shape::wrap(sys::loft_open_centerline(c.get()?, centerline.get()?)?)
+  }
 }

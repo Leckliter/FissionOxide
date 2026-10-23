@@ -38,8 +38,9 @@ pub(super) enum Pick {
 pub(crate) struct State {
   /// The row the next picks go to.
   pub(super) row: usize,
-  /// Picks per row: Profiles, then Axis (Revolve) or Path (Sweep).
-  pub(super) rows: [Vec<Pick>; 2],
+  /// Picks per row: Profiles, then Axis (Revolve) or Path (Sweep), then Loft's Rails or
+  /// Centerline.
+  pub(super) rows: [Vec<Pick>; 3],
   /// Picks already routed to a row (or replaced there), so they aren't routed again.
   seen: Vec<Pick>,
   /// Chaining / Chain Selection: a picked curve brings the curves joined end to end to it.
@@ -58,7 +59,7 @@ pub(crate) struct State {
   /// Sweep: Orientation ("perpendicular" or "parallel").
   pub(super) orientation: &'static str,
   /// Loft: Guide Type ("rails" or "centerline"), Closed and Tangent Edges ("merge" or "keep").
-  guide: &'static str,
+  pub(super) guide: &'static str,
   pub(super) closed: bool,
   tangent_edges: &'static str,
   /// Patch: the picked boundaries as drawn on the canvas (each pick's chained loop as polylines),
@@ -69,6 +70,8 @@ pub(crate) struct State {
   src: Option<(FeatureId, Vec<[f64; 2]>, Vec<u32>)>,
   path: Option<(FeatureId, Vec<u32>)>,
   sections: Vec<Value>,
+  /// Loft's rails (or its one centerline) as the engine takes them: `{sketch, curves}` each.
+  guides: Vec<Value>,
 }
 
 impl State {
@@ -82,7 +85,7 @@ impl Default for State {
   fn default() -> State {
     State {
       row: 0,
-      rows: [Vec::new(), Vec::new()],
+      rows: [Vec::new(), Vec::new(), Vec::new()],
       seen: Vec::new(),
       chain: true,
       start: "",
@@ -102,6 +105,7 @@ impl Default for State {
       src: None,
       path: None,
       sections: Vec::new(),
+      guides: Vec::new(),
     }
   }
 }
@@ -322,6 +326,8 @@ impl Dialog {
         .and_then(|b| b.edges().iter().find(|x| x.id == *e).map(|x| x.kind == fox_engine::kernel::CurveKind::Line))
         .unwrap_or(false),
       (Kind::SurfSweep, 1, Pick::Curve(..)) => true,
+      // Loft's Rails (or Centerline): sketch curves
+      (Kind::SurfLoft, 2, Pick::Curve(..)) => true,
       _ => false,
     }
   }
@@ -357,7 +363,7 @@ impl Dialog {
       self.surf.seen.push(p.clone());
       let active = self.surf.row;
       let Some(row) =
-        (if self.accepts(s, active, &p) { Some(active) } else { (0..2).find(|r| self.accepts(s, *r, &p)) })
+        (if self.accepts(s, active, &p) { Some(active) } else { (0..3).find(|r| self.accepts(s, *r, &p)) })
       else {
         continue;
       };
@@ -402,12 +408,38 @@ impl Dialog {
         x["curves"] = json!(chain_curves(s, FeatureId(sk as u32), &seeds));
       }
     }
-    if src != self.surf.src || path != self.surf.path || sections != self.surf.sections {
+    let guides = self.loft_guides(s);
+    if src != self.surf.src || path != self.surf.path || sections != self.surf.sections || guides != self.surf.guides {
       self.surf.src = src;
       self.surf.path = path;
       self.surf.sections = sections;
+      self.surf.guides = guides;
       self.dirty = true;
     }
+  }
+
+  /// Loft's Rails as the engine takes them: one rail per picked curve (with the curves chained
+  /// to it when Chain Selection is on; a curve another rail already reached adds none), or with
+  /// Guide Type Centerline the picked curves as one path per sketch.
+  fn loft_guides(&self, s: &Session) -> Vec<Value> {
+    let mut out: Vec<(FeatureId, Vec<u32>)> = Vec::new();
+    for p in &self.surf.rows[2] {
+      let Pick::Curve(sk, c) = p else { continue };
+      if self.surf.guide == "centerline" {
+        match out.iter_mut().find(|(k, _)| k == sk) {
+          Some((_, cs)) => cs.push(*c),
+          None => out.push((*sk, vec![*c])),
+        }
+      } else if !out.iter().any(|(k, cs)| k == sk && cs.contains(c)) {
+        out.push((*sk, if self.surf.chain { chain_curves(s, *sk, &[*c]) } else { vec![*c] }));
+      }
+    }
+    if self.surf.guide == "centerline" && self.surf.chain {
+      for (sk, cs) in out.iter_mut() {
+        *cs = chain_curves(s, *sk, cs);
+      }
+    }
+    out.into_iter().map(|(sk, cs)| json!({"sketch": sk.0, "curves": cs})).collect()
   }
 
   /// The sketch of the first profile pick, with the picked profiles' points and curves of it
@@ -437,7 +469,7 @@ impl Dialog {
 
   /// Enough picked to try (and, for Extrude, a distance that isn't zero).
   pub(super) fn surf_ready(&self) -> bool {
-    let [a, b] = &self.surf.rows;
+    let [a, b, _] = &self.surf.rows;
     match self.kind {
       Kind::SurfExtrude => !a.is_empty() && nonzero(&self.surf.distance),
       Kind::SurfRevolve | Kind::SurfSweep => !a.is_empty() && !b.is_empty(),
@@ -446,7 +478,7 @@ impl Dialog {
   }
 
   pub(super) fn surf_missing(&self) -> &'static str {
-    let [a, b] = &self.surf.rows;
+    let [a, b, _] = &self.surf.rows;
     match self.kind {
       Kind::SurfExtrude if a.is_empty() => "select profiles or curves",
       Kind::SurfExtrude => "specify a distance",
@@ -460,7 +492,7 @@ impl Dialog {
 
   /// Fusion's cursor prompt for a surface dialog or form; None leaves it to the usual prompt.
   pub(super) fn surface_prompt(&self, hovering: bool) -> Option<String> {
-    let [a, b] = &self.surf.rows;
+    let [a, b, _] = &self.surf.rows;
     let text = match (self.kind, form_cmd(self.kind)) {
       (_, Some("surface.patch.form")) if !self.form_picked("edges") => "Select edge",
       (_, Some("surface.offset.form")) if !self.form_picked("faces") && !self.form_picked("bodies") => {
@@ -547,7 +579,15 @@ impl Dialog {
           }),
         ))
       }
-      _ => Some(("surface.loft", json!({"sections": self.surf.sections, "closed": self.surf.closed}))),
+      _ => {
+        let mut p = json!({"sections": self.surf.sections, "closed": self.surf.closed});
+        match (self.surf.guide, self.surf.guides.first()) {
+          (_, None) => {}
+          ("centerline", Some(c)) => p["centerline"] = c.clone(),
+          _ => p["rails"] = json!(self.surf.guides),
+        }
+        Some(("surface.loft", p))
+      }
     }
   }
 
@@ -649,18 +689,17 @@ impl Dialog {
       _ => {
         self.loft_list(ui, &mut dirty);
         // Fusion's two Guide Type toggles, as the solid Loft's; the guide row under them follows
+        // (a switch starts its picks afresh)
         ui.label("Guide Type");
-        icon_row::icon_row(ui, &mut self.surf.guide, &GUIDE_TYPES, "");
+        if icon_row::icon_row(ui, &mut self.surf.guide, &GUIDE_TYPES, "") {
+          self.surf.rows[2].clear();
+          if self.surf.row == 2 {
+            self.surf.row = 0;
+          }
+          dirty = true;
+        }
         ui.end_row();
-        let centerline = self.surf.guide == "centerline";
-        ui.label(if centerline { "Centerline" } else { "Rails" });
-        let why = if centerline {
-          "FissionOxide's surface loft has no centerline yet"
-        } else {
-          "FissionOxide's surface loft has no rails yet"
-        };
-        ui.add_enabled_ui(false, |ui| sel_chip(ui, self.accent(), "Select", false)).inner.on_disabled_hover_text(why);
-        ui.end_row();
+        self.surf_chip(ui, if self.surf.guide == "centerline" { "Centerline" } else { "Rails" }, 2);
         let st = &mut self.surf;
         super::Dialog::check(ui, "Chain Selection", &mut st.chain, &mut dirty);
         super::Dialog::check(ui, "Closed", &mut st.closed, &mut dirty);
@@ -1175,6 +1214,66 @@ mod tests {
     d.preview(&mut app.s);
     assert!(d.applied && d.error.is_none(), "{:?}", d.error);
     assert!(matches!(last_kind(&app), FeatureKind::SurfaceLoft { .. }));
+    d.cancel(&mut app.s);
+  }
+
+  /// `ui:surface:sweep-loft-missing`: LOFT's Rails row takes sketch curves (its chip active once
+  /// clicked) and the surface follows them; Guide Type Centerline takes a centre line instead.
+  #[test]
+  fn loft_follows_rails_or_a_centerline() {
+    let mut app = App::with_session(Session::default());
+    // two 20 long lines, 40 apart, and on XZ two bowed rails from end to end
+    let a = sketch(&mut app, "sketch.line", json!({"points": [[0, 0], [20, 0]]}));
+    app.run("plane.offset", json!({"plane": "xy", "offset": 40})).unwrap();
+    let pl = app.s.design.features.last().unwrap().id.0;
+    app.run("sketch.create", json!({"plane": {"feature": pl}})).unwrap();
+    let b = app.s.edit_sketch.unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [20, 0]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}})).unwrap();
+    let r = app.s.edit_sketch.unwrap();
+    app.run("sketch.arc", json!({"start": [0, 0], "mid": [-5, 20], "end": [0, 40]})).unwrap();
+    app.run("sketch.arc", json!({"start": [20, 0], "mid": [25, 20], "end": [20, 40]})).unwrap();
+    app.run("sketch.line", json!({"points": [[10, 0], [10, 40]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.s.selection.clear();
+    let curve = |sk: fox_engine::model::FeatureId, app: &App, i: usize| {
+      let c = app.s.design.sketch(sk).unwrap().curves.iter().filter(|c| !c.reference()).nth(i).unwrap().id;
+      Sel::SketchCurve { sketch: sk, curve: c }
+    };
+    let mut d = Dialog::open(&mut app, Kind::SurfLoft);
+    app.s.selection = vec![curve(a, &app, 0), curve(b, &app, 0)];
+    d.sync_selection(&app.s);
+    assert_eq!(d.surf.rows[0].len(), 2);
+    // the Rails chip clicked: the next curves are rails
+    d.surf.row = 2;
+    app.s.selection.extend([curve(r, &app, 0), curve(r, &app, 1)]);
+    d.sync_selection(&app.s);
+    assert_eq!((d.surf.rows[0].len(), d.surf.rows[2].len()), (2, 2));
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!(cmd, "surface.loft");
+    assert_eq!(p["rails"].as_array().map(Vec::len), Some(2), "{p}");
+    assert!(p.get("centerline").is_none());
+    d.preview(&mut app.s);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    let FeatureKind::SurfaceLoft { rails, .. } = last_kind(&app) else { panic!() };
+    assert_eq!(rails.len(), 2);
+    let m = app.s.model.bodies.last().unwrap().shape.mass().unwrap();
+    assert!(m.bbox_min.x < -4.0 && m.bbox_max.x > 24.0, "the surface bows out to the rails: {m:?}");
+    // Guide Type Centerline: the rails go and the centre line is the path
+    d.surf.guide = "centerline";
+    d.surf.rows[2].clear();
+    app.s.selection.retain(|x| !matches!(x, Sel::SketchCurve { sketch, .. } if *sketch == r));
+    d.sync_selection(&app.s);
+    d.surf.row = 2;
+    app.s.selection.push(curve(r, &app, 2));
+    d.sync_selection(&app.s);
+    let (_, p) = d.command().unwrap();
+    assert!(p.get("rails").is_none(), "{p}");
+    assert_eq!(p["centerline"]["sketch"], json!(r.0), "{p}");
+    d.preview(&mut app.s);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    assert!(matches!(last_kind(&app), FeatureKind::SurfaceLoft { centerline: Some(_), .. }));
     d.cancel(&mut app.s);
   }
 

@@ -90,3 +90,42 @@ fn a_patch_passes_through_interior_points_and_rails() {
   let arched = Shape::patch_with(&sides, &[rail]).unwrap();
   assert!(arched.mass().unwrap().bbox_max.z > 3.0, "{}", arched.mass().unwrap().bbox_max.z);
 }
+
+/// Fusion's surface Loft with Rails: two lines 40 apart whose ends ride on two bowed rails make an
+/// open surface bulging out to the rails; with a centre line, the sections follow it.
+#[test]
+fn open_loft_follows_rails_or_a_centre_line() {
+  use crate::Seg3;
+  let line = |z: f64| Shape::path3d(&[Seg3::Line { a: DVec3::new(0.0, 0.0, z), b: DVec3::new(20.0, 0.0, z) }]).unwrap();
+  let (a, b) = (line(0.0), line(40.0));
+  let rail = |x: f64, bow: f64| {
+    Shape::path3d(&[Seg3::Arc {
+      start: DVec3::new(x, 0.0, 0.0),
+      mid: DVec3::new(x + bow, 0.0, 20.0),
+      end: DVec3::new(x, 0.0, 40.0),
+    }])
+    .unwrap()
+  };
+  let skin = Shape::loft_open_rails(&[a.clone(), b.clone()], &[rail(0.0, -5.0), rail(20.0, 5.0)]).unwrap();
+  assert_eq!(skin.solid_count(), 0);
+  let m = skin.mass().unwrap();
+  assert!((m.bbox_min.x + 5.0).abs() < 0.3 && (m.bbox_max.x - 25.0).abs() < 0.3, "{m:?}");
+  assert!(m.area > 800.0 + 50.0, "wider than the plain strip: {}", m.area);
+  // one rail: that side bows, the far one stays straight
+  let one = Shape::loft_open_rails(&[a.clone(), b.clone()], &[rail(0.0, -5.0)]).unwrap();
+  let m = one.mass().unwrap();
+  assert!((m.bbox_min.x + 5.0).abs() < 0.3 && (m.bbox_max.x - 20.0).abs() < 0.3, "{m:?}");
+  // a rail that misses a section is refused
+  assert!(Shape::loft_open_rails(&[a.clone(), b.clone()], &[rail(60.0, 5.0)]).is_err());
+  // a centre line bowed off the plane: the strip follows it
+  let center = Shape::path3d(&[Seg3::Arc {
+    start: DVec3::new(10.0, 0.0, 0.0),
+    mid: DVec3::new(10.0, 8.0, 20.0),
+    end: DVec3::new(10.0, 0.0, 40.0),
+  }])
+  .unwrap();
+  let bent = Shape::loft_open_centerline(&[a, b], &center).unwrap();
+  assert_eq!(bent.solid_count(), 0);
+  let m = bent.mass().unwrap();
+  assert!(m.bbox_max.y > 5.0, "{m:?}");
+}

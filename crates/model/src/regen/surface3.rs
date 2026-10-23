@@ -9,7 +9,7 @@ use fox_sketch::CurveId;
 use super::extra::sketch_wires;
 use super::{Ctx, FResult, SketchResult, ke, pick_profiles};
 use crate::surface::{Continuity, PatchRail, RuledType};
-use crate::{FeatureId, FeatureKind};
+use crate::{FeatureId, FeatureKind, PathRef};
 
 /// The curves a surface is made from: each picked profile's boundary loops as wires, and the
 /// picked curves one wire per segment (no profiles and no curves: every curve of the sketch).
@@ -158,7 +158,7 @@ impl Ctx<'_> {
         self.new_surface(id, faces)?;
         Ok(None)
       }
-      FeatureKind::SurfaceLoft { sections, closed } => {
+      FeatureKind::SurfaceLoft { sections, closed, rails, centerline } => {
         let mut wires = Vec::new();
         for (i, sec) in sections.iter().enumerate() {
           let sk = self.state.sketches.get(&sec.sketch).ok_or(format!("the sketch of section {} failed", i + 1))?;
@@ -171,7 +171,20 @@ impl Ctx<'_> {
             Err(_) => return Err(format!("section {} must be one chain of curves", i + 1)),
           }
         }
-        let skin = Shape::loft_open(&wires, *closed).map_err(ke)?;
+        let path = |r: &PathRef| {
+          let ps = self.state.sketches.get(&r.sketch).ok_or("a rail or centre line sketch failed")?;
+          crate::include::sketch_path(ps, &r.curves)
+        };
+        let skin = match (rails.is_empty(), centerline) {
+          (true, None) => Shape::loft_open(&wires, *closed).map_err(ke)?,
+          _ if *closed => return Err("a closed loft can't follow rails or a centre line".into()),
+          (false, Some(_)) => return Err("a loft follows rails or a centre line, not both".into()),
+          (true, Some(c)) => Shape::loft_open_centerline(&wires, &path(c)?).map_err(ke)?,
+          (false, None) => {
+            let rs = rails.iter().map(path).collect::<Result<Vec<_>, _>>()?;
+            Shape::loft_open_rails(&wires, &rs).map_err(ke)?
+          }
+        };
         self.new_body(id, skin);
         Ok(None)
       }

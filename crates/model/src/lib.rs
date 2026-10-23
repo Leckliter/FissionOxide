@@ -2363,6 +2363,12 @@ pub enum FeatureKind {
     /// Loop back to the first section.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     closed: bool,
+    /// Curves the surface's sides follow (each must touch every section).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rails: Vec<PathRef>,
+    /// A path the sections are placed along (instead of rails).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    centerline: Option<PathRef>,
   },
 }
 
@@ -2670,7 +2676,9 @@ impl FeatureKind {
       }
       FeatureKind::Canvas { plane, .. } => plane_dep(plane),
       FeatureKind::SurfaceSweep { sketch, path_sketch, .. } => vec![*sketch, *path_sketch],
-      FeatureKind::SurfaceLoft { sections, .. } => sections.iter().map(|x| x.sketch).collect(),
+      FeatureKind::SurfaceLoft { sections, rails, centerline, .. } => {
+        sections.iter().map(|x| x.sketch).chain(rails.iter().chain(centerline).map(|r| r.sketch)).collect()
+      }
       _ => vec![],
     }
   }

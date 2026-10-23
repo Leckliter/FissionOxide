@@ -4238,3 +4238,52 @@ fn move_rows_wait_for_a_pick_in_3d() {
   let label = shown.iter().find(|(_, s)| s == "X Distance").map(|(r, _)| *r).unwrap();
   assert!(copy.left() <= label.right(), "in the label column: {copy:?} vs {label:?}");
 }
+
+/// `ui:dialogs:replace-face-plane-target`: with REPLACE FACE's (still empty) Target Faces row
+/// active, a construction plane beside the box lights up under the pointer and a click in the
+/// canvas fills the row with it, as in Fusion.
+#[test]
+fn replace_face_target_takes_a_plane_clicked_in_the_canvas() {
+  use fox_engine::kernel::glam::DVec3;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+  // an Offset Plane 10 mm off the box's +X face: square, beside the box and clear of it
+  let (lo, hi) = h.app.s.model.bounds().unwrap();
+  let x = hi.x + 10.0;
+  let mid = (lo + hi) * 0.5;
+  h.app
+    .run("plane.offset", json!({"plane": {"origin": [hi.x, mid.y, mid.z], "normal": [1, 0, 0]}, "offset": 10}))
+    .unwrap();
+  let plane = h.app.s.design.features.last().unwrap().id;
+  h.settle();
+  h.app.start(crate::dialogs::Kind::Form(&crate::forms::REPLACE_FACE));
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  // the box's top face as the source, then the Target Faces row clicked
+  let top = h.screen(DVec3::new(mid.x, mid.y, hi.z));
+  h.move_then_click(top);
+  assert_eq!(h.app.s.selection.len(), 1, "{:?}", h.app.s.selection);
+  // its chip, on the label's line
+  let texts = h.frame_texts(1.0 / 60.0, vec![]);
+  let row = texts.iter().find(|(_, t)| t == "Target Faces").expect("the Target Faces row").0;
+  let chip = texts
+    .iter()
+    .filter(|(r, t)| t == "Select" && (r.center().y - row.center().y).abs() < 8.0 && r.left() > row.right())
+    .map(|(r, _)| *r)
+    .next()
+    .expect("its Select chip");
+  h.move_then_click(chip.center());
+  assert!(h.app.dialog.as_ref().is_some_and(|d| d.row_takes_plane()), "Target Faces is active");
+  // a point on the plane's square, off the box's silhouette
+  let half = crate::viewport::plane_half_size(&h.app);
+  let on = h.screen(DVec3::new(x, mid.y + half * 0.7, mid.z + half * 0.7));
+  h.frame(vec![Event::PointerMoved(on)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.hover_cplane, Some(plane), "the plane lights up under the pointer");
+  h.move_then_click(on);
+  assert!(h.app.s.selection.contains(&fox_engine::Sel::Feature { feature: plane }), "{:?}", h.app.s.selection);
+  assert_eq!(h.app.s.selection.len(), 2, "Source Faces keeps its face: {:?}", h.app.s.selection);
+  assert!(h.app.picked_plane.is_none());
+  assert_eq!(crate::construction::look(&h.app, plane), crate::origin::Look::Selected);
+}
