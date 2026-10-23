@@ -4,7 +4,7 @@ Make FissionOxide match Autodesk Fusion for each item below. Each item says what
 does, what FissionOxide does now, and where to start. Keep changes scoped to these items, add tests
 where the behaviour is testable, and run `cargo test` and `cargo clippy` before opening the PR.
 
-These five rows come from the first waves (batches from 2026-10-19 to 2026-10-21 whose fixers ran
+These nine rows come from the first waves (batches from 2026-10-19 to 2026-10-21 whose fixers ran
 before the current loop and opened PRs #100-#122). Every other row of those batches is verified or
 matches Fusion; these five were never closed. Several may since be covered by newer keys (for example
 the sketch Text and in-sketch menu rows by the wave-7, wave-10 and wave-35 batches): read the row's
