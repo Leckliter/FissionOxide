@@ -684,3 +684,14 @@ MOVE/COPY hides its value rows until a pick, and the dimension edit box tooltip 
 `reference_parts` passes on Windows (its failing rows are cloud-container only). Five wave-45 batches
 (`ui-reverify-prefs-1`, `ui-reverify-dialogs-8`, `ui-reverify-workspaces-3`, `ui-animation-actions-1`,
 `ui-kernel-tests-1`); report `parity/reports/2026-10-23-reverify-open-rows.md`.
+
+## 2026-10-23, verifier 9: workflow side-by-side
+Built `4e1c9667`. Only the four uncheckable keys were fixing-merged, so the pass ran the most-used workflow in a
+fresh mm design in both apps (Create Sketch, typed rectangle, Extrude, Fillet, Edit Feature from the timeline).
+Fusion pre-picks the only visible profile when Extrude opens and starts it at 0.00 mm; FissionOxide never
+pre-picks (an earlier fix followed an incomplete Fusion text) and starts a picked profile at 10 mm. Also Title
+Case dialog labels, Fillet's empty table before a pick, the rectangle's height box on the first corner's edge,
+three-decimal mm boxes, rotated vertical dimension text, red/green sketch axes, the sketch's entry scale and grid
+steps, collapsed new browser folders, the in-command status readout and an Assistant canvas tab Fusion does not
+have. 10 new rows, 3 reopened, three wave-46 batches (`ui-workflow-dialogs-1`, `ui-workflow-sketch-1`,
+`ui-workflow-chrome-1`); report `parity/reports/2026-10-23-workflow-side-by-side.md`.

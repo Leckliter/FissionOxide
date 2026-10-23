@@ -1,0 +1,15 @@
+{
+  "ui:sketch:axis-lines-in-sketch": "ui-workflow-sketch-1",
+  "ui:sketch:entry-scale-grid-steps": "ui-workflow-sketch-1",
+  "ui:sketch:heads-up-mm-decimals": "ui-workflow-sketch-1",
+  "ui:sketch:vertical-dimension-text": "ui-workflow-sketch-1",
+  "ui:dialogs:extrude-start-distance": "ui-workflow-dialogs-1",
+  "ui:dialogs:title-case-labels": "ui-workflow-dialogs-1",
+  "ui:dialogs:fillet-before-pick": "ui-workflow-dialogs-1",
+  "ui:browser:folders-stay-collapsed": "ui-workflow-chrome-1",
+  "ui:chrome:status-in-command-picks": "ui-workflow-chrome-1",
+  "ui:chrome:assistant-side-tab": "ui-workflow-chrome-1",
+  "ui:dialogs:extrude-auto-profile": "ui-workflow-dialogs-1",
+  "ui:sketch:rectangle-heads-up-layout": "ui-workflow-sketch-1",
+  "ui:manip:value-box-covers-arrow": "ui-workflow-dialogs-1"
+}

@@ -1,6 +1,30 @@
 # Prober progress
 
-## Last stop: 2026-10-23, 10:10, session "Open-row pass, verifier 8"
+## Last stop: 2026-10-23, 10:55, session "Incremental pass and workflow side-by-side, verifier 9"
+
+Built `main` at `4e1c9667` (binary current, no build fix). Only the usual four uncheckable keys were
+`fixing-merged`, so nothing was re-checked. Fixers: none has pushed to `main` since 05:10; mesh-1,
+render-2 and chrome-3/shortcuts-1 have pushed nothing anywhere (started 09:12 / 09:42), mesh-2,
+dialogs-6, dialogs-7/workspaces-2 and legacy-leftovers have WIP branches (see the report). Then a fresh
+side-by-side of sketch, rectangle, extrude, fillet and a timeline edit in a new mm design: 10 new rows and
+3 verified rows reopened for the second time because their earlier Fusion text was incomplete
+(`ui:dialogs:extrude-auto-profile`: Fusion pre-picks the only visible profile;
+`ui:sketch:rectangle-heads-up-layout`; `ui:manip:value-box-covers-arrow`). Report
+`parity/reports/2026-10-23-workflow-side-by-side.md`. New wave-46 batches, all `ready` with no fixer
+(keys in `map-wave46.json`): `ui-workflow-dialogs-1` (5, P1), `ui-workflow-sketch-1` (5),
+`ui-workflow-chrome-1` (3).
+
+Next verifier: re-check what the wave-42..46 fixers mark `fixing-merged`; with fewer than five waiting,
+continue the workflow side-by-side (revolve, chamfer, shell, arrow drags, Edit Sketch from the browser,
+undo names, marking menus on the results), or take the ASSEMBLY row in `coverage.md`.
+
+Where the documents stand: Fusion at x 0..1215 on "Untitled*(4)" (mm, never saved): Sketch1 (40 x 30
+rectangle), Extrude1 (now 15 mm), Fillet1 (2 mm, top front edge), Sketch2 on the top face with two 8 mm
+circles; tabs Untitled*(1), Untitled(2) (Assembly Design), Untitled*(3) untouched. FissionOxide
+(`4e1c9667`, PID 13788) at x 0..1215, 705 screenshot px tall (a bottom-edge drag would not resize it),
+Data Panel closed, one tab "Untitled*" (mm): Sketch1, Extrude1 (15 mm), Fillet1 (2 mm).
+
+## Earlier stop: 2026-10-23, 10:10, session "Open-row pass, verifier 8"
 
 Built `main` at `6c5c8b6b` (no build fix needed). No checkable key was `fixing-merged` (the usual four are left:
 `ui:marking-menu:flick`, `ui:chrome:comments-expand`, `ui:sketch:vertical-on-horizontal-line`,

@@ -151,3 +151,6 @@
 {"name": "ui-reverify-workspaces-3", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_62901c53 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-animation-actions-1", "items": 1, "status": "fixing", "pr": null, "fixer": "cloud task_62901c53 (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-kernel-tests-1", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_9b720f60 (requested 2026-10-23 by the coordinator)"}
+{"name": "ui-workflow-dialogs-1", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-workflow-sketch-1", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-workflow-chrome-1", "items": 3, "status": "ready", "pr": null}
