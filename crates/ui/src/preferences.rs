@@ -14,7 +14,7 @@ use crate::viewcube::CubeSize;
 use crate::{App, theme};
 
 mod electronics;
-mod pages;
+pub(crate) mod pages;
 use pages::{Item, Live};
 
 /// Default units for new designs.
@@ -1467,6 +1467,7 @@ fn fixed_control(ui: &mut egui::Ui, key: &str, item: &Item, value: &str) {
       }
     }
     Item::Heading(_) | Item::Live(..) | Item::Toggle(..) | Item::Choice(..) | Item::Note(..) | Item::Gate(..) => {}
+    Item::Entry(..) | Item::Number(..) | Item::Path(..) => {}
   }
 }
 
@@ -1530,7 +1531,7 @@ fn rows(app: &App, ui: &mut egui::Ui, page: Page, p: &mut Prefs) {
           });
         }
       }
-      Item::Toggle(..) | Item::Choice(..) | Item::Gate(..) => {
+      Item::Toggle(..) | Item::Choice(..) | Item::Gate(..) | Item::Entry(..) | Item::Number(..) | Item::Path(..) => {
         let label = item.label().unwrap_or_default();
         let key = pages::stored_key(page, heading, label);
         let enabled = open;
@@ -1572,7 +1573,9 @@ fn editable_control(ui: &mut egui::Ui, key: &str, item: &Item, p: &mut Prefs) {
   match item {
     Item::Toggle(..) | Item::Gate(..) => {
       let mut on = value == "1";
-      if ui.checkbox(&mut on, "").changed() {
+      let r = ui.checkbox(&mut on, "");
+      ui.ctx().data_mut(|d| d.insert_temp(combo_rect_id(key), r.rect));
+      if r.changed() {
         set_stored(p, key, item, flag(on));
       }
     }
@@ -1592,8 +1595,75 @@ fn editable_control(ui: &mut egui::Ui, key: &str, item: &Item, p: &mut Prefs) {
         set_stored(p, key, item, picked);
       }
     }
+    Item::Entry(..) => {
+      let mut text = value.clone();
+      let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(FIELD_W));
+      ui.ctx().data_mut(|d| d.insert_temp(combo_rect_id(key), r.rect));
+      if text != value {
+        set_stored(p, key, item, text);
+      }
+    }
+    Item::Number(..) => {
+      let changed = match value.split_once('.') {
+        // a decimal ("1.00"): steps of one in its last place, shown with its places
+        Some((_, places)) => {
+          let places = places.len();
+          let mut n: f64 = value.trim().parse().unwrap_or(0.0);
+          let r = decimal_spinner(ui, key, &mut n, places);
+          r.changed().then(|| format!("{n:.places$}"))
+        }
+        None => {
+          let mut n: u32 = value.trim().parse().unwrap_or(0);
+          let r = spinner(ui, key, &mut n, 0..=65535, true);
+          r.changed().then(|| n.to_string())
+        }
+      };
+      if let Some(v) = changed.filter(|v| *v != value) {
+        set_stored(p, key, item, v);
+      }
+    }
+    Item::Path(..) => {
+      let mut text = value.clone();
+      ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(COMBO_W));
+        ui.ctx().data_mut(|d| d.insert_temp(combo_rect_id(key), r.rect));
+        if ui.button("...").on_hover_text("Choose the program").clicked()
+          && let Some(path) = rfd::FileDialog::new().pick_file()
+        {
+          text = path.display().to_string();
+        }
+      });
+      if text != value {
+        set_stored(p, key, item, text);
+      }
+    }
     _ => {}
   }
+}
+
+/// [`spinner`] for a decimal with `places` places: the arrows step one in the last place.
+fn decimal_spinner(ui: &mut egui::Ui, id: &str, value: &mut f64, places: usize) -> egui::Response {
+  let step = 10f64.powi(-(places as i32));
+  ui.horizontal(|ui| {
+    ui.spacing_mut().item_spacing.x = 0.0;
+    let mut r = ui.add_sized(
+      vec2(FIELD_W - 14.0, ROW_H),
+      egui::DragValue::new(value).range(0.0..=f64::MAX).speed(step).fixed_decimals(places),
+    );
+    let (rect, arrows) = ui.allocate_exact_size(vec2(14.0, ROW_H), Sense::click());
+    let up = rect.split_top_bottom_at_fraction(0.5).0;
+    paint_spin_arrows(ui.painter(), rect, theme::ICON_INK);
+    if arrows.clicked()
+      && let Some(at) = arrows.interact_pointer_pos()
+    {
+      *value = if up.contains(at) { *value + step } else { (*value - step).max(0.0) };
+      r.mark_changed();
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(combo_rect_id(id), r.rect.union(rect)));
+    r | arrows
+  })
+  .inner
 }
 
 /// A row FissionOxide acts on.
@@ -1826,7 +1896,7 @@ fn page_ui(app: &mut App, ui: &mut egui::Ui) {
     }
     Page::DataCollection => data_collection(ui, &mut values),
     Page::Tokens => tokens(ui),
-    Page::PreviewFeatures => preview_features(ui),
+    Page::PreviewFeatures => preview_features(ui, &mut values),
     Page::ManufactureOptional => {
       grey_box(ui, |ui| {
         ui.vertical(|ui| {
@@ -1850,7 +1920,7 @@ fn page_ui(app: &mut App, ui: &mut egui::Ui) {
     Page::ElecDrill => electronics::drill_legend(ui),
     _ => {}
   }
-  if page != Page::DataCollection {
+  if !matches!(page, Page::DataCollection | Page::PreviewFeatures) {
     rows(app, ui, page, &mut values);
   }
   if page == Page::General {
@@ -1948,7 +2018,7 @@ fn tokens(ui: &mut egui::Ui) {
 }
 
 /// Preview Features: the Insider box, the terms, the filter bar and the features by workspace.
-fn preview_features(ui: &mut egui::Ui) {
+fn preview_features(ui: &mut egui::Ui, p: &mut Prefs) {
   grey_box(ui, |ui| {
     ui.label("We want your feedback on preview features. To share it you need to be a Fusion Insider. ");
     link(ui, "Get more information about becoming a Fusion Insider");
@@ -1961,24 +2031,45 @@ fn preview_features(ui: &mut egui::Ui) {
     ui.label(".");
   });
   ui.add_space(6.0);
+  let items = pages::items(Page::PreviewFeatures);
+  // the workspace filter: one section, or all of them
+  let filter = &items[0];
+  let filter_key = pages::stored_key(Page::PreviewFeatures, "", filter.label().unwrap_or_default());
   ui.horizontal(|ui| {
-    fixed_combo(ui, "preview-workspaces", "All workspaces", NOT_YET);
+    editable_control(ui, &filter_key, filter, p);
     for glyph in 0..3 {
       let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 20.0), Sense::hover());
       paint_filter_glyph(ui.painter(), rect, glyph);
       resp.on_hover_text(["Shown features", "Locked features", "Turned-on features"][glyph]);
     }
-    let mut search = String::new();
-    ui.add_enabled(false, egui::TextEdit::singleline(&mut search).hint_text("Search").desired_width(120.0));
-    link(ui, "Reset filters");
+    // the search narrows the list to the features whose title or description has its text
+    let search_id = egui::Id::new("prefs-preview-search");
+    let mut search = ui.ctx().data(|d| d.get_temp::<String>(search_id)).unwrap_or_default();
+    ui.add(egui::TextEdit::singleline(&mut search).hint_text("Search").desired_width(120.0));
+    let reset =
+      ui.add(egui::Label::new(RichText::new("Reset filters").color(theme::ACCENT).underline()).sense(Sense::click()));
+    if reset.clicked() {
+      search.clear();
+      set_stored(p, &filter_key, filter, filter.default_value().unwrap_or_default());
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(search_id, search));
   });
   ui.add_space(6.0);
+  let shown = p.stored_value(&filter_key, filter);
+  let search = ui.ctx().data(|d| d.get_temp::<String>(egui::Id::new("prefs-preview-search"))).unwrap_or_default();
+  let found = |t: &str| t.to_lowercase().contains(&search.trim().to_lowercase());
   for (section, features) in PREVIEW_FEATURES {
+    let features: Vec<_> = features.iter().filter(|(_, title, text)| found(title) || found(text)).collect();
+    if shown != "All workspaces" && shown != *section || features.is_empty() {
+      continue;
+    }
     egui::CollapsingHeader::new(RichText::new(*section).strong()).default_open(true).show(ui, |ui| {
-      for (on, glyph, title, text) in features.iter() {
+      for (glyph, title, text) in features {
         ui.horizontal(|ui| {
-          let mut on = *on;
-          ui.add_enabled(false, egui::Checkbox::without_text(&mut on)).on_disabled_hover_text(NOT_YET);
+          // the box keeps its value under the section's key (see `pages::items`)
+          let key = pages::stored_key(Page::PreviewFeatures, section, title);
+          let item = items.iter().find(|i| i.label() == Some(*title)).copied().unwrap_or(Item::Toggle(title, false));
+          editable_control(ui, &key, &item, p);
           let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
           paint_filter_glyph(ui.painter(), rect, *glyph);
           ui.label(RichText::new(*title).strong());
@@ -1991,14 +2082,14 @@ fn preview_features(ui: &mut egui::Ui) {
   }
 }
 
-/// Preview Features' sections as Fusion lists them: each feature's default, its filter glyph
-/// (0 the eye of a shown feature, 1 the lock of a locked one), title and description.
-const PREVIEW_FEATURES: &[(&str, &[(bool, usize, &str, &str)])] = &[
-  ("General", &[(true, 0, "Enable Close Speedup Experience", "Enable document close speedup experience")]),
+/// Preview Features' sections as Fusion lists them: each feature's filter glyph (0 the eye of a
+/// shown feature, 1 the lock of a locked one), title and description; its box and default are
+/// the page's row of that title (`pages::items`).
+const PREVIEW_FEATURES: &[(&str, &[(usize, &str, &str)])] = &[
+  ("General", &[(0, "Enable Close Speedup Experience", "Enable document close speedup experience")]),
   (
     "Design",
     &[(
-      false,
       1,
       "Preview Volumetric Modeling Features",
       "Enables Volumetric Texture and Modify Lattice commands. Available under Solid/Mesh > Modify Tab",
@@ -2007,7 +2098,6 @@ const PREVIEW_FEATURES: &[(&str, &[(bool, usize, &str, &str)])] = &[
   (
     "Simulation",
     &[(
-      true,
       1,
       "New Simulation results experience",
       "Activates improved post-processing features and a new visual style for Linear Static Stress, Thermal and \

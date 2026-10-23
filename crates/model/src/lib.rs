@@ -1715,6 +1715,9 @@ pub enum FeatureKind {
     edges: Vec<EdgeRef>,
     #[serde(default)]
     sketch: Option<FeatureId>,
+    /// The sketch's curves that bound the patch (empty: all of them).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    curves: Vec<CurveId>,
     /// How the patch meets the face beside each boundary edge (one per edge; missing ones
     /// are connected).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

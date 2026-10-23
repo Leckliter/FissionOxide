@@ -57,15 +57,39 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       )
     })(),
     "surface.patch" => (|| {
+      // the boundary picks: body edges, and closed sketch curves `{sketch, curve}` (always
+      // connected), each pick keeping its place in the continuity list
+      let picks: Vec<Value> = p.get("edges").and_then(Value::as_array).cloned().unwrap_or_default();
+      let (curve_picks, edge_picks): (Vec<(usize, &Value)>, Vec<(usize, &Value)>) =
+        picks.iter().enumerate().partition(|(_, e)| e.get("sketch").is_some());
+      let only_edges = json!({"edges": edge_picks.iter().map(|(_, e)| (*e).clone()).collect::<Vec<_>>()});
       // each picked edge with the boundary it chains on to (one group per pick)
       let groups: Vec<Vec<EdgeRef>> = if flag("chain") {
-        chained(s, p, chain_boundary)?
+        chained(s, &only_edges, chain_boundary)?
       } else {
-        list(p, "edges", |e| edge_ref_of(s, e))?.into_iter().map(|e| vec![e]).collect()
+        list(&only_edges, "edges", |e| edge_ref_of(s, e))?.into_iter().map(|e| vec![e]).collect()
       };
       let edges: Vec<EdgeRef> = groups.iter().flatten().cloned().collect();
-      let sketch = p.get("sketch").map(|_| req_u32(p, "sketch").map(FeatureId)).transpose()?;
+      let mut sketch = p.get("sketch").map(|_| req_u32(p, "sketch").map(FeatureId)).transpose()?;
+      let mut curves: Vec<CurveId> = Vec::new();
+      for (_, c) in &curve_picks {
+        let sk = FeatureId(req_u32(c, "sketch")?);
+        if sketch.is_some_and(|k| k != sk) {
+          return Err(CmdError::new("a patch's boundary curves come from one sketch"));
+        }
+        sketch = Some(sk);
+        let curve = CurveId(req_u32(c, "curve")?);
+        if s.design.sketch(sk)?.curve(curve).is_none() {
+          return Err(CmdError::new(format!("sketch {} has no curve {}", sk.0, curve.0)));
+        }
+        if !curves.contains(&curve) {
+          curves.push(curve);
+        }
+      }
       if let Some(sk) = sketch {
+        if flag("chain") && !curves.is_empty() {
+          curves = chain_curves(s.design.sketch(sk)?, &curves);
+        }
         s.design.sketch(sk)?;
         s.edit_sketch = None;
       }
@@ -77,12 +101,13 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(a)) => {
           let per: Vec<Continuity> = a.iter().map(continuity).collect::<Result<_, _>>()?;
+          let per: Vec<Continuity> = edge_picks.iter().map(|(i, _)| per.get(*i).copied().unwrap_or_default()).collect();
           groups.iter().enumerate().flat_map(|(i, g)| vec![per.get(i).copied().unwrap_or_default(); g.len()]).collect()
         }
         Some(v) => vec![continuity(v)?; edges.len()],
       };
       let interior = list(p, "interior", |v| patch_rail(s, v))?;
-      add_feature(s, FeatureKind::Patch { edges, sketch, continuity, flip: flag("flip"), interior })
+      add_feature(s, FeatureKind::Patch { edges, sketch, curves, continuity, flip: flag("flip"), interior })
     })(),
     // the two-edge form stays for designs and scripts that use it
     "surface.ruled" if p.get("edges").is_some() => (|| {
@@ -166,6 +191,29 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     })(),
     _ => return None,
   })
+}
+
+/// The sketch curves joined end to end to `seeds` (and the seeds), as Patch's Enable Chaining
+/// takes a whole closed loop from one of its curves.
+fn chain_curves(sk: &fox_sketch::Sketch, seeds: &[CurveId]) -> Vec<CurveId> {
+  let ends = |c: CurveId| {
+    let segs = sk.curve_segs(c);
+    Some([segs.first()?.start(), segs.last()?.end()])
+  };
+  let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-6;
+  let mut chain = seeds.to_vec();
+  loop {
+    let reached: Vec<[f64; 2]> = chain.iter().filter_map(|c| ends(*c)).flatten().collect();
+    let next = sk.curves.iter().find(|c| {
+      !c.reference()
+        && !chain.contains(&c.id)
+        && ends(c.id).is_some_and(|e| e.iter().any(|p| reached.iter().any(|q| near(*p, *q))))
+    });
+    match next {
+      Some(c) => chain.push(c.id),
+      None => return chain,
+    }
+  }
 }
 
 fn curve_ids(p: &Value) -> Vec<CurveId> {

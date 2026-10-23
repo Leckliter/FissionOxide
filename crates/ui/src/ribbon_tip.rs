@@ -106,21 +106,21 @@ pub(crate) fn show(
       return;
     }
     if illustrated {
-      let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), ILLUSTRATION_H), egui::Sense::hover());
-      ui.painter().rect(
-        r,
-        2.0,
-        theme::ILLUSTRATION,
-        Stroke::new(1.0, theme::ILLUSTRATION_FRAME),
-        egui::StrokeKind::Inside,
-      );
-      // until pictures of each command's result exist, its icon painted large
-      let side = ILLUSTRATION_H - 40.0;
-      icons::draw_tinted(ui.painter(), Rect::from_center_size(r.center(), Vec2::splat(side)), icon, tint);
+      illustration(ui, icon, tint);
     }
     text(ui, tips::MORE_HELP, theme::TOOLTIP_TEXT);
   });
   resp
+}
+
+/// The expanded tooltip's illustration: a light grey frame [`ILLUSTRATION_H`] tall across the
+/// panel, holding (until pictures of each command's result exist) the command's icon painted
+/// large.
+pub(crate) fn illustration(ui: &mut egui::Ui, icon: Icon, tint: Tint) {
+  let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), ILLUSTRATION_H), egui::Sense::hover());
+  ui.painter().rect(r, 2.0, theme::ILLUSTRATION, Stroke::new(1.0, theme::ILLUSTRATION_FRAME), egui::StrokeKind::Inside);
+  let side = ILLUSTRATION_H - 40.0;
+  icons::draw_tinted(ui.painter(), Rect::from_center_size(r.center(), Vec2::splat(side)), icon, tint);
 }
 
 #[cfg(test)]

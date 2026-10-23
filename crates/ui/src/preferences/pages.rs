@@ -1,9 +1,10 @@
 //! Fusion's Preferences pages, row by row, in Fusion's order with its labels and defaults.
 //!
 //! Most of Fusion's rows control behaviour FissionOxide doesn't have; they are listed here with
-//! Fusion's default, stored under their own key in `[Preferences]` (see [`stored_key`]) and drawn
-//! greyed with a hover reason. The rows FissionOxide acts on are [`Live`] and drawn by
-//! `preferences::live_row`.
+//! Fusion's default, stored under their own key in `[Preferences]` (see [`stored_key`]), and
+//! drawn greyed with a hover reason or, where Fusion's page is all live (Drawing, Manufacture,
+//! Network, Preview Features), as controls the user can change and that keep their values. The
+//! rows FissionOxide acts on are [`Live`] and drawn by `preferences::live_row`.
 
 use super::Page;
 
@@ -73,6 +74,14 @@ pub(crate) enum Item {
   Choice(&'static str, &'static str, &'static [&'static str]),
   /// A path box with a "..." button beside it: label, Fusion's default.
   Browse(&'static str, &'static str),
+  /// A text box the user can type in though FissionOxide doesn't act on it: label, Fusion's
+  /// default.
+  Entry(&'static str, &'static str),
+  /// A number box with up and down arrows the user can change though FissionOxide doesn't act
+  /// on it: label, Fusion's default (a whole number, or a decimal with its places: "1.00").
+  Number(&'static str, &'static str),
+  /// A [`Item::Browse`] the user can type in or pick a file for: label, Fusion's default.
+  Path(&'static str, &'static str),
   /// Greyed text in the value column, not a control: label, the text.
   Note(&'static str, &'static str),
   /// A [`Item::Toggle`] whose box, while unticked, greys every row after it (Drawing's "Override
@@ -88,6 +97,7 @@ impl Item {
       Item::Live(l, _) | Item::Check(l, _) | Item::Combo(l, _) | Item::Field(l, _) | Item::Spin(l, _) => Some(l),
       Item::Radio(l, ..) | Item::Combos(l, _) => Some(l),
       Item::Toggle(l, _) | Item::Choice(l, ..) | Item::Browse(l, _) | Item::Note(l, _) | Item::Gate(l, _) => Some(l),
+      Item::Entry(l, _) | Item::Number(l, _) | Item::Path(l, _) => Some(l),
     }
   }
 
@@ -97,6 +107,7 @@ impl Item {
       Item::Check(_, v) | Item::Toggle(_, v) | Item::Gate(_, v) => Some(if *v { "1" } else { "0" }.to_string()),
       Item::Combo(_, v) | Item::Field(_, v) | Item::Spin(_, v) | Item::Radio(_, v, _) => Some(v.to_string()),
       Item::Choice(_, v, _) | Item::Browse(_, v) => Some(v.to_string()),
+      Item::Entry(_, v) | Item::Number(_, v) | Item::Path(_, v) => Some(v.to_string()),
       Item::Combos(_, v) => Some(v.join("|")),
       Item::Heading(_) | Item::Live(..) | Item::Note(..) => None,
     }
@@ -220,54 +231,70 @@ pub(crate) fn items(page: Page) -> &'static [Item] {
       Combos("Display configured components in Browser", &["Configuration Name", "None", "None"]),
     ],
     Page::Manufacture => &[
-      Browse("Post processor editor", ""),
-      Browse("NC file editor", ""),
-      Check("Enable Cloud Libraries", false),
-      Combo("Default workspace tab", "Last Used"),
-      Combo("Default operation type", "From Active Tab"),
-      Combo("Default operation tool", "From previous operation"),
+      Path("Post processor editor", ""),
+      Path("NC file editor", ""),
+      Toggle("Enable Cloud Libraries", false),
+      Choice(
+        "Default workspace tab",
+        "Last Used",
+        &["Last Used", "Milling", "Turning", "Additive", "Inspection", "Fabrication", "Utilities"],
+      ),
+      Choice(
+        "Default operation type",
+        "From Active Tab",
+        &["From Active Tab", "Milling", "Turning", "Additive", "Inspection", "Fabrication"],
+      ),
+      Choice("Default operation tool", "From previous operation", &["From previous operation", "None"]),
       Heading("Browser Display Properties"),
-      Check("Show tool number", true),
-      Check("Show tool compensation offsets", false),
-      Check("Show operation machining time", false),
-      Check("Show tool description", false),
-      Check("Show setup work offset and spindle", false),
-      Check("Show cycle type", true),
-      Check("Show manual NC", true),
-      Check("Show pattern type", true),
-      Check("Highlight toolpaths in canvas", true),
-      Check("Show toolpath when editing", false),
-      Check("Show toolpaths in NC Program", false),
+      Toggle("Show tool number", true),
+      Toggle("Show tool compensation offsets", false),
+      Toggle("Show operation machining time", false),
+      Toggle("Show tool description", false),
+      Toggle("Show setup work offset and spindle", false),
+      Toggle("Show cycle type", true),
+      Toggle("Show manual NC", true),
+      Toggle("Show pattern type", true),
+      Toggle("Highlight toolpaths in canvas", true),
+      Toggle("Show toolpath when editing", false),
+      Toggle("Show toolpaths in NC Program", false),
       Heading("Prompts"),
-      Check("Confirm generation when already valid", true),
-      Check("Automatically generate toolpath on operation change", true),
-      Check("Show overridden parameters after reference document update", true),
-      Check("Show the Save As dialog when posting from NC Programs", false),
+      Toggle("Confirm generation when already valid", true),
+      Toggle("Automatically generate toolpath on operation change", true),
+      Toggle("Show overridden parameters after reference document update", true),
+      Toggle("Show the Save As dialog when posting from NC Programs", false),
       Heading("Additive"),
-      Check("Generate Additive Arrange on creation or edit", true),
-      Check("Generate Supports on creation or edit", true),
-      Check("Generate Optimized Orientations on creation or edit", true),
-      Check("Generate Additive Toolpath on Setup creation", false),
-      Check("Generate Interference Analysis on creation or edit", true),
+      Toggle("Generate Additive Arrange on creation or edit", true),
+      Toggle("Generate Supports on creation or edit", true),
+      Toggle("Generate Optimized Orientations on creation or edit", true),
+      Toggle("Generate Additive Toolpath on Setup creation", false),
+      Toggle("Generate Interference Analysis on creation or edit", true),
       Heading("Inspection Results"),
-      Check("Use project-to-CAD calculation", true),
-      Spin("Projection search distance (mm)", "1.00"),
-      Combo("Results display type", "Cylinder"),
+      Toggle("Use project-to-CAD calculation", true),
+      Number("Projection search distance (mm)", "1.00"),
+      Choice("Results display type", "Cylinder", &["Cylinder", "Cone", "Sphere"]),
       Heading("Colors"),
-      Combo("Tolerance Colors (above upper tolerance / below lower tolerance)", "Blue (above) / Red (below) Default"),
+      Choice(
+        "Tolerance Colors (above upper tolerance / below lower tolerance)",
+        "Blue (above) / Red (below) Default",
+        &["Blue (above) / Red (below) Default", "Red (above) / Blue (below)"],
+      ),
       Heading("Tool Library"),
-      Check("Enable logging", false),
-      Check("Reset 3D tool preview", false),
-      Check("Show validation errors and warnings in tool list", false),
+      Toggle("Enable logging", false),
+      Toggle("Reset 3D tool preview", false),
+      Toggle("Show validation errors and warnings in tool list", false),
       Heading("Manufacturing Model"),
-      Check("Enable component sources", false),
+      Toggle("Enable component sources", false),
       Heading("Turning"),
-      Check("Diameter Programming", false),
+      Toggle("Diameter Programming", false),
       Heading("IPS and Remaining Stock"),
-      Combo("Processing Mode", "Standard (computer processor)"),
-      Check("In-Process Stock - Mesh Check Safety", true),
+      Choice(
+        "Processing Mode",
+        "Standard (computer processor)",
+        &["Standard (computer processor)", "Accelerated (graphics processor)"],
+      ),
+      Toggle("In-Process Stock - Mesh Check Safety", true),
       Heading("CAM Data"),
-      Check("Enable CAM data import", true),
+      Toggle("Enable CAM data import", true),
     ],
     Page::ManufactureOptional => &[
       Check("Automatically get latest Posts, Machines and Print Settings", true),
@@ -407,10 +434,18 @@ pub(crate) fn items(page: Page) -> &'static [Item] {
       Check("Disable advanced render effect", false),
     ],
     Page::Network => &[
-      Combo("Windows network proxy setting", "Automatic"),
-      Field("Proxy Host", ""),
-      Spin("Proxy Port", "0"),
-      Combo("Server Verification", "Warn when accessing through an intermediate server"),
+      Choice("Windows network proxy setting", "Automatic", &["Automatic", "No Proxy", "Manual"]),
+      Entry("Proxy Host", ""),
+      Number("Proxy Port", "0"),
+      Choice(
+        "Server Verification",
+        "Warn when accessing through an intermediate server",
+        &[
+          "Warn when accessing through an intermediate server",
+          "Allow access through an intermediate server",
+          "Block access through an intermediate server",
+        ],
+      ),
     ],
     Page::DataCollection => &[
       Check("Required data collection", true),
@@ -490,6 +525,16 @@ pub(crate) fn items(page: Page) -> &'static [Item] {
     Page::Elec3d => &[Check("Open 3D PCB automatically when an electronics design file is opened", false)],
     // drawn by `preferences::electronics`: swatch grids, two-column lists and tables
     Page::ElecColor | Page::ElecMisc | Page::ElecGrid | Page::ElecDefaults | Page::ElecDrill => &[],
-    Page::DefaultUnits | Page::PreviewFeatures => &[],
+    // drawn by `preferences::preview_features`: the workspace filter, then each section's boxes
+    Page::PreviewFeatures => &[
+      Choice("Workspaces", "All workspaces", &["All workspaces", "General", "Design", "Simulation"]),
+      Heading("General"),
+      Toggle("Enable Close Speedup Experience", true),
+      Heading("Design"),
+      Toggle("Preview Volumetric Modeling Features", false),
+      Heading("Simulation"),
+      Toggle("New Simulation results experience", true),
+    ],
+    Page::DefaultUnits => &[],
   }
 }

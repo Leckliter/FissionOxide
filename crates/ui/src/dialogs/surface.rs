@@ -139,7 +139,8 @@ fn form_cmd(kind: Kind) -> Option<&'static str> {
 
 /// Patch's Interior Rails/Points: while its row is active, what is picked since (an edge not on
 /// the boundary, a sketch curve or point, a vertex) is a rail or point; the boundary keeps the
-/// other edges. Rails no longer selected drop out.
+/// other edges, and the sketch curves that aren't rails (a closed sketch curve bounds the patch,
+/// as in Fusion). Rails no longer selected drop out.
 pub(crate) fn sync_rails(form: &crate::forms::Form, st: &mut crate::forms::State, before: &[Value], s: &Session) {
   let at = |k: &str| form.inputs.iter().position(|x| x.key() == k);
   let (Some(ei), Some(ri)) = (at("edges"), at("interior")) else { return };
@@ -164,6 +165,13 @@ pub(crate) fn sync_rails(form: &crate::forms::Form, st: &mut crate::forms::State
   let rails: Vec<Value> = st.rails.iter().filter_map(edge).collect();
   if let Some(a) = st.values[ei].as_array_mut() {
     a.retain(|v| !rails.contains(v));
+    for sel in &s.selection {
+      if let Sel::SketchCurve { sketch, curve } = *sel
+        && !st.rails.contains(sel)
+      {
+        a.push(json!({"sketch": sketch.0, "curve": curve.0}));
+      }
+    }
   }
   let values: Vec<Value> = st
     .rails
@@ -278,6 +286,18 @@ fn pick_of(s: &Session, x: &Sel) -> Option<Pick> {
     Sel::Feature { feature } if s.model.axes.contains_key(&feature) => Some(Pick::Axis(feature)),
     _ => None,
   }
+}
+
+/// The name of row `k` of Patch's continuity table: "Edges" when grouped, else "Edge<n>" for a
+/// body edge and "Curve <n>" for a sketch curve, each counted on its own (Fusion's "Curve 1").
+fn patch_row_name(picks: &[Value], group: bool, k: usize) -> String {
+  if group {
+    return "Edges".into();
+  }
+  let curve = |v: &Value| v.get("sketch").is_some();
+  let is_curve = picks.get(k).is_some_and(curve);
+  let n = picks.iter().take(k + 1).filter(|v| curve(v) == is_curve).count().max(1);
+  if is_curve { format!("Curve {n}") } else { format!("Edge{n}") }
 }
 
 fn is_line(s: &Session, sketch: FeatureId, curve: u32) -> bool {
@@ -782,12 +802,11 @@ impl Dialog {
       ("surface.patch.form", "continuity") => {
         let group = at("group").and_then(|j| self.form.values[j].as_bool()).unwrap_or(false);
         let n = if group { 1 } else { count(self, "edges") };
+        let picks: Vec<Value> = at("edges").and_then(|j| self.form.values[j].as_array().cloned()).unwrap_or_default();
         let mut list: Vec<Value> = self.form.values[i].as_array().cloned().unwrap_or_default();
         list.resize(n, json!("connected"));
         for (k, v) in list.iter_mut().enumerate() {
-          ui.label(
-            egui::RichText::new(if group { "Edges".to_string() } else { format!("Edge{}", k + 1) }).color(theme::TEXT),
-          );
+          ui.label(egui::RichText::new(patch_row_name(&picks, group, k)).color(theme::TEXT));
           let mut cur: &'static str =
             CONTINUITY.iter().find(|(c, _)| v.as_str() == Some(c)).map_or("connected", |(c, _)| *c);
           if choice::combo(ui, &format!("patch-cont-{k}"), &CONTINUITY, &mut cur, continuity_icon) {
@@ -1365,6 +1384,50 @@ mod tests {
     d.sync_selection(&app.s);
     assert!(d.command().unwrap().1.get("interior").is_none());
     d.cancel(&mut app.s);
+  }
+
+  /// `ui:surface:patch-sketch-boundary`: a closed sketch circle clicked with PATCH open is its
+  /// boundary, listed as "Curve 1" under Boundary Edges; the cap previews and OK lights.
+  #[test]
+  fn patch_takes_a_closed_sketch_circle_as_its_boundary() {
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    let made = app.run("sketch.circle", json!({"center": [0, 0], "radius": 5})).unwrap();
+    let curve = fox_engine::sketch::CurveId(made["curves"][0].as_u64().unwrap() as u32);
+    app.run("sketch.finish", json!({})).unwrap();
+    app.s.selection.clear();
+    let mut d = Dialog::open(&mut app, Kind::Form(&crate::forms::PATCH));
+    assert!(!d.ok_enabled());
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
+    d.sync_selection(&app.s);
+    assert!(d.ok_enabled() && row_shown(&d, "continuity"));
+    let Kind::Form(f) = d.kind else { panic!() };
+    let picks = d.form.values[f.inputs.iter().position(|x| x.key() == "edges").unwrap()].as_array().cloned().unwrap();
+    assert_eq!(picks, [json!({"sketch": sk.0, "curve": curve.0})]);
+    assert_eq!(super::patch_row_name(&picks, false, 0), "Curve 1");
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!(cmd, "surface.patch");
+    assert_eq!(p["edges"], json!([{"sketch": sk.0, "curve": curve.0}]), "{p}");
+    d.preview(&mut app.s);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    let area = app.s.model.bodies.last().unwrap().shape.mass().unwrap().area;
+    assert!((area - std::f64::consts::PI * 25.0).abs() < 0.5, "the circle capped: {area}");
+    assert!(matches!(last_kind(&app), FeatureKind::Patch { curves, .. } if curves == [curve]));
+    // deselected, it leaves the boundary
+    d.withdraw(&mut app.s);
+    app.s.selection.clear();
+    d.sync_selection(&app.s);
+    assert!(!d.ok_enabled());
+    d.cancel(&mut app.s);
+  }
+
+  #[test]
+  fn patch_continuity_rows_count_edges_and_curves_apart() {
+    let picks = [json!({"body": 1, "edge": 3}), json!({"sketch": 2, "curve": 1}), json!({"body": 1, "edge": 4})];
+    let names: Vec<String> = (0..3).map(|k| super::patch_row_name(&picks, false, k)).collect();
+    assert_eq!(names, ["Edge1", "Curve 1", "Edge2"]);
+    assert_eq!(super::patch_row_name(&picks, true, 0), "Edges");
   }
 
   /// Patch draws each picked boundary on the canvas, the whole loop with Enable Chaining on.

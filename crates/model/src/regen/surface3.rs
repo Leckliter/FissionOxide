@@ -83,11 +83,15 @@ impl Ctx<'_> {
         self.new_surface(id, faces)?;
         Ok(None)
       }
-      FeatureKind::Patch { edges, sketch, continuity, flip, interior } => {
+      FeatureKind::Patch { edges, sketch, curves, continuity, flip, interior } => {
         let mut parts = Vec::new();
         if let Some(sk) = sketch {
           let sk = self.state.sketches.get(sk).ok_or("its sketch failed")?.clone();
-          parts.extend(sketch_wires(&sk.plane, &sk.sketch, &[])?.into_iter().map(|w| (w, Continuity::Connected, None)));
+          if curves.iter().any(|c| sk.sketch.curve(*c).is_none()) {
+            return Err("a boundary sketch curve no longer exists".into());
+          }
+          parts
+            .extend(sketch_wires(&sk.plane, &sk.sketch, curves)?.into_iter().map(|w| (w, Continuity::Connected, None)));
         }
         for (i, e) in edges.iter_mut().enumerate() {
           let (bi, info) = self.edge_info(e)?;

@@ -4618,3 +4618,107 @@ fn replace_face_target_takes_a_plane_clicked_in_the_canvas() {
   assert!(h.app.picked_plane.is_none());
   assert_eq!(crate::construction::look(&h.app, plane), crate::origin::Look::Selected);
 }
+
+/// `ui:manufacture:solid-holder-submenu`: MILLING ▸ MANAGE ▸ Solid Holder ▸ Milling Tool
+/// Holder's tooltip shows Fusion's texts at once and, resting on the row, grows with the holder's
+/// picture and the help line; wherever it fits (right of the submenu in a wide window, left of it
+/// in a narrower one) it never covers the submenu, which stays open beside it.
+#[test]
+fn the_milling_tool_holder_tooltip_grows_beside_its_open_submenu() {
+  use crate::{ribbon_tip, tips};
+  for width in [1440.0, 1280.0] {
+    let mut h = Harness::with_width(width);
+    h.app.manufacture = true;
+    h.frame(vec![]);
+    h.frame(vec![]);
+    let all = h.frame_texts(1.0 / 60.0, vec![]);
+    let manage = all.iter().find(|(r, t)| t.starts_with("MANAGE") && r.top() < 140.0).expect("MANAGE").0;
+    h.move_then_click(manage.center());
+    let holder = h.find(vec![], "Solid Holder").expect("the Solid Holder row");
+    let shown = h.rest_rects(holder.center(), 0.5);
+    let entry = shown.iter().find(|(_, t)| t == "Milling Tool Holder").expect("the submenu opens").0;
+    // across to the submenu, then onto its entry
+    h.frame_texts(1.0 / 60.0, vec![Event::PointerMoved(Pos2::new(entry.center().x, holder.center().y))]);
+    let tip = tips::tip(tips::Scope::Manufacture, "Milling Tool Holder").expect("Fusion's texts");
+    let at = |shown: &[(Rect, String)], text: &str| shown.iter().find(|(_, t)| t == text).map(|(r, _)| *r);
+    let early = h.rest_rects(entry.center(), 1.0);
+    assert!(at(&early, tip.line).is_some(), "the description at once ({width})");
+    assert!(at(&early, tips::MORE_HELP).is_none(), "not grown yet ({width})");
+    let shown = h.rest_rects(entry.center(), 2.0);
+    assert!(at(&shown, "Milling Tool Holder").is_some(), "the submenu stays open ({width})");
+    let more = tip.more.split("\n\n").last().unwrap();
+    let help = at(&shown, tips::MORE_HELP).unwrap_or_else(|| panic!("grown ({width}): {shown:?}"));
+    let last = at(&shown, "Not in FissionOxide yet").or(at(&shown, more)).unwrap();
+    assert!(help.top() > last.bottom() + ribbon_tip::ILLUSTRATION_H, "the picture above the help line ({width})");
+    // the tooltip lies wholly beside the submenu (whose rows start 28 px left of their text)
+    let line = at(&shown, tip.line).unwrap();
+    let submenu = (entry.left() - 28.0, entry.right());
+    // (the panel's text starts 10 px inside it and the panel is 300 px wide)
+    assert!(
+      line.left() > submenu.1 || line.left() + 290.0 < submenu.0,
+      "beside the submenu ({width}): {line:?} vs {submenu:?}"
+    );
+  }
+}
+
+/// `ui:chrome:preferences-inert-controls-greyed`: the Manufacture, Network and Preview Features
+/// pages' controls are live, as Fusion's: a click changes them and the value is kept in the
+/// preferences (under the row's own key) on OK.
+#[test]
+fn manufacture_network_and_preview_features_preferences_are_live() {
+  use crate::preferences::{Page, pages};
+  let mut h = Harness::new();
+  crate::preferences::open(&mut h.app);
+  let rect_of = |h: &Harness, key: &str| h.ctx.data(|d| d.get_temp::<Rect>(crate::preferences::combo_rect_id(key)));
+  // Network: Proxy Port's up arrow counts up, Proxy Host takes typing
+  h.app.preferences.page = Page::Network;
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let port = pages::stored_key(Page::Network, "", "Proxy Port");
+  let r = rect_of(&h, &port).expect("Proxy Port is drawn");
+  h.move_then_click(Pos2::new(r.right() - 7.0, r.top() + 4.0));
+  assert_eq!(h.app.preferences.draft.stored.get(&port).map(String::as_str), Some("1"), "the up arrow counts up");
+  let host = pages::stored_key(Page::Network, "", "Proxy Host");
+  let r = rect_of(&h, &host).expect("Proxy Host is a live box");
+  h.move_then_click(r.center());
+  h.frame(typing("proxy.local"));
+  h.frame(vec![]);
+  assert_eq!(h.app.preferences.draft.stored.get(&host).map(String::as_str), Some("proxy.local"));
+  // Manufacture: a check box ticks, a drop-down opens with choices
+  h.app.preferences.page = Page::Manufacture;
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let cloud = h.find(vec![], "Enable Cloud Libraries").expect("the row");
+  let tab = pages::stored_key(Page::Manufacture, "", "Default workspace tab");
+  let combo = rect_of(&h, &tab).expect("Default workspace tab is a live drop-down");
+  h.move_then_click(Pos2::new(combo.left() + 8.0, cloud.center().y));
+  let key = pages::stored_key(Page::Manufacture, "", "Enable Cloud Libraries");
+  assert_eq!(h.app.preferences.draft.stored.get(&key).map(String::as_str), Some("1"), "ticked");
+  h.move_then_click(combo.center());
+  let milling = h.find(vec![], "Milling").expect("the drop-down's choices");
+  h.move_then_click(milling.center());
+  assert_eq!(h.app.preferences.draft.stored.get(&tab).map(String::as_str), Some("Milling"));
+  // Preview Features: the workspace filter narrows the list, and the boxes tick
+  h.app.preferences.page = Page::PreviewFeatures;
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let key = pages::stored_key(Page::PreviewFeatures, "Design", "Preview Volumetric Modeling Features");
+  let r = rect_of(&h, &key).expect("the Design feature's box is live");
+  h.move_then_click(r.center());
+  assert_eq!(h.app.preferences.draft.stored.get(&key).map(String::as_str), Some("1"), "turned on");
+  let filter = pages::stored_key(Page::PreviewFeatures, "", "Workspaces");
+  let r = rect_of(&h, &filter).expect("the workspace filter is a live drop-down");
+  h.move_then_click(r.center());
+  let sim =
+    h.frame_texts(1.0 / 60.0, vec![]).into_iter().filter(|(_, t)| t == "Simulation").map(|(r, _)| r).next_back();
+  h.move_then_click(sim.expect("Simulation in the filter").center());
+  assert_eq!(h.app.preferences.draft.stored.get(&filter).map(String::as_str), Some("Simulation"));
+  assert!(h.find(vec![], "Preview Volumetric Modeling Features").is_none(), "only Simulation's features show");
+  assert!(h.find(vec![], "New Simulation results experience").is_some());
+  // OK keeps them
+  crate::preferences::commit(&mut h.app, None);
+  assert_eq!(h.app.preferences.values.stored.get(&port).map(String::as_str), Some("1"));
+}

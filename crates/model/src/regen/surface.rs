@@ -408,6 +408,7 @@ mod tests {
     d.add_feature(FeatureKind::Patch {
       edges: vec![],
       sketch: Some(s),
+      curves: vec![],
       continuity: vec![],
       flip: false,
       interior: vec![],
@@ -509,6 +510,7 @@ mod tests {
       d.add_feature(FeatureKind::Patch {
         edges: vec![],
         sketch: Some(s),
+        curves: vec![],
         continuity: vec![],
         flip: false,
         interior: vec![],

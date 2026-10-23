@@ -109,6 +109,42 @@ fn patch_chaining_follows_an_open_boundary() {
   assert!(matches!(k, fox_model::FeatureKind::Patch { edges, .. } if edges.len() == 4), "{k:?}");
 }
 
+/// `ui:surface:patch-sketch-boundary`: a closed sketch curve picked as a boundary caps it, and
+/// with chaining one line of a rectangle brings its whole loop.
+#[test]
+fn patch_takes_closed_sketch_curves_as_its_boundary() {
+  // a circle and, apart from it, a 10 x 10 square: (sketch, circle, one of the square's lines)
+  let drawn = |s: &mut Session| {
+    run(s, "sketch.create", json!({"plane": "xy"}));
+    let sk = s.edit_sketch.unwrap().0;
+    let circle = run(s, "sketch.circle", json!({"center": [0, 0], "radius": 5}))["curves"][0].as_u64().unwrap();
+    run(s, "sketch.rect", json!({"corner1": [20, 0], "corner2": [30, 10]}));
+    run(s, "sketch.finish", json!({}));
+    let curves = &s.design.sketch(fox_model::FeatureId(sk)).unwrap().curves;
+    let line = curves.iter().map(|c| u64::from(c.id.0)).find(|c| *c != circle).unwrap();
+    (sk, circle, line)
+  };
+  let mut s = Session::default();
+  let (sk, circle, line) = drawn(&mut s);
+  run(&mut s, "surface.patch", json!({"edges": [{"sketch": sk, "curve": circle}], "chain": true}));
+  assert!(close(mass(&s).area, PI * 25.0, 0.5), "only the circle is capped: {}", mass(&s).area);
+  let fid = s.design.features.last().unwrap().id;
+  let k = &s.design.feature(fid).unwrap().kind;
+  assert!(matches!(k, fox_model::FeatureKind::Patch { curves, .. } if curves.len() == 1), "{k:?}");
+  // one of the square's lines, chained: the whole square
+  let mut s = Session::default();
+  drawn(&mut s);
+  run(&mut s, "surface.patch", json!({"edges": [{"sketch": sk, "curve": line}], "chain": true}));
+  assert!(close(mass(&s).area, 100.0, 1e-3), "{}", mass(&s).area);
+  // curves of two sketches can't make one patch
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let other = s.edit_sketch.unwrap().0;
+  let c2 = run(&mut s, "sketch.circle", json!({"center": [50, 0], "radius": 2}))["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.finish", json!({}));
+  let both = json!({"edges": [{"sketch": sk, "curve": circle}, {"sketch": other, "curve": c2}]});
+  assert!(s.execute("surface.patch", &both).is_err());
+}
+
 #[test]
 fn ruled_from_a_strip_edge_normal_and_tangent() {
   for (kind, z) in [("normal", 5.0), ("tangent", 9.0)] {

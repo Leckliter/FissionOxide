@@ -2263,23 +2263,39 @@ pub(crate) fn options_dots(p: &egui::Painter, c: egui::Pos2, color: Color32) {
 
 /// A menu row's tooltip, as in Fusion: a dark panel with white text to the right of the open
 /// menu, level with the row, holding the command's description and instructions as paragraphs
-/// with a blank line between them. No title and no shortcut line: the row shows both.
+/// with a blank line between them. No title and no shortcut line: the row shows both. A command
+/// with Fusion's illustration (see [`tips::illustrated`]) grows, after resting on the row for
+/// [`crate::ribbon_tip::EXPAND_SECS`], with the picture and "Press Ctrl+/ for more help." under
+/// it, as the ribbon's tooltips do.
 fn menu_tip(resp: egui::Response, scope: Scope, it: &Item) -> egui::Response {
   let paragraphs = tips::menu_paragraphs(scope, it.tip_label());
   if paragraphs.is_empty() && it.cmd.is_some() {
     return resp;
   }
+  // Fusion's own menu texts (the sketch constraints) end with the help line and never grow
+  let illustrated = tips::illustrated(scope, it.tip_label()) && paragraphs.last() != Some(&tips::MORE_HELP);
+  let rested = crate::ribbon_tip::rested(&resp);
   let style = resp.ctx.global_style();
-  // the row spans the menu's content; its frame (the menu margin and a 1 px stroke) lies beyond
-  let edge = resp.rect.right() + f32::from(style.spacing.menu_margin.right) + 1.0;
-  let anchor = Rect::from_min_max(pos2(edge, resp.rect.top()), pos2(edge, resp.rect.bottom()));
+  // the row spans the menu's content; its frame (the menu margin and a 1 px stroke) lies beyond.
+  // The anchor is the whole menu's width, so a tooltip with no room on the right goes left of
+  // the menu rather than over it (and over the pointer, which would close a submenu)
+  let right = resp.rect.right() + f32::from(style.spacing.menu_margin.right) + 1.0;
+  let left = resp.rect.left() - f32::from(style.spacing.menu_margin.left) - 1.0;
+  let anchor = Rect::from_min_max(pos2(left, resp.rect.top()), pos2(right, resp.rect.bottom()));
   let frame = egui::Frame::new()
     .fill(theme::TOOLTIP)
     .corner_radius(egui::CornerRadius::same(4))
     .inner_margin(egui::Margin::symmetric(10, 8))
     .shadow(style.visuals.popup_shadow);
   let mut tooltip = egui::Tooltip::for_enabled(&resp);
-  tooltip.popup = tooltip.popup.anchor(anchor).align(egui::RectAlign::RIGHT_START).gap(6.0).width(300.0).frame(frame);
+  tooltip.popup = tooltip
+    .popup
+    .anchor(anchor)
+    .align(egui::RectAlign::RIGHT_START)
+    .align_alternatives(&[egui::RectAlign::LEFT_START])
+    .gap(6.0)
+    .width(300.0)
+    .frame(frame);
   tooltip.show(|ui| {
     ui.set_max_width(300.0);
     ui.spacing_mut().item_spacing.y = 12.0;
@@ -2290,6 +2306,16 @@ fn menu_tip(resp: egui::Response, scope: Scope, it: &Item) -> egui::Response {
     if it.cmd.is_none() {
       ui.add(egui::Label::new(RichText::new("Not in FissionOxide yet").color(theme::MUTED)).wrap());
     }
+    if !illustrated {
+      return;
+    }
+    let expand = crate::ribbon_tip::EXPAND_SECS;
+    if rested < expand {
+      ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(expand - rested));
+      return;
+    }
+    crate::ribbon_tip::illustration(ui, it.icon, it.tint);
+    ui.add(egui::Label::new(tips::MORE_HELP).wrap());
   });
   resp
 }
