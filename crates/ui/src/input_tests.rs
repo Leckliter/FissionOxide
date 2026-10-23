@@ -3373,13 +3373,14 @@ fn the_ground_plane_offset_box_takes_a_typed_distance() {
   let mut h = Harness::new();
   h.app.display.open_ground_offset(h.app.s.design.units);
   // Adaptive off: the Offset row shows its value in the design's unit
+  h.frame(vec![]); // the dialog shows from its second frame
   let adaptive = h.find(vec![], "Adaptive").expect("the dialog is open");
-  h.move_then_click(adaptive.right_center() + vec2(110.0, 0.0));
+  h.move_then_click(adaptive.left_center() + vec2(96.0 + 10.0 + 8.0, 0.0));
   assert_eq!(h.app.display.ground_offset_form.as_ref().map(|f| f.adaptive), Some(false));
   assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "0.00 mm");
   // a click goes into the box (no nudged value) and typing replaces its text
   let offset = h.find(vec![], "Offset").expect("the Offset row");
-  h.move_then_click(offset.right_center() + vec2(110.0, 0.0));
+  h.move_then_click(offset.left_center() + vec2(96.0 + 10.0 + 60.0, 0.0));
   assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "0.00 mm", "a click changes nothing");
   let mut ev = vec![Event::Key {
     key: egui::Key::A,

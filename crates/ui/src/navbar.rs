@@ -836,12 +836,12 @@ mod tests {
     let ctx = egui::Context::default();
     crate::theme::apply(&ctx);
     let mut app = App::with_session(fox_engine::Session::default());
-    let mut time = 0.0;
-    let mut frame = |app: &mut App, grid: bool, events: Vec<egui::Event>| {
-      time += 1.0 / 60.0;
+    let time = std::cell::Cell::new(0.0);
+    let frame = |app: &mut App, grid: bool, events: Vec<egui::Event>| {
+      time.set(time.get() + 1.0 / 60.0);
       let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1440.0, 900.0))),
-        time: Some(time),
+        time: Some(time.get()),
         events,
         ..Default::default()
       };
@@ -861,32 +861,37 @@ mod tests {
       out.drop_without_applying_deltas();
       (t, button.unwrap())
     };
-    let click = |p: egui::Pos2| {
-      let b = |pressed| egui::Event::PointerButton {
-        pos: p,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: Default::default(),
-      };
-      vec![egui::Event::PointerMoved(p), b(true), b(false)]
+    let button = |p: egui::Pos2, pressed| egui::Event::PointerButton {
+      pos: p,
+      button: egui::PointerButton::Primary,
+      pressed,
+      modifiers: Default::default(),
+    };
+    let click = |app: &mut App, grid: bool, p: egui::Pos2| {
+      frame(app, grid, vec![egui::Event::PointerMoved(p)]);
+      frame(app, grid, vec![button(p, true)]);
+      frame(app, grid, vec![button(p, false)])
     };
     // Grid and Snaps
+    frame(&mut app, true, vec![]);
     let (_, (b, id)) = frame(&mut app, true, vec![]);
-    frame(&mut app, true, click(b.center()));
+    click(&mut app, true, b.center());
     for _ in 0..4 {
       frame(&mut app, true, vec![]);
     }
     let r = ctx.memory(|m| m.area_rect(id)).expect("the grid menu is open");
     assert!(r.width() < 240.0, "the grid menu is {} px wide", r.width());
     // Display Settings ▸ Visual Style
+    egui::Popup::close_all(&ctx);
     let (_, (b, _)) = frame(&mut app, false, vec![egui::Event::PointerMoved(egui::pos2(10.0, 10.0))]);
-    frame(&mut app, false, click(b.center()));
+    click(&mut app, false, b.center());
+    frame(&mut app, false, vec![]);
     let (t, _) = frame(&mut app, false, vec![]);
     let row = t.iter().find(|(_, s)| s == "Visual Style").expect("the Display Settings menu is open").0;
     frame(&mut app, false, vec![egui::Event::PointerMoved(row.center())]);
     let mut t = Vec::new();
     for _ in 0..30 {
-      time += 0.05;
+      time.set(time.get() + 0.05);
       t = frame(&mut app, false, vec![]).0;
     }
     let at = |s: &str| t.iter().find(|(_, x)| x == s).unwrap_or_else(|| panic!("{s} not drawn: {t:?}")).0;

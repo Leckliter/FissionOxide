@@ -7158,17 +7158,21 @@ mod tests {
       frame(&mut app);
     }
     assert_eq!(app.tstate.measured, Some(10.0), "MEASURE has a result");
-    app.dim_edit = app.dim_edit.take().or(Some((0, "d1 * 2".into(), Pos2::new(200.0, 200.0))));
+    assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
     close(&mut app);
     assert_eq!(app.dim_edit.as_ref().unwrap().1, "10 mm");
     assert!(!app.tstate.measure_fill && app.tstate.measured.is_none());
     // two sketch lines: the distance between them
-    measure(&mut app, true, vec![Sel::SketchCurve { sketch: sk, curve: line }, Sel::SketchCurve { sketch: sk, curve: other }]);
+    measure(
+      &mut app,
+      true,
+      vec![Sel::SketchCurve { sketch: sk, curve: line }, Sel::SketchCurve { sketch: sk, curve: other }],
+    );
     for _ in 0..3 {
       frame(&mut app);
     }
     assert!(app.tstate.measured.is_some_and(|d| (d - 4.0).abs() < 1e-6), "{:?}", app.tstate.measured);
-    app.dim_edit = app.dim_edit.take().or(Some((0, "d1 * 2".into(), Pos2::new(200.0, 200.0))));
+    assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
     close(&mut app);
     assert_eq!(app.dim_edit.as_ref().unwrap().1, "4 mm");
     // Measure from the toolbar doesn't touch it
@@ -7176,7 +7180,7 @@ mod tests {
     for _ in 0..3 {
       frame(&mut app);
     }
-    app.dim_edit = app.dim_edit.take().or(Some((0, "d1 * 2".into(), Pos2::new(200.0, 200.0))));
+    assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
     close(&mut app);
     assert_eq!(app.dim_edit.as_ref().unwrap().1, "d1 * 2");
   }

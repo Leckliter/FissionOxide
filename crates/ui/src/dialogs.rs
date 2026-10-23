@@ -5204,14 +5204,8 @@ fn measure_picks(app: &App) -> (Vec<Value>, bool) {
         | Sel::SketchPoint { .. }
     )
   };
-  let picks: Vec<Value> = app
-    .s
-    .selection
-    .iter()
-    .filter(|x| measurable(x))
-    .take(2)
-    .filter_map(|x| serde_json::to_value(x).ok())
-    .collect();
+  let picks: Vec<Value> =
+    app.s.selection.iter().filter(|x| measurable(x)).take(2).filter_map(|x| serde_json::to_value(x).ok()).collect();
   if !picks.is_empty() {
     return (picks, false);
   }

@@ -184,12 +184,7 @@ fn sketch_curve_entity(s: &Session, v: &Value) -> Result<Entity, CmdError> {
   }
   let at = |k: &str| req_vec3(&info, k).ok().map(DVec3::from);
   let dir = if line { at("start").zip(at("end")).and_then(|(a, b)| (b - a).try_normalize()) } else { None };
-  Ok(Entity {
-    shape: Shape::path(&plane, &segs)?,
-    dir,
-    kind: if line { "line" } else { "edge" },
-    props,
-  })
+  Ok(Entity { shape: Shape::path(&plane, &segs)?, dir, kind: if line { "line" } else { "edge" }, props })
 }
 
 /// Measures one entity (its properties) or two (minimum distance, closest points, angle).
