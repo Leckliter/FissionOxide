@@ -1,0 +1,9 @@
+{
+  "ui:canvas:command-pick-colors": "ui-reverify-canvas-1",
+  "ui:canvas:create-sketch-plane-grid-preview": "ui-reverify-canvas-1",
+  "ui:manip:draft-drag-hang": "ui-reverify-canvas-1",
+  "ui:timeline:error-dialog": "ui-reverify-canvas-1",
+  "ui:navbar:visual-style-list": "ui-reverify-navbar-1",
+  "ui:navbar:ground-offset-applied": "ui-reverify-navbar-1",
+  "ui:navbar:popup-width": "ui-reverify-navbar-1"
+}
