@@ -4084,3 +4084,96 @@ fn a_sketch_key_in_3d_runs_its_tool_once_the_plane_is_clicked() {
   assert!(h.app.s.edit_sketch.is_some());
   assert_eq!(h.app.tool, Tool::Circle, "C runs in the sketch on the browser's plane");
 }
+
+/// `ui:chrome:preferences-unrecorded-pages`: the pages Fusion's rows were recorded for show them.
+#[test]
+fn the_recorded_preferences_pages_show_fusions_rows() {
+  use crate::preferences::Page;
+  let mut h = Harness::new();
+  let pages: [(Page, &[&str]); 11] = [
+    (Page::Manufacture, &["Post processor editor", "...", "Enable Cloud Libraries", "Show tool number"]),
+    (
+      Page::ManufactureOptional,
+      &["Automatically get latest Posts, Machines and Print Settings", "Flow (Old)", "Legacy Drilling"],
+    ),
+    (Page::ElecColor, &["Theme", "Board", "Grid Dots", "Indicator", "Dark", "Light", "Reset to default colors"]),
+    (Page::ElecMisc, &["Beep", "Check connects", "Min. visible text size", "pixel", "Snap length"]),
+    (Page::ElecGrid, &["Schematic & Symbols", "Display Grid for Schematic", "Size", "inch", "Finest"]),
+    (Page::ElecDefaults, &["Design Layers", "Display layer IDs", "Traces/Lines", "Width", "Default", "Value", "Unit"]),
+    (Page::ElecDrill, &["Symbol Assignments", "#", "Symbol", "0.2", "7.9", "Symbol Appearance", "80 mil"]),
+    (Page::ElecDirectory, &["Directory for Library", "Use Library.io for Design Rules by default"]),
+    (Page::Elec3d, &["Open 3D PCB automatically when an electronics design file is opened"]),
+    (Page::Drawing, &["Standard", "ISO", "Edge", "Override or Restore Format Defaults Below", "Include Mesh Bodies"]),
+    (Page::PreviewFeatures, &["General", "Enable Close Speedup Experience", "Design", "Simulation"]),
+  ];
+  for (page, rows) in pages {
+    h.app.preferences.page = page;
+    crate::preferences::open(&mut h.app);
+    for _ in 0..3 {
+      h.frame(vec![]);
+    }
+    let shown = h.frame_texts(1.0 / 60.0, vec![]);
+    for t in rows {
+      assert!(shown.iter().any(|(_, s)| s == t), "{t:?} on {}", page.label());
+    }
+    assert!(shown.iter().any(|(_, s)| s == page.title()), "{}'s header", page.label());
+    crate::preferences::cancel(&mut h.app);
+    h.frame(vec![]);
+  }
+}
+
+/// Drawing's top rows can be changed; the rows under "Override or Restore Format Defaults Below"
+/// stay greyed until its box is ticked, and Include Mesh / Surface Bodies start ticked.
+#[test]
+fn drawing_preferences_open_up_under_the_override_box() {
+  let mut h = Harness::new();
+  h.app.preferences.page = crate::preferences::Page::Drawing;
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let rect = |h: &Harness, key: &str| {
+    h.ctx.data(|d| d.get_temp::<Rect>(crate::preferences::combo_rect_id(key))).expect("the drop-down is drawn")
+  };
+  // Standard is live: pick ASME
+  let standard = rect(&h, "Fusion.Drawing.Standard");
+  h.move_then_click(standard.center());
+  let asme = h.find(vec![], "ASME").expect("Standard's list opens");
+  h.move_then_click(asme.center());
+  assert_eq!(h.app.preferences.draft.stored.get("Fusion.Drawing.Standard").map(String::as_str), Some("ASME"));
+  // Projection Angle is greyed until the override box is ticked
+  let angle = rect(&h, "Fusion.Drawing.ProjectionAngle");
+  h.move_then_click(angle.center());
+  assert!(h.find(vec![], "Third Angle").is_none(), "greyed: no list");
+  h.app.preferences.draft.stored.insert("Fusion.Drawing.OverrideorRestoreFormatDefaultsBelow".into(), "1".into());
+  h.frame(vec![]);
+  h.frame(vec![]);
+  let angle = rect(&h, "Fusion.Drawing.ProjectionAngle");
+  h.move_then_click(angle.center());
+  let third = h.find(vec![], "Third Angle").expect("the list opens once the override is ticked");
+  h.move_then_click(third.center());
+  assert_eq!(
+    h.app.preferences.draft.stored.get("Fusion.Drawing.ProjectionAngle").map(String::as_str),
+    Some("Third Angle")
+  );
+}
+
+/// `ui:chrome:unit-display-hide-trailing-zeroes`: the Unit and Value Display page's Hide trailing
+/// zeroes box is live and its minimum precision reads Fusion's "4.00".
+#[test]
+fn hide_trailing_zeroes_is_live_on_unit_display() {
+  let mut h = Harness::new();
+  h.app.preferences.page = crate::preferences::Page::UnitDisplay;
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let shown = h.frame_texts(1.0 / 60.0, vec![]);
+  assert!(shown.iter().any(|(_, s)| s == "4.00"), "minimum precision reads 4.00");
+  let r = h.ctx.data(|d| d.get_temp::<Rect>(crate::preferences::combo_rect_id("prefs-min-precision"))).unwrap();
+  h.move_then_click(r.center());
+  let one = h.find(vec![], "4.0").expect("the minimum precision list opens");
+  h.move_then_click(one.center());
+  assert_eq!(h.app.preferences.draft.min_precision, 1);
+  assert!(h.app.preferences.draft.hide_zeroes);
+}

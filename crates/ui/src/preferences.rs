@@ -13,6 +13,7 @@ use fox_engine::rendering::raytrace::{Background, Environment};
 use crate::viewcube::CubeSize;
 use crate::{App, theme};
 
+mod electronics;
 mod pages;
 use pages::{Item, Live};
 
@@ -276,6 +277,12 @@ pub fn precision_label(decimals: u8) -> String {
   if decimals == 0 { "0".into() } else { format!("0.{}", &"123456789"[..decimals as usize]) }
 }
 
+/// A minimum precision as Fusion's "Minimum precision when hiding trailing zeroes" drop-down shows
+/// it: "4.00" for two decimals.
+pub fn min_precision_label(decimals: u8) -> String {
+  if decimals == 0 { "4".into() } else { format!("4.{}", "0".repeat(decimals.into())) }
+}
+
 /// Render → the Scene Settings a new design starts with.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderDefaults {
@@ -377,12 +384,16 @@ pub struct Prefs {
   /// Graphics → Canvas Effects: the Display Settings effects the canvas starts with.
   pub effects: Effects,
   /// Unit and Value Display → General precision: the decimals lengths are shown with; `None`
-  /// (the drop-down reads Fusion's default, [`DEFAULT_PRECISION`]) shows each unit with its
-  /// display precision (two decimals in millimetres, three in inches; see
-  /// `ui:chrome:unit-display-hide-trailing-zeroes`).
+  /// is Fusion's default, [`DEFAULT_PRECISION`].
   pub general_precision: Option<u8>,
   /// Unit and Value Display → Angular precision: the decimals angles are shown with.
   pub angular_precision: u8,
+  /// Unit and Value Display → Hide trailing zeroes: lengths drop trailing zeroes down to
+  /// [`Prefs::min_precision`].
+  pub hide_zeroes: bool,
+  /// Unit and Value Display → Minimum precision when hiding trailing zeroes, in decimals (two,
+  /// Fusion's "4.00").
+  pub min_precision: u8,
   /// Render → the Scene Settings of new designs.
   pub render: RenderDefaults,
   /// Material → Physical Material Name: what new designs' root component is made of.
@@ -422,6 +433,8 @@ impl Default for Prefs {
       effects: crate::navbar::default_effects(),
       general_precision: None,
       angular_precision: 1,
+      hide_zeroes: true,
+      min_precision: 2,
       render: RenderDefaults::default(),
       material: "Steel".into(),
       stored: BTreeMap::new(),
@@ -479,6 +492,8 @@ impl Prefs {
       ("GraphicsDriver", self.driver.key().to_string()),
       ("GeneralPrecision", self.general_precision.map_or("auto".to_string(), |d| d.to_string())),
       ("AngularPrecision", self.angular_precision.to_string()),
+      ("HideTrailingZeroes", flag(self.hide_zeroes)),
+      ("MinimumPrecision", self.min_precision.to_string()),
       ("RenderEnvironment", self.render.environment.clone()),
       ("RenderBrightness", self.render.brightness.to_string()),
       ("RenderBackground", (if self.render.solid_background { "color" } else { "environment" }).to_string()),
@@ -536,6 +551,10 @@ impl Prefs {
         }
         "angularprecision" => {
           p.angular_precision = v.trim().parse::<u8>().ok().filter(|d| PRECISIONS.contains(d)).unwrap_or(1);
+        }
+        "hidetrailingzeroes" => p.hide_zeroes = b.unwrap_or(p.hide_zeroes),
+        "minimumprecision" => {
+          p.min_precision = v.trim().parse::<u8>().ok().filter(|d| PRECISIONS.contains(d)).unwrap_or(2);
         }
         "renderenvironment" => {
           if let Some(l) = crate::render_panels::LIBRARY.iter().find(|l| l.0.eq_ignore_ascii_case(v.trim())) {
@@ -818,6 +837,16 @@ impl Page {
       Page::DesignAssembly => "Preferences for Assembly and Hybrid Designs",
       Page::DesignConfigurations => "Preferences that control Configurations behavior",
       Page::Manufacture => "Preferences controlling behavior in the Manufacture workspace",
+      Page::ManufactureOptional => {
+        "Preferences that allow optional capabilities in Manufacturing to be disabled if necessary"
+      }
+      Page::ElecColor => "Color Preferences for Electronics",
+      Page::ElecMisc => "Misc Preferences for Electronics",
+      Page::ElecGrid => "Preferences that set default grid settings and units used in new electronics designs",
+      Page::ElecDefaults => "Preferences that set defaults values used in electronics command input",
+      Page::ElecDrill => "Preferences that control drill symbol defaults used in new electronics designs",
+      Page::ElecDirectory => "Preferences that sets directories used in electronics documents",
+      Page::Elec3d => "3D PCB Preferences for Electronics",
       Page::Electronics => "Preferences for Electronics",
       Page::Render => "Preferences that set Render Scene Settings defaults for newly created designs",
       Page::Drawing => "Preferences for the Drawing and Drawing Template \"From Scratch\" option",
@@ -947,8 +976,9 @@ fn take_effect(app: &mut App, ctx: Option<&egui::Context>, before: Option<&Prefs
   if changed(before, &p, |p| p.effects) {
     app.effects = p.effects;
   }
-  if changed(before, &p, |p| (p.general_precision, p.angular_precision)) {
-    crate::units::set_precision(p.general_precision, p.angular_precision);
+  if changed(before, &p, |p| (p.general_precision, p.angular_precision, p.hide_zeroes, p.min_precision)) {
+    let general = p.general_precision.unwrap_or(DEFAULT_PRECISION);
+    crate::units::set_precision(general, p.angular_precision, p.hide_zeroes.then_some(p.min_precision));
   }
   if let Some(ctx) = ctx {
     if changed(before, &p, |p| p.theme) {
@@ -1354,15 +1384,8 @@ fn spinner(
     ui.spacing_mut().item_spacing.x = 0.0;
     let mut r = ui.add_sized(vec2(FIELD_W - 14.0, ROW_H), egui::DragValue::new(value).range(range).speed(0.1));
     let (rect, arrows) = ui.allocate_exact_size(vec2(14.0, ROW_H), Sense::click());
-    let (up, down) = (rect.split_top_bottom_at_fraction(0.5).0, rect.split_top_bottom_at_fraction(0.5).1);
-    let ink = if enabled { theme::ICON_INK } else { theme::MUTED };
-    let painter = ui.painter();
-    painter.rect_stroke(rect, 1.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-    for (half, sign) in [(up, -1.0), (down, 1.0)] {
-      let c = half.center();
-      let pts = vec![c + vec2(-3.0, -1.5 * sign), c + vec2(3.0, -1.5 * sign), c + vec2(0.0, 1.5 * sign)];
-      painter.add(egui::Shape::convex_polygon(pts, ink, Stroke::NONE));
-    }
+    let up = rect.split_top_bottom_at_fraction(0.5).0;
+    paint_spin_arrows(ui.painter(), rect, if enabled { theme::ICON_INK } else { theme::MUTED });
     if arrows.clicked()
       && let Some(at) = arrows.interact_pointer_pos()
     {
@@ -1373,6 +1396,17 @@ fn spinner(
     r | arrows
   })
   .inner
+}
+
+/// A number box's up and down arrows in `rect`.
+fn paint_spin_arrows(painter: &egui::Painter, rect: egui::Rect, ink: Color32) {
+  painter.rect_stroke(rect, 1.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+  let (up, down) = rect.split_top_bottom_at_fraction(0.5);
+  for (half, sign) in [(up, -1.0), (down, 1.0)] {
+    let c = half.center();
+    let pts = vec![c + vec2(-3.0, -1.5 * sign), c + vec2(3.0, -1.5 * sign), c + vec2(0.0, 1.5 * sign)];
+    painter.add(egui::Shape::convex_polygon(pts, ink, Stroke::NONE));
+  }
 }
 
 /// A greyed box showing `value`.
@@ -1390,9 +1424,26 @@ fn fixed_control(ui: &mut egui::Ui, key: &str, item: &Item, value: &str) {
     }
     Item::Combo(..) => fixed_combo(ui, key, value, NOT_YET),
     Item::Field(..) => fixed_field(ui, value, FIELD_W, NOT_YET),
-    Item::Spin(..) => {
-      let mut n = value.trim().parse().unwrap_or(0);
-      spinner(ui, key, &mut n, 0..=u32::MAX, false).on_disabled_hover_text(NOT_YET);
+    Item::Spin(..) => match value.trim().parse() {
+      Ok(mut n) => {
+        spinner(ui, key, &mut n, 0..=u32::MAX, false).on_disabled_hover_text(NOT_YET);
+      }
+      // a decimal ("1.00"): the box with the arrows, greyed
+      Err(_) => {
+        ui.horizontal(|ui| {
+          ui.spacing_mut().item_spacing.x = 0.0;
+          fixed_field(ui, value, FIELD_W - 14.0 - 8.0, NOT_YET);
+          let (rect, _) = ui.allocate_exact_size(vec2(14.0, ROW_H), Sense::hover());
+          paint_spin_arrows(ui.painter(), rect, theme::MUTED);
+        });
+      }
+    },
+    Item::Browse(..) => {
+      ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        fixed_field(ui, value, COMBO_W, NOT_YET);
+        ui.add_enabled(false, egui::Button::new("...")).on_disabled_hover_text(NOT_YET);
+      });
     }
     Item::Radio(_, _, choices) => {
       for c in choices.iter() {
@@ -1415,7 +1466,7 @@ fn fixed_control(ui: &mut egui::Ui, key: &str, item: &Item, value: &str) {
         });
       }
     }
-    Item::Heading(_) | Item::Live(..) => {}
+    Item::Heading(_) | Item::Live(..) | Item::Toggle(..) | Item::Choice(..) | Item::Note(..) | Item::Gate(..) => {}
   }
 }
 
@@ -1458,6 +1509,8 @@ fn rows(app: &App, ui: &mut egui::Ui, page: Page, p: &mut Prefs) {
     .fold(0.0, f32::max);
   let label_w = (widest + 2.0).min(ui.available_width() * 0.62);
   let mut heading = "";
+  // a Gate's box, while unticked, greys the rows after it
+  let mut open = true;
   ui.spacing_mut().item_spacing.y = 5.0;
   for item in items {
     match item {
@@ -1477,6 +1530,22 @@ fn rows(app: &App, ui: &mut egui::Ui, page: Page, p: &mut Prefs) {
           });
         }
       }
+      Item::Toggle(..) | Item::Choice(..) | Item::Gate(..) => {
+        let label = item.label().unwrap_or_default();
+        let key = pages::stored_key(page, heading, label);
+        let enabled = open;
+        row(ui, label_w, label, left, |ui| {
+          ui.add_enabled_ui(enabled, |ui| editable_control(ui, &key, item, p));
+        });
+        if let Item::Gate(..) = item {
+          open = p.stored_value(&key, item) == "1";
+        }
+      }
+      Item::Note(label, text) => {
+        row(ui, label_w, label, left, |ui| {
+          ui.label(RichText::new(*text).color(theme::MUTED));
+        });
+      }
       _ => {
         let label = item.label().unwrap_or_default();
         let key = pages::stored_key(page, heading, label);
@@ -1484,6 +1553,46 @@ fn rows(app: &App, ui: &mut egui::Ui, page: Page, p: &mut Prefs) {
         row(ui, label_w, label, left, |ui| fixed_control(ui, &key, item, &value));
       }
     }
+  }
+}
+
+/// Keeps a stored row's value, dropping it when it is Fusion's default again.
+fn set_stored(p: &mut Prefs, key: &str, item: &Item, value: String) {
+  if item.default_value().as_deref() == Some(value.as_str()) {
+    p.stored.remove(key);
+  } else {
+    p.stored.insert(key.to_string(), value);
+  }
+}
+
+/// A row the user can change though FissionOxide doesn't act on it: its value is kept under its
+/// key (see [`pages::stored_key`]).
+fn editable_control(ui: &mut egui::Ui, key: &str, item: &Item, p: &mut Prefs) {
+  let value = p.stored_value(key, item);
+  match item {
+    Item::Toggle(..) | Item::Gate(..) => {
+      let mut on = value == "1";
+      if ui.checkbox(&mut on, "").changed() {
+        set_stored(p, key, item, flag(on));
+      }
+    }
+    Item::Choice(_, _, choices) => {
+      let mut picked = value.clone();
+      let r = egui::ComboBox::from_id_salt(("prefs-choice", key))
+        .selected_text(picked.as_str())
+        .width(COMBO_W)
+        .truncate()
+        .show_ui(ui, |ui| {
+          for c in choices.iter() {
+            ui.selectable_value(&mut picked, c.to_string(), *c);
+          }
+        });
+      ui.ctx().data_mut(|d| d.insert_temp(combo_rect_id(key), r.response.rect));
+      if picked != value {
+        set_stored(p, key, item, picked);
+      }
+    }
+    _ => {}
   }
 }
 
@@ -1616,6 +1725,24 @@ fn live_row(app: &App, ui: &mut egui::Ui, live: Live, p: &mut Prefs) {
         });
       ui.ctx().data_mut(|d| d.insert_temp(combo_rect_id("prefs-angular-precision"), r.response.rect));
     }
+    Live::HideZeroes => {
+      ui.checkbox(&mut p.hide_zeroes, "");
+    }
+    Live::MinPrecision => {
+      let r = ui
+        .add_enabled_ui(p.hide_zeroes, |ui| {
+          egui::ComboBox::from_id_salt("prefs-min-precision")
+            .selected_text(min_precision_label(p.min_precision))
+            .width(COMBO_W)
+            .show_ui(ui, |ui| {
+              for d in PRECISIONS {
+                ui.selectable_value(&mut p.min_precision, d, min_precision_label(d));
+              }
+            })
+        })
+        .inner;
+      ui.ctx().data_mut(|d| d.insert_temp(combo_rect_id("prefs-min-precision"), r.response.rect));
+    }
     Live::RenderEnvironment => {
       egui::ComboBox::from_id_salt("prefs-render-env")
         .selected_text(p.render.environment.as_str())
@@ -1697,9 +1824,30 @@ fn page_ui(app: &mut App, ui: &mut egui::Ui) {
     Page::DefaultUnits => {
       ui.label(RichText::new("Select a sub page under the Default Units control").strong());
     }
-    Page::DataCollection => data_collection(ui, &values),
+    Page::DataCollection => data_collection(ui, &mut values),
     Page::Tokens => tokens(ui),
     Page::PreviewFeatures => preview_features(ui),
+    Page::ManufactureOptional => {
+      grey_box(ui, |ui| {
+        ui.vertical(|ui| {
+          ui.label(
+            "These settings improve functionality for some Fusion features. If you need additional time to adjust \
+             your workflows to any of the improvements, you may choose to change a setting to revert to the \
+             original, older functionality.",
+          );
+          ui.label(
+            "In future updates, these improvements will be Fusion's default behavior and you will no longer be able \
+             to change settings here.",
+          );
+        });
+      });
+      ui.add_space(6.0);
+    }
+    Page::ElecColor => electronics::color(ui),
+    Page::ElecMisc => electronics::misc(ui),
+    Page::ElecGrid => electronics::grid(ui),
+    Page::ElecDefaults => electronics::default_values(ui),
+    Page::ElecDrill => electronics::drill_legend(ui),
     _ => {}
   }
   if page != Page::DataCollection {
@@ -1712,8 +1860,9 @@ fn page_ui(app: &mut App, ui: &mut egui::Ui) {
   app.preferences.draft = values;
 }
 
-/// Data Collection and Use: Fusion's text and its three cards.
-fn data_collection(ui: &mut egui::Ui, p: &Prefs) {
+/// Data Collection and Use: Fusion's text and its three cards; the first is always on, as
+/// Fusion's.
+fn data_collection(ui: &mut egui::Ui, p: &mut Prefs) {
   ui.label(RichText::new("Improve your Fusion experience").strong());
   ui.horizontal_wrapped(|ui| {
     ui.spacing_mut().item_spacing.x = 0.0;
@@ -1728,20 +1877,23 @@ fn data_collection(ui: &mut egui::Ui, p: &Prefs) {
     ui.label(" for how the data is used.");
   });
   ui.add_space(4.0);
-  let cards = [
-    ("Required data collection", "Data needed to run, secure and support the product."),
-    ("Help develop new products and services", "Use data about how you work to shape new features."),
-    ("Personalize our offers", "Use data about how you work to tailor messages and offers."),
+  let texts = [
+    "Data needed to run, secure and support the product.",
+    "Use data about how you work to shape new features.",
+    "Use data about how you work to tailor messages and offers.",
   ];
-  for (lead, text) in cards {
-    let item = Item::Check(lead, false);
+  for (item, text) in pages::items(Page::DataCollection).iter().zip(texts) {
+    let lead = item.label().unwrap_or_default();
     let key = pages::stored_key(Page::DataCollection, "", lead);
-    let default = pages::items(Page::DataCollection).iter().find(|i| i.label() == Some(lead)).copied().unwrap_or(item);
-    let mut on = p.stored_value(&key, &default) == "1";
     egui::Frame::NONE.fill(theme::PANEL).inner_margin(egui::Margin::same(8)).corner_radius(3.0).show(ui, |ui| {
       ui.set_width(ui.available_width());
       ui.horizontal_top(|ui| {
-        ui.add_enabled(false, egui::Checkbox::without_text(&mut on)).on_disabled_hover_text(NOT_YET);
+        if let Item::Toggle(..) = item {
+          editable_control(ui, &key, item, p);
+        } else {
+          let mut on = p.stored_value(&key, item) == "1";
+          ui.add_enabled(false, egui::Checkbox::without_text(&mut on)).on_disabled_hover_text("Always on");
+        }
         ui.horizontal_wrapped(|ui| {
           ui.spacing_mut().item_spacing.x = 0.0;
           ui.label(RichText::new(format!("{lead}. ")).strong());
@@ -1795,17 +1947,16 @@ fn tokens(ui: &mut egui::Ui) {
   ui.add_space(6.0);
 }
 
-/// Preview Features: the Insider box, the terms, the filter bar and the (empty) list.
+/// Preview Features: the Insider box, the terms, the filter bar and the features by workspace.
 fn preview_features(ui: &mut egui::Ui) {
-  info_box(ui, |ui| {
-    ui.label("Want to try features before they are released? Join the ");
-    link(ui, "Fusion Insider Program");
-    ui.label(".");
+  grey_box(ui, |ui| {
+    ui.label("We want your feedback on preview features. To share it you need to be a Fusion Insider. ");
+    link(ui, "Get more information about becoming a Fusion Insider");
   });
   ui.add_space(4.0);
   ui.horizontal_wrapped(|ui| {
     ui.spacing_mut().item_spacing.x = 0.0;
-    ui.label("Preview features are still in development. Turning one on is subject to the ");
+    ui.label("Preview features are still in development. By enabling one you agree to the ");
     link(ui, "Autodesk Terms of Use");
     ui.label(".");
   });
@@ -1822,13 +1973,69 @@ fn preview_features(ui: &mut egui::Ui) {
     link(ui, "Reset filters");
   });
   ui.add_space(6.0);
-  note(ui, "FissionOxide has no preview features.");
+  for (section, features) in PREVIEW_FEATURES {
+    egui::CollapsingHeader::new(RichText::new(*section).strong()).default_open(true).show(ui, |ui| {
+      for (on, glyph, title, text) in features.iter() {
+        ui.horizontal(|ui| {
+          let mut on = *on;
+          ui.add_enabled(false, egui::Checkbox::without_text(&mut on)).on_disabled_hover_text(NOT_YET);
+          let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+          paint_filter_glyph(ui.painter(), rect, *glyph);
+          ui.label(RichText::new(*title).strong());
+        });
+        ui.indent(*title, |ui| {
+          ui.add(egui::Label::new(RichText::new(*text).color(theme::MUTED)).wrap());
+        });
+      }
+    });
+  }
 }
 
-/// The Preview Features filter bar's toggles: an eye, a lock and a tick.
+/// Preview Features' sections as Fusion lists them: each feature's default, its filter glyph
+/// (0 the eye of a shown feature, 1 the lock of a locked one), title and description.
+const PREVIEW_FEATURES: &[(&str, &[(bool, usize, &str, &str)])] = &[
+  ("General", &[(true, 0, "Enable Close Speedup Experience", "Enable document close speedup experience")]),
+  (
+    "Design",
+    &[(
+      false,
+      1,
+      "Preview Volumetric Modeling Features",
+      "Enables Volumetric Texture and Modify Lattice commands. Available under Solid/Mesh > Modify Tab",
+    )],
+  ),
+  (
+    "Simulation",
+    &[(
+      true,
+      1,
+      "New Simulation results experience",
+      "Activates improved post-processing features and a new visual style for Linear Static Stress, Thermal and \
+       Thermal Stress Studies.",
+    )],
+  ),
+];
+
+/// A grey box with an ⓘ and text, as Fusion's notes on the Optional Features and Preview
+/// Features pages.
+fn grey_box(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+  egui::Frame::NONE.fill(theme::PANEL).inner_margin(egui::Margin::same(6)).corner_radius(2.0).show(ui, |ui| {
+    ui.set_width(ui.available_width());
+    ui.horizontal_top(|ui| {
+      info_icon(ui);
+      ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        add(ui);
+      });
+    });
+  });
+}
+
+/// The Preview Features filter bar's toggles: a green eye, an orange lock and a green tick.
 fn paint_filter_glyph(p: &egui::Painter, rect: egui::Rect, which: usize) {
   let c = rect.center();
-  let ink = Stroke::new(1.3, theme::MUTED);
+  let colour = if which == 1 { theme::ICON_ORANGE } else { theme::ICON_GREEN };
+  let ink = Stroke::new(1.3, colour);
   match which {
     0 => {
       let pts: Vec<egui::Pos2> = (0..=16)
@@ -1838,7 +2045,7 @@ fn paint_filter_glyph(p: &egui::Painter, rect: egui::Rect, which: usize) {
         })
         .collect();
       p.add(egui::Shape::line(pts, ink));
-      p.circle_filled(c, 1.8, theme::MUTED);
+      p.circle_filled(c, 1.8, colour);
     }
     1 => {
       let body = egui::Rect::from_center_size(c + vec2(0.0, 2.0), vec2(9.0, 7.0));
@@ -1893,6 +2100,8 @@ mod tests {
       effects: Effects { environment_dome: true, ground_shadow: false, ..crate::navbar::default_effects() },
       general_precision: Some(4),
       angular_precision: 3,
+      hide_zeroes: false,
+      min_precision: 3,
       render: RenderDefaults {
         environment: "Soft Light".into(),
         brightness: 1500.0,
@@ -2170,8 +2379,10 @@ mod tests {
     use fox_engine::model::LengthUnit;
     let mut app = App::with_session(fox_engine::Session::default());
     apply(&mut app, None);
-    assert_eq!(crate::viewport::display_decimals(LengthUnit::Mm), 2, "the unit's own by default");
-    assert_eq!(crate::viewport::display_decimals(LengthUnit::In), 3);
+    assert_eq!(crate::units::length_number(LengthUnit::Mm, 1.2346), "1.235", "Fusion's 0.123 by default");
+    assert_eq!(crate::units::length_number(LengthUnit::In, 25.4 * 1.2346), "1.235");
+    assert_eq!(crate::units::length_number(LengthUnit::Mm, 12.3456), "12.346");
+    assert_eq!(crate::units::length_number(LengthUnit::Mm, 10.0), "10.00", "zeroes hidden down to 4.00");
     assert_eq!(crate::units::angle_decimals(), 1);
     assert_eq!(precision_label(0), "0");
     assert_eq!(precision_label(3), "0.123");
@@ -2179,12 +2390,21 @@ mod tests {
     app.preferences.draft.general_precision = Some(4);
     app.preferences.draft.angular_precision = 2;
     commit(&mut app, None);
-    assert_eq!(crate::viewport::display_decimals(LengthUnit::Mm), 4);
-    assert_eq!(crate::viewport::display_decimals(LengthUnit::In), 4);
+    assert_eq!(crate::units::length_number(LengthUnit::Mm, 1.23456), "1.2346");
+    assert_eq!(crate::units::length_number(LengthUnit::In, 25.4 * 1.23456), "1.2346");
     assert_eq!(crate::units::angle_decimals(), 2);
+    app.preferences.draft.hide_zeroes = false;
+    commit(&mut app, None);
+    assert_eq!(crate::units::length_number(LengthUnit::Mm, 10.0), "10.0000", "zeroes shown");
+    app.preferences.draft.hide_zeroes = true;
+    app.preferences.draft.min_precision = 0;
+    commit(&mut app, None);
+    assert_eq!(crate::units::length_number(LengthUnit::Mm, 10.0), "10");
     app.preferences.draft = Prefs::default();
     commit(&mut app, None);
-    assert_eq!(crate::viewport::display_decimals(LengthUnit::In), 3);
+    assert_eq!(crate::units::length_number(LengthUnit::In, 25.4 * 1.23456), "1.235");
+    assert_eq!(min_precision_label(2), "4.00");
+    assert_eq!(min_precision_label(0), "4");
   }
 
   #[test]

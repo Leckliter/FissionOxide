@@ -1639,7 +1639,7 @@ mod tests {
     let picked = ["thread_type", "size", "designation", "class", "direction"].map(|k| get(&d, k));
     assert_eq!(picked, [json!("ansi"), json!("1.0"), json!("1-8 UNC"), json!("3A"), json!("right")]);
     assert_eq!((get(&d, "modeled"), get(&d, "full_length")), (json!(false), json!(true)));
-    assert_eq!(d.thread_status(&s).as_deref(), Some("1 Face | Radius: 0.500 in"));
+    assert_eq!(d.thread_status(&s).as_deref(), Some("1 Face | Radius: 0.50 in"));
     assert_eq!(d.prompt(false).as_deref(), Some("Specify size, or hold Ctrl/CMD to modify selections"));
     // Full Length hides the span's rows
     let length = THREAD.inputs.iter().position(|x| x.key() == "length").unwrap();

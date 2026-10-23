@@ -92,37 +92,64 @@ pub fn pin(ui: &egui::Ui, r: &mut egui::Response, text: &mut String) {
   }
 }
 
+/// Preferences → Unit and Value Display, as the readouts follow it.
+#[derive(Clone, Copy)]
+struct Display {
+  /// General precision: the most decimals a length is shown with.
+  general: u8,
+  /// Angular precision, in decimals.
+  angular: u8,
+  /// Hide trailing zeroes: `Some` with the minimum precision the zeroes are trimmed down to.
+  trim_to: Option<u8>,
+}
+
 thread_local! {
-  /// Preferences → Unit and Value Display: the general precision (`None`: the unit's own) and the
-  /// angular precision, in decimals. The UI runs on one thread, which sets these at start and on
-  /// OK or Apply.
-  static PRECISION: std::cell::Cell<(Option<u8>, u8)> = const { std::cell::Cell::new((None, 1)) };
+  /// The display preferences. The UI runs on one thread, which sets these at start and on OK or
+  /// Apply; until then they are Fusion's defaults (0.123, 0.1, trailing zeroes hidden down to
+  /// 4.00).
+  static DISPLAY: std::cell::Cell<Display> =
+    const { std::cell::Cell::new(Display { general: 3, angular: 1, trim_to: Some(2) }) };
 }
 
-/// Sets the precisions lengths and angles are shown with (see [`length_decimals`]).
-pub fn set_precision(general: Option<u8>, angular: u8) {
-  PRECISION.with(|p| p.set((general, angular)));
+/// Sets the precisions lengths and angles are shown with and whether trailing zeroes are hidden,
+/// down to which precision (see [`number`]).
+pub fn set_precision(general: u8, angular: u8, trim_to: Option<u8>) {
+  DISPLAY.with(|p| p.set(Display { general, angular, trim_to }));
 }
 
-/// The decimals a length in `unit` is shown with: Preferences' General precision, else Fusion's
-/// default display precision for the unit (Document Settings → Units).
-pub fn length_decimals(unit: LengthUnit) -> usize {
-  PRECISION.with(|p| p.get().0).map_or_else(|| unit_decimals(unit), usize::from)
+/// A number (already in the display unit) as Fusion's readouts show it: at the General precision
+/// (three decimals by default, whatever the unit, as Fusion's 0.123),
+/// trailing zeroes dropped down to the minimum precision while Hide trailing zeroes is on
+/// (12.3456 → "12.346", 12.3 → "12.30", 10 → "10.00" at the defaults), never "-0.00".
+pub fn number(v: f64) -> String {
+  let d = DISPLAY.with(|p| p.get());
+  let s = format!("{v:.*}", usize::from(d.general));
+  let s = match (d.trim_to, s.find('.')) {
+    (Some(min), Some(dot)) => {
+      let keep = dot + 1 + usize::from(min.min(d.general));
+      let trimmed = s.trim_end_matches('0').len().max(keep);
+      let out = &s[..trimmed];
+      out.strip_suffix('.').unwrap_or(out).to_string()
+    }
+    _ => s,
+  };
+  let zero = s.trim_start_matches('-').chars().all(|c| c == '0' || c == '.');
+  if zero { s.trim_start_matches('-').to_string() } else { s }
 }
 
-/// Fusion's default display precision for a unit: two decimals in millimetres and centimetres,
-/// three in inches, four in metres and feet.
-pub fn unit_decimals(unit: LengthUnit) -> usize {
-  match unit {
-    LengthUnit::Mm | LengthUnit::Cm => 2,
-    LengthUnit::In => 3,
-    LengthUnit::M | LengthUnit::Ft => 4,
-  }
+/// A length (mm) in `unit` as the readouts show it, without the unit (see [`number`]).
+pub fn length_number(unit: LengthUnit, mm: f64) -> String {
+  number(unit.from_mm(mm))
+}
+
+/// A length (mm) in `unit` as the readouts show it, with the unit ("12.346 mm").
+pub fn length_text(unit: LengthUnit, mm: f64) -> String {
+  format!("{} {}", length_number(unit, mm), unit.symbol())
 }
 
 /// The decimals an angle is shown with (Preferences' Angular precision, one by default).
 pub fn angle_decimals() -> usize {
-  PRECISION.with(|p| p.get().1).into()
+  DISPLAY.with(|p| p.get().angular).into()
 }
 
 /// The Units row's label, as Fusion's: the length unit, then the mass unit ("Units: in, ouncemass").
@@ -180,5 +207,25 @@ mod tests {
     assert_eq!(edit_box("30 deg", "45", LengthUnit::In), "45.0 deg", "an angle box's number is degrees");
     assert_eq!(edit_box("30 deg", "a1 * 2", LengthUnit::In), "a1 * 2", "an expression stays as typed");
     assert_eq!(edit_box("10 mm", "2", LengthUnit::Mm), "2", "bare numbers already mean mm");
+  }
+
+  /// Fusion's defaults (0.123, Hide trailing zeroes down to 4.00) read 12.3456 mm as "12.346",
+  /// 12.3 as "12.30" and 10 as "10.00"; without hiding every decimal stays.
+  #[test]
+  fn lengths_trim_trailing_zeroes_down_to_the_minimum_precision() {
+    set_precision(3, 1, Some(2));
+    assert_eq!(length_number(LengthUnit::Mm, 12.3456), "12.346");
+    assert_eq!(length_number(LengthUnit::Mm, 12.3), "12.30");
+    assert_eq!(length_number(LengthUnit::Mm, 10.0), "10.00");
+    assert_eq!(length_number(LengthUnit::Mm, -0.0001), "0.00");
+    assert_eq!(length_text(LengthUnit::In, 12.5), "0.492 in");
+    set_precision(3, 1, None);
+    assert_eq!(length_number(LengthUnit::Mm, 10.0), "10.000", "zeroes kept");
+    set_precision(4, 1, Some(0));
+    assert_eq!(length_number(LengthUnit::Mm, 10.0), "10");
+    assert_eq!(length_number(LengthUnit::Mm, 10.25), "10.25");
+    set_precision(1, 1, Some(2));
+    assert_eq!(length_number(LengthUnit::Mm, 10.0), "10.0", "never more than the precision");
+    set_precision(3, 1, Some(2));
   }
 }

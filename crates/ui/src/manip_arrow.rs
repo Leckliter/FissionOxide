@@ -107,15 +107,10 @@ pub(crate) fn paint_track(painter: &egui::Painter, at: Pos2, dir: Vec2) {
 }
 
 /// A length (mm) as the distance dimension reads it: in the design's unit without the unit, at
-/// the document precision but keeping two decimals ("1.30", "2.00", "0.601", "25.00").
+/// the document precision with trailing zeroes hidden down to two decimals ("1.30", "2.00",
+/// "0.601", "25.00").
 pub(crate) fn dimension_number(unit: LengthUnit, mm: f64) -> String {
-  let s = format!("{:.*}", crate::viewport::display_decimals(unit), unit.from_mm(mm));
-  let keep = s.find('.').map_or(s.len(), |dot| dot + 3);
-  let trimmed = s.trim_end_matches('0');
-  let out = if trimmed.len() < keep { &s[..keep.min(s.len())] } else { trimmed };
-  // no "-0.00"
-  let zero = out.trim_start_matches('-').chars().all(|c| c == '0' || c == '.');
-  if zero { out.trim_start_matches('-').to_string() } else { out.to_string() }
+  crate::units::length_number(unit, mm)
 }
 
 /// The distance dimension along an arrow's axis, from `a` (where the value starts) to `b` (its

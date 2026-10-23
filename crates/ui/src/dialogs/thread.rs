@@ -140,6 +140,6 @@ impl Dialog {
     let id = v.get("face")?.as_u64()? as u32;
     let r = body.faces().iter().find(|x| x.id == id)?.radius;
     let u = s.design.units;
-    Some(format!("1 Face | Radius: {}", u.fixed(r, crate::viewport::display_decimals(u))))
+    Some(format!("1 Face | Radius: {}", crate::units::length_text(u, r)))
   }
 }

@@ -3339,7 +3339,7 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
         .sketch(sketch)
         .ok()
         .and_then(|s| crate::viewport::curve_min_distance(s, a, b))
-        .map(|d| format!("Min Distance : {}", u.fixed(d, crate::viewport::display_decimals(u)))),
+        .map(|d| format!("Min Distance : {}", crate::units::length_text(u, d))),
       _ => None,
     },
     // a circle or an arc reads its diameter, a line its length, trailing zeros trimmed:
@@ -3364,7 +3364,7 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
       }
       _ => None,
     })
-    .map(|l| format!("Length : {}", u.fixed(l, crate::viewport::display_decimals(u)))),
+    .map(|l| format!("Length : {}", crate::units::length_text(u, l))),
     // "Sketch Point | X: -1.974 Y: 0.00 Z: -0.259 in": one point's world coordinates, no count
     Sel::SketchPoint { sketch, point } if n == 1 => {
       if let Some(w) = model.sketches.get(&sketch).and_then(|r| Some(r.plane.to_world(r.sketch.pos(point)?))) {
@@ -3410,9 +3410,9 @@ fn mixed_pair_text(app: &App, a: Sel, b: Sel, na: &str, nb: &str) -> String {
   let count = format!("1 {na} 1 {nb}");
   let u = app.s.design.units;
   let sketchy = |s: &Sel| matches!(s, Sel::SketchPoint { .. } | Sel::SketchCurve { .. });
-  let decimals = if sketchy(&a) || sketchy(&b) { crate::viewport::display_decimals(u) } else { 2 };
   match pair_distance(app, a, b) {
-    Some(d) => format!("{count} | Min Distance : {}", u.fixed(d, decimals)),
+    Some(d) if sketchy(&a) || sketchy(&b) => format!("{count} | Min Distance : {}", crate::units::length_text(u, d)),
+    Some(d) => format!("{count} | Min Distance : {}", u.fixed(d, 2)),
     None => count,
   }
 }
@@ -3543,15 +3543,9 @@ fn sketch_curve_length(sk: &fox_engine::sketch::Sketch, kind: &fox_engine::sketc
 }
 
 /// A sketch point's coordinate (mm) as Fusion's status bar reads it out: the document precision
-/// with trailing zeros trimmed, two decimals at least ("-1.974", "0.00").
+/// with trailing zeros hidden down to the minimum precision ("-1.974", "0.00").
 fn sketch_coord(u: fox_engine::model::LengthUnit, mm: f64) -> String {
-  let decimals = crate::viewport::display_decimals(u);
-  let s = format!("{:.*}", decimals, u.from_mm(mm));
-  let (int, frac) = s.split_once('.').unwrap_or((&s, ""));
-  let frac = frac.trim_end_matches('0');
-  let frac = format!("{frac:0<2}");
-  let int = if int == "-0" && frac.trim_matches('0').is_empty() { "0" } else { int };
-  format!("{int}.{frac}")
+  crate::units::length_number(u, mm)
 }
 
 /// Status message and sketch hint at the bottom-left of the canvas, above COMMENTS.
@@ -4871,7 +4865,7 @@ mod row_menu_tests {
     assert_eq!(sketch_coord(LengthUnit::In, 0.0), "0.00");
     assert_eq!(sketch_coord(LengthUnit::In, 12.7), "0.50");
     assert_eq!(sketch_coord(LengthUnit::In, -0.0001), "0.00");
-    assert_eq!(sketch_coord(LengthUnit::Mm, 12.346), "12.35");
+    assert_eq!(sketch_coord(LengthUnit::Mm, 12.346), "12.346");
     assert_eq!(sketch_coord(LengthUnit::Mm, 10.0), "10.00");
   }
 

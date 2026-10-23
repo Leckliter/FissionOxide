@@ -2162,14 +2162,8 @@ fn hud_display(unit: fox_engine::model::LengthUnit, field: Field, v: f64) -> Str
     Field::Angle => format!("{v:.p$} deg", p = crate::units::angle_decimals()),
     Field::Sides => format!("{}", v.round() as i64),
     Field::Rho => format!("{v:.2}"),
-    _ => unit.fixed(v, display_decimals(unit)),
+    _ => crate::units::length_text(unit, v),
   }
-}
-
-/// The decimals lengths are shown with: Preferences' General precision, else Fusion's default
-/// display precision for the unit (see [`crate::units::length_decimals`]).
-pub(crate) fn display_decimals(unit: fox_engine::model::LengthUnit) -> usize {
-  crate::units::length_decimals(unit)
 }
 
 /// Adds the driving dimensions that lock the typed values of a shape just drawn (`made` is the
@@ -2999,9 +2993,10 @@ fn dim_place_preview(app: &mut App, painter: &egui::Painter, resp: &egui::Respon
   text.paint(painter, rect.min + Vec2::new(4.0, 2.0), DIM_TEXT);
 }
 
-/// A length (mm) in the design's unit at Fusion's document precision, without the unit.
+/// A length (mm) in the design's unit at Fusion's document precision, trailing zeroes hidden as
+/// the preferences say, without the unit.
 fn fixed_number(unit: fox_engine::model::LengthUnit, mm: f64) -> String {
-  format!("{:.*}", display_decimals(unit), unit.from_mm(mm))
+  crate::units::length_number(unit, mm)
 }
 
 /// The leader graphics of a dimension placed by the cursor at `cur` (sketch coordinates): a
@@ -6395,7 +6390,7 @@ mod tests {
     assert_eq!(hud_display(app.s.design.units, Field::Radius, 5.0), "0.197 in");
     assert_eq!(
       crate::panels::selection_text(&app).as_deref(),
-      Some("2 Sketch Curves | Min Distance : 0.000 in"),
+      Some("2 Sketch Curves | Min Distance : 0.00 in"),
       "the picks read out like a selection"
     );
     app.s.design.units = fox_engine::model::LengthUnit::Mm;
@@ -6440,7 +6435,7 @@ mod tests {
     assert_eq!(curve_min_distance(s, c[0], c[2]), Some(0.0));
     assert!((curve_min_distance(s, c[0], c[3]).unwrap() - 16.0).abs() < 1e-6);
     app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve: c[0] }, Sel::SketchCurve { sketch: sk, curve: c[1] }];
-    assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("2 Sketch Curves | Min Distance : 3.61 mm"));
+    assert_eq!(crate::panels::selection_text(&app).as_deref(), Some("2 Sketch Curves | Min Distance : 3.606 mm"));
   }
 
   /// A placed dimension keeps its value where the click put it: a diameter's text sits there
@@ -6551,7 +6546,7 @@ mod tests {
     // the labels show inches
     let c = s.constraints.iter().find(|c| c.kind.dim().is_some()).unwrap();
     let (_, label) = dim_label(s, &c.kind, c.kind.dim().unwrap(), app.s.design.units).unwrap();
-    assert_eq!(label, "2.000", "labels read at the document precision");
+    assert_eq!(label, "2.00", "labels read at the document precision, trailing zeroes hidden");
   }
 
   #[test]
