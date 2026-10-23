@@ -24,6 +24,10 @@ pub(super) struct State {
   pub(super) single: bool,
   /// Hole: where the face was clicked (a model point) and the face it was found for.
   at: Option<(Value, [f64; 3])>,
+  /// Hole: the picked face's centre and outward normal, found before the hole previews (which
+  /// may renumber the body's faces): where the hole sits until a click places it, and the way
+  /// the depth arrow points against.
+  face_at: Option<(DVec3, DVec3)>,
   /// Hole: the distances from the point to the reference edges (the dialog's `edges`).
   offsets: [String; 2],
   /// Hole: Simple, Clearance or Tapped ("" = Simple), the fastener size ("" = custom).
@@ -175,6 +179,8 @@ impl Dialog {
     self.solid.hp.single = face || self.sketch.is_none_or(|sk| free_points(s, sk) == 0);
     self.solid.hp.tap = "simple";
     self.solid.hp.tip = "118 deg".into();
+    // a face picked before Hole opened is taken (and previewed) at once
+    self.solid.hp.face_at = self.face_at(s);
   }
 
   pub(super) fn hole_single(&self) -> bool {
@@ -205,6 +211,11 @@ impl Dialog {
     if face != self.faces {
       self.faces = face;
       self.solid.hp.at = self.faces.first().and_then(|f| click_on(app, f).map(|p| (f.clone(), p)));
+      self.solid.hp.face_at = None;
+    }
+    // (a face picked before Hole opened is taken with the dialog)
+    if self.solid.hp.face_at.is_none() {
+      self.solid.hp.face_at = self.face_at(s);
     }
     let edges: Vec<Value> = s
       .selection
@@ -235,8 +246,25 @@ impl Dialog {
     let f = self.faces.first()?;
     match &self.solid.hp.at {
       Some((g, p)) if g == f => Some(DVec3::from(*p)),
-      _ => face_info(s, f).map(|i| i.origin),
+      _ => self.solid.hp.face_at.map(|(o, _)| o).or_else(|| face_info(s, f).map(|i| i.origin)),
     }
+  }
+
+  /// The picked face's centre and outward normal on the model as it is now.
+  fn face_at(&self, s: &Session) -> Option<(DVec3, DVec3)> {
+    self.faces.first().and_then(|f| face_info(s, f)).map(|i| (i.origin, i.normal))
+  }
+
+  /// A new single hole's depth arrow, as Fusion's manipulator on the previewed hole: from where
+  /// the hole sits, into the body (out of it when flipped), as deep as the hole.
+  pub(super) fn hole_manipulator(&self, s: &Session) -> Option<super::Manipulator> {
+    if !self.hole_single() || self.editing.is_some() || self.flag {
+      return None;
+    }
+    let (_, n) = self.solid.hp.face_at?;
+    let origin = self.hole_centre(s)?;
+    let dir = if self.flip { n } else { -n };
+    Some(super::Manipulator { origin, dir, value: self.len(s, &self.b)? })
   }
 
   /// The `hole` command's parameters.
@@ -386,13 +414,9 @@ impl Dialog {
     }
     if self.solid.hp.single {
       ui.label("Face");
-      let text = match self.faces.first().and_then(|f| ref_of(f, "body")) {
-        Some(b) => format!("Face of {}", app.s.body_name(BodyId(b))),
-        // an edited hole's face is its sketch's, as Fusion's chip shows it
-        None if !creating && !self.faces.is_empty() => "1 selected".into(),
-        None => "Select".into(),
-      };
-      sel_chip(ui, accent, &text, !self.faces.is_empty()).on_hover_text("Click a planar face where the hole goes");
+      // Fusion's chip counts the face ("1 selected"), new or edited
+      let text = if self.faces.is_empty() { "Select" } else { "1 selected" };
+      sel_chip(ui, accent, text, !self.faces.is_empty()).on_hover_text("Click a planar face where the hole goes");
       ui.end_row();
       // two references, each a straight edge the hole is held at a distance from
       for i in 0..2 {

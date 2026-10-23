@@ -366,6 +366,21 @@ mod tests {
       _ => false,
     });
     assert!(top_now, "{:?}", app.s.selection);
+    // and so does the face it drafts, tilted now (both picks blue, as in Fusion)
+    let tilted = app.s.selection.iter().any(|x| match *x {
+      Sel::Face { body, face } => app
+        .s
+        .model
+        .body(body)
+        .unwrap()
+        .faces()
+        .iter()
+        .any(|f| f.id == face && f.normal.y < -0.9 && f.normal.z.abs() > 1e-3),
+      _ => false,
+    });
+    assert!(tilted && app.s.selection.len() == 2, "{:?}", app.s.selection);
+    // a bare number typed in the Angle row is degrees, shown as Fusion shows it
+    assert_eq!(crate::units::typed_angle("5"), "5.0 deg");
     // Flip Pull Direction turns the pull round
     d.flip = true;
     assert!((d.draft_pull().unwrap().1 + DVec3::Z).length() < 1e-9);

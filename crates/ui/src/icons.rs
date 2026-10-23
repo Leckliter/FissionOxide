@@ -334,6 +334,10 @@ pub enum Icon {
   // Shell Type: sharp or rounded corners
   ShellSharp,
   ShellRound,
+  // Chamfer's Corner Type: how three chamfers meet at a corner
+  CornerChamfer,
+  CornerMiter,
+  CornerBlend,
   // Hole: Placement, Hole Type, Hole Tap Type and Drill Point
   HoleSingle,
   HoleAtPoints,
@@ -2467,6 +2471,33 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       pts.push((0.7, 0.9));
       k.solid(&pts, White);
       k.path(&pts, Blue);
+    }
+    // ---- Chamfer Corner Type: a block's corner seen from above, its three edges chamfered ----
+    Icon::CornerChamfer => {
+      // the bevels meet at a flat triangle
+      k.solid(&[(0.1, 0.9), (0.1, 0.1), (0.9, 0.1), (0.9, 0.9)], Light);
+      k.solid(&[(0.1, 0.6), (0.6, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9)], White);
+      k.closed(&[(0.32, 0.38), (0.52, 0.48), (0.38, 0.32)], Blue);
+      k.line((0.1, 0.6), (0.32, 0.38), Ink);
+      k.line((0.6, 0.1), (0.38, 0.32), Ink);
+      k.line((0.52, 0.48), (0.9, 0.86), Ink);
+    }
+    Icon::CornerMiter => {
+      // the bevels run on to meet in a point
+      k.solid(&[(0.1, 0.9), (0.1, 0.1), (0.9, 0.1), (0.9, 0.9)], Light);
+      k.solid(&[(0.1, 0.6), (0.6, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9)], White);
+      k.line((0.1, 0.6), (0.42, 0.42), Blue);
+      k.line((0.6, 0.1), (0.42, 0.42), Blue);
+      k.line((0.42, 0.42), (0.9, 0.86), Blue);
+    }
+    Icon::CornerBlend => {
+      // the bevels meet in a rounded patch
+      k.solid(&[(0.1, 0.9), (0.1, 0.1), (0.9, 0.1), (0.9, 0.9)], Light);
+      k.solid(&[(0.1, 0.6), (0.6, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9)], White);
+      k.circle((0.42, 0.42), 0.12, Some(Blue), None);
+      k.line((0.1, 0.6), (0.31, 0.47), Ink);
+      k.line((0.6, 0.1), (0.47, 0.31), Ink);
+      k.line((0.5, 0.52), (0.9, 0.86), Ink);
     }
     // ---- Hole ----
     Icon::HoleSingle => {

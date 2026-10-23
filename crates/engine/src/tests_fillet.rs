@@ -203,3 +203,26 @@ fn edit_picks_marker_after_and_the_too_big_message() {
   let e = v["error"].as_str().unwrap_or_default();
   assert!(e.starts_with("The fillet/chamfer could not be created at the requested size."), "{v}");
 }
+
+/// A chamfer keeps Fusion's Corner Type (miter or blend; chamfer is the default and isn't
+/// stored), edits it, and refuses a corner type it doesn't know.
+#[test]
+fn chamfer_keeps_its_corner_type() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
+  let corner = |s: &Session| match &s.design.features.last().unwrap().kind {
+    FeatureKind::Chamfer { corner, .. } => corner.clone(),
+    k => panic!("{k:?}"),
+  };
+  let edges = json!([{"point": [20, 10, 20]}]);
+  run(&mut s, "chamfer", json!({"edges": edges, "distance": 1, "corner": "miter"}));
+  assert_eq!(corner(&s).as_deref(), Some("miter"));
+  let f = s.design.features.last().unwrap().id.0;
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"corner": "blend"}}));
+  assert_eq!(corner(&s).as_deref(), Some("blend"));
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"corner": null}}));
+  assert_eq!(corner(&s), None);
+  assert!(s.execute("chamfer", &json!({"edges": edges, "distance": 1, "corner": "round"})).is_err());
+  run(&mut s, "chamfer", json!({"edges": [{"point": [0, 10, 20]}], "distance": 1, "corner": "chamfer"}));
+  assert_eq!(corner(&s), None);
+}

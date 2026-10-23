@@ -169,8 +169,7 @@ mod tests {
     for (f, want) in expect {
       let (f, d) = open(f);
       assert_eq!(rows(f, &d), want, "{}", f.name);
-      // no Preview check box, and OK greyed until the picks are made
-      assert!(always_previews(f), "{}", f.name);
+      // OK greyed until the picks are made
       assert!(!d.ok_enabled(), "{}", f.name);
     }
     assert_eq!(options(&EXTEND, "mode"), ["Natural", "Perpendicular", "Tangent"]);

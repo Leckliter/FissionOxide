@@ -78,6 +78,8 @@ pub(crate) use primitive::temp_sketch_name;
 mod construct_tests;
 #[cfg(test)]
 mod leftovers_tests;
+#[cfg(test)]
+mod reverify_tests;
 
 pub(crate) use section::{KeptSection, shown_section};
 mod edit_picks;
@@ -86,6 +88,9 @@ pub(crate) use remove::remove_params;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
 pub(crate) const PICK_PLANE_HINT: &str = "Select a plane or planar face";
+/// Fusion's prompt once a single hole is placed, until two reference edges hold it.
+pub(crate) const HOLE_REFERENCE_PROMPT: &str =
+  "Select linear or circular reference edges to fully define hole location";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -901,7 +906,7 @@ impl Dialog {
 
   /// Does this Extrude take planar body faces as its profiles (none of a sketch's picked)? Its
   /// preview then changes the very body picked, so it previews as the model-picking dialogs do.
-  fn extrudes_faces(&self) -> bool {
+  pub(super) fn extrudes_faces(&self) -> bool {
     self.kind == Kind::Extrude && self.profiles.is_empty() && !self.faces.is_empty()
   }
 
@@ -1275,9 +1280,12 @@ impl Dialog {
     if kind == Kind::PressPull {
       d.sync_press_owner(&app.s);
     }
-    // Fusion's Offset Face starts at 0.00 in the document unit
+    // Fusion's Offset Face starts at 0.00 in the document unit, as do Move/Copy's distances
     if kind == Kind::OffsetFace {
       d.distance = d.unit.fixed(0.0, 2);
+    }
+    if kind == Kind::Move {
+      d.translate = std::array::from_fn(|_| d.unit.fixed(0.0, 2));
     }
     d.drop_mesh_bodies(&app.s);
     d.dirty = !d.picks();
@@ -1386,10 +1394,10 @@ impl Dialog {
         d.edges = vec![Value::Null; edges.len()];
         d
       }
-      FeatureKind::Chamfer { distance, edges, distance2, angle, .. } => {
+      FeatureKind::Chamfer { distance, edges, distance2, angle, corner, .. } => {
         let mut d = Dialog::blank(Kind::Chamfer);
         d.radius = distance.clone();
-        d.load_chamfer(distance2, angle);
+        d.load_chamfer(distance2, angle, corner);
         d.edges = vec![Value::Null; edges.len()];
         d
       }
@@ -2093,6 +2101,7 @@ impl Dialog {
     if matches!(self.kind, Kind::Form(f) if crate::forms::close_only(f)) {
       return;
     }
+    self.face_extrude_op(s);
     let Some((cmd, params)) = self.command() else {
       return;
     };
@@ -2108,8 +2117,12 @@ impl Dialog {
     self.cut_ghost(s, cmd, &params);
     self.live_applying(s, cmd, &params);
     let before: Vec<BodyId> = s.model.bodies.iter().map(|b| b.id).collect();
+    let hole_before = self.hole_before(s);
     let result = s.execute(cmd, &params);
     self.note_copies(s, &before, result.is_ok());
+    if result.is_ok() {
+      self.hole_ghost(s, &hole_before);
+    }
     if let Some(t) = self.trace.as_mut() {
       t.result = result.as_ref().ok().cloned();
     }
@@ -2957,9 +2970,16 @@ impl Dialog {
     if self.kind == Kind::Mirror && self.editing.is_none() {
       return Some("Hold Ctrl to modify object selection or mirror plane".into());
     }
-    // so does Draft's, once its picks are made
+    // so does Draft's, once its picks are made, and Chamfer's once an edge is picked
     if self.kind == Kind::Draft {
       return Some("Specify draft angle".into());
+    }
+    if self.kind == Kind::Chamfer {
+      return Some("Specify chamfer distance".into());
+    }
+    // a placed hole asks for the edges that hold it until both references are picked
+    if self.hole_single() && self.editing.is_none() && self.edges.len() < 2 {
+      return Some(HOLE_REFERENCE_PROMPT.into());
     }
     // a mesh dialog keeps naming its settings, as Fusion's do
     if let Kind::Form(f) = self.kind
@@ -3037,7 +3057,9 @@ impl Dialog {
   /// fails (a fillet too big for its edges), until a value that works is typed.
   pub(crate) fn ok_enabled(&self) -> bool {
     let input = match self.kind {
-      Kind::Extrude if !self.picks_fixed() => !self.profiles.is_empty() || !self.faces.is_empty(),
+      Kind::Extrude if !self.picks_fixed() => {
+        (!self.profiles.is_empty() || !self.faces.is_empty()) && !self.waits_for_value()
+      }
       // OK waits for Compute, and Section Analysis for its cut plane
       Kind::Interference => self.report.is_some(),
       Kind::Section => !self.plane.is_null(),
@@ -3062,6 +3084,10 @@ impl Dialog {
   fn waits_for_value(&self) -> bool {
     match self.kind {
       Kind::SkOffset | Kind::OffsetFace => !self.offset_set(),
+      // a body face's extrude, until its distance leaves 0.00 (or To Object picks its object)
+      Kind::Extrude if self.editing.is_none() && self.extrudes_faces() => {
+        matches!(self.extent, "one_side" | "symmetric" | "two_sides") && !length_set(&self.distance)
+      }
       Kind::Draft => !self.draft_angle_set(),
       Kind::Fillet if self.editing.is_none() && self.solid.fillet_type != "full_round" => !length_set(&self.radius),
       Kind::Shell if self.editing.is_none() => !length_set(&self.radius),
@@ -3475,6 +3501,7 @@ impl Dialog {
             if choice::combo(ui, &format!("form-choice-{i}"), options, &mut sel, choice::form_icon) {
               *dirty = true;
             }
+            ui.end_row();
           } else if options.iter().any(|(k, _)| crate::forms::greyed_option(f, input.key(), k).is_some()) {
             // a drop-down with entries FissionOxide can't do yet: those are greyed, with the reason
             ui.label(*label);
@@ -4882,7 +4909,7 @@ impl Dialog {
   }
 
   /// Extrude's distance for the engine: its magnitude and the flip its sign (or the arrow) implies.
-  fn extrude_distance(&self) -> (String, bool) {
+  pub(super) fn extrude_distance(&self) -> (String, bool) {
     let (distance, negative) = extrude::split_sign(&self.distance);
     (distance, self.flip != negative)
   }
@@ -6419,7 +6446,7 @@ mod tests {
       &forms::SK_INTERSECTION_CURVE,
       &forms::SK_ISOPARAMETRIC,
     ] {
-      assert!(forms::always_previews(f) || forms::no_preview(f), "{} shows a Preview box", f.name);
+      assert!(!Dialog::blank(Kind::Form(f)).has_preview_box(), "{} shows a Preview box", f.name);
     }
     let f = &forms::SK_SPUN_PROFILE;
     let keys: Vec<&str> = f.inputs.iter().map(|i| i.key()).collect();
@@ -7159,7 +7186,6 @@ mod tests {
     apply(&mut s, &mut d);
     let m = s.model.body(block).unwrap().shape.mass().unwrap();
     assert!((m.bbox_min.z - 10.0).abs() < 1e-6 && (m.bbox_min.x - 50.0).abs() < 1e-6, "{:?}", m.bbox_min);
-    assert!(!crate::forms::preview_box(&ALIGN));
 
     // Remove with nothing selected opens REMOVE: Objects, OK greyed, Fusion's prompt
     let mut app = App::with_session(Session::default());
@@ -7226,7 +7252,7 @@ mod tests {
     let body = s.model.bodies[0].id;
     let labels: Vec<&str> = REPLACE_PRIMITIVES.inputs.iter().map(Input::label).collect();
     assert_eq!(labels, ["Object type", "Selection", "Primitive Shape", "Offset"]);
-    assert!(crate::forms::always_previews(&REPLACE_PRIMITIVES), "no Preview check box");
+    assert!(!Dialog::blank(Kind::Form(&REPLACE_PRIMITIVES)).has_preview_box(), "no Preview check box");
     let d = form(&mut s, &REPLACE_PRIMITIVES, vec![], &[]);
     assert!(!d.ok_enabled());
     assert_eq!(d.prompt(false).as_deref(), Some("Select Bodies"));

@@ -634,6 +634,10 @@ impl State {
           ne += 1;
           edges.get(ne - 1).cloned().unwrap_or(Value::Null)
         }
+        // Thicken takes surface bodies: a solid picked (or selected before it opened) isn't one
+        Input::Bodies { .. } if form.cmd == "thicken" => {
+          json!(bodies.iter().filter(|b| s.body_is_surface(BodyId(**b))).collect::<Vec<_>>())
+        }
         Input::Bodies { .. } => json!(bodies),
         Input::Curves { .. } => json!(curves.iter().map(|c| c.1).collect::<Vec<_>>()),
         Input::Sketch { .. } => {
@@ -4135,44 +4139,12 @@ pub fn preview_off(form: &Form) -> bool {
   mesh_form(form)
 }
 
-/// Forms with no Preview check box that don't preview (Convert Mesh; Isoparametric Curve, whose
-/// OK is live, as Fusion's is, and reports that FissionOxide can't make one yet): OK applies them.
-pub fn no_preview(form: &Form) -> bool {
-  matches!(form.cmd, "mesh.convert" | "sketch.isoparametric_curve")
-}
-
 /// A drop-down's first value when it isn't the first in the list (Reduce's Type: Proportion).
 fn initial_choice(form: &Form, key: &str) -> Option<&'static str> {
   match (form.cmd, key) {
     ("mesh.reduce", "type") => Some("proportion"),
     _ => None,
   }
-}
-
-/// Forms whose Fusion dialog has no Preview check box: they always preview (the surface MODIFY
-/// dialogs and the sketch's Project / Include dialogs among them).
-pub fn always_previews(form: &Form) -> bool {
-  matches!(
-    form.cmd,
-    "thread"
-      | "emboss"
-      | "thicken"
-      | "boundary_fill"
-      | "rib"
-      | "web"
-      | TRIM_CMD
-      | EXTEND_CMD
-      | "surface.untrim"
-      | "surface.stitch"
-      | UNSTITCH_CMD
-      | REVERSE_CMD
-      | "sketch.intersect.form"
-      | "sketch.spun_profile.form"
-      | "sketch.include"
-      | "sketch.project_to_surface"
-      | "sketch.intersection_curve"
-      | "replace_with_primitives"
-  )
 }
 
 /// Forms whose drop-downs show an icon before each value, as Fusion's Extent Type, Direction
@@ -4301,12 +4273,6 @@ pub fn prompt(form: &Form, key: &str) -> Option<&'static str> {
     ("replace_with_primitives", "bodies") => Some("Select Bodies"),
     _ => None,
   }
-}
-
-/// Does a form's dialog show the Preview box? Fusion's Align and Remove show their result
-/// without one.
-pub fn preview_box(form: &Form) -> bool {
-  !matches!(form.cmd, "align.form" | "body.remove")
 }
 
 /// Forms whose dialog has only a Close button: what they do is applied from the dialog itself.

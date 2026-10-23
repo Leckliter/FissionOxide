@@ -26,6 +26,9 @@ pub(crate) struct Rows {
   start_offset: String,
   /// Start: object, the picked face (`{body, face}`); kept as stored when editing.
   pub(super) start_face: Value,
+  /// Operation was chosen in the dialog: a body face's extrude no longer picks Join or Cut by
+  /// the way its distance goes.
+  op_chosen: bool,
 }
 
 const DIRECTIONS: [(&str, &str); 3] =
@@ -186,12 +189,30 @@ impl Dialog {
     }
 
     ui.label("Operation");
+    let op = self.op;
     self.combo(ui, "op", &OPS, false);
+    self.solid.ext.op_chosen |= self.op != op;
     ui.end_row();
     self.comp_name_row(ui);
     if dirty {
       self.dirty = true;
     }
+  }
+
+  /// A body face's extrude, as Fusion's: Operation stays as it was while the distance is 0.00,
+  /// then joins the body when the distance goes out of it and cuts when it goes in, until an
+  /// operation is chosen in the dialog.
+  pub(super) fn face_extrude_op(&mut self, s: &Session) {
+    if self.kind != super::Kind::Extrude || self.editing.is_some() || !self.extrudes_faces() || self.solid.ext.op_chosen
+    {
+      return;
+    }
+    let (d, flip) = self.extrude_distance();
+    let Ok(v) = fox_engine::expr::eval(&d, fox_engine::expr::Kind::Length, &s.model.params) else { return };
+    if v.abs() < 1e-9 || !matches!(self.op, "new_body" | "join" | "cut") {
+      return;
+    }
+    self.op = if (v > 0.0) != flip { "join" } else { "cut" };
   }
 
   /// Taper, thin wall and start for the extrude command; None while Start: Object has no face.
@@ -280,9 +301,10 @@ impl Dialog {
       planar
     };
     if faces != self.faces {
-      // extruding a body's face defaults to Join, as from a sketch on a face
-      if self.faces.is_empty() && self.op == "new_body" && self.editing.is_none() {
-        self.op = "join";
+      // Fusion starts a body face's extrude at 0.00 (no preview, OK greyed until a distance is
+      // typed or the arrow dragged), keeping the operation as it was
+      if self.faces.is_empty() && self.editing.is_none() {
+        self.distance = self.unit.fixed(0.0, 2);
       }
       self.faces = faces;
       self.dirty = true;

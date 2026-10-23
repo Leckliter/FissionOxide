@@ -334,6 +334,10 @@ impl Dialog {
     if self.kind == Kind::Hem {
       return self.hem_manipulator(s);
     }
+    // Hole: the depth arrow on the placed hole (see [`super::hole_pattern`])
+    if self.kind == Kind::Hole {
+      return self.hole_manipulator(s);
+    }
     // Extend: the distance along the arrow out of the first edge
     if let Kind::Form(f) = self.kind
       && f.cmd == crate::forms::EXTEND_CMD
@@ -723,8 +727,9 @@ impl Dialog {
       Kind::PressPull | Kind::OffsetFace => self.distance = mm(self.unit, v),
       // a flange's height stops at the edge
       Kind::Flange if self.choice == "edge" => self.distance = mm(self.unit, v.max(0.0)),
-      // a hem has some length
+      // a hem has some length, and so does a hole
       Kind::Hem => self.distance = mm(self.unit, v.max(step.max(1e-3))),
+      Kind::Hole => self.b = mm(self.unit, v.max(step.max(1e-3))),
       // Extend doesn't go backwards
       Kind::Form(f) if f.cmd == crate::forms::EXTEND_CMD => {
         let Some(i) = f.inputs.iter().position(|x| x.key() == "distance") else { return false };

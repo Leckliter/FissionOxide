@@ -370,7 +370,7 @@ impl Dialog {
         "faces" => "select faces",
         "sketch" => "select sketch geometry to move",
         "components" => "select a body of a component",
-        _ => "select bodies",
+        _ => "select bodies to move",
       });
     }
     if self.mv.points.len() < self.points_needed() {
@@ -865,7 +865,8 @@ impl Dialog {
         let c = self.comps.first().copied().flatten().and_then(|c| app.s.design.component(ComponentId(c)));
         ("Component", c.map_or("Select".into(), |c| c.name.clone()), c.is_some())
       }
-      _ => ("Bodies", format!("{} selected", self.bodies.len()), !self.bodies.is_empty()),
+      // Fusion names the bodies' row Selection, new or edited
+      _ => ("Selection", format!("{} selected", self.bodies.len()), !self.bodies.is_empty()),
     };
     let name = if self.editing.is_some() { "Selection" } else { name };
     ui.label(name);

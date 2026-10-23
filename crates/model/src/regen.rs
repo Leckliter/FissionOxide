@@ -911,7 +911,7 @@ impl Ctx<'_> {
           None => self.edge_op(id, edges, |s, ids| round(s, s.fillet(ids, r)?, ids)),
         }
       }
-      FeatureKind::Chamfer { edges, distance, distance2, angle, flipped } => {
+      FeatureKind::Chamfer { edges, distance, distance2, angle, flipped, .. } => {
         let flip = *flipped;
         let d = self.len(distance)?;
         // designs from before CHAMFER_FORWARD_FACE measure d1 on each edge's first adjacent face

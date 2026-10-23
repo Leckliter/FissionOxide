@@ -132,7 +132,7 @@ cmds! {
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?, tangent_chain?: bool (adds the faces joined to them across smooth edges)}";
   "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius; distance2 makes it asymmetric (radius, or distance, along each edge's first face: the one whose outward normal sorts first by x, y, z; flipped swaps them); full_round replaces each centre face with a round tangent to it and its side faces", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius | distance, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?, distance2?, flipped?: bool} | {full_round: [{center: face, side_one: [face], side_two: [face]}]} (a face is {body, face} or {point, normal?})";
-  "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle (as in Fusion, distance and the angle are measured on an extrusion's cap; flipped swaps the faces); faces chamfer all their edges; tangent_chain adds the edges that continue them smoothly", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], distance, distance2? | angle?, flipped?: bool, tangent_chain?: bool}";
+  "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle (as in Fusion, distance and the angle are measured on an extrusion's cap; flipped swaps the faces); faces chamfer all their edges; tangent_chain adds the edges that continue them smoothly", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], distance, distance2? | angle?, flipped?: bool, tangent_chain?: bool, corner?: chamfer|miter|blend (Fusion's Corner Type; every corner is made as chamfer)}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
   "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
   "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?}; tangent_chain adds the faces that continue them smoothly) or whole bodies (closed, hollow inside); walls go inside the surface, outside it, or both (thickness inside, outside_thickness outside); walls meet in sharp corners unless corners is round", "{faces?: [{body, face} | {point}], bodies?: [body], thickness, direction?: \"inside\"|\"outside\"|\"both\", outside_thickness?, tangent_chain?: bool, corners?: \"sharp\"|\"round\"}";
@@ -1215,6 +1215,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           distance2: opt_expr(p, "distance2"),
           angle: opt_expr(p, "angle"),
           flipped: p.get("flipped").and_then(Value::as_bool).unwrap_or(false),
+          corner: chamfer_corner(p)?,
         },
       )
     }
@@ -2641,6 +2642,15 @@ fn edit_picks(s: &Session, id: FeatureId, picks: &Value) -> Result<serde_json::M
     None => return Err(CmdError::new("no such feature")),
   }
   Ok(out)
+}
+
+/// A chamfer's Corner Type: `corner` "chamfer" (the default, stored as None), "miter" or "blend".
+fn chamfer_corner(p: &Value) -> Result<Option<String>, CmdError> {
+  match p.get("corner").and_then(Value::as_str) {
+    None | Some("chamfer") => Ok(None),
+    Some(c @ ("miter" | "blend")) => Ok(Some(c.to_string())),
+    Some(c) => Err(CmdError::new(format!("unknown corner type '{c}' (chamfer, miter or blend)"))),
+  }
 }
 
 /// {"body", "edge"} or {"point": [x,y,z]} on the edge.

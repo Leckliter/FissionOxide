@@ -1091,6 +1091,10 @@ pub enum FeatureKind {
     /// angle) are measured on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     flipped: bool,
+    /// Fusion's Corner Type where three chamfered edges meet: "miter" or "blend" (None is
+    /// Chamfer). Kept for the dialog; the kernel closes every corner with Chamfer's flat patch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    corner: Option<String>,
   },
   /// Press-pull: planar faces pushed out (join) or in (cut) along their normals.
   OffsetFaces {

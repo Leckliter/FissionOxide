@@ -63,7 +63,7 @@ fn convert_mesh_has_no_preview_and_makes_a_new_body() {
   let (mut s, b) = cube();
   let f = &MESH_CONVERT;
   let mut d = Dialog::blank(Kind::Form(f));
-  assert!(forms::no_preview(f) && !d.live.on);
+  assert!(!d.live.on);
   assert_eq!((value(&d, f, "operation"), value(&d, f, "method")), (json!("parametric"), json!("faceted")));
   assert!(forms::greyed_option(f, "method", "organic").is_some());
   assert!(forms::greyed_option(f, "method", "prismatic").is_none());
