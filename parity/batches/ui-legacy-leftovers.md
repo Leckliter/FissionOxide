@@ -6,7 +6,7 @@ where the behaviour is testable, and run `cargo test` and `cargo clippy` before 
 
 These nine rows come from the first waves (batches from 2026-10-19 to 2026-10-21 whose fixers ran
 before the current loop and opened PRs #100-#122). Every other row of those batches is verified or
-matches Fusion; these five were never closed. Several may since be covered by newer keys (for example
+matches Fusion; these nine were never closed. Several may since be covered by newer keys (for example
 the sketch Text and in-sketch menu rows by the wave-7, wave-10 and wave-35 batches): read the row's
 history and the newer keys first, and where a newer verified key already covers the behaviour, set this
 row `verified` with a note naming that key instead of changing code.
