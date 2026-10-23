@@ -695,3 +695,12 @@ three-decimal mm boxes, rotated vertical dimension text, red/green sketch axes, 
 steps, collapsed new browser folders, the in-command status readout and an Assistant canvas tab Fusion does not
 have. 10 new rows, 3 reopened, three wave-46 batches (`ui-workflow-dialogs-1`, `ui-workflow-sketch-1`,
 `ui-workflow-chrome-1`); report `parity/reports/2026-10-23-workflow-side-by-side.md`.
+
+## 2026-10-23, verifier 10: incremental re-verification
+Built `588d30a9` and re-checked the 43 checkable keys the wave-42..45 fixers had marked fixing-merged: 39
+verified (tabs overflow, sketch keys from 3D, dimension readouts, chamfer corners, Move/Copy rows, Mirror ghost,
+Replace Face plane target, surface Loft/Patch rails, every mesh dialog, oak appearance, lights, texture map,
+In-canvas Render, Remove on components, Canvas calibrate, reference parts on Windows), 1 reopened (the Milling Tool
+Holder tooltip has no picture), 2 new rows (Patch refuses a closed sketch circle as its boundary, which Fusion
+takes; three Preferences pages draw their controls greyed). Three keys still need components or a toolpath to
+check. Wave-47 batch `ui-reverify-misc-1`; report `parity/reports/2026-10-23-reverify-incremental-2.md`.

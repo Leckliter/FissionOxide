@@ -154,3 +154,4 @@
 {"name": "ui-workflow-dialogs-1", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_06fb018b (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-workflow-sketch-1", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_3fa0964f (requested 2026-10-23 by the coordinator)"}
 {"name": "ui-workflow-chrome-1", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_4f6bcb13 (requested 2026-10-23 by the coordinator)"}
+{"name": "ui-reverify-misc-1", "items": 3, "status": "ready", "pr": null}

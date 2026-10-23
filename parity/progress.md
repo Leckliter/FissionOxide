@@ -1,6 +1,28 @@
 # Prober progress
 
-## Last stop: 2026-10-23, 10:55, session "Incremental pass and workflow side-by-side, verifier 9"
+## Last stop: 2026-10-23, 15:40, session "Incremental re-verification, verifier 10"
+
+Built `main` at `588d30a9` (no build fix needed) and re-checked the 43 checkable `fixing-merged` keys: 39
+verified, 1 reopened (`ui:manufacture:solid-holder-submenu`: tooltip without the holder picture), 2 new rows
+(`ui:surface:patch-sketch-boundary`, Fusion checked this session; `ui:chrome:preferences-inert-controls-greyed`).
+New wave-47 batch `ui-reverify-misc-1` (3, `ready`, keys in `map-wave47.json`). Report
+`parity/reports/2026-10-23-reverify-incremental-2.md` (its last section lists things seen but not checked in
+Fusion: coplanar-line Loft, triple-click in value boxes, appearance drag-and-drop, Canvas/Calibrate window style,
+Hybrid Design's ASSEMBLE menu).
+
+Left `fixing-merged`: `ui:browser:drag-reorder` and `ui:animation:commands` (both need a component holding a
+body, which could not be made from the UI here), `ui:manufacture:show-tool-on-cursor` (needs a toolpath), and the
+usual four. Next verifier: re-check what the wave-46/47 fixers mark `fixing-merged`; with fewer than eight
+waiting, check the "seen but not recorded" list in Fusion and row it, or take the ASSEMBLY row in `coverage.md`.
+
+Where the documents stand: FissionOxide (`588d30a9`, PID 388) at x 0..1030 screenshot px, Data Panel closed, tabs
+Untitled(1)..(3) empty, Untitled(4)* (box with chamfer and oak appearance, Plane1, loft and cylinder surfaces,
+Sketch1..8, a callout in ANIMATION), Untitled(5)* (Assembly Design, External1), Untitled(6)* (Hybrid Design, a box,
+Canvas1). Fusion: Untitled*(4) on the SURFACE tab, Sketch2 finished, nothing saved. A test image was copied to
+`C:/Users/Leckliter/Documents/fox-mesh/canvas-test.png` (next to lprism.stl). Traps: Box now asks for a plane and two corners first;
+Texture Map Controls' Scale box takes a single click then Ctrl+A (triple-click does not select all).
+
+## Earlier stop: 2026-10-23, 10:55, session "Incremental pass and workflow side-by-side, verifier 9"
 
 Built `main` at `4e1c9667` (binary current, no build fix). Only the usual four uncheckable keys were
 `fixing-merged`, so nothing was re-checked. Fixers: none has pushed to `main` since 05:10; mesh-1,
