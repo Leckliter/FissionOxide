@@ -3367,3 +3367,44 @@ fn the_centre_of_concentric_circles_is_picked_as_the_pattern_centre() {
   assert!(d.center_pick().is_some(), "the shared centre is the Center Point: {:?}", h.app.s.selection);
   assert_eq!(d.objects(), vec![small.0], "the small circle stays the object");
 }
+
+#[test]
+fn the_ground_plane_offset_box_takes_a_typed_distance() {
+  let mut h = Harness::new();
+  h.app.display.open_ground_offset(h.app.s.design.units);
+  // Adaptive off: the Offset row shows its value in the design's unit
+  let adaptive = h.find(vec![], "Adaptive").expect("the dialog is open");
+  h.move_then_click(adaptive.right_center() + vec2(110.0, 0.0));
+  assert_eq!(h.app.display.ground_offset_form.as_ref().map(|f| f.adaptive), Some(false));
+  assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "0.00 mm");
+  // a click goes into the box (no nudged value) and typing replaces its text
+  let offset = h.find(vec![], "Offset").expect("the Offset row");
+  h.move_then_click(offset.right_center() + vec2(110.0, 0.0));
+  assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "0.00 mm", "a click changes nothing");
+  let mut ev = vec![Event::Key {
+    key: egui::Key::A,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::COMMAND,
+  }];
+  ev.extend(typing("20"));
+  h.frame(ev);
+  h.frame(vec![]);
+  assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "20");
+  // OK moves the ground that far below the model
+  let ok = h.find(vec![], "OK").expect("OK");
+  h.move_then_click(ok.center());
+  assert_eq!(h.app.display.ground_offset_form, None);
+  assert!(!h.app.display.ground_adaptive);
+  assert_eq!(h.app.display.ground(), Some(20.0));
+  // units and expressions work as in the command dialogs; OK greys while it does not evaluate
+  let s = &h.app.s;
+  assert_eq!(crate::navbar::ground_offset_mm(s, "20 mm"), Some(20.0));
+  assert!((crate::navbar::ground_offset_mm(s, "1 in / 2").unwrap() - 12.7).abs() < 1e-9);
+  assert_eq!(crate::navbar::ground_offset_mm(s, "abc"), None);
+  assert_eq!(crate::navbar::ground_offset_mm(s, "-3"), None);
+  // it reopens on the value applied
+  h.app.display.open_ground_offset(h.app.s.design.units);
+  assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "20.00 mm");
+}

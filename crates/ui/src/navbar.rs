@@ -327,7 +327,7 @@ pub fn default_effects() -> Effects {
 }
 
 /// Dresses a built scene as Display Settings ask: the visual style (Shaded with Visible Edges
-/// Only darkens the plain edges), and the effects with the ground at Ground Plane Offset and the
+/// Only and Shaded with Hidden Edges darken the plain edges), and the effects with the ground at Ground Plane Offset and the
 /// environment's dome.
 pub fn dress(app: &App, scene: &mut Scene) {
   scene.style = app.visual_style;
@@ -372,11 +372,12 @@ pub struct DisplaySettings {
 }
 
 /// What the GROUND PLANE OFFSET dialog edits.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GroundOffsetForm {
   pub adaptive: bool,
-  /// mm; its field shows only with Adaptive off.
-  pub offset: f64,
+  /// The Offset box's text, a typed distance or expression ("20", "20 mm", "1 in / 2"); its
+  /// field shows only with Adaptive off.
+  pub offset: String,
 }
 
 impl Default for DisplaySettings {
@@ -411,10 +412,25 @@ impl DisplaySettings {
     (!self.ground_adaptive).then_some(self.ground_offset as f32)
   }
 
-  /// Opens the GROUND PLANE OFFSET dialog on the current values.
-  pub fn open_ground_offset(&mut self) {
-    self.ground_offset_form = Some(GroundOffsetForm { adaptive: self.ground_adaptive, offset: self.ground_offset });
+  /// Opens the GROUND PLANE OFFSET dialog on the current values, the offset in the design's unit.
+  pub fn open_ground_offset(&mut self, unit: fox_engine::model::LengthUnit) {
+    let offset = unit.fixed(self.ground_offset, 2);
+    self.ground_offset_form = Some(GroundOffsetForm { adaptive: self.ground_adaptive, offset });
   }
+}
+
+/// The Offset box's distance (mm), as the dialogs' value boxes read one: a bare number or unitless
+/// expression is in the design's unit; parameters work. None when it does not evaluate to a
+/// length of zero or more.
+pub(crate) fn ground_offset_mm(s: &fox_engine::Session, text: &str) -> Option<f64> {
+  use fox_engine::expr::{Empty, Kind, eval, eval_raw};
+  let t = text.trim();
+  if t.is_empty() {
+    return None;
+  }
+  let bare = matches!(eval_raw(t, &Empty), Ok(v) if !v.has_unit);
+  let e = if bare { format!("({t}) * 1 {}", s.design.units.symbol()) } else { t.to_string() };
+  eval(&e, Kind::Length, &s.model.params).ok().filter(|v| v.is_finite() && *v >= 0.0)
 }
 
 /// Display Settings ▸ Enter Full Screen / Exit Full Screen (Ctrl+Shift+F).
@@ -423,11 +439,19 @@ pub fn toggle_full_screen(ctx: &egui::Context) {
   ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
 }
 
+/// The Visual Style fly-out's width: its longest row ("Shaded with Visible Edges Only") and the
+/// shortcut column.
+const VISUAL_STYLE_WIDTH: f32 = 250.0;
+/// The Grid and Snaps menu's width.
+const GRID_MENU_WIDTH: f32 = 190.0;
+
 /// Fusion's Display Settings fly-out, in its order.
 pub fn display_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(220.0);
   ui.menu_button("Visual Style", |ui| {
-    ui.set_min_width(300.0);
+    // as wide as the longest row and the shortcut column, as Fusion's: the right-aligned
+    // shortcuts would otherwise stretch the fly-out to the widest a menu gets
+    ui.set_width(VISUAL_STYLE_WIDTH);
     for (s, _, keys) in VISUAL_STYLES {
       ui.horizontal(|ui| {
         if ui.radio(app.visual_style == s, s.label()).clicked() {
@@ -509,7 +533,7 @@ pub fn display_menu(app: &mut App, ui: &mut egui::Ui) {
     }
   });
   if ui.button("Ground Plane Offset").clicked() {
-    app.display.open_ground_offset();
+    app.display.open_ground_offset(app.s.design.units);
     ui.close();
   }
   let full = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -530,11 +554,14 @@ pub(crate) fn set_projection(app: &mut App, mode: Projection) {
 /// The GROUND PLANE OFFSET dialog, while open: docked like a command dialog, with Adaptive
 /// (and the offset field when Adaptive is off) and OK / Cancel. Escape closes it (`App::escape`).
 pub fn ground_offset_window(app: &mut App, ctx: &egui::Context) {
-  let Some(mut form) = app.display.ground_offset_form else { return };
+  let Some(mut form) = app.display.ground_offset_form.take() else { return };
   let mut done = false;
   let mut cancel = false;
   let width = 300.0;
   let dock = crate::panels::dialog_dock(app.canvas, app.s.edit_sketch.is_some());
+  // what OK applies: the typed offset (OK greys while it does not evaluate), or with Adaptive on
+  // the offset kept for later
+  let mut offset = None;
   egui::Area::new(egui::Id::new("ground-plane-offset"))
     .pivot(egui::Align2::RIGHT_TOP)
     .default_pos(dock)
@@ -552,12 +579,18 @@ pub fn ground_offset_window(app: &mut App, ctx: &egui::Context) {
             ui.checkbox(&mut form.adaptive, "");
             ui.end_row();
             if !form.adaptive {
+              // a typed value box, as the command dialogs' distance rows (units, expressions)
               ui.label("Offset");
-              ui.add(egui::DragValue::new(&mut form.offset).range(0.0..=1e5).speed(0.5).suffix(" mm"));
+              crate::dialogs::value_edit_w(ui, &mut form.offset, 140.0);
               ui.end_row();
             }
           });
         });
+        offset = if form.adaptive {
+          Some(ground_offset_mm(&app.s, &form.offset).unwrap_or(app.display.ground_offset))
+        } else {
+          ground_offset_mm(&app.s, &form.offset)
+        };
         let sep = ui.allocate_exact_size(egui::vec2(width, 1.0), egui::Sense::hover()).0;
         ui.painter().rect_filled(sep, 0.0, crate::theme::SEPARATOR);
         egui::Frame::new().fill(crate::theme::DIALOG_BODY).inner_margin(egui::Margin::symmetric(10, 7)).show(
@@ -569,9 +602,8 @@ pub fn ground_offset_window(app: &mut App, ctx: &egui::Context) {
                 if crate::panels::secondary_button(ui, "Cancel").clicked() {
                   cancel = true;
                 }
-                if crate::panels::primary_button(ui, "OK", crate::icons::accent_of(crate::icons::Icon::Display))
-                  .clicked()
-                {
+                let accent = crate::icons::accent_of(crate::icons::Icon::Display);
+                if crate::dialogs::ok_button(ui, accent, offset.is_some()).clicked() {
                   done = true;
                 }
               });
@@ -580,9 +612,9 @@ pub fn ground_offset_window(app: &mut App, ctx: &egui::Context) {
         );
       });
     });
-  if done {
+  if done && let Some(mm) = offset {
     app.display.ground_adaptive = form.adaptive;
-    app.display.ground_offset = form.offset;
+    app.display.ground_offset = mm;
     app.display.ground_offset_form = None;
   } else if cancel {
     app.display.ground_offset_form = None;
@@ -597,7 +629,8 @@ pub fn ground_offset_window(app: &mut App, ctx: &egui::Context) {
 /// and open the docked GRID SETTINGS and SET INCREMENTS dialogs (see [`crate::grid_dialogs`]).
 /// `adaptive_now` is the spacing the adaptive grid has (what a lock freezes).
 pub fn grid_menu(app: &mut App, ui: &mut egui::Ui, adaptive_now: f64) {
-  ui.set_min_width(190.0);
+  // its rows' width, as Fusion's (the icon rows fill what they're given)
+  ui.set_width(GRID_MENU_WIDTH);
   if ui.checkbox(&mut app.layout_grid, "Layout Grid").changed() {
     set_layout_grid(app, app.layout_grid, adaptive_now);
   }
@@ -779,12 +812,97 @@ mod tests {
     assert!(o.hide_construction_axes && !o.hide_construction_planes && !o.hide_construction_points);
   }
 
+  /// The texts drawn in a frame, with where.
+  fn drawn(out: &egui::FullOutput) -> Vec<(egui::Rect, String)> {
+    fn walk(s: &egui::Shape, out: &mut Vec<(egui::Rect, String)>) {
+      match s {
+        egui::Shape::Text(t) => out.push((t.visual_bounding_rect(), t.galley.text().to_string())),
+        egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+        _ => {}
+      }
+    }
+    let mut all = Vec::new();
+    for c in &out.shapes {
+      walk(&c.shape, &mut all);
+    }
+    all
+  }
+
+  /// The Grid and Snaps menu and the Visual Style fly-out are as wide as their rows (Fusion's
+  /// are about 200-260 px), and the fly-out opens to the right of its row, from a navigation
+  /// bar button at the bottom of the window.
+  #[test]
+  fn the_grid_menu_and_the_visual_style_fly_out_are_narrow_and_open_right() {
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx);
+    let mut app = App::with_session(fox_engine::Session::default());
+    let mut time = 0.0;
+    let mut frame = |app: &mut App, grid: bool, events: Vec<egui::Event>| {
+      time += 1.0 / 60.0;
+      let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1440.0, 900.0))),
+        time: Some(time),
+        events,
+        ..Default::default()
+      };
+      let mut button = None;
+      let out = ctx.run_ui(input, |ui| {
+        egui::Area::new(egui::Id::new("bar")).fixed_pos(egui::pos2(700.0, 860.0)).show(ui.ctx(), |ui| {
+          let b = ui.button(if grid { "Grid" } else { "Display" });
+          if grid {
+            egui::Popup::menu(&b).show(|ui| grid_menu(app, ui, 10.0));
+          } else {
+            egui::Popup::menu(&b).show(|ui| display_menu(app, ui));
+          }
+          button = Some((b.rect, egui::Popup::default_response_id(&b)));
+        });
+      });
+      let t = drawn(&out);
+      out.drop_without_applying_deltas();
+      (t, button.unwrap())
+    };
+    let click = |p: egui::Pos2| {
+      let b = |pressed| egui::Event::PointerButton {
+        pos: p,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+      };
+      vec![egui::Event::PointerMoved(p), b(true), b(false)]
+    };
+    // Grid and Snaps
+    let (_, (b, id)) = frame(&mut app, true, vec![]);
+    frame(&mut app, true, click(b.center()));
+    for _ in 0..4 {
+      frame(&mut app, true, vec![]);
+    }
+    let r = ctx.memory(|m| m.area_rect(id)).expect("the grid menu is open");
+    assert!(r.width() < 240.0, "the grid menu is {} px wide", r.width());
+    // Display Settings ▸ Visual Style
+    let (_, (b, _)) = frame(&mut app, false, vec![egui::Event::PointerMoved(egui::pos2(10.0, 10.0))]);
+    frame(&mut app, false, click(b.center()));
+    let (t, _) = frame(&mut app, false, vec![]);
+    let row = t.iter().find(|(_, s)| s == "Visual Style").expect("the Display Settings menu is open").0;
+    frame(&mut app, false, vec![egui::Event::PointerMoved(row.center())]);
+    let mut t = Vec::new();
+    for _ in 0..30 {
+      time += 0.05;
+      t = frame(&mut app, false, vec![]).0;
+    }
+    let at = |s: &str| t.iter().find(|(_, x)| x == s).unwrap_or_else(|| panic!("{s} not drawn: {t:?}")).0;
+    let (first, longest, key) = (at("Shaded"), at("Shaded with Visible Edges Only"), at("Ctrl+9"));
+    assert!(first.left() > row.right(), "the fly-out opens right: {first:?} beside {row:?}");
+    assert!(key.right() - first.left() < 260.0, "the fly-out is narrow: {first:?} .. {key:?}");
+    assert!(key.left() - longest.right() < 50.0, "no gap before the shortcuts: {longest:?} {key:?}");
+    assert!(key.left() > longest.right(), "the shortcuts sit after the rows: {longest:?} {key:?}");
+  }
+
   #[test]
   fn the_ground_plane_offset_dialog_is_docked_with_adaptive() {
     let mut app = App::with_session(fox_engine::Session::default());
     app.canvas = egui::Rect::from_min_max(egui::pos2(0.0, 80.0), egui::pos2(1200.0, 760.0));
-    app.display.open_ground_offset();
-    assert_eq!(app.display.ground_offset_form, Some(GroundOffsetForm { adaptive: true, offset: 0.0 }));
+    app.display.open_ground_offset(app.s.design.units);
+    assert_eq!(app.display.ground_offset_form, Some(GroundOffsetForm { adaptive: true, offset: "0.00 mm".into() }));
     let ctx = egui::Context::default();
     let frame = |app: &mut App, events: Vec<egui::Event>| {
       let input = egui::RawInput {
@@ -801,9 +919,9 @@ mod tests {
     assert!((r.right() - dock.x).abs() < 1.0 && (r.top() - dock.y).abs() < 1.0, "{r:?} {dock:?}");
     assert!(r.width() <= 302.0 && r.height() < 130.0, "{r:?}");
     // Adaptive off keeps its value through the dialog; OK is needed to apply it
-    app.display.ground_offset_form = Some(GroundOffsetForm { adaptive: false, offset: 12.5 });
+    app.display.ground_offset_form = Some(GroundOffsetForm { adaptive: false, offset: "12.5".into() });
     frame(&mut app, vec![]);
-    assert_eq!(app.display.ground_offset_form, Some(GroundOffsetForm { adaptive: false, offset: 12.5 }));
+    assert_eq!(app.display.ground_offset_form, Some(GroundOffsetForm { adaptive: false, offset: "12.5".into() }));
     assert!(app.display.ground_adaptive && app.display.ground_offset == 0.0, "open until OK");
     // Escape closes it, changing nothing
     app.escape();

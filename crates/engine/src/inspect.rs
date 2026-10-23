@@ -56,7 +56,7 @@ struct Entity {
 }
 
 /// `{body}`, `{body, face}`, `{body, edge}`, `{point: [x,y,z]}` (a point in space), or a
-/// selection item (`{"type": "face", ...}`).
+/// selection item (`{"type": "face", ...}`, a sketch curve or sketch point too).
 fn entity(s: &Session, v: &Value) -> Result<Entity, CmdError> {
   if let Some(sel) = v.get("type").and_then(Value::as_str) {
     let mut v = v.clone();
@@ -70,6 +70,14 @@ fn entity(s: &Session, v: &Value) -> Result<Entity, CmdError> {
         let at = crate::scene::vertex_pos(s, BodyId(req_u32(&v, "body")?), req_u32(&v, "edge")?, end)
           .ok_or(CmdError::new("no such vertex"))?;
         entity(s, &json!({"point": at.to_array()}))
+      }
+      "sketch_curve" => sketch_curve_entity(s, &v),
+      "sketch_point" => {
+        let sketch = fox_model::FeatureId(req_u32(&v, "sketch")?);
+        let (sk, plane) = crate::properties::solved(s, sketch)?;
+        let q = sk.pos(fox_sketch::PointId(req_u32(&v, "point")?)).ok_or(CmdError::new("no such sketch point"))?;
+        let plane = plane.ok_or(CmdError::new("the sketch has no plane"))?;
+        entity(s, &json!({"point": plane.to_world(q).to_array()}))
       }
       o => Err(CmdError::new(format!("can't measure a {o}"))),
     };
@@ -151,6 +159,36 @@ fn entity(s: &Session, v: &Value) -> Result<Entity, CmdError> {
       "center_of_mass": m.center_of_mass.to_array(),
       "size": (m.bbox_max - m.bbox_min).to_array(),
     }),
+  })
+}
+
+/// A sketch curve, measured as an edge in space: its length (and a circle's or arc's radius),
+/// and its direction when it is a line.
+fn sketch_curve_entity(s: &Session, v: &Value) -> Result<Entity, CmdError> {
+  let sketch = fox_model::FeatureId(req_u32(v, "sketch")?);
+  let curve = fox_sketch::CurveId(req_u32(v, "curve")?);
+  let (sk, plane) = crate::properties::solved(s, sketch)?;
+  let plane = plane.ok_or(CmdError::new("the sketch has no plane"))?;
+  let segs = sk.curve_segs(curve);
+  if segs.is_empty() {
+    return Err(CmdError::new(format!("sketch has no curve {}", curve.0)));
+  }
+  let info = crate::properties::sketch_curve(s, sketch, curve)?;
+  let kind = info.get("curve").and_then(Value::as_str).unwrap_or("curve");
+  let line = kind == "line";
+  let mut props = json!({"kind": "edge", "curve": kind, "length": info["length"]});
+  for k in ["start", "end", "center", "radius", "diameter"] {
+    if let Some(x) = info.get(k) {
+      props[k] = x.clone();
+    }
+  }
+  let at = |k: &str| req_vec3(&info, k).ok().map(DVec3::from);
+  let dir = if line { at("start").zip(at("end")).and_then(|(a, b)| (b - a).try_normalize()) } else { None };
+  Ok(Entity {
+    shape: Shape::path(&plane, &segs)?,
+    dir,
+    kind: if line { "line" } else { "edge" },
+    props,
   })
 }
 

@@ -65,6 +65,31 @@ fn measure_between_faces_and_selection_tools() {
   assert!((cm[0].as_f64().unwrap() - 20.0).abs() < 1e-6 && (cm[2].as_f64().unwrap() - 5.0).abs() < 1e-6, "{c}");
 }
 
+/// Measure takes sketch curves and sketch points while a sketch is open: a line reads as an edge
+/// with its length, two lines give the distance and angle between them.
+#[test]
+fn measure_sketch_curves_and_points() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  let sk = s.edit_sketch.unwrap().0;
+  let a = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}))["curves"][0].clone();
+  let b = run(&mut s, "sketch.line", json!({"points": [[0, 4], [10, 4]]}))["curves"][0].clone();
+  let curve = |c: &Value| json!({"type": "sketch_curve", "sketch": sk, "curve": c});
+  let one = run(&mut s, "measure", json!({"a": curve(&a)}));
+  assert_eq!(one["kind"], "edge", "{one}");
+  assert!((one["length"].as_f64().unwrap() - 10.0).abs() < 1e-9, "{one}");
+  let two = run(&mut s, "measure", json!({"a": curve(&a), "b": curve(&b)}));
+  assert!((two["distance"].as_f64().unwrap() - 4.0).abs() < 1e-6, "{two}");
+  assert!(two["angle_deg"].as_f64().unwrap().abs() < 1e-6, "parallel lines: {two}");
+  // a sketch point measures as a point in space (on the XZ plane)
+  let sketch = s.design.sketch(fox_model::FeatureId(sk)).unwrap();
+  let p = sketch.curve_points(fox_sketch::CurveId(b.as_u64().unwrap() as u32))[1];
+  let pt = run(&mut s, "measure", json!({"a": {"type": "sketch_point", "sketch": sk, "point": p.0}}));
+  assert_eq!(pt["kind"], "point", "{pt}");
+  let to = run(&mut s, "measure", json!({"a": curve(&a), "b": {"type": "sketch_point", "sketch": sk, "point": p.0}}));
+  assert!((to["distance"].as_f64().unwrap() - 4.0).abs() < 1e-6, "{to}");
+}
+
 #[test]
 fn construction_planes_axes_and_points() {
   let mut s = Session::default();

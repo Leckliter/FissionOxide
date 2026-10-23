@@ -5190,22 +5190,32 @@ pub(crate) fn section_header(ui: &mut egui::Ui, id: egui::Id, title: &str) -> bo
   open
 }
 
-/// What Measure measures: the first two selected bodies, faces, edges and vertices, or (with
-/// nothing selected) what the pointer is over.
+/// What Measure measures: the first two selected bodies, faces, edges, vertices, sketch curves
+/// and sketch points, or (with nothing selected) what the pointer is over.
 fn measure_picks(app: &App) -> (Vec<Value>, bool) {
+  let measurable = |x: &Sel| {
+    matches!(
+      x,
+      Sel::Body { .. }
+        | Sel::Face { .. }
+        | Sel::Edge { .. }
+        | Sel::Vertex { .. }
+        | Sel::SketchCurve { .. }
+        | Sel::SketchPoint { .. }
+    )
+  };
   let picks: Vec<Value> = app
     .s
     .selection
     .iter()
-    .filter(|x| matches!(x, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. }))
+    .filter(|x| measurable(x))
     .take(2)
     .filter_map(|x| serde_json::to_value(x).ok())
     .collect();
   if !picks.is_empty() {
     return (picks, false);
   }
-  let hover =
-    app.hover.map(|p| p.to_sel()).filter(|x| matches!(x, Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. }));
+  let hover = app.hover.map(|p| p.to_sel()).filter(|x| !matches!(x, Sel::Body { .. }) && measurable(x));
   (hover.and_then(|h| serde_json::to_value(h).ok()).into_iter().collect(), true)
 }
 
@@ -5217,6 +5227,7 @@ impl Dialog {
     use crate::select::Priority;
     use icon_row::{choice, icon_row};
     app.measure = None;
+    app.tstate.measured = None;
     // Measure picks vertices too, while it's open
     if self.saved_filter.is_none() {
       self.saved_filter = Some((app.sel_priority, app.sel_filter.vertices));
@@ -5296,6 +5307,10 @@ impl Dialog {
       if let (Some(a), Some(b)) = (v3(a), v3(b)) {
         app.measure = Some((a, b, fmt.len(d)));
       }
+      app.tstate.measured = Some(d);
+    } else if !hovering && r.get("kind").and_then(Value::as_str) == Some("edge") {
+      // one picked edge or sketch line: its length
+      app.tstate.measured = r.get("length").and_then(Value::as_f64);
     }
     for (i, sec) in measure_sections(&r, &fmt).iter().enumerate() {
       if !section_header(ui, ui.id().with(("measure-section", i)), &sec.title) {
@@ -5364,6 +5379,7 @@ impl Dialog {
       crate::viewport::fill_dim_from_measure(app);
       app.s.selection.clear();
       app.measure = None;
+      app.tstate.measured = None;
     }
     // Section Analysis's live cut goes (OK kept a copy in the browser)
     if self.kind == Kind::Section {
