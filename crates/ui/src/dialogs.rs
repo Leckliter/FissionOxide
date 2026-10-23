@@ -885,7 +885,7 @@ impl Dialog {
       }),
       flange: flange::State::default(),
       plane_cut: plane_cut::State::default(),
-      surf: surface::State::default(),
+      surf: surface::State::new(kind),
     }
   }
 

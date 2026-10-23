@@ -71,6 +71,13 @@ pub(crate) struct State {
   sections: Vec<Value>,
 }
 
+impl State {
+  /// A fresh state for the dialog `kind`: Loft's Chain Selection starts unchecked, as Fusion's.
+  pub(super) fn new(kind: Kind) -> State {
+    State { chain: kind != Kind::SurfLoft, ..State::default() }
+  }
+}
+
 impl Default for State {
   fn default() -> State {
     State {
@@ -105,6 +112,9 @@ const DIRECTIONS: [(&str, &str); 3] =
 const EXTENT_TYPES: [(&str, &str); 1] = [("distance", "Distance")];
 const REVOLVE_EXTENTS: [(&str, &str); 2] = [("partial", "Partial"), ("full", "Full")];
 const ORIENTATIONS: [(&str, &str); 2] = [("perpendicular", "Perpendicular"), ("parallel", "Parallel")];
+/// Loft Guide Type: rails or a centerline (the solid Loft's icons).
+const GUIDE_TYPES: [icon_row::Choice; 2] =
+  [icon_row::choice("rails", Icon::SplineFit, "Rails"), icon_row::choice("centerline", Icon::Centerline, "Centerline")];
 const SWEEP_TYPES: [(&str, &str); 1] = [("single", "Single Path")];
 const CONTINUITY: [(&str, &str); 3] = [("connected", "Connected"), ("tangent", "Tangent"), ("curvature", "Curvature")];
 
@@ -590,17 +600,18 @@ impl Dialog {
       }
       _ => {
         self.loft_list(ui, &mut dirty);
+        // Fusion's two Guide Type toggles, as the solid Loft's; the guide row under them follows
         ui.label("Guide Type");
-        let guides = [
-          icon_row::choice("rails", Icon::Loft, "Rails"),
-          icon_row::greyed("centerline", Icon::Centerline, "Centerline"),
-        ];
-        icon_row::icon_row(ui, &mut self.surf.guide, &guides, "FissionOxide's surface loft has no centerline yet");
+        icon_row::icon_row(ui, &mut self.surf.guide, &GUIDE_TYPES, "");
         ui.end_row();
-        ui.label("Rails");
-        ui.add_enabled_ui(false, |ui| sel_chip(ui, self.accent(), "Select", false))
-          .inner
-          .on_disabled_hover_text("FissionOxide's surface loft has no rails yet");
+        let centerline = self.surf.guide == "centerline";
+        ui.label(if centerline { "Centerline" } else { "Rails" });
+        let why = if centerline {
+          "FissionOxide's surface loft has no centerline yet"
+        } else {
+          "FissionOxide's surface loft has no rails yet"
+        };
+        ui.add_enabled_ui(false, |ui| sel_chip(ui, self.accent(), "Select", false)).inner.on_disabled_hover_text(why);
         ui.end_row();
         let st = &mut self.surf;
         super::Dialog::check(ui, "Chain Selection", &mut st.chain, &mut dirty);
@@ -639,7 +650,7 @@ impl Dialog {
       for (i, _) in self.surf.rows[0].iter().enumerate() {
         ui.horizontal(|ui| {
           ui.label(egui::RichText::new(format!("Profile{}", i + 1)).color(theme::TEXT));
-          if ui.small_button("🗙").on_hover_text("Remove this profile").clicked() {
+          if icons::icon_button(ui, Icon::Close, 16.0, "Remove this profile", false, None).clicked() {
             remove = Some(i);
           }
         });
@@ -927,6 +938,7 @@ mod tests {
   use serde_json::{Value, json};
 
   use super::super::{Dialog, Kind};
+  use super::GUIDE_TYPES;
   use crate::App;
 
   fn sketch(app: &mut App, cmd: &str, p: Value) -> fox_engine::model::FeatureId {
@@ -1033,6 +1045,46 @@ mod tests {
     assert_eq!(p["path_curves"].as_array().unwrap().len(), 2, "{p}");
     d.preview(&mut app.s);
     assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    d.cancel(&mut app.s);
+  }
+
+  /// `ui:surface:sweep-loft-missing`: LOFT opens with Chain Selection unchecked (SWEEP's is
+  /// checked) and Guide Type as two icon toggles, rails and centerline, the guide row following.
+  #[test]
+  fn loft_opens_unchained_with_two_guide_toggles() {
+    let mut app = App::with_session(Session::default());
+    assert!(Dialog::open(&mut app, Kind::SurfSweep).surf.chain, "Sweep chains");
+    let mut d = Dialog::open(&mut app, Kind::SurfLoft);
+    assert!(!d.surf.chain, "Loft's Chain Selection starts unchecked");
+    assert!(GUIDE_TYPES.iter().all(|c| c.enabled), "both Guide Type icons are toggles");
+    assert_eq!(GUIDE_TYPES.map(|c| c.key), ["rails", "centerline"]);
+    assert_eq!(d.surf.guide, "rails");
+    let ctx = egui::Context::default();
+    let texts = |d: &mut Dialog| {
+      let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+        ..Default::default()
+      };
+      let out = ctx.run_ui(raw, |ui| {
+        egui::Grid::new("t").num_columns(2).show(ui, |ui| d.surf_rows(ui));
+      });
+      let mut t = Vec::new();
+      fn walk(s: &egui::Shape, out: &mut Vec<String>) {
+        match s {
+          egui::Shape::Text(x) => out.push(x.galley.text().to_string()),
+          egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+          _ => {}
+        }
+      }
+      out.shapes.iter().for_each(|c| walk(&c.shape, &mut t));
+      out.drop_without_applying_deltas();
+      t
+    };
+    let t = texts(&mut d);
+    assert!(t.iter().any(|x| x == "Rails") && !t.iter().any(|x| x == "Centerline"), "{t:?}");
+    d.surf.guide = "centerline";
+    let t = texts(&mut d);
+    assert!(t.iter().any(|x| x == "Centerline") && !t.iter().any(|x| x == "Rails"), "{t:?}");
     d.cancel(&mut app.s);
   }
 

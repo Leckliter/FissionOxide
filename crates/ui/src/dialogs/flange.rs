@@ -340,7 +340,9 @@ impl Dialog {
         .stroke(egui::Stroke::new(1.0, theme::BORDER))
         .inner_margin(egui::Margin::symmetric(4, 2))
         .show(ui, |ui| {
-          ui.set_min_size(egui::vec2(172.0, 48.0));
+          // inside the value column, less the margins and border, with room for the override
+          // groups' longest label ("Relief placement") in the label column
+          ui.set_min_size(egui::vec2(156.0, 48.0));
           for (i, r) in rows.iter().enumerate() {
             ui.horizontal(|ui| {
               ui.label(r);
@@ -358,8 +360,9 @@ impl Dialog {
         });
       ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        let _ = ui.small_button("+").on_hover_text("Add");
-        if ui.small_button("🗙").on_hover_text("Remove").clicked() {
+        // drawn icons, as the Loft lists'
+        let _ = icons::icon_button(ui, Icon::Plus, 20.0, "Add", false, None);
+        if icons::icon_button(ui, Icon::Close, 20.0, "Remove", false, None).clicked() {
           clear = true;
         }
       });
@@ -418,11 +421,7 @@ impl Dialog {
       ("3-Bend Corner Override", vec![("Relief shape", "Default (Round with Radius)"), ("Relief radius", "Thickness")]),
     ];
     for (i, (name, rows)) in groups.iter().enumerate() {
-      let arrow = if self.flange.open[i] { "⏷" } else { "⏵" };
-      if ui
-        .add(egui::Label::new(RichText::new(format!("{arrow} {name}")).strong()).sense(egui::Sense::click()))
-        .clicked()
-      {
+      if group_header(ui, name, self.flange.open[i]) {
         self.flange.open[i] = !self.flange.open[i];
       }
       ui.label("");
@@ -455,6 +454,31 @@ impl Dialog {
     });
     ui.end_row();
   }
+}
+
+/// An override group's heading, Fusion's triangle and name across the row. It takes no more of the label column than the labels under it, so the
+/// dialog keeps its width, and runs on into the empty value cell. True when clicked.
+fn group_header(ui: &mut egui::Ui, name: &str, open: bool) -> bool {
+  let galley = egui::WidgetText::from(RichText::new(name).strong()).into_galley(
+    ui,
+    Some(egui::TextWrapMode::Extend),
+    f32::INFINITY,
+    egui::TextStyle::Body,
+  );
+  let size = egui::vec2(galley.size().x + 14.0, galley.size().y.max(16.0));
+  let (cell, _) = ui.allocate_exact_size(egui::vec2(size.x.min(90.0), size.y), egui::Sense::hover());
+  let full = egui::Rect::from_min_size(cell.min, size);
+  let r = ui.interact(full, ui.id().with(("flange-group", name)), egui::Sense::click());
+  let ink = ui.visuals().strong_text_color();
+  let c = egui::pos2(full.left() + 5.0, full.center().y);
+  let tri = if open {
+    vec![c + egui::vec2(-4.0, -2.0), c + egui::vec2(4.0, -2.0), c + egui::vec2(0.0, 3.0)]
+  } else {
+    vec![c + egui::vec2(-2.0, -4.0), c + egui::vec2(3.0, 0.0), c + egui::vec2(-2.0, 4.0)]
+  };
+  ui.painter().add(egui::Shape::convex_polygon(tri, ink, egui::Stroke::NONE));
+  ui.painter().galley(egui::pos2(full.left() + 14.0, full.center().y - galley.size().y / 2.0), galley, ink);
+  r.clicked()
 }
 
 /// A greyed row: a value the dialog shows but can't change yet (the rule's).
@@ -815,6 +839,43 @@ mod tests {
     let mut d = Dialog::edit(&app, base).expect("a base flange is editable");
     assert_eq!(d.heading(), "EDIT BASE FLANGE");
     d.cancel(&mut app.s);
+  }
+
+  /// The dialog's drawn width (its frame's), after two frames.
+  fn dialog_width(ctx: &egui::Context, app: &mut App, d: &mut Dialog) -> f32 {
+    frame(ctx, app, d);
+    ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog"))).expect("the dialog's area").width()
+  }
+
+  /// `ui:sheet:flange-dialog-open`: FLANGE, EDGE FLANGE and HEM keep the dialog's width, so the
+  /// header bar runs to the right edge (no row is wider than the dialog).
+  #[test]
+  fn flange_dialogs_keep_the_header_width() {
+    let mut app = App::with_session(Session::default());
+    plate(&mut app);
+    let ctx = egui::Context::default();
+    let mut d = Dialog::open(&mut app, Kind::Flange);
+    let bare = dialog_width(&ctx, &mut app, &mut d);
+    d.cancel(&mut app.s);
+    app.run("sheet.flange", json!({}));
+    let b = &app.s.model.bodies[0];
+    let e = b.edges().iter().find(|e| e.length > 99.0).unwrap();
+    app.s.selection = vec![Sel::Edge { body: b.id, edge: e.id }];
+    let mut d = Dialog::open(&mut app, Kind::Flange);
+    d.flange.open = [false; 3];
+    let edge = dialog_width(&ctx, &mut app, &mut d);
+    assert_eq!(d.heading(), "EDGE FLANGE");
+    // every override group open too
+    d.flange.open = [true; 3];
+    let open = dialog_width(&ctx, &mut app, &mut d);
+    d.cancel(&mut app.s);
+    app.s.selection.clear();
+    let mut d = Dialog::open(&mut app, Kind::Hem);
+    let hem = dialog_width(&ctx, &mut app, &mut d);
+    d.cancel(&mut app.s);
+    for (name, w) in [("HEM", hem), ("FLANGE", bare), ("EDGE FLANGE", edge), ("EDGE FLANGE (groups open)", open)] {
+      assert!(w <= 302.0, "{name} is {w} wide: the 300 pt header stops short");
+    }
   }
 
   #[test]
