@@ -133,7 +133,7 @@
 {"name": "ui-reverify-sketch-4", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_5b7c8ddc (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-reverify-dialogs-4", "items": 4, "status": "fixing", "pr": null, "fixer": "cloud task_a1160402 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-reverify-chrome-2", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_0354a724 (requested 2026-10-22 by the coordinator)"}
-{"name": "ui-reverify-render-1", "items": 3, "status": "ready", "pr": null}
-{"name": "ui-reverify-workspaces-1", "items": 6, "status": "ready", "pr": null}
-{"name": "ui-reverify-toolbar-1", "items": 6, "status": "ready", "pr": null}
-{"name": "ui-reverify-dialogs-5", "items": 2, "status": "ready", "pr": null}
+{"name": "ui-reverify-render-1", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_d34698b1 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-reverify-workspaces-1", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_a1bfc620 (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-reverify-toolbar-1", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_081bcd2e (requested 2026-10-22 by the coordinator)"}
+{"name": "ui-reverify-dialogs-5", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_fc7adbe1 (requested 2026-10-22 by the coordinator)"}
