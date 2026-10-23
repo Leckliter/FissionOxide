@@ -1051,23 +1051,28 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
-/// The workspace menu's rows: Fusion's, taller than other menus' and semi-bold.
-pub(crate) const WORKSPACE_ROW_H: f32 = 32.0;
-const WORKSPACE_FONT: f32 = 13.0;
-/// The room a row keeps right of its name for the padlock or the ▸.
-const WORKSPACE_LOCK_W: f32 = 26.0;
-const WORKSPACE_ARROW_W: f32 = 18.0;
+/// The workspace menu's rows: Fusion's, taller than other menus' and bold.
+pub(crate) const WORKSPACE_ROW_H: f32 = 35.0;
+const WORKSPACE_FONT: f32 = 12.0;
+/// The room a row keeps right of its name for the subscription badge or the ▸.
+const WORKSPACE_LOCK_W: f32 = 15.0;
+const WORKSPACE_ARROW_W: f32 = 14.0;
+/// The subscription badge's radius and its gap after the name.
+const WORKSPACE_BADGE_R: f32 = 5.0;
+const WORKSPACE_BADGE_GAP: f32 = 4.0;
+pub(crate) const WORKSPACE_BADGE: Color32 = Color32::from_rgb(0, 150, 214);
 /// The name's inset from the row's left edge, and the margin past the widest row's end.
-const WORKSPACE_PAD: f32 = 10.0;
+const WORKSPACE_PAD: f32 = 8.0;
 /// Resting on a workspace row this long opens its tooltip, as in Fusion.
 pub(crate) const WORKSPACE_TIP_SECS: f64 = 1.5;
 /// The tooltip's width and the height of its picture.
 const WORKSPACE_TIP_W: f32 = 280.0;
 const WORKSPACE_TIP_PICTURE_H: f32 = 140.0;
 
-/// Fusion's workspace list: semi-bold upper-case names in a list as wide as the longest, a
-/// padlock on the workspaces that need an extension, DRAWING ▸ and ELECTRONICS ▸ submenus for
-/// the documents they create, and no fill on the current workspace.
+/// Fusion's workspace list: bold upper-case names in a list as wide as the longest, the
+/// workspaces that need a subscription greyed with a blue badge after the name, DRAWING ▸ and
+/// ELECTRONICS ▸ submenus (the ▸ at the list's right edge) for the documents they create, and no
+/// fill on the current workspace.
 fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
   const SUB_WIDTH: f32 = 200.0;
   ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -1123,7 +1128,7 @@ fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Trail {
   None,
-  /// The workspace needs an extension.
+  /// The workspace needs a subscription: the name greyed, a blue badge after it.
   Lock,
   /// The row opens a submenu.
   Arrow,
@@ -1145,9 +1150,9 @@ pub(crate) fn workspace_document_unavailable(item: &str) -> Option<&'static str>
   }
 }
 
-/// One row of the workspace menu (`top`: semi-bold and Fusion's taller row) or of its
-/// submenus: the name, then a padlock at the row's end or a ▸ just after the name; greyed when
-/// not `enabled`.
+/// One row of the workspace menu (`top`: bold and Fusion's taller row) or of its submenus: the
+/// name, then a blue subscription badge just after it (the name greyed) or a ▸ at the row's
+/// end; greyed when not `enabled`.
 fn workspace_row(ui: &mut egui::Ui, width: f32, label: &str, trail: Trail, top: bool, enabled: bool) -> egui::Response {
   let h = if top { WORKSPACE_ROW_H } else { 24.0 };
   let (rect, resp) = ui.allocate_exact_size(vec2(width, h), egui::Sense::click());
@@ -1157,30 +1162,21 @@ fn workspace_row(ui: &mut egui::Ui, width: f32, label: &str, trail: Trail, top: 
   }
   let font = egui::FontId::proportional(if top { WORKSPACE_FONT } else { 12.5 });
   let at = rect.left_center() + vec2(WORKSPACE_PAD, 0.0);
-  let ink = if enabled { theme::TEXT } else { theme::MUTED };
+  let ink = if enabled && trail != Trail::Lock { theme::TEXT } else { theme::MUTED };
   let r = p.text(at, egui::Align2::LEFT_CENTER, label, font.clone(), ink);
   if top {
-    // the font has no semi-bold face: a second pass a little over gives the weight
-    p.text(at + vec2(0.4, 0.0), egui::Align2::LEFT_CENTER, label, font, theme::TEXT);
+    // the font has no bold face: a second pass a little over gives the weight
+    p.text(at + vec2(0.8, 0.0), egui::Align2::LEFT_CENTER, label, font, ink);
   }
   let ink = Color32::from_gray(80);
   match trail {
     Trail::Lock => {
-      // a padlock: the shackle over the body
-      let c = rect.right_center() - vec2(16.0, 1.0);
-      p.rect_filled(Rect::from_min_max(c + vec2(-5.0, -1.0), c + vec2(5.0, 6.0)), 1.0, ink);
-      let arc: Vec<Pos2> = (0..=8)
-        .map(|i| {
-          let a = std::f32::consts::PI * (1.0 + i as f32 / 8.0);
-          c + vec2(3.5 * a.cos(), 3.5 * a.sin())
-        })
-        .collect();
-      p.add(egui::Shape::line(arc, Stroke::new(1.5, ink)));
-      p.line_segment([c + vec2(-3.5, -1.0), c + vec2(-3.5, -3.0)], Stroke::new(1.5, ink));
-      p.line_segment([c + vec2(3.5, -1.0), c + vec2(3.5, -3.0)], Stroke::new(1.5, ink));
+      // Fusion's subscription badge: a round blue disc just after the name
+      let c = pos2(r.right() + 0.8 + WORKSPACE_BADGE_GAP + WORKSPACE_BADGE_R, rect.center().y);
+      p.circle_filled(c, WORKSPACE_BADGE_R, WORKSPACE_BADGE);
     }
     Trail::Arrow => {
-      let c = pos2(r.right() + 10.0, rect.center().y);
+      let c = pos2(rect.right() - 8.0, rect.center().y);
       p.add(egui::Shape::convex_polygon(
         vec![c + vec2(-3.0, -5.0), c + vec2(4.0, 0.0), c + vec2(-3.0, 5.0)],
         ink,

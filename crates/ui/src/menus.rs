@@ -378,7 +378,7 @@ const ASSEMBLE: &[E] = &[x("Add To Assembly", Icon::AddToAssembly)];
 /// assembly design: not in a Part Design's dropdown, still found by the S toolbox. Their keys
 /// (J, Shift+J) do nothing in a Part Design, as in Fusion (see [`assembly_only`]).
 const ASSEMBLE_MORE: &[E] = &[
-  c("New Component", Icon::Component, D(Kind::NewComponent)),
+  c("New Component", Icon::NewComponent, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
   c("As-built Joint", Icon::JointOrigin, D(Kind::AsBuiltJoint)).k("Shift+J"),
   c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
@@ -649,7 +649,7 @@ const ASM_INSERT: &[E] = &[
 ];
 
 const ASM_CREATE: &[E] = &[
-  c("New Component", Icon::Component, D(Kind::NewComponent)),
+  c("New Component", Icon::NewComponent, D(Kind::NewComponent)),
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
   E::Sub("Pattern", PATTERN),
   x("Create Linked PCB", Icon::InsertComponent),
@@ -722,11 +722,12 @@ const ASSEMBLY_SHARED: [Group; 4] = [
 // as in Fusion, only MESH has an EXPORT panel (elsewhere 3D Print is under UTILITIES > MAKE)
 const MESH_SHARED: [Group; 7] = shared_groups!(Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT });
 
-// Fusion's SOLID ribbon: CREATE 5 icons, MODIFY 4; the rest stay in the panel menus
+// Fusion's SOLID ribbon: CREATE 6 icons, the last New Component (purple, on the toolbar only:
+// the dropdown doesn't list it), and MODIFY 4; the rest stay in the panel menus
 const SOLID: [Group; 2] = [
   Group {
     label: "CREATE",
-    quick: &["Create Sketch", "Extrude", "Revolve", "Hole", "Rectangular Pattern"],
+    quick: &["Create Sketch", "Extrude", "Revolve", "Hole", "Rectangular Pattern", "New Component"],
     menu: SOLID_CREATE,
   },
   Group { label: "MODIFY", quick: &["Press Pull", "Fillet", "Shell", "Combine"], menu: SOLID_MODIFY },
@@ -1814,7 +1815,7 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bo
   let shown: Vec<(&'static str, usize)> = all.iter().zip(&counts).map(|(g, n)| (g.label, *n)).collect();
   ui.ctx().data_mut(|d| d.insert_temp(fit_id(tab), shown));
   for ((g, its), n) in all.iter().zip(items).zip(counts) {
-    show_group(app, ui, tab, g, &its[..n], &mut pick, &mut act);
+    show_group(app, ui, tab, g, &collapse(g.menu, &its, n), &mut pick, &mut act);
   }
   if let Some(it) = pick.filter(|it| !it.disabled) {
     match it.cmd {
@@ -1935,7 +1936,7 @@ fn quick_items(prefs: &Prefs, tab: Tab, g: &Group) -> Vec<Item> {
     .iter()
     .take(MAX_QUICK)
     .filter(|l| prefs.shows(tab, g.label, l, true))
-    .filter_map(|l| find(g.menu, l))
+    .filter_map(|l| find(g.menu, l).or_else(|| toolbar_only(tab, l)))
     .collect();
   let prefix = customize::pin_id(tab, g.label, "");
   for id in &prefs.pinned {
@@ -1945,6 +1946,26 @@ fn quick_items(prefs: &Prefs, tab: Tab, g: &Group) -> Vec<Item> {
       out.push(it);
     }
   }
+  out
+}
+
+/// A toolbar icon of `tab` its panel's dropdown doesn't list (SOLID's New Component, one of
+/// [`ASSEMBLE_MORE`]).
+fn toolbar_only(tab: Tab, label: &str) -> Option<Item> {
+  extra_commands(tab).iter().find_map(|m| find(m, label))
+}
+
+/// The first `n` of a panel's toolbar icons, as Fusion collapses it: icons come off the right,
+/// but one its dropdown doesn't list (SOLID's New Component, its last) keeps its place at the
+/// end.
+pub(crate) fn collapse(menu: &[E], its: &[Item], n: usize) -> Vec<Item> {
+  if n >= its.len() {
+    return its.to_vec();
+  }
+  let (kept, rest): (Vec<Item>, Vec<Item>) = its.iter().partition(|it| find(menu, it.label).is_none());
+  let mut out: Vec<Item> = rest.into_iter().take(n.saturating_sub(kept.len())).collect();
+  out.extend(kept);
+  out.truncate(n.max(1));
   out
 }
 
@@ -2615,6 +2636,33 @@ mod tests {
     assert_eq!(counts[2], ("CONSTRAINTS", 12));
     let names: Vec<&str> = quick_items(&prefs, Tab::Sketch, &SKETCH[2]).iter().map(|i| i.label).collect();
     assert!(!names.contains(&"Polygon"), "Polygon is in the menu only: {names:?}");
+  }
+
+  /// `ui:toolbar:responsive-collapse`: SOLID's CREATE ends with New Component (purple, not in
+  /// the dropdown), and a CREATE short of room loses the icons before it, so at Fusion's 907 px it
+  /// shows five ending with New Component; with Extrude unpinned it is Create Sketch, Revolve,
+  /// Hole, Rectangular Pattern, New Component.
+  #[test]
+  fn solid_create_ends_with_new_component_and_keeps_it_when_collapsed() {
+    let mut prefs = Prefs::default();
+    let names = |its: &[Item]| its.iter().map(|i| i.label).collect::<Vec<_>>();
+    let its = quick_items(&prefs, Tab::Solid, &SOLID[0]);
+    assert_eq!(names(&its), ["Create Sketch", "Extrude", "Revolve", "Hole", "Rectangular Pattern", "New Component"]);
+    let nc = its.last().unwrap();
+    assert_eq!((nc.icon, nc.cmd), (Icon::NewComponent, Some(D(Kind::NewComponent))));
+    assert!(find(SOLID_CREATE, "New Component").is_none(), "the dropdown doesn't list it");
+    assert_eq!(collapse(SOLID_CREATE, &its, 6).len(), 6);
+    assert_eq!(
+      names(&collapse(SOLID_CREATE, &its, 5)),
+      ["Create Sketch", "Extrude", "Revolve", "Hole", "New Component"]
+    );
+    assert_eq!(names(&collapse(SOLID_CREATE, &its, 2)), ["Create Sketch", "New Component"]);
+    // the other panels still lose icons from the right
+    let modify = quick_items(&prefs, Tab::Solid, &SOLID[1]);
+    assert_eq!(names(&collapse(SOLID_MODIFY, &modify, 3)), ["Press Pull", "Fillet", "Shell"]);
+    prefs.unpinned.push(customize::pin_id(Tab::Solid, "CREATE", "Extrude"));
+    let its = quick_items(&prefs, Tab::Solid, &SOLID[0]);
+    assert_eq!(names(&its), ["Create Sketch", "Revolve", "Hole", "Rectangular Pattern", "New Component"]);
   }
 
   #[test]

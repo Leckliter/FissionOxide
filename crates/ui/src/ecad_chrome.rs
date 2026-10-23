@@ -367,7 +367,10 @@ pub(crate) fn draw_glyph(p: &egui::Painter, r: Rect, g: Glyph, mono: Option<Colo
 /// design or board, a sheet for a schematic.
 pub(crate) fn doc_icon(p: &egui::Painter, r: Rect, kind: DocKind) {
   match kind {
-    DocKind::Design => icons::draw_color(p, r, Icon::Component),
+    // Fusion's orange design icon, as the Data Panel's
+    DocKind::Design => {
+      crate::data_panel::cube_badge(p, Rect::from_center_size(r.center(), r.size() * 0.875), crate::theme::ICON_ORANGE)
+    }
     DocKind::Electronics | DocKind::Board => board_picture(p, r, None),
     DocKind::Schematic => sheet_picture(p, r, None),
   }

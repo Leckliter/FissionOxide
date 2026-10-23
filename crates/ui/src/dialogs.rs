@@ -328,7 +328,7 @@ impl Kind {
       Kind::Unfold => Icon::Unfold,
       Kind::SheetRules => Icon::SmRules,
       Kind::FlatPattern => Icon::FlatPattern,
-      Kind::NewComponent => Icon::Component,
+      Kind::NewComponent => Icon::NewComponent,
       Kind::Joint | Kind::AsBuiltJoint => Icon::JointOrigin,
       Kind::ComponentProps => Icon::Component,
       Kind::Material => Icon::PhysMaterial,
@@ -587,6 +587,9 @@ pub struct Dialog {
   closed: bool,
   /// OK picked from outside the dialog (the marking menu); handled on its next frame.
   pub(crate) ok_requested: bool,
+  /// Create Sketch's plane pick for a sketch key whose command has a dialog (O, Offset): that
+  /// dialog, drawn empty while the plane is picked, as Fusion opens OFFSET before the sketch.
+  waiting: Option<Box<Dialog>>,
   // captured inputs
   pub sketch: Option<FeatureId>,
   profiles: Vec<[f64; 2]>,
@@ -786,6 +789,7 @@ impl Dialog {
       dirty: false,
       closed: false,
       ok_requested: false,
+      waiting: None,
       sketch: None,
       profiles: Vec::new(),
       edges: Vec::new(),
@@ -2630,7 +2634,15 @@ impl Dialog {
     }
     if self.kind == Kind::PickPlane {
       // no dialog, as in Fusion: the ribbon button stays pressed, the planes show and the cursor
-      // hint asks; Escape or the button cancels
+      // hint asks; Escape or the button cancels. Offset (O) from 3D shows its OFFSET dialog
+      // meanwhile, its Cancel cancelling the pick
+      if app.sketch_then == Some(panels::Cmd::Dialog(Kind::SkOffset)) {
+        let w = self.waiting.get_or_insert_with(|| Box::new(Dialog::open(app, Kind::SkOffset)));
+        if w.frame(app, ctx, false).1 {
+          app.sketch_then = None;
+          self.closed = true;
+        }
+      }
       return !self.closed;
     }
     if self.placing() {
@@ -2653,7 +2665,109 @@ impl Dialog {
             .read_response(id)
             .is_some_and(|r| r.layer_id == dialog_layer || crate::value_box::is_box_layer(r.layer_id)),
         };
-    let mut cancel = false;
+    let (clicked_ok, cancel) = self.frame(app, ctx, ok_enabled);
+    ok |= clicked_ok;
+    // typing no value box took (a dialog without one) is dropped
+    ctx.data_mut(|d| d.remove::<String>(egui::Id::new(TYPING)));
+    self.live_check();
+    if let Some(k) = self.switch.take() {
+      self.switch_pattern(app, k);
+      return true;
+    }
+    if std::mem::take(&mut self.live.withdraw) {
+      self.withdraw(&mut app.s);
+    }
+    if self.dirty {
+      self.preview(&mut app.s);
+    }
+    // Export DXF's OK asks where to save; Redefine Sketch Plane's puts the timeline back first
+    if ok && self.kind == Kind::ExportDxf {
+      ok = false;
+      keep = false;
+      self.dxf_ok(app);
+    }
+    if ok && self.kind == Kind::ExportFlat {
+      ok = false;
+      keep = !self.export_flat_ok(app);
+    }
+    if ok && self.kind == Kind::RedefinePlane {
+      ok = false;
+      keep = !self.redefine_ok(app);
+    }
+    if ok && matches!(self.kind, Kind::Interference | Kind::Section) {
+      // nothing to apply: OK closes, Section Analysis keeping its cut in the browser
+      if ok_enabled {
+        if self.kind == Kind::Section {
+          self.keep_section(app);
+        }
+        keep = false;
+      }
+      ok = false;
+    }
+    // an analysis is kept in the browser's Analysis folder
+    if ok && let Some((kind, params)) = self.analysis_ok() {
+      crate::analyses::keep(app, kind, params);
+      app.s.selection.clear();
+      keep = false;
+      ok = false;
+    }
+    if ok {
+      if !self.applied {
+        self.preview(&mut app.s);
+      }
+      if self.applied && self.error.is_none() {
+        keep = false;
+        self.end_edit(&mut app.s, true);
+        app.s.selection.clear();
+        // select the traced shapes (not their holes), ready to extrude
+        if let (Some(r), Some(sketch)) = (self.trace.as_ref().and_then(|t| t.result.as_ref()), app.s.edit_sketch) {
+          let ink = r["ink_profiles"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect::<Vec<_>>());
+          if let Some(ink) = ink.filter(|i| !i.is_empty()) {
+            app.s.selection = ink.iter().map(|i| Sel::Profile { sketch, index: *i as usize }).collect();
+            app.status = Some((format!("Traced {} shapes, selected: Extrude (E) makes them solid", ink.len()), false));
+          }
+        }
+        if self.kind == Kind::Move {
+          self.finish_paste(app);
+        }
+        if self.kind == Kind::SkOffset {
+          offset_dimension(app, &self.curves, &self.made, &self.distance);
+        }
+        if self.kind == Kind::NewDrawing {
+          app.drawing = app.s.design.drawings.last().map(|d| d.id);
+        }
+        // OK on CREATE FLAT PATTERN enters the flat pattern environment
+        if self.kind == Kind::FlatPattern {
+          crate::flat_ui::enter(app);
+        }
+        // the new component is the newest (ids only grow)
+        if self.kind == Kind::NewComponent
+          && self.flag2
+          && let Some(c) = app.s.design.components.iter().map(|c| c.id.0).max()
+        {
+          app.run("component.activate", json!({"component": c}));
+        }
+      } else if !self.applied && self.error.is_none() {
+        self.error = Some(self.missing_input().into());
+      }
+      // a failing preview (OK greyed, from the marking menu or with Preview off) keeps the
+      // dialog open, as Fusion's greyed OK does
+    }
+    if cancel {
+      self.cancel(&mut app.s);
+      keep = false;
+      // Cancel closes with nothing selected, as OK, Escape and the marking menu's Cancel do
+      if !self.kind.reports() {
+        app.s.selection.clear();
+      }
+    }
+    keep && !self.closed
+  }
+
+  /// Draws the dialog window: header, rows, and the Preview / OK / Cancel footer. Returns
+  /// whether OK and Cancel were clicked.
+  fn frame(&mut self, app: &mut App, ctx: &egui::Context, ok_enabled: bool) -> (bool, bool) {
+    let (mut ok, mut cancel) = (false, false);
     let title = self.heading();
     // FILLET's selection table and SETUP's headings need the extra width, as in Fusion
     let width =
@@ -2751,101 +2865,7 @@ impl Dialog {
         });
       });
     });
-    // typing no value box took (a dialog without one) is dropped
-    ctx.data_mut(|d| d.remove::<String>(egui::Id::new(TYPING)));
-    self.live_check();
-    if let Some(k) = self.switch.take() {
-      self.switch_pattern(app, k);
-      return true;
-    }
-    if std::mem::take(&mut self.live.withdraw) {
-      self.withdraw(&mut app.s);
-    }
-    if self.dirty {
-      self.preview(&mut app.s);
-    }
-    // Export DXF's OK asks where to save; Redefine Sketch Plane's puts the timeline back first
-    if ok && self.kind == Kind::ExportDxf {
-      ok = false;
-      keep = false;
-      self.dxf_ok(app);
-    }
-    if ok && self.kind == Kind::ExportFlat {
-      ok = false;
-      keep = !self.export_flat_ok(app);
-    }
-    if ok && self.kind == Kind::RedefinePlane {
-      ok = false;
-      keep = !self.redefine_ok(app);
-    }
-    if ok && matches!(self.kind, Kind::Interference | Kind::Section) {
-      // nothing to apply: OK closes, Section Analysis keeping its cut in the browser
-      if ok_enabled {
-        if self.kind == Kind::Section {
-          self.keep_section(app);
-        }
-        keep = false;
-      }
-      ok = false;
-    }
-    // an analysis is kept in the browser's Analysis folder
-    if ok && let Some((kind, params)) = self.analysis_ok() {
-      crate::analyses::keep(app, kind, params);
-      app.s.selection.clear();
-      keep = false;
-      ok = false;
-    }
-    if ok {
-      if !self.applied {
-        self.preview(&mut app.s);
-      }
-      if self.applied && self.error.is_none() {
-        keep = false;
-        self.end_edit(&mut app.s, true);
-        app.s.selection.clear();
-        // select the traced shapes (not their holes), ready to extrude
-        if let (Some(r), Some(sketch)) = (self.trace.as_ref().and_then(|t| t.result.as_ref()), app.s.edit_sketch) {
-          let ink = r["ink_profiles"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect::<Vec<_>>());
-          if let Some(ink) = ink.filter(|i| !i.is_empty()) {
-            app.s.selection = ink.iter().map(|i| Sel::Profile { sketch, index: *i as usize }).collect();
-            app.status = Some((format!("Traced {} shapes, selected: Extrude (E) makes them solid", ink.len()), false));
-          }
-        }
-        if self.kind == Kind::Move {
-          self.finish_paste(app);
-        }
-        if self.kind == Kind::SkOffset {
-          offset_dimension(app, &self.curves, &self.made, &self.distance);
-        }
-        if self.kind == Kind::NewDrawing {
-          app.drawing = app.s.design.drawings.last().map(|d| d.id);
-        }
-        // OK on CREATE FLAT PATTERN enters the flat pattern environment
-        if self.kind == Kind::FlatPattern {
-          crate::flat_ui::enter(app);
-        }
-        // the new component is the newest (ids only grow)
-        if self.kind == Kind::NewComponent
-          && self.flag2
-          && let Some(c) = app.s.design.components.iter().map(|c| c.id.0).max()
-        {
-          app.run("component.activate", json!({"component": c}));
-        }
-      } else if !self.applied && self.error.is_none() {
-        self.error = Some(self.missing_input().into());
-      }
-      // a failing preview (OK greyed, from the marking menu or with Preview off) keeps the
-      // dialog open, as Fusion's greyed OK does
-    }
-    if cancel {
-      self.cancel(&mut app.s);
-      keep = false;
-      // Cancel closes with nothing selected, as OK, Escape and the marking menu's Cancel do
-      if !self.kind.reports() {
-        app.s.selection.clear();
-      }
-    }
-    keep && !self.closed
+    (ok, cancel)
   }
 
   /// The dialog's title: the command's, or EDIT FEATURE for every feature edited from the

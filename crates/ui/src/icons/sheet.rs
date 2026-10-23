@@ -64,6 +64,7 @@ const ALL: &[Icon] = &[
   Icon::Folder,
   Icon::Gear,
   Icon::Component,
+  Icon::NewComponent,
   Icon::Body,
   Icon::SketchSmall,
   Icon::Eye,

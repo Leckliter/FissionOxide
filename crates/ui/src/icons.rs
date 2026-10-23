@@ -67,6 +67,8 @@ pub enum Icon {
   Folder,
   Gear,
   Component,
+  /// New Component: Fusion's purple component box.
+  NewComponent,
   Body,
   /// A surface body's browser row: an orange curved sheet, where a solid body has a grey block.
   SurfaceBody,
@@ -585,6 +587,34 @@ fn literal(icon: Icon) -> bool {
   matches!(icon, Finish | FinishAuto | Remove | Origin | Ucs | Appearance | ComputeAll | Untrim | Unstitch)
 }
 
+/// The CONSTRUCT commands' icons, drawn in Fusion's construction colours whatever their family:
+/// orange planes over green reference planes, green axes, orange points ringed in green.
+fn construct(icon: Icon) -> bool {
+  use Icon::*;
+  matches!(
+    icon,
+    Plane
+      | PlaneAngle
+      | PlaneTangent
+      | Midplane
+      | PlanePerpendicular
+      | PlaneTwoEdges
+      | PlaneThreePoints
+      | PlaneAlongPath
+      | AxisCylinder
+      | AxisNormal
+      | AxisTwoPlanes
+      | AxisTwoPoints
+      | AxisEdge
+      | PointVertex
+      | PointTwoEdges
+      | PointThreePlanes
+      | PointCenter
+      | PointEdgePlane
+      | PointAlongPath
+  )
+}
+
 fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
   let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
   Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
@@ -600,6 +630,8 @@ struct Pen<'a> {
   mono: Option<Color32>,
   tint: Tint,
   literal: bool,
+  /// The orange and green tones keep their colour instead of taking the family's accent.
+  hues: bool,
   w: f32,
 }
 
@@ -625,7 +657,7 @@ impl Pen<'_> {
         // the unified style: slate lines, white/grey bodies, everything coloured in shades of
         // the family accent
         let accent = self.tint.accent();
-        let lit = |c: Color32| if self.literal { c } else { accent };
+        let lit = |c: Color32| if self.hues { c } else { accent };
         match t {
           Tone::Ink | Tone::Slate => SLATE,
           Tone::Fill => Color32::from_rgb(233, 236, 240),
@@ -847,7 +879,15 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
   use std::f32::consts::{FRAC_PI_2, PI, TAU};
   // Fusion's icons keep 1 px outlines at every size
   let w = (r.width() / 32.0).clamp(0.8, 1.0);
-  let k = Pen { p, r, mono, tint, literal: literal(icon), w };
+  let k = Pen {
+    p,
+    r,
+    mono,
+    tint,
+    literal: literal(icon),
+    hues: literal(icon) || construct(icon) || icon == Icon::NewComponent,
+    w,
+  };
   match icon {
     Icon::Sketch => {
       k.solid(&[(0.08, 0.14), (0.78, 0.14), (0.78, 0.78), (0.08, 0.78)], White);
@@ -931,8 +971,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       }
     }
     Icon::Plane => {
-      k.skc(&[(0.04, 0.9), (0.28, 0.6), (0.96, 0.6), (0.72, 0.9)], Slate);
-      k.solid(&[(0.04, 0.42), (0.28, 0.1), (0.96, 0.1), (0.72, 0.42)], Amber);
+      k.skc(&[(0.04, 0.9), (0.28, 0.6), (0.96, 0.6), (0.72, 0.9)], Green);
+      k.solid(&[(0.04, 0.42), (0.28, 0.1), (0.96, 0.1), (0.72, 0.42)], Orange);
       k.thick((0.5, 0.78), (0.5, 0.36), Slate, 1.0);
       k.arrow_head((0.5, 0.3), (0.0, -1.0), 0.12, Slate);
     }
@@ -1172,6 +1212,7 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.block(0.1, 0.38, 0.66, 0.9, 0.26, White, White, Light);
       k.circle((0.38, 0.64), 0.1, Some(Blue), None);
     }
+    Icon::NewComponent => k.block(0.1, 0.38, 0.66, 0.9, 0.26, Light, Purple, Dark),
     Icon::Body => k.block(0.1, 0.38, 0.66, 0.9, 0.26, Light, Fill, Dark),
     Icon::MeshCenter => {
       k.block(0.22, 0.4, 0.66, 0.84, 0.18, BlueLight, Blue, BlueDark);
@@ -1506,97 +1547,97 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.5, 0.5), 0.2, Some(Amber), Some(Amber));
     }
     Icon::PlaneAngle => {
-      k.skc(&[(0.04, 0.94), (0.24, 0.72), (0.96, 0.72), (0.76, 0.94)], Slate);
-      k.solid(&[(0.14, 0.83), (0.3, 0.12), (0.98, 0.12), (0.86, 0.83)], Amber);
+      k.skc(&[(0.04, 0.94), (0.24, 0.72), (0.96, 0.72), (0.76, 0.94)], Green);
+      k.solid(&[(0.14, 0.83), (0.3, 0.12), (0.98, 0.12), (0.86, 0.83)], Orange);
       k.thick((0.14, 0.83), (0.86, 0.83), Slate, 1.4);
       k.ska((0.14, 0.83), 0.28, 0.0, 1.35, Slate);
     }
     Icon::PlaneTangent => {
       k.circle((0.5, 0.66), 0.27, Some(Light), Some(Slate));
-      k.solid(&[(0.04, 0.39), (0.24, 0.17), (0.96, 0.17), (0.76, 0.39)], Amber);
+      k.solid(&[(0.04, 0.39), (0.24, 0.17), (0.96, 0.17), (0.76, 0.39)], Orange);
       k.dot((0.5, 0.39), Slate);
     }
     Icon::Midplane => {
-      k.skc(&[(0.04, 0.3), (0.24, 0.06), (0.96, 0.06), (0.76, 0.3)], Slate);
-      k.skc(&[(0.04, 0.94), (0.24, 0.7), (0.96, 0.7), (0.76, 0.94)], Slate);
-      k.solid(&[(0.04, 0.62), (0.24, 0.38), (0.96, 0.38), (0.76, 0.62)], Amber);
+      k.skc(&[(0.04, 0.3), (0.24, 0.06), (0.96, 0.06), (0.76, 0.3)], Green);
+      k.skc(&[(0.04, 0.94), (0.24, 0.7), (0.96, 0.7), (0.76, 0.94)], Green);
+      k.solid(&[(0.04, 0.62), (0.24, 0.38), (0.96, 0.38), (0.76, 0.62)], Orange);
     }
     Icon::PlanePerpendicular => {
-      k.skc(&[(0.04, 0.94), (0.28, 0.68), (0.96, 0.68), (0.72, 0.94)], Slate);
-      k.solid(&[(0.22, 0.81), (0.22, 0.08), (0.78, 0.08), (0.78, 0.81)], Amber);
+      k.skc(&[(0.04, 0.94), (0.28, 0.68), (0.96, 0.68), (0.72, 0.94)], Green);
+      k.solid(&[(0.22, 0.81), (0.22, 0.08), (0.78, 0.08), (0.78, 0.81)], Orange);
       k.sk(&[(0.78, 0.69), (0.88, 0.69), (0.88, 0.8)], Slate);
     }
     Icon::PlaneTwoEdges => {
-      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Amber);
+      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Orange);
       k.thick((0.0, 0.9), (0.36, 0.16), Slate, 1.4);
       k.thick((0.62, 0.9), (0.98, 0.16), Slate, 1.4);
     }
     Icon::PlaneThreePoints => {
-      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Amber);
+      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Orange);
       for c in [(0.26, 0.64), (0.5, 0.38), (0.74, 0.62)] {
         k.dot(c, Slate);
       }
     }
     Icon::PlaneAlongPath => {
       k.sk(&[(0.04, 0.92), (0.26, 0.74), (0.48, 0.6), (0.7, 0.42), (0.86, 0.22), (0.96, 0.04)], Slate);
-      k.solid(&[(0.36, 0.22), (0.58, 0.06), (0.82, 0.78), (0.6, 0.94)], Amber);
+      k.solid(&[(0.36, 0.22), (0.58, 0.06), (0.82, 0.78), (0.6, 0.94)], Orange);
       k.dot((0.59, 0.5), Slate);
     }
     Icon::AxisCylinder => {
       k.solid(&[(0.24, 0.26), (0.76, 0.26), (0.76, 0.78), (0.24, 0.78)], Light);
       k.ellipse((0.5, 0.78), 0.26, 0.09, Some(Light), Slate);
       k.ellipse((0.5, 0.26), 0.26, 0.09, Some(Light), Slate);
-      k.thick((0.5, 0.02), (0.5, 0.98), Amber, 2.0);
+      k.thick((0.5, 0.02), (0.5, 0.98), Green, 2.0);
     }
     Icon::AxisNormal => {
       k.solid(&[(0.04, 0.92), (0.28, 0.62), (0.96, 0.62), (0.72, 0.92)], Light);
-      k.thick((0.5, 0.77), (0.5, 0.04), Amber, 2.0);
+      k.thick((0.5, 0.77), (0.5, 0.04), Green, 2.0);
       k.sk(&[(0.5, 0.62), (0.62, 0.62), (0.62, 0.72)], Slate);
     }
     Icon::AxisTwoPlanes => {
       k.solid(&[(0.17, 0.6), (0.17, 0.1), (0.83, 0.1), (0.83, 0.6)], Light);
       k.solid(&[(0.04, 0.76), (0.3, 0.44), (0.96, 0.44), (0.7, 0.76)], Light);
-      k.thick((0.02, 0.6), (0.98, 0.6), Amber, 2.0);
+      k.thick((0.02, 0.6), (0.98, 0.6), Green, 2.0);
     }
     Icon::AxisTwoPoints => {
-      k.thick((0.06, 0.94), (0.94, 0.06), Amber, 2.0);
+      k.thick((0.06, 0.94), (0.94, 0.06), Green, 2.0);
       k.circle((0.27, 0.73), 0.09, Some(White), Some(Slate));
       k.circle((0.73, 0.27), 0.09, Some(White), Some(Slate));
     }
     Icon::AxisEdge => {
       k.block(0.16, 0.42, 0.7, 0.92, 0.22, Light, Light, Dark);
-      k.thick((0.02, 0.42), (0.98, 0.42), Amber, 2.0);
+      k.thick((0.02, 0.42), (0.98, 0.42), Green, 2.0);
     }
     Icon::PointVertex => {
       k.block(0.1, 0.42, 0.66, 0.92, 0.24, Light, Light, Dark);
-      k.circle((0.66, 0.42), 0.11, Some(Amber), Some(Amber));
+      k.circle((0.66, 0.42), 0.11, Some(Orange), Some(Green));
     }
     Icon::PointTwoEdges => {
       k.thick((0.08, 0.88), (0.92, 0.18), Slate, 1.3);
       k.thick((0.08, 0.22), (0.92, 0.8), Slate, 1.3);
-      k.circle((0.5, 0.53), 0.11, Some(Amber), Some(Amber));
+      k.circle((0.5, 0.53), 0.11, Some(Orange), Some(Green));
     }
     Icon::PointThreePlanes => {
       k.solid(&[(0.4, 0.08), (0.94, 0.08), (0.94, 0.6), (0.4, 0.6)], Light);
       k.solid(&[(0.4, 0.08), (0.4, 0.6), (0.1, 0.86), (0.1, 0.34)], Dark);
       k.solid(&[(0.4, 0.6), (0.94, 0.6), (0.64, 0.86), (0.1, 0.86)], Light);
-      k.circle((0.4, 0.6), 0.11, Some(Amber), Some(Amber));
+      k.circle((0.4, 0.6), 0.11, Some(Orange), Some(Green));
     }
     Icon::PointCenter => {
       k.circle((0.5, 0.5), 0.4, None, Some(Slate));
       k.dashed((0.5, 0.16), (0.5, 0.84), Slate);
       k.dashed((0.16, 0.5), (0.84, 0.5), Slate);
-      k.circle((0.5, 0.5), 0.11, Some(Amber), Some(Amber));
+      k.circle((0.5, 0.5), 0.11, Some(Orange), Some(Green));
     }
     Icon::PointEdgePlane => {
       k.thick((0.5, 0.6), (0.5, 0.98), Slate, 1.3);
       k.solid(&[(0.04, 0.76), (0.3, 0.44), (0.96, 0.44), (0.7, 0.76)], Light);
       k.thick((0.5, 0.02), (0.5, 0.6), Slate, 1.3);
-      k.circle((0.5, 0.6), 0.11, Some(Amber), Some(Amber));
+      k.circle((0.5, 0.6), 0.11, Some(Orange), Some(Green));
     }
     Icon::PointAlongPath => {
       k.sk(&[(0.04, 0.84), (0.2, 0.56), (0.38, 0.42), (0.56, 0.5), (0.74, 0.46), (0.96, 0.16)], Slate);
-      k.circle((0.56, 0.5), 0.11, Some(Amber), Some(Amber));
+      k.circle((0.56, 0.5), 0.11, Some(Orange), Some(Green));
     }
     Icon::Interference => {
       k.solid(&[(0.06, 0.06), (0.62, 0.06), (0.62, 0.62), (0.06, 0.62)], White);
@@ -3256,3 +3297,67 @@ pub fn chevron(p: &Painter, c: Pos2, color: Color32) {
 mod mesh;
 #[cfg(test)]
 mod sheet;
+
+#[cfg(test)]
+mod construct_tests {
+  use super::*;
+
+  /// Every colour `icon` draws with, in its own family.
+  fn colours(icon: Icon) -> Vec<Color32> {
+    let ctx = egui::Context::default();
+    let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+      let p = ui.ctx().layer_painter(egui::LayerId::background());
+      draw_tinted(&p, Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(32.0, 32.0)), icon, Tint::Blue);
+    });
+    out.textures_delta.clear();
+    let mut all = Vec::new();
+    for c in &out.shapes {
+      match &c.shape {
+        Shape::Path(p) => {
+          all.push(p.fill);
+          if let egui::epaint::ColorMode::Solid(c) = p.stroke.color {
+            all.push(c);
+          }
+        }
+        Shape::Circle(c) => {
+          all.push(c.fill);
+          all.push(c.stroke.color);
+        }
+        Shape::LineSegment { stroke, .. } => all.push(stroke.color),
+        Shape::Rect(r) => all.push(r.fill),
+        _ => {}
+      }
+    }
+    all
+  }
+
+  /// Fusion's CONSTRUCT icons: orange planes (the reference planes green), green axes and
+  /// orange points ringed in green; none in the amber they used to share.
+  #[test]
+  fn construct_icons_use_fusions_orange_and_green() {
+    use Icon::*;
+    let orange = [theme::ICON_ORANGE, mix(theme::ICON_ORANGE, Color32::WHITE, 0.3)];
+    let green = [theme::ICON_GREEN, mix(theme::ICON_GREEN, SLATE, 0.3)];
+    let amber = theme::color(fox_brand::AMBER.base);
+    let has = |c: &[Color32], want: &[Color32]| c.iter().any(|x| want.contains(x));
+    for icon in
+      [Plane, PlaneAngle, PlaneTangent, Midplane, PlanePerpendicular, PlaneTwoEdges, PlaneThreePoints, PlaneAlongPath]
+    {
+      let c = colours(icon);
+      assert!(has(&c, &orange), "{icon:?} has an orange plane");
+      assert!(!c.contains(&amber) && !c.contains(&mix(amber, Color32::WHITE, 0.3)), "{icon:?}");
+    }
+    for icon in [Plane, PlaneAngle, Midplane, PlanePerpendicular] {
+      assert!(has(&colours(icon), &green), "{icon:?}'s reference plane is green");
+    }
+    for icon in [AxisCylinder, AxisNormal, AxisTwoPlanes, AxisTwoPoints, AxisEdge] {
+      let c = colours(icon);
+      assert!(c.contains(&theme::ICON_GREEN), "{icon:?} is a green axis");
+      assert!(!c.contains(&amber), "{icon:?}");
+    }
+    for icon in [PointVertex, PointTwoEdges, PointThreePlanes, PointCenter, PointEdgePlane, PointAlongPath] {
+      let c = colours(icon);
+      assert!(has(&c, &orange) && has(&c, &green), "{icon:?} is an orange point ringed in green");
+    }
+  }
+}

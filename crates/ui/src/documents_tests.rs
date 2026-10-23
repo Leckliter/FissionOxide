@@ -35,15 +35,20 @@ impl Harness {
   }
 
   fn frame(&mut self, events: Vec<Event>) {
+    self.frame_out(1440.0, events).drop_without_applying_deltas();
+  }
+
+  /// A frame in a window `width` wide, returning what it drew.
+  fn frame_out(&mut self, width: f32, events: Vec<Event>) -> egui::FullOutput {
     self.time += 1.0 / 60.0;
     let input = RawInput {
-      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 900.0))),
       time: Some(self.time),
       events,
       ..Default::default()
     };
     let app = &mut self.app;
-    self.ctx.run_ui(input, |ui| app.draw(ui)).drop_without_applying_deltas();
+    self.ctx.run_ui(input, |ui| app.draw(ui))
   }
 
   fn key(&mut self, key: Key, modifiers: Modifiers) {
@@ -246,6 +251,18 @@ fn an_overflowing_tab_strip_scrolls_and_lists_the_tabs() {
   assert!(!egui::Popup::is_any_open(&h.ctx));
   h.click(v.center());
   assert!(egui::Popup::is_any_open(&h.ctx), "the tab list opens");
+  // each document but the shown one has Fusion's orange design icon (once the list has faded in)
+  h.time += 1.0;
+  let out = h.frame_out(1440.0, vec![]);
+  let orange = out
+    .shapes
+    .iter()
+    .filter(
+      |c| matches!(&c.shape, egui::Shape::Rect(r) if r.fill == crate::theme::ICON_ORANGE && r.rect.width() < 20.0),
+    )
+    .count();
+  out.drop_without_applying_deltas();
+  assert_eq!(orange, 9, "an orange design icon for each of the other nine");
   documents::switch_to(&mut h.app, 0);
   h.frame(vec![]);
   assert_eq!(documents::tab_label(&h.app.s), "Untitled");
@@ -387,12 +404,18 @@ fn ctrl_tab_cycles_the_document_tabs() {
 
 #[test]
 fn tabs_keep_fusions_minimum_width_and_closing_the_last_shows_its_neighbour() {
-  // about 150 px a tab before the strip scrolls, as in a 908 px Fusion window
-  assert_eq!(documents::TAB_MIN_W, 150.0);
-  assert!(!documents::tabs_overflow(4, 600.0));
-  assert!(documents::tabs_overflow(5, 600.0));
+  // about 196 px a tab before the strip scrolls (147 px in a screenshot of a 908 px Fusion
+  // window): in a 1200 px window three tabs fit and four already scroll
+  assert_eq!(documents::TAB_MIN_W, 196.0);
   let mut h = Harness::new("overflow-close");
-  for _ in 0..6 {
+  for n in 2..=4 {
+    documents::new_document(&mut h.app, DesignType::Part, None);
+    h.frame_out(1200.0, vec![]).drop_without_applying_deltas();
+    h.frame_out(1200.0, vec![]).drop_without_applying_deltas();
+    assert_eq!(h.app.docs.count(), n);
+    assert_eq!(h.app.docs.overflow_at.is_some(), n == 4, "{n} tabs in a 1200 px window");
+  }
+  for _ in 0..3 {
     documents::new_document(&mut h.app, DesignType::Part, None);
   }
   h.frame(vec![]);

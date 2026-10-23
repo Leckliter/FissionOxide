@@ -1219,8 +1219,8 @@ fn the_workspace_menu_rows_are_fusions() {
   assert!((step - crate::panels::WORKSPACE_ROW_H).abs() < 0.5, "rows {step} apart");
   // semi-bold: each name drawn twice, a fraction of a pixel apart
   assert_eq!(all.iter().filter(|(r, s)| s == "RENDER" && r.top() > switcher.bottom()).count(), 2);
-  // the rows' fills: none is drawn behind the current DESIGN row
-  let shapes = h.frame_shapes(1.0 / 60.0);
+  // the rows' fills: none is drawn behind the current DESIGN row (the menu faded in)
+  let shapes = h.frame_shapes(1.0);
   let behind = shapes.iter().any(|s| match s {
     egui::Shape::Rect(r) => {
       r.fill == crate::theme::SELECTED && r.rect.contains(design.center()) && r.rect.height() < 60.0
@@ -1238,8 +1238,47 @@ fn the_workspace_menu_rows_are_fusions() {
     .filter(|r| r.height() < 400.0)
     .min_by(|a, b| a.area().total_cmp(&b.area()))
     .expect("the menu's frame");
-  assert!(menu.width() < 200.0, "the menu is {} wide", menu.width());
-  assert!(menu.right() > generative.right() + 20.0, "room for the padlock: {menu:?} vs {generative:?}");
+  // Fusion's list is about 153 px (116 in the prober's screenshot)
+  assert!((menu.width() - 153.0).abs() < 6.0, "the menu is {} wide", menu.width());
+  assert!(menu.right() > generative.right() + 16.0, "room for the badge: {menu:?} vs {generative:?}");
+  // GENERATIVE DESIGN and SIMULATION are grey, each with a round blue badge just after its name
+  let color = |text: &str| {
+    shapes.iter().find_map(|s| match s {
+      egui::Shape::Text(t) if t.galley.text() == text && t.pos.y > switcher.bottom() => Some(text_color(t)),
+      _ => None,
+    })
+  };
+  assert_eq!(color("GENERATIVE DESIGN"), Some(crate::theme::MUTED));
+  assert_eq!(color("SIMULATION"), Some(crate::theme::MUTED));
+  assert_eq!(color("RENDER"), Some(crate::theme::TEXT));
+  let simulation = row("SIMULATION").expect("the SIMULATION row");
+  for name in [generative, simulation] {
+    let badge = shapes.iter().find_map(|s| match s {
+      egui::Shape::Circle(c)
+        if c.fill == crate::panels::WORKSPACE_BADGE && (c.center.y - name.center().y).abs() < 3.0 =>
+      {
+        Some(c.center)
+      }
+      _ => None,
+    });
+    let badge = badge.unwrap_or_else(|| panic!("a blue badge beside {name:?}"));
+    assert!(badge.x > name.right() && badge.x < name.right() + 14.0, "just after the name: {badge:?} vs {name:?}");
+  }
+  // no padlock: nothing grey-black drawn after GENERATIVE DESIGN
+  assert!(!shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r)
+    if r.fill == egui::Color32::from_gray(80) && r.rect.center().y > generative.top() && r.rect.center().y < generative.bottom())));
+  // DRAWING's ▸ sits at the list's right edge
+  let drawing = row("DRAWING").expect("the DRAWING row");
+  let arrow = shapes
+    .iter()
+    .find_map(|s| match s {
+      egui::Shape::Path(p) if p.closed && p.points.len() == 3 && (p.points[1].y - drawing.center().y).abs() < 3.0 => {
+        Some(p.points[1])
+      }
+      _ => None,
+    })
+    .expect("DRAWING's arrow");
+  assert!(menu.right() - arrow.x < 16.0, "the arrow at the right edge: {arrow:?} vs {menu:?}");
 }
 
 /// Resting on a workspace row for 1.5 s opens Fusion's dark tooltip right of the menu: the bold
@@ -3596,4 +3635,38 @@ fn sketch_circular_pattern_takes_the_centre_after_the_objects_pick() {
   );
   assert_eq!(d.objects(), vec![line as u32], "and not another object");
   assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Sketch Point | X: 0.00 Y: -15.00 Z: 0.00 mm"));
+}
+
+/// O in 3D opens Fusion's OFFSET dialog (Curves, Chain Selection, Direction, Flip) while Create
+/// Sketch asks for the plane; its Cancel drops the pick, and picking a plane carries on in the
+/// new sketch with the real OFFSET. C (Circle) shows only the prompt.
+#[test]
+fn o_in_3d_shows_the_offset_dialog_while_the_plane_is_picked() {
+  let mut h = Harness::new();
+  let c = h.app.canvas.center();
+  h.frame(vec![Event::PointerMoved(c)]);
+  h.frame(vec![key(egui::Key::O)]);
+  let t: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
+  assert_eq!(h.app.dialog.as_ref().map(|d| d.kind), Some(crate::dialogs::Kind::PickPlane));
+  for want in ["OFFSET", "Curves", "Chain Selection", "Direction", "Flip"] {
+    assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
+  }
+  assert!(h.prompt_at(c, crate::dialogs::PICK_PLANE_HINT));
+  // Cancel in the OFFSET dialog cancels the pick and the Offset with it
+  let r = h.dialog_rect();
+  h.move_then_click(cancel_pos(r));
+  assert!(h.app.dialog.is_none() && h.app.sketch_then.is_none());
+  // again, this time picking a plane
+  h.frame(vec![key(egui::Key::O)]);
+  h.frame(vec![]);
+  h.app.create_sketch(json!("xy"));
+  assert!(h.app.s.edit_sketch.is_some());
+  assert_eq!(h.app.dialog.as_ref().map(|d| d.kind), Some(crate::dialogs::Kind::SkOffset));
+  h.app.cancel_dialog();
+  h.app.finish_sketch();
+  // C asks for the plane with no dialog
+  h.frame(vec![key(egui::Key::C)]);
+  let t: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
+  assert_eq!(h.app.dialog.as_ref().map(|d| d.kind), Some(crate::dialogs::Kind::PickPlane));
+  assert!(!t.iter().any(|x| x == "OFFSET" || x == "Chain Selection"), "{t:?}");
 }

@@ -1146,12 +1146,18 @@ fn updated(it: &Value) -> String {
 /// The orange badge of a design (grey for an uploaded file): a white cube on a rounded square.
 fn kind_badge(ui: &mut egui::Ui, design: bool) {
   let (rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::hover());
-  let p = ui.painter();
-  p.rect_filled(rect, 2.0, if design { theme::ICON_ORANGE } else { theme::MUTED });
+  cube_badge(ui.painter(), rect, if design { theme::ICON_ORANGE } else { theme::MUTED });
+}
+
+/// Fusion's design icon, a white cube on a rounded `fill` square, in `rect`.
+pub(crate) fn cube_badge(p: &egui::Painter, rect: egui::Rect, fill: Color32) {
+  p.rect_filled(rect, 2.0, fill);
   let c = rect.center();
   let w = Stroke::new(1.0, Color32::WHITE);
   let hex: Vec<egui::Pos2> = (0..6)
-    .map(|k| c + 4.2 * egui::Vec2::angled(std::f32::consts::FRAC_PI_3 * k as f32 + std::f32::consts::FRAC_PI_6))
+    .map(|k| {
+      c + rect.width() * 0.3 * egui::Vec2::angled(std::f32::consts::FRAC_PI_3 * k as f32 + std::f32::consts::FRAC_PI_6)
+    })
     .collect();
   p.add(egui::Shape::closed_line(hex.clone(), w));
   for k in [1, 3, 5] {
