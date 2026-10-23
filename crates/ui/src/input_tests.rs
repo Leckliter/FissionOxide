@@ -1514,15 +1514,20 @@ fn prefs_tree_row(h: &Harness, page: crate::preferences::Page) -> Option<Rect> {
 }
 
 #[test]
-fn the_preferences_tree_starts_collapsed_and_opens_like_fusions() {
+fn the_preferences_tree_opens_on_generals_children_and_toggles_like_fusions() {
   use crate::preferences::Page;
   let mut h = Harness::new();
   crate::preferences::open(&mut h.app);
   for _ in 0..3 {
     h.frame(vec![]);
   }
-  assert!(prefs_tree_row(&h, Page::Api).is_none(), "General's children are hidden");
-  assert!(prefs_tree_row(&h, Page::GraphicsRdp).is_none());
+  // opening on General shows its children, as Fusion's does; the other branches stay closed
+  assert!(prefs_tree_row(&h, Page::Api).is_some(), "General's children show");
+  assert!(prefs_tree_row(&h, Page::DesignAssembly).is_none() && prefs_tree_row(&h, Page::GraphicsRdp).is_none());
+  // General's arrow closes the branch
+  let general = prefs_tree_row(&h, Page::General).expect("General is drawn");
+  h.move_then_click(Pos2::new(general.left() + 9.0, general.center().y));
+  assert!(!h.app.preferences.expanded.contains(&Page::General), "General's children are hidden");
   let general = prefs_tree_row(&h, Page::General).expect("General is drawn");
   let tokens = prefs_tree_row(&h, Page::Tokens).expect("Tokens is drawn");
   assert!((tokens.top() - general.bottom()).abs() < 1.0, "Tokens sits right under the collapsed General");
@@ -1561,7 +1566,7 @@ fn the_preferences_x_cancels_and_labels_line_up_against_their_controls() {
   assert!((label.right() - longer.right()).abs() < 1.0, "right-aligned: {label:?} {longer:?}");
   assert!(label.right() < theme.left() && theme.left() - label.right() < 16.0);
   // a greyed row says why
-  let row = h.find(vec![], "Offline cache period").expect("Fusion's Offline cache period row");
+  let row = h.find(vec![], "Purpose for using Fusion").expect("Fusion's Purpose for using Fusion row");
   let tips = h.rest(Pos2::new(theme.center().x, row.center().y), 1.5);
   assert!(tips.iter().any(|t| t.starts_with("Not in FissionOxide yet")), "{tips:?}");
   // the title bar's X cancels

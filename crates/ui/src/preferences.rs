@@ -2129,7 +2129,10 @@ mod tests {
     };
     assert_eq!(default("User language").0, "English | English");
     assert_eq!(default("Start-up experience").0, "Default Design Type");
-    assert_eq!(default("Offline cache time period (days)"), ("15".into(), Item::Spin("Offline cache time period (days)", "15")));
+    assert_eq!(
+      default("Offline cache time period (days)"),
+      ("15".into(), Item::Spin("Offline cache time period (days)", "15"))
+    );
     assert_eq!(default("Purpose for using Fusion").0, "Design");
     assert_eq!(default("Create new shortcuts when updating Fusion").0, "0");
     assert_eq!(default("Automatic save on close").0, "1");

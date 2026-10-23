@@ -583,7 +583,8 @@ fn texts(h: &mut Harness) -> Vec<(String, Pos2)> {
     ..Default::default()
   };
   let app = &mut h.app;
-  let out = h.ctx.run_ui(input, |ui| app.draw(ui));
+  let mut out = h.ctx.run_ui(input, |ui| app.draw(ui));
+  out.textures_delta.clear();
   out
     .shapes
     .iter()
@@ -713,7 +714,11 @@ fn home_hides_the_unsaved_banner() {
   let mut h = Harness::new("home-banner");
   h.app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
   assert!(h.app.s.dirty && h.app.s.path.is_none());
-  let unsaved = |h: &mut Harness| texts(h).iter().any(|(t, _)| t == "Unsaved:");
+  // a frame first: a newly shown area draws nothing while it sizes itself
+  let unsaved = |h: &mut Harness| {
+    h.frame(vec![]);
+    texts(h).iter().any(|(t, _)| t == "Unsaved:")
+  };
   assert!(unsaved(&mut h), "the design shows the banner");
   crate::home::open(&mut h.app);
   assert!(!unsaved(&mut h), "Home doesn't");
