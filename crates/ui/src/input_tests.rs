@@ -3333,6 +3333,40 @@ fn the_material_browser_tree_has_one_library_per_row() {
   assert!(window.bottom() <= 785.0, "the browser fits the window: {window:?}");
 }
 
+/// `ui:mesh:{reduce,smooth,remesh,shell,combine}-dialog`: on an inserted mesh, REDUCE, SMOOTH,
+/// REMESH, SHELL and COMBINE end with Fusion's Preview row, under their last setting and above
+/// OK; the footer has no second Preview box.
+#[test]
+fn mesh_dialogs_end_with_a_preview_row() {
+  use crate::dialogs::Kind;
+  use crate::forms::{MESH_COMBINE, MESH_REDUCE, MESH_REMESH, MESH_SHELL, MESH_SMOOTH};
+  let mut h = Harness::new();
+  let stl =
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/reference/464-stl-millimeter/lprism.stl");
+  h.app.run("import", json!({"path": stl}));
+  let b = h.app.s.model.bodies[0].id;
+  for (f, last) in [
+    (&MESH_REDUCE, "Proportion"),
+    (&MESH_SMOOTH, "Smoothness"),
+    (&MESH_REMESH, "Preserve Boundaries"),
+    (&MESH_SHELL, "Thickness"),
+    (&MESH_COMBINE, "Algorithm"),
+  ] {
+    h.app.s.selection = vec![fox_engine::Sel::Body { body: b }];
+    h.app.start(Kind::Form(f));
+    for _ in 0..3 {
+      h.frame(vec![]);
+    }
+    let t = h.frame_texts(1.0 / 60.0, vec![]);
+    let at = |w: &str| t.iter().filter(|(_, x)| x.trim() == w).map(|(r, _)| r.center().y).collect::<Vec<_>>();
+    let (preview, above, ok) = (at("Preview"), at(last), at("OK"));
+    assert_eq!(preview.len(), 1, "{}: one Preview: {t:?}", f.title);
+    assert!(above.iter().all(|y| *y < preview[0]) && ok.iter().all(|y| *y > preview[0]), "{}: {t:?}", f.title);
+    h.app.cancel_dialog();
+    h.frame(vec![]);
+  }
+}
+
 /// The SURFACE tab's Create dialogs draw Fusion's rows (`ui:surface:*-rows`,
 /// `ui:surface:sweep-loft-missing`): no Operation row and no Preview checkbox, Feature and
 /// Analysis tabs on Sweep, Loft, Patch and Ruled, and the value rows once something is picked.

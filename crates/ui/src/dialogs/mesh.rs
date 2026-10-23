@@ -292,6 +292,13 @@ impl Dialog {
     }
     ui.end_row();
   }
+
+  /// The Preview row ending Reduce, Smooth, Remesh, Shell and Combine: its label, and the box
+  /// after it as their other check boxes are drawn.
+  pub(super) fn preview_row(&mut self, ui: &mut egui::Ui) {
+    ui.label("Preview");
+    self.preview_check(ui, "");
+  }
 }
 
 /// The analysis of a body's mesh, worked out once per design revision.

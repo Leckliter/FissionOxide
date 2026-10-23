@@ -168,20 +168,22 @@ pub fn remesh(pos: &[DVec3], tris: &[u32], opts: &Remesh) -> (Vec<DVec3>, Vec<u3
   let passes = ((1.0 - opts.shape.clamp(0.0, 1.0)) * 6.0).round() as usize;
   if passes > 0 {
     let normals = face_normals(&pos, &tris);
+    let boundary: Vec<(u32, u32)> = boundary_edges(&tris).into_iter().map(|(a, b)| key(a, b)).collect();
+    let sharp = sharp_edges(&tris, &normals);
     let mut fixed = vec![false; pos.len()];
-    for (a, b) in boundary_edges(&tris) {
-      if opts.boundaries {
-        fixed[a as usize] = true;
-        fixed[b as usize] = true;
+    let mut features: Vec<Vec<u32>> = vec![Vec::new(); pos.len()];
+    for (edges, pinned) in [(&boundary, opts.boundaries), (&sharp, opts.sharp)] {
+      for &(a, b) in edges {
+        fixed[a as usize] |= pinned;
+        fixed[b as usize] |= pinned;
+        for (u, w) in [(a, b), (b, a)] {
+          if !features[u as usize].contains(&w) {
+            features[u as usize].push(w);
+          }
+        }
       }
     }
-    if opts.sharp {
-      for (a, b) in sharp_edges(&tris, &normals) {
-        fixed[a as usize] = true;
-        fixed[b as usize] = true;
-      }
-    }
-    pos = relax(&pos, &tris, &fixed, passes, 0.5 * (1.0 - opts.shape.clamp(0.0, 1.0)));
+    pos = relax(&pos, &tris, &fixed, &features, passes, 0.5 * (1.0 - opts.shape.clamp(0.0, 1.0)));
   }
   (pos, drop_degenerate(tris))
 }
@@ -287,8 +289,10 @@ fn split_edges(pos: &mut Vec<DVec3>, tris: &[u32], marked: &[(u32, u32)]) -> Vec
 }
 
 /// Tangential smoothing: each pass moves the free vertices `lambda` of the way to their
-/// neighbours' average, within the plane through them across their normal.
-fn relax(pos: &[DVec3], tris: &[u32], fixed: &[bool], passes: usize, lambda: f64) -> Vec<DVec3> {
+/// neighbours' average, within the plane through them across their normal. A vertex on a
+/// crease or an open boundary (two `features` neighbours) only slides along it, and one where
+/// such lines end or meet (a corner) stays put, so the body keeps its shape.
+fn relax(pos: &[DVec3], tris: &[u32], fixed: &[bool], features: &[Vec<u32>], passes: usize, lambda: f64) -> Vec<DVec3> {
   let mut nb: Vec<Vec<u32>> = vec![Vec::new(); pos.len()];
   for t in tris.chunks_exact(3) {
     for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
@@ -308,9 +312,20 @@ fn relax(pos: &[DVec3], tris: &[u32], fixed: &[bool], passes: usize, lambda: f64
       if n.is_empty() || fixed[i] {
         continue;
       }
-      let avg = n.iter().map(|&j| prev[j as usize]).sum::<DVec3>() / n.len() as f64;
-      let d = avg - prev[i];
-      p[i] = prev[i] + (d - normals[i] * d.dot(normals[i])) * lambda;
+      match features[i].as_slice() {
+        [] => {
+          let avg = n.iter().map(|&j| prev[j as usize]).sum::<DVec3>() / n.len() as f64;
+          let d = avg - prev[i];
+          p[i] = prev[i] + (d - normals[i] * d.dot(normals[i])) * lambda;
+        }
+        &[a, b] => {
+          let (a, b) = (prev[a as usize], prev[b as usize]);
+          let along = (b - a).normalize_or_zero();
+          let d = (a + b) / 2.0 - prev[i];
+          p[i] = prev[i] + along * d.dot(along) * lambda;
+        }
+        _ => {}
+      }
     }
   }
   p
@@ -457,6 +472,42 @@ mod tests {
     // adaptive leaves a flat region coarser
     let (_, ta) = remesh(&pos, &tris, &Remesh { adaptive: true, ..opts });
     assert!(ta.len() < t.len());
+  }
+
+  /// A closed 30 x 10 x 5 box of 12 triangles, facing out.
+  fn block() -> (Vec<DVec3>, Vec<u32>) {
+    let pos = (0..8).map(|i| DVec3::new(30.0 * (i & 1) as f64, 10.0 * (i >> 1 & 1) as f64, 5.0 * (i >> 2) as f64));
+    let tris =
+      [0, 2, 3, 0, 3, 1, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 6, 7, 2, 7, 3, 0, 4, 6, 0, 6, 2, 1, 3, 7, 1, 7, 5];
+    (pos.collect(), tris.to_vec())
+  }
+
+  /// Fusion's default Remesh (Adaptive, Density 0.25, Shape Preservation 0.50, nothing
+  /// preserved) refines a box and leaves it a box: its creases slide along themselves, its
+  /// corners stay put.
+  #[test]
+  fn remesh_at_the_defaults_keeps_a_box_a_box() {
+    let (pos, tris) = block();
+    let v0 = crate::meshtools::volume(&pos, &tris);
+    assert!((v0.abs() - 1500.0).abs() < 1e-9, "{v0}");
+    let diagonal = (30.0f64 * 30.0 + 10.0 * 10.0 + 5.0 * 5.0).sqrt();
+    let opts =
+      Remesh { target: density_edge(diagonal, 0.25), adaptive: true, shape: 0.5, sharp: false, boundaries: false };
+    let (p, t) = remesh(&pos, &tris, &opts);
+    assert!(t.len() > tris.len() * 4, "{} → {}", tris.len() / 3, t.len() / 3);
+    assert!(boundary_edges(&t).is_empty(), "still closed");
+    assert!((crate::meshtools::volume(&p, &t) - v0).abs() < 1e-6, "the volume stays");
+    // every vertex is still on the box's surface
+    let on_face = |v: &DVec3| {
+      [v.x, 30.0 - v.x, v.y, 10.0 - v.y, v.z, 5.0 - v.z].iter().any(|d| d.abs() < 1e-9)
+        && v.cmpge(DVec3::splat(-1e-9)).all()
+        && v.cmple(DVec3::new(30.0, 10.0, 5.0) + 1e-9).all()
+    };
+    assert!(p.iter().all(on_face), "{:?}", p.iter().find(|v| !on_face(v)));
+    // and every corner is still there
+    for c in &pos {
+      assert!(p.iter().any(|v| (*v - *c).length() < 1e-9), "corner {c}");
+    }
   }
 
   #[test]

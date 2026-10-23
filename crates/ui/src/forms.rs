@@ -4147,6 +4147,12 @@ pub fn preview_off(form: &Form) -> bool {
   mesh_form(form)
 }
 
+/// Mesh forms whose last row is Fusion's Preview check box (unticked, see [`preview_off`]):
+/// Reduce, Smooth, Remesh, Shell and Combine. Fusion's solid command dialogs have none.
+pub fn preview_row(form: &Form) -> bool {
+  matches!(form.cmd, "mesh.reduce" | "mesh.smooth" | "mesh.remesh" | "mesh.shell" | "mesh.combine")
+}
+
 /// A drop-down's first value when it isn't the first in the list (Reduce's Type: Proportion).
 fn initial_choice(form: &Form, key: &str) -> Option<&'static str> {
   match (form.cmd, key) {

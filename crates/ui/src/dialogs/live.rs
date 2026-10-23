@@ -140,6 +140,12 @@ fn keeps_picks(kind: Kind) -> bool {
 }
 
 impl Dialog {
+  /// Does the dialog preview as it opens? Not a model-picking one with Preview unticked (the
+  /// mesh dialogs, Plane Cut): Fusion draws nothing until Preview is ticked or OK applies it.
+  pub(crate) fn previews_on_open(&self) -> bool {
+    self.live.on || !self.picks()
+  }
+
   /// Asks for a preview when live preview is on and the command changed since the last one.
   pub(super) fn live_check(&mut self) {
     if !self.live.on || !self.picks() || self.picks_fixed() || self.dirty || !self.ready() || self.waits_for_value() {

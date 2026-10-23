@@ -280,10 +280,14 @@ pub fn subdivide(pos: &[DVec3], tris: &[u32]) -> (Vec<DVec3>, Vec<u32>) {
   (p, out)
 }
 
+/// The most triangles Smooth subdivides a coarse mesh into: each becomes a planar face of the
+/// body, and building a body of several thousand took seconds (the app froze on Smooth).
+pub const SMOOTH_SUBDIVIDE_MAX: usize = 1000;
+
 /// Fusion's Smooth: `smoothness` (0–1) of Laplacian smoothing, each pass followed (on a closed
 /// mesh) by scaling about the centre back to the volume it had, so the mesh rounds off without
 /// shrinking. A coarse mesh is subdivided first (a box's eight corners have nothing to round
-/// between them). An open mesh's boundary stays.
+/// between them), up to [`SMOOTH_SUBDIVIDE_MAX`] triangles. An open mesh's boundary stays.
 pub fn smooth_volume(pos: &[DVec3], tris: &[u32], smoothness: f64) -> (Vec<DVec3>, Vec<u32>) {
   let passes = (smoothness.clamp(0.0, 1.0) * 10.0).round() as usize;
   if passes == 0 || pos.is_empty() {
@@ -298,7 +302,7 @@ pub fn smooth_volume(pos: &[DVec3], tris: &[u32], smoothness: f64) -> (Vec<DVec3
       .fold(0.0, f64::max)
   };
   let (mut p, mut tris) = (pos.to_vec(), tris.to_vec());
-  while tris.len() / 3 < 20_000 && longest(&p, &tris) > fine {
+  while tris.len() / 3 * 4 <= SMOOTH_SUBDIVIDE_MAX && longest(&p, &tris) > fine {
     (p, tris) = subdivide(&p, &tris);
   }
   let nb = neighbour_lists(p.len(), &tris);
@@ -722,6 +726,8 @@ mod tests {
     let (near, far) = (r.iter().copied().fold(f64::MAX, f64::min), r.iter().copied().fold(0.0, f64::max));
     assert!(far < 75f64.sqrt() - 0.5 && near > 4.0, "{near} {far}");
     assert_eq!(smooth_volume(&pos, &tris, 0.0), (pos, tris));
+    // a coarse mesh is subdivided only so far: a body of a few hundred faces builds at once
+    assert!(t.len() / 3 <= SMOOTH_SUBDIVIDE_MAX && t.len() / 3 > 100, "{}", t.len() / 3);
   }
 
   #[test]

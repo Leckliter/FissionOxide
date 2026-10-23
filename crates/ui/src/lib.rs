@@ -1808,7 +1808,9 @@ impl App {
     if let Some(d) = self.dialog.as_mut() {
       // manipulators hang on the picks as they are before the preview changes them
       d.refresh_manip(&self.s);
-      d.preview(&mut self.s);
+      if d.previews_on_open() {
+        d.preview(&mut self.s);
+      }
     }
   }
 

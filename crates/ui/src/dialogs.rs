@@ -3654,6 +3654,9 @@ impl Dialog {
         }
       }
     }
+    if crate::forms::preview_row(f) {
+      self.preview_row(ui);
+    }
     if crate::forms::takes_sheet_points(f) {
       ui.label("");
       ui.label(RichText::new("click points on the sheet to fill them").small().color(theme::MUTED));

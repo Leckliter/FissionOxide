@@ -111,3 +111,90 @@ fn plane_cut_waits_for_its_plane_then_trims() {
   assert!(d.error.is_none(), "{:?}", d.error);
   assert_eq!(app.s.model.bodies.len(), 2);
 }
+
+const LPRISM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/reference/464-stl-millimeter/lprism.stl");
+
+/// A body's volume and bounding box.
+fn size(app: &App, b: BodyId) -> (f64, fox_engine::kernel::glam::DVec3, fox_engine::kernel::glam::DVec3) {
+  let m = app.s.model.body(b).unwrap().shape.mass().unwrap();
+  (m.volume, m.bbox_min, m.bbox_max)
+}
+
+/// `ui:mesh:{reduce,smooth,remesh,shell,combine}-dialog` (verifier 6 on an inserted
+/// `lprism.stl`): the dialogs open without previewing, as Fusion's do with Preview unticked
+/// (the model and the timeline stay as they were), and end with the Preview row; ticking it
+/// previews, unticking it withdraws the preview. Remesh at its defaults keeps the prism's shape.
+#[test]
+fn mesh_dialogs_preview_only_once_preview_is_ticked() {
+  use crate::forms::{MESH_COMBINE, MESH_REMESH, MESH_SHELL};
+  let mut app = App::with_session(Session::default());
+  app.run("import", json!({"path": LPRISM})).unwrap();
+  let b = app.s.model.bodies[0].id;
+  let tris = |app: &App| app.s.model.body(b).unwrap().mesh().unwrap().indices.len() / 3;
+  let (v0, lo0, hi0) = size(&app, b);
+  let t0 = tris(&app);
+  let n0 = app.s.design.features.len();
+  for f in [&MESH_REDUCE, &MESH_SMOOTH, &MESH_REMESH, &MESH_SHELL, &MESH_COMBINE] {
+    assert!(forms::preview_row(f), "{} ends with Preview", f.name);
+    app.s.selection = vec![Sel::Body { body: b }];
+    app.start(Kind::Form(f));
+    let d = app.dialog.as_mut().unwrap();
+    assert!(!d.live.on && !d.applied && !d.has_preview_box(), "{}: Preview unticked, in the rows", f.name);
+    d.live_check();
+    assert!(!d.dirty, "{}: nothing previews while Preview is unticked", f.name);
+    assert_eq!((app.s.design.features.len(), tris(&app)), (n0, t0), "{}: the model is as it was", f.name);
+    assert!((size(&app, b).0 - v0).abs() < 1e-9, "{}", f.name);
+    app.cancel_dialog();
+  }
+  // Preview ticked: Remesh previews, refining the prism and keeping its shape
+  app.s.selection = vec![Sel::Body { body: b }];
+  app.start(Kind::Form(&MESH_REMESH));
+  let d = app.dialog.as_mut().unwrap();
+  d.live.on = true;
+  d.live.retry();
+  d.live_check();
+  assert!(d.dirty);
+  d.preview(&mut app.s);
+  assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+  let (v, lo, hi) = size(&app, b);
+  assert!(tris(&app) > t0, "{t0} → {}", tris(&app));
+  assert!((v - v0).abs() < 1e-3 * v0, "the volume stays: {v0} → {v}");
+  assert!((lo - lo0).length() < 1e-4 && (hi - hi0).length() < 1e-4, "the box stays: {lo0}..{hi0} → {lo}..{hi}");
+  // unticked again: the preview goes
+  let d = app.dialog.as_mut().unwrap();
+  d.live.on = false;
+  d.withdraw(&mut app.s);
+  assert_eq!((app.s.design.features.len(), tris(&app)), (n0, t0));
+}
+
+/// `ui:mesh:smooth-dialog`: opening Smooth on the prism froze the app for seconds. It
+/// previewed on opening (with Preview unticked), and the preview subdivided the 20 triangles
+/// into 5120 planar faces, which took the kernel about two seconds to build into a body before
+/// the dialog drew. It now opens without computing anything, and a preview stays a few hundred
+/// faces.
+#[test]
+fn smooth_opens_at_once_and_previews_a_light_mesh() {
+  let mut app = App::with_session(Session::default());
+  app.run("import", json!({"path": LPRISM})).unwrap();
+  let b = app.s.model.bodies[0].id;
+  let tris = |app: &App| app.s.model.body(b).unwrap().mesh().unwrap().indices.len() / 3;
+  let (v0, lo0, hi0) = size(&app, b);
+  app.s.selection = vec![Sel::Body { body: b }];
+  let revision = app.s.revision;
+  app.start(Kind::Form(&MESH_SMOOTH));
+  assert_eq!(app.s.revision, revision, "nothing regenerates as Smooth opens");
+  assert_eq!(tris(&app), 20);
+  let d = app.dialog.as_mut().unwrap();
+  d.live.on = true;
+  d.live.retry();
+  d.live_check();
+  d.preview(&mut app.s);
+  assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+  let n = tris(&app);
+  assert!(n > 20 && n <= fox_engine::model::meshtools::SMOOTH_SUBDIVIDE_MAX, "{n} triangles");
+  // rounded off, about the size it was
+  let (v, lo, hi) = size(&app, b);
+  assert!((v - v0).abs() < 0.02 * v0, "{v0} → {v}");
+  let (d, d0) = ((hi - lo).length(), (hi0 - lo0).length());
+  assert!((d - d0).abs() < 0.2 * d0, "{lo0}..{hi0} → {lo}..{hi}");
+}
