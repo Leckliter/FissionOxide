@@ -1681,6 +1681,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     if ev.eye {
       browser_rows::root_show_hide(app);
     }
+    browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::Root);
     if let Some(r) = ev.response {
       if r.hovered() {
         marking::peek(app, Vec::new(), root_label.clone());
@@ -2241,6 +2242,7 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
   let shown = !app.ctx_menu.bodies_hidden;
   let eye = folder_eye(ui, shown, bodies.iter().any(|b| !b.2));
   let ev = tree_row(ui, id, 1, Some(true), eye, Icon::Folder, "Bodies", false, theme::TEXT);
+  browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::Root);
   if ev.eye {
     app.ctx_menu.bodies_hidden = shown;
     if shown {

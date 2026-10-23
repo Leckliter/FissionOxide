@@ -252,7 +252,7 @@ cmds! {
   "component.properties" => "A component's properties (name, part number, description, type, material ...); sets those given", "{component, name?, part_number?, description?, type?: standard|sheet_metal}";
   "component.activate" => "Activate a component: bodies later features make go into it (no component: the top level)", "{component?}";
   "component.copy" => "Another instance of a component, rebuilt from it on every change", "{component, translate?: [x,y,z], name?}";
-  "component.add_bodies" => "Move bodies into a component", "{component, bodies: [id]}";
+  "component.add_bodies" => "Move bodies into a component (null: back to the root)", "{component|null, bodies: [id]}";
   "component.delete" => "Delete a component (its bodies go back to the root)", "{component}";
   "component.rename" => "Rename a component", "{component, name}";
   "component.ground" => "Ground (fix) or unground a component", "{component, grounded?}";

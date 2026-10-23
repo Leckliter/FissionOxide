@@ -187,10 +187,21 @@ pub fn command_label(name: &str, p: &Value) -> Option<String> {
   Some(label.to_string())
 }
 
-/// A feature's name without its number: the command that made it ("Extrude1" → "Extrude").
-fn command_of(feature: &str) -> &str {
+/// A feature's name without its number, in words: the command that made it ("Extrude1" →
+/// "Extrude", "PressPull2" → "Press Pull").
+fn command_of(feature: &str) -> String {
   let base = feature.trim_end_matches(|c: char| c.is_ascii_digit());
-  if base.is_empty() { feature } else { base }
+  let base = if base.is_empty() { feature } else { base };
+  let mut out = String::with_capacity(base.len() + 4);
+  let mut prev: Option<char> = None;
+  for c in base.chars() {
+    if c.is_ascii_uppercase() && prev.is_some_and(|p| p.is_ascii_lowercase()) {
+      out.push(' ');
+    }
+    out.push(c);
+    prev = Some(c);
+  }
+  out
 }
 
 /// What a step from `before` to `after` did, as the Undo list names it.
@@ -200,7 +211,7 @@ pub fn step_label(before: &Design, after: &Design) -> String {
   let added: Vec<&str> = after.features.iter().filter(|f| !had(f.id)).map(|f| f.name.as_str()).collect();
   if let Some(first) = added.first() {
     // named by the command, as in Fusion: "Extrude", not "Extrude3"
-    return command_of(first).to_string();
+    return command_of(first);
   }
   if let Some(f) = before.features.iter().find(|f| !has(f.id)) {
     return format!("Delete {}", f.name);
@@ -326,6 +337,16 @@ mod tests {
     assert_eq!(s.undo_history(), ["Sketch Dimension", "Line", "Create Sketch"]);
     assert_eq!(s.redo_steps(1), 1);
     assert_eq!(s.undo_history()[0], "Fix");
+  }
+
+  #[test]
+  fn run_together_feature_names_are_spaced() {
+    // Fusion's Undo list reads "Undo Press Pull", "Undo Rectangular Pattern"
+    assert_eq!(super::command_of("PressPull2"), "Press Pull");
+    assert_eq!(super::command_of("BaseFeature1"), "Base Feature");
+    assert_eq!(super::command_of("RectangularPattern1"), "Rectangular Pattern");
+    assert_eq!(super::command_of("Extrude3"), "Extrude");
+    assert_eq!(super::command_of("ECAD1"), "ECAD");
   }
 
   #[test]

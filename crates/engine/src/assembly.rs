@@ -63,14 +63,18 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       Ok(json!({"active": s.active_component.map(|c| c.0)}))
     })(),
     "component.add_bodies" => (|| {
-      let id = component_id(s, p, "component")?;
+      // a null component moves the bodies back to the root
+      let id =
+        if p.get("component").is_some_and(Value::is_null) { None } else { Some(component_id(s, p, "component")?) };
       let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
       s.edit(|d| {
         for c in &mut d.components {
           c.bodies.retain(|b| !bodies.contains(b));
         }
-        let c = d.component_mut(id).ok_or(CmdError::new("no such component"))?;
-        c.bodies.extend(bodies);
+        if let Some(id) = id {
+          let c = d.component_mut(id).ok_or(CmdError::new("no such component"))?;
+          c.bodies.extend(bodies);
+        }
         Ok(())
       })?;
       Ok(json!({}))

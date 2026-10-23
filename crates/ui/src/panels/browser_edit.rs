@@ -187,6 +187,9 @@ pub(super) enum DropOn {
   Component(u32),
   /// The Components folder: back to the top level.
   TopLevel,
+  /// The root row or its Bodies folder: bodies leave their components for the root, a
+  /// component goes back to the top level.
+  Root,
 }
 
 /// The bodies a body row drags: the selected bodies when it is one of them, else just it.
@@ -223,6 +226,7 @@ fn accepts(app: &App, what: &Dragged, on: DropOn) -> bool {
       d.component(ComponentId(c)).is_some_and(|comp| bodies.iter().any(|b| !comp.bodies.contains(b)))
     }
     (Dragged::Bodies(_), DropOn::TopLevel) => false,
+    (Dragged::Bodies(bodies), DropOn::Root) => d.components.iter().any(|c| bodies.iter().any(|b| c.bodies.contains(b))),
     (Dragged::Component(x), DropOn::Component(c)) => {
       // not into itself or anything inside it, nor where it already is
       let mut p = Some(ComponentId(c));
@@ -235,7 +239,9 @@ fn accepts(app: &App, what: &Dragged, on: DropOn) -> bool {
       }
       d.component(ComponentId(*x)).is_some_and(|comp| comp.parent != Some(ComponentId(c)))
     }
-    (Dragged::Component(x), DropOn::TopLevel) => d.component(ComponentId(*x)).is_some_and(|c| c.parent.is_some()),
+    (Dragged::Component(x), DropOn::TopLevel | DropOn::Root) => {
+      d.component(ComponentId(*x)).is_some_and(|c| c.parent.is_some())
+    }
   }
 }
 
@@ -260,7 +266,8 @@ pub(super) fn drop_target(app: &mut App, ui: &egui::Ui, ev: &RowEvents, on: Drop
   }
 }
 
-/// Moves dragged rows: bodies into a component, a component into another or to the top level.
+/// Moves dragged rows: bodies into a component or back to the root, a component into another
+/// or to the top level.
 fn drop(app: &mut App, what: &Dragged, on: DropOn) {
   match (what, on) {
     (Dragged::Bodies(bodies), DropOn::Component(c)) => {
@@ -270,7 +277,11 @@ fn drop(app: &mut App, what: &Dragged, on: DropOn) {
     (Dragged::Component(x), DropOn::Component(c)) => {
       app.run("component.parent", json!({"component": x, "parent": c}));
     }
-    (Dragged::Component(x), DropOn::TopLevel) => {
+    (Dragged::Bodies(bodies), DropOn::Root) => {
+      let ids: Vec<u32> = bodies.iter().map(|b| b.0).collect();
+      app.run("component.add_bodies", json!({"component": null, "bodies": ids}));
+    }
+    (Dragged::Component(x), DropOn::TopLevel | DropOn::Root) => {
       app.run("component.parent", json!({"component": x, "parent": null}));
     }
     (Dragged::Bodies(_), DropOn::TopLevel) => {}
@@ -323,6 +334,23 @@ mod tests {
     assert!(!accepts(&app, &Dragged::Component(a), DropOn::Component(b)), "not into its own child");
     assert!(accepts(&app, &Dragged::Component(b), DropOn::TopLevel));
     drop(&mut app, &Dragged::Component(b), DropOn::TopLevel);
+    assert_eq!(app.s.design.component(ComponentId(b)).unwrap().parent, None);
+  }
+
+  #[test]
+  fn bodies_dragged_onto_the_root_leave_their_component() {
+    // Fusion: a body dragged onto the root row or its Bodies folder moves to the root component
+    let (mut app, bodies, a, b) = app_with_components();
+    let what = Dragged::Bodies(vec![bodies[0]]);
+    assert!(accepts(&app, &what, DropOn::Root));
+    drop(&mut app, &what, DropOn::Root);
+    assert!(app.s.design.components.iter().all(|c| !c.bodies.contains(&bodies[0])), "back at the root");
+    assert!(app.s.design.component(ComponentId(b)).unwrap().bodies.contains(&bodies[1]), "the other stays");
+    assert!(!accepts(&app, &what, DropOn::Root), "already at the root");
+    // a component dropped on the root goes back to the top level
+    drop(&mut app, &Dragged::Component(b), DropOn::Component(a));
+    assert!(accepts(&app, &Dragged::Component(b), DropOn::Root));
+    drop(&mut app, &Dragged::Component(b), DropOn::Root);
     assert_eq!(app.s.design.component(ComponentId(b)).unwrap().parent, None);
   }
 
