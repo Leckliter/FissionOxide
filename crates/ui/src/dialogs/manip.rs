@@ -61,6 +61,11 @@ impl Dialog {
     self.applied
   }
 
+  /// The error the last preview reported ("1 error(s)" in the dialog), if any.
+  pub fn error_text(&self) -> Option<&str> {
+    self.error.as_deref()
+  }
+
   /// Offset Plane: a planar face or construction plane picked in the viewport or browser becomes
   /// the base plane, as in Fusion (the dropdown keeps the origin planes).
   pub(super) fn sync_offset_base(&mut self, s: &Session) {

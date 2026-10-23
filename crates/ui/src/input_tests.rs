@@ -1021,6 +1021,48 @@ fn create_sketch_picks_infinite_planes_and_previews_their_grid() {
   assert_eq!(h.app.grid_preview, None, "no preview once the sketch is open");
 }
 
+/// `ui:canvas:create-sketch-plane-grid-preview`: while Create Sketch waits for a plane, every
+/// pointer position on the canvas hovers one origin plane, the upper canvas (above the horizon)
+/// too, and the hovered plane's sketch grid shows with its labels though the Layout Grid is off.
+#[test]
+fn create_sketch_hovers_a_plane_everywhere_and_shows_its_grid() {
+  let mut h = Harness::new();
+  h.settle();
+  assert!(!h.app.layout_grid, "the Layout Grid is off by default");
+  h.app.new_sketch();
+  h.frame(vec![]);
+  let views = [
+    (std::f64::consts::FRAC_PI_4, 0.6155),
+    // a low orbit: the horizon crosses the canvas
+    (0.5, 0.08),
+    (2.6, 0.15),
+    (-1.0, -0.2),
+  ];
+  for (yaw, pitch) in views {
+    h.app.cam.yaw = yaw;
+    h.app.cam.pitch = pitch;
+    let c = h.app.canvas;
+    let mut missed = Vec::new();
+    for i in 0..9 {
+      for j in 0..9 {
+        // the middle of the canvas from its top edge down (the browser and the ViewCube sit over
+        // its upper corners, the timeline's toast over its foot)
+        let at = c.min + vec2(c.width() * (0.3 + 0.4 * i as f32 / 8.0), c.height() * (0.03 + 0.8 * j as f32 / 8.0));
+        h.frame(vec![Event::PointerMoved(at)]);
+        if h.app.grid_preview.is_none() {
+          missed.push(at);
+        }
+      }
+    }
+    assert!(missed.is_empty(), "yaw {yaw} pitch {pitch}: no plane hovered at {missed:?}");
+    assert!(crate::viewport::grid_shown(&h.app), "the previewed sketch grid shows with the Layout Grid off");
+    let opts = crate::viewport::scene_options(&mut h.app);
+    assert_eq!(opts.grid_plane, h.app.grid_preview);
+    assert!(!opts.hide_grid, "the scene draws the previewed grid");
+    assert!(!opts.grid_axes, "no Layout Grid axis lines over a sketch grid preview");
+  }
+}
+
 /// The File button (after the Home and data panel buttons) and the Help (?) button (left of
 /// the avatar at the right end) of the application bar.
 const FILE: Pos2 = Pos2::new(78.0, 17.0);
@@ -1734,6 +1776,64 @@ fn dragging_drafts_arc_turns_the_angle_in_five_degree_steps() {
   let value_box = h.ctx.memory(|m| m.area_rect(crate::value_box::id()));
   assert!(value_box.is_some(), "the drag opened the box");
   assert_eq!(h.app.dialog.as_mut().unwrap().handle_field(0).unwrap().clone(), "30.0 deg");
+}
+
+/// `ui:manip:draft-drag-hang`: dragging Draft's angle disc along its whole arc (out to 89° either
+/// way) on a body whose drafted face a hole breaks out of keeps every frame short: an angle that
+/// fails only stops the preview, and the dialog stays open with Cancel working after the release.
+#[test]
+fn dragging_a_draft_angle_that_fails_keeps_the_app_responsive() {
+  use serde_json::json;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 40, "depth": 20, "height": 10})).unwrap();
+  let b = &h.app.s.model.bodies[0];
+  let bid = b.id;
+  let e = b.edges().iter().find(|e| (e.mid.x + 20.0).abs() < 1e-6 && (e.mid.y - 10.0).abs() < 1e-6).unwrap().id;
+  h.app.run("fillet", json!({"edges": [{"body": bid.0, "edge": e}], "radius": 3})).unwrap();
+  let top = h.app.s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  h.app
+    .run("hole", json!({"face": {"body": bid.0, "face": top}, "at": [-18, 0, 10], "diameter": 8, "depth": 6}))
+    .unwrap();
+  let b = &h.app.s.model.bodies[0];
+  let top = b.faces().iter().find(|f| f.normal.z > 0.9 && f.kind == fox_engine::kernel::SurfaceKind::Plane).unwrap().id;
+  let left = b.faces().iter().find(|f| f.normal.x < -0.9).unwrap().id;
+  let volume = h.app.s.model.bodies[0].shape.mass().unwrap().volume;
+  // the top face picked for the pull direction, then the face to draft
+  h.app.start(crate::dialogs::Kind::Draft);
+  h.app.fit_view_now();
+  h.frame(vec![]);
+  h.app.s.selection = vec![fox_engine::Sel::Face { body: bid, face: top }];
+  h.frame(vec![]);
+  h.app.s.selection.push(fox_engine::Sel::Face { body: bid, face: left });
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let project = |p| crate::viewport::screen_of(&h.app, p);
+  let (head, arc) = crate::handles::placed_points(&h.app, &project)[0].clone().expect("the disc on its arc");
+  h.frame(vec![Event::PointerMoved(head)]);
+  h.frame(vec![Harness::button(head, true)]);
+  // out to one end of the arc, back across to the other
+  let path: Vec<Pos2> = arc.iter().rev().chain(arc.iter()).copied().collect();
+  let mut slowest = 0f64;
+  let mut failed = false;
+  for p in &path {
+    let t = std::time::Instant::now();
+    h.frame(vec![Event::PointerMoved(*p)]);
+    slowest = slowest.max(t.elapsed().as_secs_f64());
+    failed |= h.app.dialog.as_ref().unwrap().error_text().is_some();
+  }
+  assert!(failed, "some angle along the arc fails to draft");
+  let t = std::time::Instant::now();
+  h.frame(vec![Harness::button(*path.last().unwrap(), false)]);
+  h.frame(vec![]);
+  slowest = slowest.max(t.elapsed().as_secs_f64());
+  assert!(slowest < 2.0, "a frame took {slowest} s");
+  assert!(h.app.dialog.is_some(), "the dialog stays open");
+  h.app.cancel_dialog();
+  h.frame(vec![]);
+  assert!(h.app.dialog.is_none());
+  assert_eq!(h.app.s.design.features.len(), 4, "Cancel leaves no draft (box, fillet, hole and its sketch)");
+  assert!((h.app.s.model.bodies[0].shape.mass().unwrap().volume - volume).abs() < 1e-6);
 }
 
 /// Select Other, as in Fusion: a press held still on the model opens the list (Depth tab, one

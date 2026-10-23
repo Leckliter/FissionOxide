@@ -158,34 +158,42 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
 }
 
 /// One feature's branch: its row (icon outlined in red for a failure), "Compute Failed" with the
-/// red glyph (expandable), and the message.
+/// red glyph (expandable), and the message. Each row is Fusion's: the expand arrow, the icon in
+/// its own slot, then the label.
 fn tree(ui: &mut egui::Ui, f: &Failure) {
   let (icon, error) = (f.icon, f.error);
   let ink = if error { theme::ERROR } else { theme::WARNING };
-  egui::CollapsingHeader::new(RichText::new(&f.name).color(theme::TEXT))
-    .id_salt(("error-feature", f.feature.0))
-    .default_open(true)
-    .icon(move |ui, _, resp| {
-      let r = egui::Rect::from_center_size(resp.rect.left_center() + vec2(9.0, 0.0), Vec2::splat(16.0));
-      ui.painter().rect_stroke(r.expand(1.0), 2.0, Stroke::new(1.0, ink), egui::StrokeKind::Outside);
-      icons::draw_color(ui.painter(), r, icon);
+  let feature = ui.make_persistent_id(("error-feature", f.feature.0));
+  egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), feature, true)
+    .show_header(ui, |ui| {
+      row(ui, 18.0, &f.name, |p, r| {
+        let r = egui::Rect::from_center_size(r.center(), Vec2::splat(16.0));
+        p.rect_stroke(r.expand(1.0), 2.0, Stroke::new(1.0, ink), egui::StrokeKind::Outside);
+        icons::draw_color(p, r, icon);
+      });
     })
-    .show(ui, |ui| {
-      egui::CollapsingHeader::new(RichText::new(state_label(f.error)).color(theme::TEXT))
-        .id_salt(("error-state", f.feature.0))
-        .default_open(true)
-        .icon(move |ui, _, resp| {
-          let r = egui::Rect::from_center_size(resp.rect.left_center() + vec2(8.0, 0.0), Vec2::splat(14.0));
-          state_glyph(ui.painter(), r, error);
+    .body(|ui| {
+      let state = ui.make_persistent_id(("error-state", f.feature.0));
+      egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), state, true)
+        .show_header(ui, |ui| {
+          row(ui, 14.0, state_label(error), |p, r| state_glyph(p, r, error));
         })
-        .show(ui, |ui| {
+        .body(|ui| {
           ui.horizontal_top(|ui| {
             let (r, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
-            state_glyph(ui.painter(), r, f.error);
+            state_glyph(ui.painter(), r, error);
             ui.add(egui::Label::new(RichText::new(&f.message).color(theme::TEXT)).wrap());
           });
         });
     });
+}
+
+/// A tree row's icon (a `size` square laid out before the text, never over it) and its label.
+fn row(ui: &mut egui::Ui, size: f32, label: &str, icon: impl FnOnce(&egui::Painter, egui::Rect)) {
+  ui.spacing_mut().item_spacing.x = 6.0;
+  let (r, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
+  icon(ui.painter(), r);
+  ui.label(RichText::new(label).color(theme::TEXT));
 }
 
 fn state_glyph(p: &egui::Painter, r: egui::Rect, error: bool) {

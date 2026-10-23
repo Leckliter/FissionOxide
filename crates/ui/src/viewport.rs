@@ -882,7 +882,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     grid_step: app.grid.step(),
     grid_plane: app.grid_preview,
     // the Layout Grid carries Fusion's red X and green Y axis lines across it
-    grid_axes: app.s.edit_sketch.is_none() && vis.origin_axes,
+    grid_axes: app.s.edit_sketch.is_none() && app.grid_preview.is_none() && vis.origin_axes,
     show_profiles_of: profiles_of,
     hide_profiles_of: app.hidden_profiles.clone(),
     hide_projected_of: app.sketch_rows.hidden_projected.clone(),
@@ -1033,7 +1033,8 @@ pub(crate) fn slice_params(app: &App) -> Option<serde_json::Value> {
 /// on and a tool with a 3D form runs, when Fusion hides it under the tool's 3D manipulator.
 pub(crate) fn grid_shown(app: &App) -> bool {
   if app.s.edit_sketch.is_none() {
-    return app.layout_grid;
+    // a plane hovered for a new sketch previews that sketch's grid, Layout Grid on or off
+    return if app.grid_preview.is_some() { app.show_grid } else { app.layout_grid };
   }
   let tool_3d = app.tool != Tool::Select && sketch_3d_enabled(app);
   app.show_grid && !(app.palette.sketch_3d && tool_3d)
@@ -5292,8 +5293,20 @@ fn plane_under(
   match (first(true), face) {
     (Some((t, i)), f) if f.is_none_or(|f| t <= f) => Some(i),
     (_, Some(_)) => None,
-    (_, None) => first(false).filter(|_| infinite).map(|(_, i)| i),
+    (_, None) if infinite => first(false).map(|(_, i)| i).or_else(|| facing(planes, d)),
+    (_, None) => None,
   }
+}
+
+/// The origin plane that faces a ray going away from all three (the upper canvas of a low
+/// orbit): the one most across it, so some plane is still under the pointer.
+fn facing(planes: &[(serde_json::Value, Plane)], d: DVec3) -> Option<usize> {
+  planes
+    .iter()
+    .enumerate()
+    .filter(|(_, (p, _))| p.get("feature").is_none())
+    .max_by(|(_, (_, a)), (_, (_, b))| a.normal().dot(d).abs().total_cmp(&b.normal().dot(d).abs()))
+    .map(|(i, _)| i)
 }
 
 /// The planes Create Sketch offers this frame.

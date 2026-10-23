@@ -625,3 +625,41 @@ fn replace_face_keeps_a_two_lump_body_whole() {
   assert_eq!(s.model.bodies[0].shape.solid_count(), 2);
   assert!((volume(&s) - 12_000.0 - 4000.0).abs() < 1e-2, "{}", volume(&s));
 }
+
+/// `ui:manip:draft-drag-hang`: a 40 x 20 x 10 block, a 3 mm round on a vertical edge of its -x
+/// end and a hole in the top breaking out through that end, drafted (Tangent Chain on) about the
+/// top face. A steep angle folds the drafted faces over; it fails with an error at once instead
+/// of ShapeFix spinning on the crossing wires (it never came back at 59.5°), and the gentler
+/// angles still draft.
+#[test]
+fn a_draft_that_folds_over_fails_at_once() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 40, "depth": 20, "height": 10}));
+  let b = &s.model.bodies[0];
+  let bid = b.id.0;
+  let e = b.edges().iter().find(|e| (e.mid.x + 20.0).abs() < 1e-6 && (e.mid.y - 10.0).abs() < 1e-6).unwrap().id;
+  run(&mut s, "fillet", json!({"edges": [{"body": bid, "edge": e}], "radius": 3}));
+  let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  run(&mut s, "hole", json!({"face": {"body": bid, "face": top}, "at": [-18, 0, 10], "diameter": 8, "depth": 6}));
+  let b = &s.model.bodies[0];
+  let top = b.faces().iter().find(|f| f.normal.z > 0.9 && f.kind == fox_kernel::SurfaceKind::Plane).unwrap().id;
+  let left = b.faces().iter().find(|f| f.normal.x < -0.9).unwrap().id;
+  let draft = |s: &mut Session, angle: &str| {
+    let p = json!({"faces": [{"body": bid, "face": left}], "plane": {"body": bid, "face": top}, "angle": angle,
+      "tangent_chain": true});
+    let t = std::time::Instant::now();
+    let r = s.execute("draft", &p).unwrap();
+    let secs = t.elapsed().as_secs_f64();
+    s.undo();
+    s.drop_redo();
+    (r.get("error").and_then(Value::as_str).map(str::to_string), secs)
+  };
+  for angle in ["59.5 deg", "70 deg", "89 deg", "-59.5 deg"] {
+    let (error, secs) = draft(&mut s, angle);
+    assert_eq!(error.as_deref(), Some("draft: the draft failed"), "{angle}");
+    assert!(secs < 2.0, "{angle} took {secs} s");
+  }
+  for angle in ["3 deg", "12 deg"] {
+    assert_eq!(draft(&mut s, angle).0, None, "{angle} drafts");
+  }
+}

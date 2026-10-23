@@ -61,9 +61,9 @@ pub const PREVIEW_COLOR: [u8; 4] = [104, 154, 222, 255];
 pub const PROFILE_COLOR: [u8; 4] = [230, 245, 250, 255];
 /// The profiles of the sketch being edited: the same pale blue.
 pub const PROFILE_COLOR_EDIT: [u8; 4] = PROFILE_COLOR;
-/// A profile under the cursor is lightened like a face (with a black outline); a selected one
-/// fills in the selection blue with a red outline, as Extrude shows them.
-pub const PROFILE_HOVER: [u8; 4] = lighten(PROFILE_COLOR, HOVER_LIGHTEN);
+/// A profile under the cursor fills Fusion's mid grey (192,197,193) with a black outline; a
+/// selected one fills in the selection blue with a red outline, as Extrude shows them.
+pub const PROFILE_HOVER: [u8; 4] = [192, 197, 193, 255];
 pub const PROFILE_SELECTED: [u8; 4] = SELECT_COLOR;
 pub const PROFILE_OUTLINE_HOVER: [u8; 4] = EDGE_HOVER_COLOR;
 pub const PROFILE_OUTLINE_SELECTED: [u8; 4] = [220, 40, 40, 255];
@@ -635,7 +635,7 @@ impl SceneBuilder {
         let (color, outline) = if selected.contains(&pick) {
           (PROFILE_SELECTED, Some(PROFILE_OUTLINE_SELECTED))
         } else if opts.hover == Some(pick) {
-          (lighten(base, HOVER_LIGHTEN), Some(PROFILE_OUTLINE_HOVER))
+          (PROFILE_HOVER, Some(PROFILE_OUTLINE_HOVER))
         } else if whole {
           (PROFILE_SKETCH_SELECTED, None)
         } else if peeked {

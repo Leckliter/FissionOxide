@@ -505,7 +505,8 @@ fn sketch_curves_and_profiles_highlight_outside_the_sketch() {
   let pid = picks.id_of(&profile).unwrap();
   let fill = sc.meshes.iter().find(|m| m.tri_ids.first() == Some(&pid)).expect("the profile is shaded");
   assert_eq!(fill.color, scene::PROFILE_HOVER);
-  assert_eq!(fill.color, scene::lighten(scene::PROFILE_COLOR, scene::HOVER_LIGHTEN));
+  // `ui:canvas:command-pick-colors`: Fusion's mid grey, darker than the pale blue at rest
+  assert_eq!(fill.color, [192, 197, 193, 255]);
   assert_eq!(lines(&sc, pid), [(scene::PROFILE_OUTLINE_HOVER, 1.0)]);
   let outline = sc.lines.iter().find(|l| l.id == pid).unwrap();
   assert_eq!(outline.points.first(), outline.points.last(), "a closed outline");

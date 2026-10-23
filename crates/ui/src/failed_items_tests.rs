@@ -105,6 +105,29 @@ impl Harness {
     self.ctx.run_ui(input, |ui| app.draw(ui)).drop_without_applying_deltas();
   }
 
+  /// One frame's shapes, flattened.
+  fn shapes(&mut self) -> Vec<egui::Shape> {
+    self.time += 1.0 / 60.0;
+    let input = RawInput {
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+      time: Some(self.time),
+      ..Default::default()
+    };
+    let app = &mut self.app;
+    let out = self.ctx.run_ui(input, |ui| app.draw(ui));
+    fn flat(s: egui::Shape, into: &mut Vec<egui::Shape>) {
+      match s {
+        egui::Shape::Vec(v) => v.into_iter().for_each(|s| flat(s, into)),
+        s => into.push(s),
+      }
+    }
+    let mut all = Vec::new();
+    for c in out.shapes {
+      flat(c.shape, &mut all);
+    }
+    all
+  }
+
   fn click(&mut self, pos: Pos2) {
     let button = |pressed| Event::PointerButton {
       pos,
@@ -129,6 +152,59 @@ fn the_red_badge_opens_the_error_window() {
   assert!(error_dialog::is_open(&h.ctx));
   h.frame(1.0 / 60.0, vec![]);
   assert!(h.ctx.memory(|m| m.area_rect(file_dialogs::floating_id(error_dialog::NAME))).is_some());
+}
+
+/// `ui:timeline:error-dialog`: each tree row's icon sits before its label, never over it.
+#[test]
+fn the_error_windows_icons_sit_before_their_labels() {
+  let (app, _) = failed_chamfer();
+  let mut h = Harness::new(app);
+  error_dialog::open(&h.ctx);
+  // (past the window's fade-in)
+  for _ in 0..30 {
+    h.frame(1.0 / 60.0, vec![]);
+  }
+  let shapes = h.shapes();
+  let window = h.ctx.memory(|m| m.area_rect(file_dialogs::floating_id(error_dialog::NAME))).expect("the window");
+  // the window's own rows (the toast names the feature too)
+  let text = |label: &str| {
+    shapes
+      .iter()
+      .find_map(|s| match s {
+        egui::Shape::Text(t) if t.galley.text() == label => {
+          Some(t.galley.rect.translate(t.pos.to_vec2())).filter(|r| window.contains_rect(*r))
+        }
+        _ => None,
+      })
+      .unwrap_or_else(|| panic!("{label} is drawn"))
+  };
+  let (name, state) = (text("Chamfer1"), text("Compute Failed"));
+
+  // the feature icon's red outline, on the feature's row
+  let outline = shapes
+    .iter()
+    .find_map(|s| match s {
+      egui::Shape::Rect(r)
+        if r.stroke.color == crate::theme::ERROR && (r.rect.center().y - name.center().y).abs() < 6.0 =>
+      {
+        Some(r.rect)
+      }
+      _ => None,
+    })
+    .expect("the feature icon is outlined in red");
+  assert!(outline.max.x < name.min.x, "the icon {outline:?} stays left of Chamfer1 {name:?}");
+  // the red circled X on the Compute Failed row
+  let glyph = shapes
+    .iter()
+    .find_map(|s| match s {
+      egui::Shape::Circle(c) if c.fill == crate::theme::ERROR && (c.center.y - state.center().y).abs() < 6.0 => {
+        Some(Rect::from_center_size(c.center, vec2(c.radius, c.radius) * 2.0))
+      }
+      _ => None,
+    })
+    .expect("Compute Failed has its red glyph");
+  assert!(glyph.max.x < state.min.x, "the glyph {glyph:?} stays left of Compute Failed {state:?}");
+  assert!(state.min.x > name.min.x, "Compute Failed is a level in");
 }
 
 #[test]

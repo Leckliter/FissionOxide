@@ -245,6 +245,25 @@ TopoDS_Shape checked(const TopoDS_Shape &s, const char *what, Track *t = nullptr
   return f;
 }
 
+// Validates a draft's result as `checked` does, but its ShapeFix leaves crossing wires alone: a
+// steep taper folds faces over, and ShapeFix_Face's FixIntersectingWires can spin on the crossing
+// wires for good (dragging Draft's angle handle to 59.5° on a body with a hole breaking out of
+// the drafted face hung the app). Without that step the fix stays quick, and such a draft fails,
+// as Fusion's does.
+TopoDS_Shape checked_draft(const TopoDS_Shape &s, Track *t = nullptr) {
+  if (s.IsNull()) throw std::runtime_error("the draft failed");
+  if (BRepCheck_Analyzer(s).IsValid()) return s;
+  BRepBuilderAPI_Copy copy(s);
+  if (t) t->step(s, copy);
+  ShapeFix_Shape fix(copy.Shape());
+  fix.FixSolidTool()->FixShellTool()->FixFaceTool()->FixIntersectingWiresMode() = 0;
+  fix.Perform();
+  if (t) t->step(fix.Context()->History());
+  TopoDS_Shape f = fix.Shape();
+  if (!BRepCheck_Analyzer(f).IsValid()) throw std::runtime_error("the draft failed");
+  return f;
+}
+
 void index_map(const TopoDS_Shape &s, TopAbs_ShapeEnum kind, TopTools_IndexedMapOfShape &map) {
   TopExp::MapShapes(s, kind, map);
 }
@@ -1395,7 +1414,7 @@ std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, 
   if (!mk.IsDone()) throw std::runtime_error("the draft failed");
   Track t({&s});
   t.step(s.s, mk);
-  return wrap(checked(mk.Shape(), "draft", &t), t);
+  return wrap(checked_draft(mk.Shape(), &t), t);
   FOX_CATCH("draft")
 }
 
@@ -1492,7 +1511,7 @@ std::unique_ptr<Shape> draft_two_sided(const Shape &s, rust::Slice<const uint32_
   if (added == 0) throw std::runtime_error("no faces to draft");
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the draft failed");
-  return wrap(checked(mk.Shape(), "draft"));
+  return wrap(checked_draft(mk.Shape()));
   FOX_CATCH("draft")
 }
 
