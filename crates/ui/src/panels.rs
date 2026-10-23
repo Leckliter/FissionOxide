@@ -351,8 +351,17 @@ pub(crate) const PROFILE_MENU: [Option<(&str, bool)>; 8] = [
   Some(("Sign Out", false)),
 ];
 
+/// The profile menu's width: Fusion's is a narrow list under the avatar (about 108 screenshot px,
+/// 142 points).
+pub(crate) const PROFILE_MENU_W: f32 = 142.0;
+
+/// The id under which the profile menu's rect is kept, for tests.
+pub(crate) fn profile_menu_rect_id() -> egui::Id {
+  egui::Id::new("profile-menu-rect")
+}
+
 fn profile_menu(app: &mut App, ui: &mut egui::Ui) {
-  ui.set_min_width(200.0);
+  ui.set_width(PROFILE_MENU_W);
   for entry in PROFILE_MENU {
     let Some((label, enabled)) = entry else {
       ui.separator();
@@ -376,6 +385,7 @@ fn profile_menu(app: &mut App, ui: &mut egui::Ui) {
       profile_action(app, label);
     }
   }
+  ui.ctx().data_mut(|d| d.insert_temp(profile_menu_rect_id(), ui.min_rect()));
 }
 
 /// Runs a profile menu entry.
@@ -3118,8 +3128,9 @@ pub fn assistant_tab(app: &mut App, ctx: &egui::Context) {
 
 /// Fusion's "Unsaved: Changes may be lost — Save" notice at the top of the canvas, shown for a
 /// changed design that has never been saved.
+/// The Home page shows none of it, as it shows nothing of the design underneath.
 pub fn unsaved_banner(app: &mut App, ctx: &egui::Context) {
-  if app.s.path.is_some() || !app.s.dirty {
+  if app.home.open || app.s.path.is_some() || !app.s.dirty {
     return;
   }
   let canvas = app.canvas;
