@@ -4031,14 +4031,17 @@ impl Dialog {
           *dirty = true;
         }
         ui.end_row();
-        let before = self.distance.clone();
-        Self::field(ui, "Distance", &mut self.distance, dirty);
-        if self.distance != before {
-          // a typed distance holds: the offset stops following the cursor
-          self.follow = false;
-        }
-        if self.extent == "two_sides" {
-          Self::field(ui, "Distance 2", &mut self.distance2, dirty);
+        // as in Fusion, the distance shows once a curve is picked
+        if !self.curves.is_empty() {
+          let before = self.distance.clone();
+          Self::field(ui, "Distance", &mut self.distance, dirty);
+          if self.distance != before {
+            // a typed distance holds: the offset stops following the cursor
+            self.follow = false;
+          }
+          if self.extent == "two_sides" {
+            Self::field(ui, "Distance 2", &mut self.distance2, dirty);
+          }
         }
         // Flip is an icon button, as in Fusion
         ui.label("Flip");

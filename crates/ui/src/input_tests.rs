@@ -3882,6 +3882,8 @@ fn o_in_3d_shows_the_offset_dialog_while_the_plane_is_picked() {
   for want in ["OFFSET", "Curves", "Chain Selection", "Direction", "Flip"] {
     assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
   }
+  // the distance shows only once a curve is picked, as in Fusion
+  assert!(!t.iter().any(|x| x == "Distance" || x == "0 mm"), "no Distance row in {t:?}");
   assert!(h.prompt_at(c, crate::dialogs::PICK_PLANE_HINT));
   // Cancel in the OFFSET dialog cancels the pick and the Offset with it
   let r = h.dialog_rect();
@@ -3900,4 +3902,66 @@ fn o_in_3d_shows_the_offset_dialog_while_the_plane_is_picked() {
   let t: Vec<String> = h.frame_texts(1.0 / 60.0, vec![]).into_iter().map(|(_, t)| t).collect();
   assert_eq!(h.app.dialog.as_ref().map(|d| d.kind), Some(crate::dialogs::Kind::PickPlane));
   assert!(!t.iter().any(|x| x == "OFFSET" || x == "Chain Selection"), "{t:?}");
+}
+
+/// The verifier's case: L in 3D, then a click on the XY plane in the canvas opens the sketch
+/// with Line already running, and the next clicks draw a line, as in Fusion. C, R and T start
+/// their tools the same way; P and O open PROJECT and OFFSET in the new sketch.
+#[test]
+fn a_sketch_key_in_3d_runs_its_tool_once_the_plane_is_clicked() {
+  use crate::dialogs::Kind;
+  use crate::viewport::Tool;
+  use fox_engine::kernel::glam::DVec3;
+  let mut h = Harness::new();
+  let keys = [
+    (egui::Key::L, Some(Tool::Line), None),
+    (egui::Key::C, Some(Tool::Circle), None),
+    (egui::Key::R, Some(Tool::Rect), None),
+    (egui::Key::T, Some(Tool::Trim), None),
+    (egui::Key::P, None, Some(Kind::Project)),
+    (egui::Key::O, None, Some(Kind::SkOffset)),
+  ];
+  let xy = {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"plane": "xy"})).unwrap();
+    s.model.sketches[&s.edit_sketch.unwrap()].plane.normal()
+  };
+  for (k, tool, dialog) in keys {
+    h.settle();
+    h.frame(vec![Event::PointerMoved(h.app.canvas.center())]);
+    h.frame(vec![key(k)]);
+    h.frame(vec![]);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.kind), Some(Kind::PickPlane), "{k:?} asks for a plane");
+    // the XY plane's square, clicked in the canvas where the XZ square doesn't stand in front of
+    // it in the home view
+    let s = crate::viewport::origin_plane_size(&h.app);
+    h.move_then_click(h.screen(DVec3::new(0.5 * s, 0.92 * s, 0.0)));
+    let sk = h.app.s.edit_sketch.unwrap_or_else(|| panic!("{k:?}: the click starts the sketch"));
+    assert_eq!(h.app.s.model.sketches[&sk].plane.normal(), xy, "{k:?}: on XY");
+    if let Some(tool) = tool {
+      assert_eq!(h.app.tool, tool, "{k:?} runs in the new sketch");
+    }
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.kind), dialog, "{k:?}");
+    if k == egui::Key::L {
+      // clicks on the canvas draw the line
+      h.settle();
+      assert_eq!(h.app.tool, Tool::Line, "still drawing after the view settles");
+      let plane = h.app.s.model.sketches[&sk].plane;
+      h.move_then_click(h.screen(plane.to_world([5.0, 5.0])));
+      h.move_then_click(h.screen(plane.to_world([25.0, 15.0])));
+      let lines = h.app.s.design.sketch(sk).unwrap().curves.iter().filter(|c| !c.construction).count();
+      assert_eq!(lines, 1, "the two clicks drew a line");
+      h.frame(vec![key(egui::Key::Escape)]);
+      h.frame(vec![]);
+    }
+    h.app.cancel_dialog();
+    h.app.finish_sketch();
+    h.frame(vec![]);
+  }
+  // a plane picked in the browser does the same
+  h.frame(vec![key(egui::Key::C)]);
+  h.frame(vec![]);
+  crate::panels::pick_plane(&mut h.app, json!("xz"));
+  assert!(h.app.s.edit_sketch.is_some());
+  assert_eq!(h.app.tool, Tool::Circle, "C runs in the sketch on the browser's plane");
 }

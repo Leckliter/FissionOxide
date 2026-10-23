@@ -2673,7 +2673,7 @@ pub(crate) fn pick_plane(app: &mut App, plane: Value) {
     return;
   }
   if app.dialog.as_ref().is_some_and(|d| d.kind == Kind::PickPlane) {
-    app.cancel_dialog();
+    // create_sketch closes the pick and runs a sketch key's command in the new sketch
     app.create_sketch(plane);
   } else if let Some(d) = app.dialog.as_mut().filter(|d| d.wants_plane()) {
     d.take_plane(plane);

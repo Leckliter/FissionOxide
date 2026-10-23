@@ -500,10 +500,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         Some(d) if d.wants_cut_plane() => d.set_cut_plane(&app.s, plane),
         // Draft's pull direction
         Some(d) if d.wants_pull_plane() => d.pick_pull_plane(&mut app.s, plane),
-        _ => {
-          app.cancel_dialog();
-          app.create_sketch(plane);
-        }
+        // Create Sketch: it closes the plane pick itself, keeping a sketch key's command
+        // (L, C, ...) to run in the new sketch, which cancelling first would drop
+        _ => app.create_sketch(plane),
       }
     }
   }
