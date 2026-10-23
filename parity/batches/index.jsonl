@@ -139,5 +139,5 @@
 {"name": "ui-reverify-dialogs-5", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_fc7adbe1 (requested 2026-10-22 by the coordinator)"}
 {"name": "ui-reverify-mesh-1", "items": 5, "status": "ready", "pr": null}
 {"name": "ui-reverify-mesh-2", "items": 5, "status": "ready", "pr": null}
-{"name": "ui-reverify-dialogs-6", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-reverify-dialogs-6", "items": 6, "status": "ready", "pr": null}
 {"name": "ui-reverify-render-2", "items": 3, "status": "ready", "pr": null}

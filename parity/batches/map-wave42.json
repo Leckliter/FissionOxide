@@ -9,6 +9,7 @@
   "ui:mesh:face-groups-dialogs": "ui-reverify-mesh-2",
   "ui:mesh:scale-mesh-dialog": "ui-reverify-mesh-2",
   "ui:mesh:sharp-edge-shading": "ui-reverify-mesh-2",
+  "ui:chrome:export-dialog": "ui-reverify-dialogs-6",
   "ui:dialogs:angle-box-precision": "ui-reverify-dialogs-6",
   "ui:dialogs:chamfer-fields-2": "ui-reverify-dialogs-6",
   "ui:dialogs:copy-ghost-preview": "ui-reverify-dialogs-6",

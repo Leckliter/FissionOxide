@@ -5,7 +5,7 @@ FissionOxide does now, and where to start. Keep changes scoped to them, add test
 `cargo test` and `cargo clippy` before pushing.
 
 Found on 2026-10-22 by the re-verification sweep (verifier 6) on a 30 x 20 x 10 mm box (SOLID > Box) in the
-rebuilt app (`main` at `dadbcad3`, then `d2202676`). Four rows are reopened, one is new.
+rebuilt app (`main` at `dadbcad3`, then `d2202676`). Five rows are reopened (the Export one on `3aa0fa4c`), one is new.
 Every row is already in `parity/ui-features.jsonl` (do not run `ledger_from_batches.py` for this
 batch); read each row's `history` before starting.
 
@@ -38,3 +38,9 @@ batch); read each row's `history` before starting.
 - Fusion: angle boxes read "0.0 deg" / "118.0 deg": Extrude's Taper Angle, Hole's drill point, Move/Copy's X/Y/Z Angle.
 - FissionOxide: Extrude's Taper angle is a greyed "0 deg", Hole's drill point "118 deg", Move/Copy's angles "0 deg" (Insert Mesh and Draft already show "0.0 deg").
 - Start here: `crates/ui/src/dialogs/hole_pattern.rs:181`, `crates/ui/src/dialogs/extrude.rs:169`, `units::typed_angle`
+
+## Export types and default (P2)
+- key: `ui:chrome:export-dialog`
+- Fusion: File > Export... starts at "Autodesk Fusion Archive Files (*.f3d)"; 3MF, Autodesk Inventor 2025 (*.ipt), FBX, OBJ, SketchUp (*.skp), SMT (*.smt), STEP, STL and USD are live; DWG, DXF, IGES and SAT are greyed.
+- FissionOxide (`main` at `3aa0fa4c`, after `ui-reverify-chrome-1`): FBX is live now, but IPT, SketchUp and SMT are still greyed, and the Type starts at "FissionOxide Archive Files (*.foxz)" with the .f3d entry greyed.
+- Start here: `crates/ui/src/file_dialogs.rs:561`, `crates/ui/src/file_dialogs.rs:564`

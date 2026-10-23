@@ -21,7 +21,14 @@ two shells), both copied to `C:\Users\Leckliter\Documents\fox-mesh\`.
 | sketch (2) | 0 | 1 | 0 | 1 |
 | render (2) | 0 | 2 | 1 | 0 |
 | singles (7) | 4 | 0 | 0 | 3 |
-| total (53) | 35 | 14 | 4 | 4 |
+| chrome, after `ui-reverify-chrome-1` (8) | 7 | 1 | 0 | 0 |
+| total (61) | 42 | 15 | 4 | 4 |
+
+The eight chrome keys arrived with `f6aaa91d` while this session was writing up; they were checked on a third
+build (`3aa0fa4c`): Text Commands bar and View entry, the dark theme round trip, one-click projects, list rows
+with their details card, the Open window's tree, the View submenu and the glyph boxes now match; Export still
+greys Inventor, SketchUp and SMT and starts at FissionOxide's own archive type (reopened into
+`ui-reverify-dialogs-6`).
 
 ## Verified
 
