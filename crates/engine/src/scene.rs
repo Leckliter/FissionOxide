@@ -2011,7 +2011,32 @@ fn tool_lines(scene: &mut Scene, s: &Session, shaft: bool, holder: bool) {
       .collect()
   };
   let grey = [110, 115, 125, 255];
-  let mut line = |points: Vec<[f32; 3]>| {
+  let mut out: Vec<Vec<[f32; 3]>> = Vec::new();
+  let barrel = |out: &mut Vec<Vec<[f32; 3]>>, from: DVec3, to: DVec3, r: f64| {
+    for k in 0..4 {
+      let a = k as f64 * std::f64::consts::FRAC_PI_2;
+      let d = (u * a.cos() + v * a.sin()) * r;
+      out.push(vec![(from + d).as_vec3().to_array(), (to + d).as_vec3().to_array()]);
+    }
+  };
+  let top = tip + axis * flutes;
+  // the shaft runs on as far again as the flutes; the holder grips its end
+  let end = if shaft { top + axis * flutes } else { top };
+  barrel(&mut out, tip, end, r);
+  out.push(ring(tip, r));
+  out.push(ring(top, r));
+  if shaft {
+    out.push(ring(end, r));
+  }
+  if holder {
+    // a generic holder: a body a few tool diameters across and as long as the flutes and shaft
+    let (hr, hl) = ((r * 2.5).max(r + 6.0), (flutes * 2.0).max(20.0));
+    let far = end + axis * hl;
+    barrel(&mut out, end, far, hr);
+    out.push(ring(end, hr));
+    out.push(ring(far, hr));
+  }
+  for points in out {
     scene.lines.push(Polyline {
       points,
       color: grey,
@@ -2021,31 +2046,7 @@ fn tool_lines(scene: &mut Scene, s: &Session, shaft: bool, holder: bool) {
       dashed: false,
       dash_dot: false,
       behind: false,
-    })
-  };
-  let top = tip + axis * flutes;
-  // the shaft runs on as far again as the flutes; the holder grips its end
-  let end = if shaft { top + axis * flutes } else { top };
-  let mut barrel = |from: DVec3, to: DVec3, r: f64| {
-    for k in 0..4 {
-      let a = k as f64 * std::f64::consts::FRAC_PI_2;
-      let d = (u * a.cos() + v * a.sin()) * r;
-      line(vec![(from + d).as_vec3().to_array(), (to + d).as_vec3().to_array()]);
-    }
-  };
-  barrel(tip, end, r);
-  line(ring(tip, r));
-  line(ring(top, r));
-  if shaft {
-    line(ring(end, r));
-  }
-  if holder {
-    // a generic holder: a body a few tool diameters across and as long as the flutes and shaft
-    let (hr, hl) = ((r * 2.5).max(r + 6.0), (flutes * 2.0).max(20.0));
-    let far = end + axis * hl;
-    barrel(end, far, hr);
-    line(ring(end, hr));
-    line(ring(far, hr));
+    });
   }
 }
 

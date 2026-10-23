@@ -421,7 +421,7 @@ impl Dialog {
 
   /// Enough picked to try (and, for Extrude, a distance that isn't zero).
   pub(super) fn surf_ready(&self) -> bool {
-    let [a, b] = &self.surf.rows;
+    let [a, b, _] = &self.surf.rows;
     match self.kind {
       Kind::SurfExtrude => !a.is_empty() && nonzero(&self.surf.distance),
       Kind::SurfRevolve | Kind::SurfSweep => !a.is_empty() && !b.is_empty(),
@@ -430,7 +430,7 @@ impl Dialog {
   }
 
   pub(super) fn surf_missing(&self) -> &'static str {
-    let [a, b] = &self.surf.rows;
+    let [a, b, _] = &self.surf.rows;
     match self.kind {
       Kind::SurfExtrude if a.is_empty() => "select profiles or curves",
       Kind::SurfExtrude => "specify a distance",
@@ -444,7 +444,7 @@ impl Dialog {
 
   /// Fusion's cursor prompt for a surface dialog or form; None leaves it to the usual prompt.
   pub(super) fn surface_prompt(&self, hovering: bool) -> Option<String> {
-    let [a, b] = &self.surf.rows;
+    let [a, b, _] = &self.surf.rows;
     let text = match (self.kind, form_cmd(self.kind)) {
       (_, Some("surface.patch.form")) if !self.form_picked("edges") => "Select edge",
       (_, Some("surface.offset.form")) if !self.form_picked("faces") && !self.form_picked("bodies") => {

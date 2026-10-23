@@ -3969,8 +3969,16 @@ fn replace_face_target_takes_a_plane_clicked_in_the_canvas() {
   let top = h.screen(DVec3::new(mid.x, mid.y, hi.z));
   h.move_then_click(top);
   assert_eq!(h.app.s.selection.len(), 1, "{:?}", h.app.s.selection);
-  let row = h.find(vec![], "Target Faces").expect("the Target Faces row");
-  h.move_then_click(row.center());
+  // its chip, on the label's line
+  let texts = h.frame_texts(1.0 / 60.0, vec![]);
+  let row = texts.iter().find(|(_, t)| t == "Target Faces").expect("the Target Faces row").0;
+  let chip = texts
+    .iter()
+    .filter(|(r, t)| t == "Select" && (r.center().y - row.center().y).abs() < 8.0 && r.left() > row.right())
+    .map(|(r, _)| *r)
+    .next()
+    .expect("its Select chip");
+  h.move_then_click(chip.center());
   assert!(h.app.dialog.as_ref().is_some_and(|d| d.row_takes_plane()), "Target Faces is active");
   // a point on the plane's square, off the box's silhouette
   let half = crate::viewport::plane_half_size(&h.app);
