@@ -1,6 +1,29 @@
 # Prober progress
 
-## Last stop: 2026-10-22, 19:45, session "Re-verification sweep, verifier 3"
+## Last stop: 2026-10-22, 20:30, session "Re-verification sweep, verifier 4"
+
+Re-checked on `main` at `ff53fda7` (binary current): sketch 11, dialogs 8, chrome 14, construct 5,
+inspect 6, insert 1. 33 verified, 9 reopened, 4 new rows, 4 left (report
+`parity/reports/2026-10-22-reverify-sketch-dialogs-chrome-inspect.md`). New wave-40 batches, all
+`ready` with no fixer (keys in `map-wave40.json`): `ui-reverify-sketch-4` (4: Project / Include rows
+greyed, Distance-Angle chamfer's missing distance dimension, 3D sketch edge snaps / triad, circular
+pattern centre pick and status), `ui-reverify-dialogs-4` (4: Coil rotation handle and Box's typed base,
+Measure's status bar, Replace Face plane target, Replace Face splitting a two-lump body) and
+`ui-reverify-chrome-2` (5: Preferences General defaults, General precision 0.123, Preferences window
+size, profile menu width, Unsaved banner over Home).
+
+Left `fixing-merged` in the swept areas: `ui:sketch:vertical-on-horizontal-line` (no UI route: H/V is
+one tool), `ui:dialogs:remove-components` (needs components), `ui:chrome:comments-expand` (needs a
+saved design), `ui:assemble:convert-design-type-assembly` (needs an Assembly Design).
+
+Where the documents stand: Fusion untouched apart from Sketch1 of "Untitled*(3)" opened and finished
+unchanged and Preferences opened and cancelled; Fusion is now snapped to the left half (x 0..920),
+behind FissionOxide. FissionOxide (PID 12740) runs `ff53fda7` with one "Untitled*" mm Part Design:
+Sketch1 (lines, blend curve, chamfered corner, circle), Sketch2 on Body1's top (a projected edge and a
+3D line), Body1 (box, shelled, mirrored, joined with the moved copy, filleted, face replaced, now split
+into Body1 and Body3), Plane1, CenterOfMass1 in an Analysis folder; window at x 0..907, Data Panel closed.
+
+## Earlier stop: 2026-10-22, 19:45, session "Re-verification sweep, verifier 3"
 
 Swept canvas, navbar, viewcube, marking-menu, browser, timeline and manip on `main` at `afddd332`, then
 eleven sketch keys (six on a rebuild at `3e4cc76d`). 84 verified, 6 reopened, 2 new rows (report
@@ -88,24 +111,25 @@ documents 3, manage 2, viewcube 1, plastic 1).
 
 ## Next verifier: start here
 
-1. Keep the sweep line `in progress`. Swept so far: sketch, dialogs, chrome (verifiers 1-2), canvas,
-   navbar, viewcube, marking-menu, browser, timeline, manip (verifier 3). 180 keys were
-   `fixing-merged` at 19:45. Recount before each area (fixers keep merging):
-   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='sketch' and r['status']=='fixing-merged']"`.
-2. Start with the 11 sketch keys: `ui-reverify-sketch-2`'s four (`circular-pattern-rows`,
-   `constraint-glyph-context-menu`, `text-dialog-rows`, `project-include-menu`, merged at `cd2aa0b`),
-   then `dimension-placement-kept` (dimension a plain line, not a projected one),
-   `blend-curve-constrained`, `chamfer-angle-dimension`, `tangent-line-circle-motion` (a line joined
-   to another line only), `project-specified-edge`, `3d-sketch-input`, `vertical-on-horizontal-line`
-   (see Traps). Then the 8 dialogs and 14 chrome keys merged since (Preferences pages, Home, profile,
-   window title, check for updates; `comments-expand` still needs a saved design), then construct (5),
-   inspect (6), insert, assemble, toolbar (9), shortcuts (10), documents (7) and the other tabs
-   (surface 19, mesh 21, sheet 18, render 14, ...) in `coverage.md`'s order.
+1. Keep the sweep line `in progress`. Swept so far: sketch, dialogs, chrome (verifiers 1-2, 4), canvas,
+   navbar, viewcube, marking-menu, browser, timeline, manip (verifier 3), construct, inspect, insert
+   (verifier 4). 138 keys were `fixing-merged` at 20:30. Recount before each area (fixers keep merging):
+   `python -c "import json;[print(r['key']) for r in map(json.loads,open('parity/ui-features.jsonl',encoding='utf-8')) if r['area']=='toolbar' and r['status']=='fixing-merged']"`.
+2. Start with toolbar (9), shortcuts (10), documents (7), menus (4), workspaces (4), then the other tabs
+   (mesh 21, surface 19, sheet 18, render 14, manufacture 6, utilities 5, animation 5, electronics 4,
+   manage 2, plastic 1) and the singles (context-menus, status, marking-menu flick, manip drag snap,
+   timeline component owner). Also recount sketch / dialogs / chrome / canvas: wave-38 to wave-40 fixers
+   will have merged more keys there.
 3. Rebuild first (kill `fissionoxide.exe`, `cargo build --release -p fissionoxide`, about 3 min).
-4. Work from the rows' `fusion` text and look at Fusion only where the text is unclear. One body with a
-   sketch on XZ through it covered Intersect, Slice and Look At this session.
+4. Work from the rows' `fusion` text and look at Fusion only where the text is unclear.
 
 ## Traps
+- Fusion maximised puts Finish Sketch and its palette under the overlay: Win+Left snaps it to x 0..920
+  (no snap assist this time); the sketch marking menu's OK did not finish the sketch.
+- FissionOxide's Replace Face target ignores construction planes (canvas and browser); use a face.
+- A click on a FissionOxide sketch circle's centre picks the centre point, not the profile; a profile
+  right under the Unsaved banner could not be picked: zoom out first.
+- FissionOxide's Preferences is 579 x 360 screenshot px (Fusion's 748 x 447) until `ui-reverify-chrome-2`.
 - Draft with an angle dragged to a failing value hung FissionOxide (Not Responding, CPU busy) until
   `ui-reverify-canvas-1` lands: type the angle instead of dragging, on a plain face.
 - `open_application` on "Autodesk Fusion" while Fusion runs opens "Multiple instances are not

@@ -1,0 +1,15 @@
+{
+  "ui:sketch:project-include-menu": "ui-reverify-sketch-4",
+  "ui:sketch:chamfer-angle-dimension": "ui-reverify-sketch-4",
+  "ui:sketch:3d-sketch-input": "ui-reverify-sketch-4",
+  "ui:sketch:circular-pattern-center-status": "ui-reverify-sketch-4",
+  "ui:dialogs:primitive-drawing-extras": "ui-reverify-dialogs-4",
+  "ui:inspect:measure-two-picks": "ui-reverify-dialogs-4",
+  "ui:dialogs:replace-face-plane-target": "ui-reverify-dialogs-4",
+  "ui:dialogs:replace-face-splits-lumps": "ui-reverify-dialogs-4",
+  "ui:chrome:preferences-general-settings": "ui-reverify-chrome-2",
+  "ui:chrome:preferences-unit-display-page": "ui-reverify-chrome-2",
+  "ui:chrome:preferences-window-look": "ui-reverify-chrome-2",
+  "ui:chrome:profile-menu": "ui-reverify-chrome-2",
+  "ui:chrome:home-unsaved-banner": "ui-reverify-chrome-2"
+}

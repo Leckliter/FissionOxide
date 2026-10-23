@@ -635,3 +635,15 @@ icons overlap their labels; Ground Plane Offset ignores typed values; Ctrl+5 sho
 navbar menus are 450 px wide; Measure from a dimension box fills nothing. Three wave-39 batches
 (`ui-reverify-canvas-1`, `ui-reverify-navbar-1`, `ui-reverify-sketch-3`); report
 `parity/reports/2026-10-22-reverify-canvas-timeline.md`. 180 keys remain fixing-merged; sketch next.
+
+## 2026-10-22, verifier 4: re-verification sweep, sketch, dialogs, chrome, construct, inspect, insert
+Re-checked on `ff53fda7` (binary already current): the eleven sketch keys, eight dialogs, fourteen chrome,
+five construct, six inspect and one insert key, with Fusion's Project / Include dialogs and Preferences
+open beside it. 33 verified, 9 reopened, 4 new rows, 4 left (no UI route for Vertical on a horizontal
+line; components, a saved design and an Assembly Design needed for the others). Still open: Project /
+Include rows greyed, no distance dimension on a Distance-Angle chamfer, 3D sketch edge snaps, Coil's
+rotation handle, Measure's status bar, Replace Face's plane target and lump split, Preferences size and
+General defaults, profile menu width, the Unsaved banner over Home. Three wave-40 batches
+(`ui-reverify-sketch-4`, `ui-reverify-dialogs-4`, `ui-reverify-chrome-2`); report
+`parity/reports/2026-10-22-reverify-sketch-dialogs-chrome-inspect.md`. 138 keys remain fixing-merged;
+toolbar, shortcuts and documents next.
