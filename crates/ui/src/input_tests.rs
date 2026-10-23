@@ -3463,3 +3463,39 @@ fn the_ground_plane_offset_box_takes_a_typed_distance() {
   h.app.display.open_ground_offset(h.app.s.design.units);
   assert_eq!(h.app.display.ground_offset_form.as_ref().unwrap().offset, "20.00 mm");
 }
+
+/// The verifier's case: Circular Pattern's objects picked, the next canvas click on a sketch
+/// point is the Center Point (Fusion moves the active row on with the prompt), and the status
+/// bar then reads the centre's position.
+#[test]
+fn sketch_circular_pattern_takes_the_centre_after_the_objects_pick() {
+  use crate::dialogs::Kind;
+  use crate::viewport::Tool;
+  use fox_engine::Sel;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  let line = h.app.run("sketch.line", json!({"points": [[20, 0], [40, 0]]})).unwrap()["curves"][0].as_u64().unwrap();
+  h.app.run("sketch.point", json!({"at": [0, -15]})).unwrap();
+  h.app.set_tool(Tool::Select);
+  h.frame(vec![]);
+  h.app.start(Kind::SkCircPattern);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let plane = h.app.s.model.sketches[&sk].plane;
+  h.move_then_click(h.screen(plane.to_world([30.0, 0.0])));
+  let d = h.app.dialog.as_ref().expect("the dialog stays open");
+  assert_eq!(d.objects(), vec![line as u32]);
+  assert_eq!(d.prompt(false).as_deref(), Some("Select the center point"));
+  h.move_then_click(h.screen(plane.to_world([0.0, -15.0])));
+  let d = h.app.dialog.as_ref().expect("the dialog stays open");
+  assert!(
+    matches!(d.center_pick(), Some(Sel::SketchPoint { .. })),
+    "the point is the Center Point: {:?}",
+    h.app.s.selection
+  );
+  assert_eq!(d.objects(), vec![line as u32], "and not another object");
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Sketch Point | X: 0.00 Y: -15.00 Z: 0.00 mm"));
+}

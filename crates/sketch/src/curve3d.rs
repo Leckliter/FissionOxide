@@ -147,14 +147,14 @@ impl Sketch {
 
   /// Adds a 3D sketch line from `a` to `b` (world positions), as 3D Sketch draws it.
   pub fn add_line3d(&mut self, a: P3, b: P3) -> CurveId {
+    self.add_drawn3d(Curve3dKind::Line { a, b }, false)
+  }
+
+  /// Adds a curve drawn with 3D Sketch on (world positions), as construction geometry when
+  /// `construction` is set.
+  pub fn add_drawn3d(&mut self, kind: Curve3dKind, construction: bool) -> CurveId {
     let id = CurveId(self.alloc());
-    self.curves3d.push(Curve3d {
-      id,
-      kind: Curve3dKind::Line { a, b },
-      construction: false,
-      source: None,
-      drawn: true,
-    });
+    self.curves3d.push(Curve3d { id, kind, construction, source: None, drawn: true });
     id
   }
 

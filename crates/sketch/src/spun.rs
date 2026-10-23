@@ -51,6 +51,33 @@ pub enum SpunSeg {
     a: [f64; 2],
     b: [f64; 2],
   },
+  /// The axis, as a plain line.
+  Axis {
+    a: [f64; 2],
+    b: [f64; 2],
+  },
+}
+
+/// How a spun profile draws its axis: Fusion's Project Axis and Add Centerline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpunAxisLine {
+  /// Project Axis off: no axis.
+  None,
+  /// Project Axis on, Add Centerline off: a plain line.
+  Line,
+  /// Both on: a construction centre line.
+  Centerline,
+}
+
+impl SketchSpun {
+  /// How this profile draws its axis.
+  pub fn axis_drawn(&self) -> SpunAxisLine {
+    match (self.centerline, self.axis_line) {
+      (true, _) => SpunAxisLine::Centerline,
+      (false, true) => SpunAxisLine::Line,
+      (false, false) => SpunAxisLine::None,
+    }
+  }
 }
 
 impl SpunSeg {
@@ -58,7 +85,8 @@ impl SpunSeg {
     let p = |a: &[f64; 2], b: &[f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) <= tol;
     match (self, o) {
       (SpunSeg::Line { a, b }, SpunSeg::Line { a: c, b: d })
-      | (SpunSeg::Centerline { a, b }, SpunSeg::Centerline { a: c, b: d }) => p(a, c) && p(b, d),
+      | (SpunSeg::Centerline { a, b }, SpunSeg::Centerline { a: c, b: d })
+      | (SpunSeg::Axis { a, b }, SpunSeg::Axis { a: c, b: d }) => p(a, c) && p(b, d),
       (SpunSeg::Arc { a, mid, b }, SpunSeg::Arc { a: c, mid: m, b: d }) => p(a, c) && p(mid, m) && p(b, d),
       (SpunSeg::Circle { center, radius }, SpunSeg::Circle { center: c, radius: r }) => {
         p(center, c) && (radius - r).abs() <= tol
@@ -84,6 +112,14 @@ pub struct SketchSpun {
   /// Add the axis as a construction centre line.
   #[serde(default)]
   pub centerline: bool,
+  /// Without `centerline`: add the axis as a plain line (Fusion's Project Axis with Add
+  /// Centerline off).
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub axis_line: bool,
+  /// How far the outline's lines and arcs may stray from the bodies' true outline (mm); 0 fits
+  /// to the bodies' size.
+  #[serde(default, skip_serializing_if = "is_zero")]
+  pub tolerance: f64,
   /// The outline last generated.
   #[serde(default)]
   pub outline: Vec<SpunSeg>,
@@ -101,6 +137,10 @@ pub struct SketchSpun {
   pub faces: Vec<[u32; 2]>,
 }
 
+fn is_zero(v: &f64) -> bool {
+  *v == 0.0
+}
+
 impl Sketch {
   pub fn spun(&self, id: SpunId) -> Option<&SketchSpun> {
     self.spuns.iter().find(|s| s.id == id)
@@ -111,16 +151,26 @@ impl Sketch {
     self.spuns.iter().find(|s| s.curves.contains(&curve)).map(|s| s.id)
   }
 
-  /// Adds a spun profile of `bodies` about `axis`; it has no curves until the model gives it an
-  /// outline.
-  pub fn add_spun(&mut self, bodies: Vec<u32>, axis: SpunAxis, flip: bool, centerline: bool) -> SpunId {
+  /// Adds a spun profile of `bodies` about `axis`, drawing the axis as `line` says and fitting
+  /// its outline to `tolerance` (mm, 0: to the bodies' size); it has no curves until the model
+  /// gives it an outline.
+  pub fn add_spun(
+    &mut self,
+    bodies: Vec<u32>,
+    axis: SpunAxis,
+    flip: bool,
+    line: SpunAxisLine,
+    tolerance: f64,
+  ) -> SpunId {
     let id = SpunId(self.alloc());
     self.spuns.push(SketchSpun {
       id,
       bodies,
       axis,
       flip,
-      centerline,
+      centerline: line == SpunAxisLine::Centerline,
+      axis_line: line == SpunAxisLine::Line,
+      tolerance,
       outline: Vec::new(),
       curves: Vec::new(),
       points: Vec::new(),
@@ -140,6 +190,8 @@ impl Sketch {
       axis: SpunAxis::World { origin: [0.0; 3], dir: [0.0, 0.0, 1.0] },
       flip: false,
       centerline: false,
+      axis_line: false,
+      tolerance: 0.0,
       outline: Vec::new(),
       curves: Vec::new(),
       points: Vec::new(),
@@ -188,7 +240,7 @@ impl Sketch {
     let mut curves = Vec::new();
     for seg in outline {
       let c = match seg {
-        SpunSeg::Line { a, b } | SpunSeg::Centerline { a, b } => {
+        SpunSeg::Line { a, b } | SpunSeg::Centerline { a, b } | SpunSeg::Axis { a, b } => {
           let (pa, pb) = (at(self, *a), at(self, *b));
           if pa == pb {
             continue;

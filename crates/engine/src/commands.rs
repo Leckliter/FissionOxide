@@ -123,7 +123,7 @@ cmds! {
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default +Y), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
   "sketch.project" => "Project a body's silhouette (or one face's edges, or the edges given, which follow the body) into the sketch", "{body, face?, edges?: [id], associative?}";
-  "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true), associative?: false for plain curves that don't follow the bodies (default true)}";
+  "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, project_axis?: draw the axis (default true), centerline?: the axis as a construction line, else a plain one (default true), tolerance?: how far the outline's lines and arcs may stray (default: to the bodies' size), associative?: false for plain curves that don't follow the bodies (default true)}";
   "extrude" => "Extrude sketch profiles or planar faces", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, faces?: [{body, face} | {point}] (planar faces, in place of a sketch's profiles), distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body|to_vertex, to?: face (flat or curved) | {body} | point for to_vertex ({at} | {vertex: edge, end?} | {center: edge} | {point: id}; stops on the plane through it parallel to the sketch), start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect|new_component, component_name?: (new_component; default the next ComponentN), targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, symmetric?: bool (angle turns each way), angle2? (two sides: the angle the other way), operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y], end_condition?: free|point_sharp|point_tangent, weight?}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
@@ -443,8 +443,8 @@ cmds! {
   "ecad.export" => "Fab output into a folder: Gerber RS-274X (copper, mask, paste, silkscreen, outline), Excellon drill files (plated, unplated), BOM and pick-and-place CSV", "{dir, what?: all|gerber|drill|bom|pnp}";
   "ecad.svg" => "An SVG picture of the schematic or the board (returned, or written to path)", "{view?: schematic|board, path?}";
   "ecad.push3d" => "Push the board to 3D: a PCB feature (the board body drilled, with its parts' 3D models placed) in a component, kept up to date as the layout changes", "{}";
-  "sketch.project_to_surface" => "Project To Surface: drape sketch curves onto faces as 3D curves, pushed along a direction (both ways) or each point to the closest point of the faces; a pipe can follow them (path: this feature)", "{sketch?, curves?: [curve], faces: [face], type?: closest_point|along_vector, direction?: x|y|z|{axis}|{line}|{body, edge}}";
-  "sketch.intersection_curve" => "Intersection curve: 3D curves where sketch curves, pushed along their sketch's normal, cross faces or other sketches' curves (pushed along theirs); pipe can follow them; they follow the body", "{sketch?, curves?: [id] (default all), faces?: [face], with?: [sketch id | {sketch, curves?}]}";
+  "sketch.project_to_surface" => "Project To Surface: drape sketch curves onto faces as 3D curves, pushed along a direction (both ways) or each point to the closest point of the faces; a pipe can follow them (path: this feature)", "{sketch?, curves?: [curve], faces: [face], type?: closest_point|along_vector, direction?: x|y|z|{axis}|{line}|{body, edge}, associative?: false copies the curves into the sketch as plain 3D curves that don't follow the model (default true)}";
+  "sketch.intersection_curve" => "Intersection curve: 3D curves where sketch curves, pushed along their sketch's normal, cross faces or other sketches' curves (pushed along theirs); pipe can follow them; they follow the body", "{sketch?, curves?: [id] (default all), faces?: [face], with?: [sketch id | {sketch, curves?}], associative?: false copies the curves into the sketch as plain 3D curves (default true)}";
   "sketch.include" => "Include 3D Geometry: body edges and earlier sketches' curves at their real positions; off-plane ones stay 3D (sweep paths, rails), in-plane ones form profiles; they follow their source", "{sketch?, edges?: [{body, edge} | {point}], curves?: [{sketch, curve}], associative?}";
   "sketch.intersect" => "Intersect: the curves where bodies, or chosen faces of them, cut the sketch plane (fixed lines, arcs, circles and splines that form profiles); with associative (default) they follow the bodies", "{sketch?, bodies?: [id | name], faces?: [{body, face}], associative?}";
   "sketch.isoparametric_curve" => "Isoparametric Curve: a curve of constant U or V across a face as a 3D sketch curve. Not available yet: the kernel can't evaluate a face's iso-curves, so this always fails", "{face: {body, face}, curve?: single|multiple}";
@@ -541,6 +541,7 @@ cmds! {
   "mesh.scale" => "Scale Mesh: scale mesh bodies about a point (default their centre), uniformly or per axis", "{bodies, center?: [x,y,z], scale_type?: uniform|non_uniform, factor? | x, y, z}";
   "surface.sweep" => "Surface body swept from sketch curves or profile boundaries along a path", "{sketch?, curves?, profiles?, path: sketch id, path_curves?: [id], orientation?: perpendicular|parallel}";
   "surface.loft" => "Surface body lofted through sections: a sketch's profile boundary or curves, in order", "{sections: [sketch id | {sketch, profile?: [x,y], curves?: [id]}], closed?}";
+  "sketch.lift" => "3D Sketch: moves curves just drawn off the sketch plane by `offset` along its normal, as 3D sketch curves (a shape started on a model point off the plane); they are sweep paths and rails, never part of a profile", "{sketch?, curves: [id], offset}";
   "sketch.line3d" => "3D Sketch line: segments through world points, off the sketch plane (Fusion's 3D Sketch); they are sweep paths and rails, never part of a profile", "{sketch?, points: [[x,y,z], ...]}";
   "sketch.dimension_label" => "Move a placed sketch dimension's value (drag its text): where it sits sets its offset and side; null puts it back at the default", "{sketch?, constraint, at: [x,y] | null}";
   "render.lights" => "The lights placed in the render scene", "{}";
@@ -1855,6 +1856,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       })?;
       Ok(json!({}))
     }
+    "sketch.lift" => sketch_lift(s, p),
     "sketch.line3d" => {
       let sk = sketch_id(s, p)?;
       let pts: Vec<[f64; 3]> = p
@@ -3149,6 +3151,48 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
 
 /// Fusion's Spun Profile: the outline bodies sweep through as they turn about an axis, drawn on
 /// one side of the axis (the bodies' side, or the other with `flip`). The curves follow the bodies.
+/// `sketch.lift`: Fusion's 3D Sketch drawing a shape on a plane parallel to the sketch's, through a
+/// model point off it. The planar curves go and 3D sketch curves `offset` along the normal take
+/// their place (lines, arcs and circles exactly, other curves sampled).
+fn sketch_lift(s: &mut Session, p: &Value) -> CmdResult {
+  use fox_sketch::Curve3dKind;
+  let sk = sketch_id(s, p)?;
+  let plane = s.model.sketches.get(&sk).map(|r| r.plane).ok_or(CmdError::new("the sketch failed to build"))?;
+  let offset =
+    p.get("offset").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or(CmdError::new("missing 'offset'"))?;
+  let curves: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
+  if curves.is_empty() {
+    return Err(CmdError::new("give the curves to lift"));
+  }
+  let lift = plane.normal() * offset;
+  let made = s.edit(move |d| {
+    let sketch = d.sketch_mut(sk)?;
+    let w = |q: [f64; 2]| (plane.to_world(q) + lift).to_array();
+    let mut made = Vec::new();
+    for id in curves {
+      let c = sketch.curve(id).ok_or(fox_sketch::SketchError::NoCurve(id))?.clone();
+      let pos = |pid: PointId| sketch.pos(pid).ok_or(fox_sketch::SketchError::NoPoint(pid));
+      let kind = match &c.kind {
+        CurveKind::Line { a, b } => Curve3dKind::Line { a: w(pos(*a)?), b: w(pos(*b)?) },
+        CurveKind::Circle { center, radius } => {
+          Curve3dKind::Circle { center: w(pos(*center)?), normal: plane.normal().to_array(), radius: *radius }
+        }
+        CurveKind::Arc { start, end, .. } => {
+          let pts = crate::scene::curve_polyline(sketch, &c.kind);
+          let mid = *pts.get(pts.len() / 2).ok_or(fox_sketch::SketchError::NoCurve(id))?;
+          Curve3dKind::Arc { start: w(pos(*start)?), mid: w(mid), end: w(pos(*end)?) }
+        }
+        k => Curve3dKind::Polyline { points: crate::scene::curve_polyline(sketch, k).into_iter().map(w).collect() },
+      };
+      let construction = c.reference();
+      sketch.remove_curve(id)?;
+      made.push(sketch.add_drawn3d(kind, construction));
+    }
+    Ok(made)
+  })?;
+  Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>()}))
+}
+
 fn spun_profile(s: &mut Session, p: &Value) -> CmdResult {
   use fox_sketch::SpunAxis;
   let sk = sketch_id(s, p)?;
@@ -3205,8 +3249,21 @@ fn spun_profile(s: &mut Session, p: &Value) -> CmdResult {
       }
     }
   };
-  let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-  let centerline = p.get("centerline").and_then(Value::as_bool).unwrap_or(true);
+  let flag = |k: &str, default: bool| p.get(k).and_then(Value::as_bool).unwrap_or(default);
+  let flip = flag("flip", false);
+  // Fusion's Project Axis and Add Centerline
+  let line = match (flag("project_axis", true), flag("centerline", true)) {
+    (false, _) => fox_sketch::SpunAxisLine::None,
+    (true, false) => fox_sketch::SpunAxisLine::Line,
+    (true, true) => fox_sketch::SpunAxisLine::Centerline,
+  };
+  let tolerance = match opt_expr(p, "tolerance") {
+    Some(e) => fox_expr::eval(&e, fox_expr::Kind::Length, &params_scope(s))?,
+    None => 0.0,
+  };
+  if !(tolerance >= 0.0 && tolerance.is_finite()) {
+    return Err(CmdError::new("the tolerance can't be negative"));
+  }
   // trace it now, so a body that can't be traced is an error rather than an empty sketch
   let (o, d) = match &axis {
     SpunAxis::World { origin, dir } => (DVec3::from(*origin), DVec3::from(*dir)),
@@ -3222,7 +3279,7 @@ fn spun_profile(s: &mut Session, p: &Value) -> CmdResult {
   };
   let shapes: Vec<&fox_kernel::Shape> =
     bodies.iter().filter_map(|b| s.model.body(BodyId(*b))).map(|b| &b.shape).collect();
-  let outline = fox_model::regen::spun_outline(&shapes, o, d, &plane, flip, centerline).map_err(CmdError::new)?;
+  let outline = fox_model::regen::spun_outline(&shapes, o, d, &plane, flip, line, tolerance).map_err(CmdError::new)?;
   // without the projection link (Fusion's Projection Link unticked) the outline is plain fixed
   // curves that no longer follow the bodies
   if !p.get("associative").and_then(Value::as_bool).unwrap_or(true) {
@@ -3232,7 +3289,7 @@ fn spun_profile(s: &mut Session, p: &Value) -> CmdResult {
   }
   let id = s.edit(move |d| {
     let sketch = d.sketch_mut(sk)?;
-    let id = sketch.add_spun(bodies, axis, flip, centerline);
+    let id = sketch.add_spun(bodies, axis, flip, line, tolerance);
     sketch.set_spun_outline(id, outline)?;
     Ok(id)
   })?;

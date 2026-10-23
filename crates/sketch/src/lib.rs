@@ -46,7 +46,7 @@ pub use infer::{InferTolerance, Inferred};
 pub use profile::{Loop, Profile, Seg, SegSrc, find_profiles};
 pub use quintic::{QUINTIC_POINTS, quintic_at, quintic_beziers, quintic_spans};
 pub use solve::{SolveReport, SolveStatus};
-pub use spun::{SketchSpun, SpunAxis, SpunId, SpunSeg};
+pub use spun::{SketchSpun, SpunAxis, SpunAxisLine, SpunId, SpunSeg};
 pub use text::{HAlign, SketchText, TextAlign, TextId, TextPath, TextStyle, VAlign, text_fonts};
 pub use transform::{TransformReport, Xform2};
 

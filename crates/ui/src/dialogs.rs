@@ -3475,8 +3475,8 @@ impl Dialog {
         Input::Check { label, .. } | Input::CheckOn { label, .. } => {
           let mut b = v.as_bool().unwrap_or(false);
           if let Some(why) = greyed {
-            ui.label("");
-            ui.add_enabled_ui(false, |ui| ui.checkbox(&mut b, *label)).inner.on_disabled_hover_text(why);
+            ui.label(*label);
+            ui.add_enabled_ui(false, |ui| ui.checkbox(&mut b, "")).inner.on_disabled_hover_text(why);
             ui.end_row();
           } else {
             Self::check(ui, label, &mut b, dirty);
@@ -4399,10 +4399,15 @@ impl Dialog {
     let used = self.other_row_curves();
     let objects: Vec<u32> = picked.into_iter().filter(|c| !used.contains(c)).collect();
     if !objects.is_empty() && objects != self.curves {
-      // Mirror: the first objects pick moves the active row on to the mirror line with the
-      // prompt, so the next line clicked is the line (Fusion); the other rows keep Objects
-      // active for more picks
-      if self.kind == Kind::SkMirror && self.curves.is_empty() && self.pick_row == 0 && self.line.is_none() {
+      // Mirror and Circular Pattern: the first objects pick moves the active row on to the
+      // mirror line or Center Point with the prompt, so the next pick is the line or the centre
+      // (Fusion); the other rows keep Objects active for more picks
+      let second_empty = match self.kind {
+        Kind::SkMirror => self.line.is_none(),
+        Kind::SkCircPattern => self.center.is_none(),
+        _ => false,
+      };
+      if second_empty && self.curves.is_empty() && self.pick_row == 0 {
         self.pick_row = 1;
       }
       self.curves = objects;
@@ -4840,9 +4845,11 @@ impl Dialog {
     ui.end_row();
   }
 
+  /// A check box row as Fusion lays it out: the label in the label column, the box alone in the
+  /// value column.
   fn check(ui: &mut egui::Ui, label: &str, v: &mut bool, dirty: &mut bool) {
-    ui.label("");
-    if ui.checkbox(v, label).changed() {
+    ui.label(label);
+    if ui.checkbox(v, "").changed() {
       *dirty = true;
     }
     ui.end_row();
@@ -5317,6 +5324,12 @@ impl Dialog {
   #[cfg(test)]
   pub(crate) fn set_pick_row(&mut self, row: usize) {
     self.pick_row = row;
+  }
+
+  /// Circular Pattern's centre while its Center Point row is active: the status bar reads it as
+  /// Fusion does ("Sketch Point | X: 0.00 Y: 0.00 Z: 0.00 in"), not the objects with it.
+  pub(crate) fn center_status(&self) -> Option<Sel> {
+    (self.kind == Kind::SkCircPattern && self.pick_row == 1).then_some(self.center).flatten()
   }
 
   /// The sketch pattern's or Scale's picked centre point.
@@ -6464,7 +6477,16 @@ mod tests {
     assert!(
       matches!(f.inputs[0], Input::Pick { multi: true, .. }) && matches!(f.inputs[3], Input::Pick { multi: false, .. })
     );
-    assert!(forms::greyed(f, "associative").is_none());
+    // every row is live, as in Fusion: Project Axis, Tolerance (0.01 mm) and Projection Link too,
+    // and Flip Result is an icon toggle
+    for key in keys {
+      assert!(forms::greyed(f, key).is_none(), "{key} is greyed");
+    }
+    assert!(matches!(f.inputs[6], Input::Expr { default: "0.01 mm", .. }));
+    assert!(matches!(f.inputs[7], Input::Flip { label: "Flip Result", .. }));
+    for g in [&forms::SK_PROJECT_SURFACE, &forms::SK_INTERSECTION_CURVE] {
+      assert!(forms::greyed(g, "associative").is_none(), "{}: Projection Link is live", g.name);
+    }
     let iso = &forms::SK_ISOPARAMETRIC;
     assert!(forms::greyed(iso, "curve").is_none() && forms::greyed(iso, "associative").is_none());
     assert!(Dialog::blank(Kind::Form(iso)).ok_enabled(), "Fusion's OK is live");

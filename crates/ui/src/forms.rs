@@ -3987,8 +3987,8 @@ pub static SK_INTERSECT: Form = Form {
 };
 
 /// Project / Include > Spun Profile, with Fusion's rows: Geometry and Axis are Select rows that
-/// take the picks in turn (Project Axis and Tolerance are greyed: the engine draws the outline
-/// exactly and adds the axis as a centre line).
+/// take the picks in turn, Project Axis and Add Centerline draw the axis, Tolerance is how far the
+/// outline's lines and arcs may stray, Flip Result an icon toggle.
 pub static SK_SPUN_PROFILE: Form = Form {
   title: "SPUN PROFILE",
   name: "Spun Profile",
@@ -4003,8 +4003,8 @@ pub static SK_SPUN_PROFILE: Form = Form {
     Input::Pick { key: "axis", label: "Axis", fits: Fits::Axis, multi: false, prompt: "Select axis" },
     Input::CheckOn { key: "project_axis", label: "Project Axis" },
     Input::CheckOn { key: "centerline", label: "Add Centerline" },
-    Input::Expr { key: "tolerance", label: "Tolerance", default: "0 mm" },
-    Input::Check { key: "flip", label: "Flip Result" },
+    Input::Expr { key: "tolerance", label: "Tolerance", default: "0.01 mm" },
+    Input::Flip { key: "flip", label: "Flip Result" },
   ],
   picks_model: true,
 };
@@ -4159,13 +4159,6 @@ pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
     ("emboss", "tangent_chain") => Some("Emboss goes on one face in FissionOxide: a tangent chain isn't picked yet"),
     ("thicken", "chain") => Some("Thicken picks whole surface bodies in FissionOxide: chains of faces aren't yet"),
     ("thread", "remember") => Some("Each Thread starts from the picked face's size in FissionOxide"),
-    ("sketch.project_to_surface" | "sketch.intersection_curve", "associative") => {
-      Some("These curves always follow the model in FissionOxide")
-    }
-    ("sketch.spun_profile.form", "project_axis") => Some("Projecting the axis isn't in FissionOxide yet"),
-    ("sketch.spun_profile.form", "tolerance") => {
-      Some("The outline is drawn exactly; a tolerance isn't in FissionOxide yet")
-    }
     ("coil.form", "angle") => Some("Tapered coils aren't in FissionOxide yet"),
     ("cam.setup", "stock_bottom") => Some("The stock's bottom is the part's in FissionOxide: no bottom offset yet"),
     ("cam.setup", "round_up") => Some("FissionOxide doesn't round the stock's size up yet"),

@@ -5,7 +5,7 @@
 
 use fox_kernel::glam::DVec3;
 use fox_kernel::{Plane, Shape};
-use fox_sketch::{SpunAxis, SpunSeg};
+use fox_sketch::{SpunAxis, SpunAxisLine, SpunSeg};
 
 use super::Ctx;
 use crate::BodyId;
@@ -58,20 +58,22 @@ impl Ctx<'_> {
       let bi = self.body_index(BodyId(*b))?;
       shapes.push(&self.state.bodies[bi].shape);
     }
-    outline(&shapes, o, d, plane, sp.flip, sp.centerline)
+    outline(&shapes, o, d, plane, sp.flip, sp.axis_drawn(), sp.tolerance)
   }
 }
 
 /// The spun outline of `shapes` about the axis through `o` along `d`, in `plane`'s coordinates:
-/// on the side of the axis the bodies are on (the other side when `flip` is set), with the axis as
-/// a centre line when `centerline` is set.
+/// on the side of the axis the bodies are on (the other side when `flip` is set), with the axis
+/// drawn as `axis_line` says. Its lines and arcs stay within `tolerance` (mm) of the true outline;
+/// 0 fits to the bodies' size.
 pub fn outline(
   shapes: &[&Shape],
   o: DVec3,
   d: DVec3,
   plane: &Plane,
   flip: bool,
-  centerline: bool,
+  axis_line: SpunAxisLine,
+  tolerance: f64,
 ) -> Result<Vec<SpunSeg>, String> {
   if shapes.is_empty() {
     return Err("there are no bodies to spin".into());
@@ -107,7 +109,7 @@ pub fn outline(
   }
   let rmax = events.iter().flat_map(|e| e.vertices.iter().map(|v| v.1)).fold(0.0, f64::max);
   let size = (tmax - tmin).max(rmax).max(1.0);
-  let tol = 1e-5 * size;
+  let tol = if tolerance > 0.0 { tolerance } else { 1e-5 * size };
   let eps = 1e-7 * size;
 
   let slices = |ts: &[f64]| -> Result<Vec<Vec<(f64, f64)>>, String> {
@@ -206,8 +208,11 @@ pub fn outline(
     }
   }
   let mut segs = join_segments(segs, eps.max(1e-7));
-  if centerline {
-    segs.push(SpunSeg::Centerline { a: at(tmin, 0.0), b: at(tmax, 0.0) });
+  let (a, b) = (at(tmin, 0.0), at(tmax, 0.0));
+  match axis_line {
+    SpunAxisLine::Centerline => segs.push(SpunSeg::Centerline { a, b }),
+    SpunAxisLine::Line => segs.push(SpunSeg::Axis { a, b }),
+    SpunAxisLine::None => {}
   }
   Ok(segs)
 }
@@ -329,7 +334,7 @@ fn ends(s: &SpunSeg) -> Option<([f64; 2], [f64; 2])> {
   match s {
     SpunSeg::Line { a, b } | SpunSeg::Arc { a, b, .. } => Some((*a, *b)),
     SpunSeg::Spline { points } | SpunSeg::Bezier { points } => Some((points[0], points[points.len() - 1])),
-    SpunSeg::Circle { .. } | SpunSeg::Centerline { .. } => None,
+    SpunSeg::Circle { .. } | SpunSeg::Centerline { .. } | SpunSeg::Axis { .. } => None,
   }
 }
 

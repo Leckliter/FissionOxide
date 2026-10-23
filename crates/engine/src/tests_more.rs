@@ -931,6 +931,38 @@ fn project_to_surface_drapes_curves_a_pipe_follows() {
   assert!(v["error"].is_string(), "{v}");
 }
 
+/// Fusion's Projection Link unticked: Project To Surface and Intersection Curve copy their curves
+/// into the sketch as plain 3D curves, with no timeline feature, in one undo step.
+#[test]
+fn unlinked_project_to_surface_and_intersection_curve_are_plain_sketch_curves() {
+  let mut s = Session::new(fox_model::Design::new("t"));
+  run(&mut s, "cylinder", json!({"radius": 10, "height": 30}));
+  let plane = json!({"origin": [20, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]});
+  run(&mut s, "sketch.create", json!({"plane": plane}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 15], "radius": 5}));
+  run(&mut s, "sketch.finish", json!({}));
+  let side = json!([{"point": [-10, 0, 5]}]);
+  let features = s.design.features.len();
+  let steps = s.undo_history().len();
+  let r = run(&mut s, "sketch.project_to_surface", json!({"sketch": 2, "faces": side, "associative": false}));
+  assert_eq!(s.design.features.len(), features, "no feature: {r}");
+  assert!(s.model.curves3d.is_empty());
+  assert_eq!(s.undo_history().len(), steps + 1, "one undo step");
+  let sk = s.design.sketch(fox_model::FeatureId(2)).unwrap();
+  let made: Vec<u32> = r["curves"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
+  assert!(!made.is_empty() && made.iter().all(|c| sk.curve3d(fox_sketch::CurveId(*c)).is_some()), "{r}");
+  // on the cylinder's side: every point 10 from its axis
+  for c in &sk.curves3d {
+    let fox_sketch::Curve3dKind::Polyline { points } = &c.kind else { panic!("{c:?}") };
+    assert!(points.iter().all(|p| (p[0].hypot(p[1]) - 10.0).abs() < 0.05), "{points:?}");
+  }
+  assert!(s.undo());
+  assert!(s.design.sketch(fox_model::FeatureId(2)).unwrap().curves3d.is_empty());
+  let r = run(&mut s, "sketch.intersection_curve", json!({"sketch": 2, "faces": side, "associative": false}));
+  assert_eq!(s.design.features.len(), features, "{r}");
+  assert!(!s.design.sketch(fox_model::FeatureId(2)).unwrap().curves3d.is_empty());
+}
+
 /// SELECT > Selection Tools: Select By Name (wildcards), Select By Size, Select By Boundary and
 /// Seed And Boundary.
 #[test]

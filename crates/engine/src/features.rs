@@ -84,7 +84,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       if faces.is_empty() && with.is_empty() {
         return Err(CmdError::new("give 'faces' or 'with' (sketch curves) to intersect with"));
       }
-      add_feature(s, FeatureKind::IntersectionCurve { curves, faces, with })
+      curves3d_feature(s, p, sketch, FeatureKind::IntersectionCurve { curves, faces, with })
     })(),
     "pipe" => (|| {
       const KEYS: [&str; 11] = [
@@ -245,10 +245,59 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           o => return Err(CmdError::new(format!("unknown type '{o}' (closest_point, along_vector)"))),
         };
       let curves = ids(p, "curves").into_iter().map(CurveId).collect();
-      add_feature(s, FeatureKind::ProjectToSurface { sketch, curves, faces, along })
+      curves3d_feature(s, p, sketch, FeatureKind::ProjectToSurface { sketch, curves, faces, along })
     })(),
     _ => return None,
   })
+}
+
+/// Adds a Project To Surface or Intersection Curve feature. With `associative` false (Fusion's
+/// Projection Link unticked) its curves are copied into `sketch` as plain 3D curves that don't
+/// follow the model, and the feature goes: one undo step either way.
+fn curves3d_feature(s: &mut Session, p: &Value, sketch: FeatureId, kind: FeatureKind) -> CmdResult {
+  if p.get("associative").and_then(Value::as_bool).unwrap_or(true) {
+    return add_feature(s, kind);
+  }
+  let start = s.undo.len();
+  let r = add_feature(s, kind)?;
+  let id = FeatureId(r["feature"].as_u64().and_then(|v| u32::try_from(v).ok()).ok_or(CmdError::new("no feature"))?);
+  let lines: Vec<Vec<[f64; 3]>> = s
+    .model
+    .curves3d
+    .get(&id)
+    .into_iter()
+    .flatten()
+    .filter_map(|c| c.edge_lines(0.02).ok())
+    .flatten()
+    .map(|l| l.points.iter().map(|q| q.to_array()).collect::<Vec<_>>())
+    .filter(|l| l.len() >= 2)
+    .collect();
+  let error = r["error"].as_str().map(str::to_string);
+  let made = s.edit(|d| {
+    d.remove_feature(id)?;
+    if let Some(e) = error.filter(|_| lines.is_empty()) {
+      return Err(CmdError::new(e));
+    }
+    let sk = d.sketch_mut(sketch)?;
+    Ok(
+      lines
+        .into_iter()
+        .map(|points| sk.add_curve3d(fox_sketch::Curve3dKind::Polyline { points }, None).0)
+        .collect::<Vec<_>>(),
+    )
+  });
+  // the feature and its copy are one step; a failure takes the feature back out too
+  match made {
+    Ok(made) => {
+      s.undo.truncate(start + 1);
+      Ok(json!({"sketch": sketch.0, "curves": made, "associative": false}))
+    }
+    Err(e) => {
+      s.undo();
+      s.redo.clear();
+      Err(e)
+    }
+  }
 }
 
 /// Fusion's common appearances (library names) and the colour FissionOxide renders them in.

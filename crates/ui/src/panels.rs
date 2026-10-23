@@ -3193,9 +3193,12 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
     return Some(t);
   }
   let (hovered, picked);
-  let sel = match app.s.selection.as_slice() {
+  // Circular Pattern's centre just picked reads on its own
+  let center = app.dialog.as_ref().and_then(|d| d.center_status());
+  let sel = match (center.as_ref(), app.s.selection.as_slice()) {
+    (Some(c), _) => std::slice::from_ref(c),
     // a curve-picking sketch tool's picks read out like a selection ("2 Sketch Curves | ...")
-    [] => {
+    (None, []) => {
       // a picked origin plane, axis or point: "XY Plane", "Y Axis", "Origin Point | X: …"; a
       // picked or hovered construction plane: "Plane1"
       if let Some(t) = crate::origin::status(app).or_else(|| crate::construction::status(app)) {
@@ -3215,7 +3218,7 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
         &picked[..]
       }
     }
-    s => s,
+    (None, s) => s,
   };
   let noun = |s: &Sel| -> (&'static str, &'static str) {
     match s {
