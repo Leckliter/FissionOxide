@@ -359,7 +359,7 @@ fn feature_name(s: &Session, id: FeatureId) -> String {
 }
 
 /// The solved sketch and its plane (`None` before it has been computed).
-fn solved(s: &Session, id: FeatureId) -> Result<(&Sketch, Option<fox_kernel::Plane>), CmdError> {
+pub(crate) fn solved(s: &Session, id: FeatureId) -> Result<(&Sketch, Option<fox_kernel::Plane>), CmdError> {
   match s.model.sketches.get(&id) {
     Some(r) => Ok((&r.sketch, Some(r.plane))),
     None => Ok((s.design.sketch(id)?, None)),
@@ -391,7 +391,7 @@ fn sketch(s: &Session, id: FeatureId) -> CmdResult {
   }))
 }
 
-fn sketch_curve(s: &Session, sketch: FeatureId, curve: fox_sketch::CurveId) -> CmdResult {
+pub(crate) fn sketch_curve(s: &Session, sketch: FeatureId, curve: fox_sketch::CurveId) -> CmdResult {
   let (sk, plane) = solved(s, sketch)?;
   let c = sk.curve(curve).ok_or(CmdError::new(format!("sketch has no curve {}", curve.0)))?;
   let kind = serde_json::to_value(&c.kind)?.get("type").and_then(Value::as_str).unwrap_or("curve").to_string();

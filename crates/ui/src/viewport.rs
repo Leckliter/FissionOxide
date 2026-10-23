@@ -203,6 +203,9 @@ pub struct ToolState {
   /// Measure was opened from a dimension box's menu: its measurement goes into the box when it
   /// closes.
   pub(crate) measure_fill: bool,
+  /// The length Measure reads now: the distance between its two picks, or one picked edge's or
+  /// sketch curve's length (what [`fill_dim_from_measure`] writes into the box).
+  pub(crate) measured: Option<f64>,
   /// 3D Sketch: where the Line chain's last point is in the world (off the sketch plane when it
   /// was taken from a model vertex).
   pub(crate) last3d: Option<DVec3>,
@@ -3030,8 +3033,7 @@ pub(crate) fn fill_dim_from_measure(app: &mut App) {
   if !std::mem::take(&mut app.tstate.measure_fill) {
     return;
   }
-  let Some((a, b, _)) = &app.measure else { return };
-  let d = (*b - *a).length();
+  let Some(d) = app.tstate.measured else { return };
   let unit = app.s.design.units;
   if let Some((_, text, _)) = app.dim_edit.as_mut() {
     *text = dim_full_text(unit, false, d);
@@ -7134,24 +7136,68 @@ mod tests {
 
   /// `ui:sketch:dim-box-measure-fill`: Measure opened from a dimension box's menu writes what it
   /// measured into the box when it closes; Measure opened any other way leaves the box alone.
+  /// As the verifier tried it: a sketch line picked in Measure (while the sketch is open) reads
+  /// its length in MEASURE, and Close puts that length in the box.
   #[test]
   fn measure_from_the_dimension_box_fills_it() {
-    let (mut app, _) = sketching(Tool::Dimension);
-    app.dim_edit = Some((0, "20 mm".into(), Pos2::new(200.0, 200.0)));
-    let measured = || Some((DVec3::ZERO, DVec3::new(3.0, 4.0, 12.0), "13.00 mm".to_string()));
-    // the box menu's Measure
-    let mut d = crate::dialogs::Dialog::open(&mut app, crate::dialogs::Kind::Inspect);
-    app.tstate.measure_fill = true;
-    app.measure = measured();
-    d.leave(&mut app);
-    assert_eq!(app.dim_edit.as_ref().unwrap().1, "13 mm");
-    assert!(!app.tstate.measure_fill);
+    let (mut app, sk) = sketching(Tool::Dimension);
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [10, 0]]})).unwrap();
+    let line = fox_engine::sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32);
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 4], [10, 4]]})).unwrap();
+    let other = fox_engine::sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32);
+    let ctx = egui::Context::default();
+    let mut t = 0.0;
+    let mut frame = |app: &mut App| {
+      t += 0.05;
+      let input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 800.0))),
+        time: Some(t),
+        ..Default::default()
+      };
+      ctx.run_ui(input, |ui| app.draw(ui)).drop_without_applying_deltas();
+    };
+    let measure = |app: &mut App, from_box: bool, picks: Vec<Sel>| {
+      app.dim_edit = Some((0, "d1 * 2".into(), Pos2::new(200.0, 200.0)));
+      // the box menu's Measure (or the toolbar's)
+      app.dialog = Some(crate::dialogs::Dialog::open(app, crate::dialogs::Kind::Inspect));
+      app.tstate.measure_fill = from_box;
+      app.s.selection = picks;
+    };
+    let close = |app: &mut App| {
+      let mut d = app.dialog.take().expect("Measure is open");
+      d.leave(app);
+    };
+    // one sketch line: MEASURE reads its length, and Close writes it into the box
+    measure(&mut app, true, vec![Sel::SketchCurve { sketch: sk, curve: line }]);
+    for _ in 0..3 {
+      frame(&mut app);
+    }
+    assert_eq!(app.tstate.measured, Some(10.0), "MEASURE has a result");
+    assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
+    close(&mut app);
+    assert_eq!(app.dim_edit.as_ref().unwrap().1, "10 mm");
+    assert!(!app.tstate.measure_fill && app.tstate.measured.is_none());
+    // two sketch lines: the distance between them
+    measure(
+      &mut app,
+      true,
+      vec![Sel::SketchCurve { sketch: sk, curve: line }, Sel::SketchCurve { sketch: sk, curve: other }],
+    );
+    for _ in 0..3 {
+      frame(&mut app);
+    }
+    assert!(app.tstate.measured.is_some_and(|d| (d - 4.0).abs() < 1e-6), "{:?}", app.tstate.measured);
+    assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
+    close(&mut app);
+    assert_eq!(app.dim_edit.as_ref().unwrap().1, "4 mm");
     // Measure from the toolbar doesn't touch it
-    app.dim_edit = Some((0, "20 mm".into(), Pos2::new(200.0, 200.0)));
-    let mut d = crate::dialogs::Dialog::open(&mut app, crate::dialogs::Kind::Inspect);
-    app.measure = measured();
-    d.leave(&mut app);
-    assert_eq!(app.dim_edit.as_ref().unwrap().1, "20 mm");
+    measure(&mut app, false, vec![Sel::SketchCurve { sketch: sk, curve: line }]);
+    for _ in 0..3 {
+      frame(&mut app);
+    }
+    assert!(app.dim_edit.is_some(), "the box stays open while Measure is");
+    close(&mut app);
+    assert_eq!(app.dim_edit.as_ref().unwrap().1, "d1 * 2");
   }
 
   /// `ui:sketch:3d-sketch-input`: with 3D Sketch on, a Line click near a model vertex takes it
