@@ -106,6 +106,10 @@ fn bar_icon(ui: &mut egui::Ui, g: Glyph, hint: &str, enabled: bool) -> egui::Res
 pub(crate) const APP_BAR_H: f32 = 34.0;
 /// A bar button's square.
 const BAR_BUTTON: f32 = 26.0;
+/// The account icons at the bar's right: Plugins, Assistant, Job Status, Notifications and Help
+/// (4 px apart) and the 28 px avatar; and the least room kept between them and the "+".
+const BAR_RIGHT_W: f32 = 5.0 * BAR_BUTTON + 5.0 * 4.0 + 28.0;
+const BAR_RIGHT_GAP: f32 = 8.0;
 
 /// Fusion's application bar: Home, the Data Panel, File, Save, Undo and Redo as solid grey
 /// glyphs on the grey bar, the document tabs (the shown one lighter, joined to the toolbar), the
@@ -153,9 +157,9 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           .open_memory(redo_list.then_some(egui::SetOpenCommand::Toggle))
           .show(|ui| history_menu(app, ui, false));
         ui.add_space(14.0);
-        // the document tabs fill the middle of the bar, each as wide as Fusion's
-        let right_w = 230.0;
-        let tab_w = (ui.available_width() - right_w - 40.0).max(160.0);
+        // the document tabs fill the middle of the bar up to the "+" (and its gap) and the
+        // account icons
+        let tab_w = (ui.available_width() - BAR_RIGHT_W - BAR_RIGHT_GAP - 32.0).max(crate::documents::TAB_MIN_W);
         crate::documents::tab_strip(app, ui, tab_w);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
           ui.spacing_mut().item_spacing.x = 4.0;
@@ -1057,9 +1061,10 @@ const WORKSPACE_FONT: f32 = 12.0;
 /// The room a row keeps right of its name for the subscription badge or the ▸.
 const WORKSPACE_LOCK_W: f32 = 15.0;
 const WORKSPACE_ARROW_W: f32 = 14.0;
-/// The subscription badge's radius and its gap after the name.
+/// The subscription badge's radius, and its centre's inset from the list's right edge (the
+/// column the ▸ sits in).
 const WORKSPACE_BADGE_R: f32 = 5.0;
-const WORKSPACE_BADGE_GAP: f32 = 4.0;
+const WORKSPACE_BADGE_INSET: f32 = 9.0;
 pub(crate) const WORKSPACE_BADGE: Color32 = Color32::from_rgb(0, 150, 214);
 /// The name's inset from the row's left edge, and the margin past the widest row's end.
 const WORKSPACE_PAD: f32 = 8.0;
@@ -1070,7 +1075,7 @@ const WORKSPACE_TIP_W: f32 = 280.0;
 const WORKSPACE_TIP_PICTURE_H: f32 = 140.0;
 
 /// Fusion's workspace list: bold upper-case names in a list as wide as the longest, the
-/// workspaces that need a subscription greyed with a blue badge after the name, DRAWING ▸ and
+/// workspaces that need a subscription greyed with a blue badge at the list's right edge, DRAWING ▸ and
 /// ELECTRONICS ▸ submenus (the ▸ at the list's right edge) for the documents they create, and no
 /// fill on the current workspace.
 fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
@@ -1163,7 +1168,7 @@ fn workspace_row(ui: &mut egui::Ui, width: f32, label: &str, trail: Trail, top: 
   let font = egui::FontId::proportional(if top { WORKSPACE_FONT } else { 12.5 });
   let at = rect.left_center() + vec2(WORKSPACE_PAD, 0.0);
   let ink = if enabled && trail != Trail::Lock { theme::TEXT } else { theme::MUTED };
-  let r = p.text(at, egui::Align2::LEFT_CENTER, label, font.clone(), ink);
+  p.text(at, egui::Align2::LEFT_CENTER, label, font.clone(), ink);
   if top {
     // the font has no bold face: a second pass a little over gives the weight
     p.text(at + vec2(0.8, 0.0), egui::Align2::LEFT_CENTER, label, font, ink);
@@ -1171,9 +1176,17 @@ fn workspace_row(ui: &mut egui::Ui, width: f32, label: &str, trail: Trail, top: 
   let ink = Color32::from_gray(80);
   match trail {
     Trail::Lock => {
-      // Fusion's subscription badge: a round blue disc just after the name
-      let c = pos2(r.right() + 0.8 + WORKSPACE_BADGE_GAP + WORKSPACE_BADGE_R, rect.center().y);
+      // Fusion's subscription badge: a blue disc holding a white up arrow, right-aligned at the
+      // list's edge so every badge sits in one column
+      let c = pos2(rect.right() - WORKSPACE_BADGE_INSET, rect.center().y);
       p.circle_filled(c, WORKSPACE_BADGE_R, WORKSPACE_BADGE);
+      let white = Color32::WHITE;
+      p.add(egui::Shape::convex_polygon(
+        vec![c + vec2(0.0, -3.4), c + vec2(2.9, -0.4), c + vec2(-2.9, -0.4)],
+        white,
+        Stroke::NONE,
+      ));
+      p.rect_filled(egui::Rect::from_min_max(c + vec2(-1.0, -0.6), c + vec2(1.0, 3.2)), 0.0, white);
     }
     Trail::Arrow => {
       let c = pos2(rect.right() - 8.0, rect.center().y);

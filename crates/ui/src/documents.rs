@@ -416,9 +416,10 @@ pub(crate) fn window_close(app: &mut App, ctx: &egui::Context) {
 
 // ---------------------------------------------------------------- the tab strip
 
-/// The narrowest a document tab gets, as Fusion's (about 196 px, 147 in the probers'
-/// screenshots): past that the strip scrolls, so four tabs already scroll in a 1200 px window.
-pub(crate) const TAB_MIN_W: f32 = 196.0;
+/// The narrowest a document tab gets before the strip scrolls: Fusion fits four design tabs
+/// (about 187 px each, 142 in the probers' screenshots) in a 1215 px window with no "v", so four
+/// fit here at that width too (about 180 px each beside the quick-access buttons).
+pub(crate) const TAB_MIN_W: f32 = 180.0;
 
 /// The widest a document tab gets, as Fusion's: one open design doesn't stretch its tab across
 /// the bar, the rest of the bar stays grey.

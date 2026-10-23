@@ -404,18 +404,36 @@ fn ctrl_tab_cycles_the_document_tabs() {
 
 #[test]
 fn tabs_keep_fusions_minimum_width_and_closing_the_last_shows_its_neighbour() {
-  // about 196 px a tab before the strip scrolls (147 px in a screenshot of a 908 px Fusion
-  // window): in a 1200 px window three tabs fit and four already scroll
-  assert_eq!(documents::TAB_MIN_W, 196.0);
+  // the verifier's case: in a 1215 px window Fusion fits four design tabs (about 187 px each,
+  // 142 in its screenshot) beside the quick-access buttons, with "+" and no "v"; a fifth scrolls
+  const { assert!(documents::TAB_MIN_W <= 187.0) };
   let mut h = Harness::new("overflow-close");
-  for n in 2..=4 {
+  for n in 2..=5 {
     documents::new_document(&mut h.app, DesignType::Part, None);
-    h.frame_out(1200.0, vec![]).drop_without_applying_deltas();
-    h.frame_out(1200.0, vec![]).drop_without_applying_deltas();
+    h.frame_out(1215.0, vec![]).drop_without_applying_deltas();
+    let out = h.frame_out(1215.0, vec![]);
     assert_eq!(h.app.docs.count(), n);
-    assert_eq!(h.app.docs.overflow_at.is_some(), n == 4, "{n} tabs in a 1200 px window");
+    assert_eq!(h.app.docs.overflow_at.is_some(), n == 5, "{n} tabs in a 1215 px window");
+    if n == 4 {
+      // every tab whole and as wide as the strip allows: the labels (centred in their tabs) at
+      // least TAB_MIN_W apart
+      let mut xs: Vec<f32> = out
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+          egui::Shape::Text(t) if t.galley.text().starts_with("Untitled") && t.pos.y < 40.0 => {
+            Some(t.pos.x + t.galley.size().x / 2.0)
+          }
+          _ => None,
+        })
+        .collect();
+      xs.sort_by(f32::total_cmp);
+      xs.dedup_by(|a, b| (*a - *b).abs() < 2.0);
+      assert_eq!(xs.len(), 4, "four whole labels: {xs:?}");
+      assert!(xs.windows(2).all(|w| w[1] - w[0] >= documents::TAB_MIN_W - 0.5), "tabs at {xs:?}");
+    }
   }
-  for _ in 0..3 {
+  for _ in 0..2 {
     documents::new_document(&mut h.app, DesignType::Part, None);
   }
   h.frame(vec![]);

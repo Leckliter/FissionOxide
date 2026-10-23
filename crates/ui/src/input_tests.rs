@@ -1283,7 +1283,8 @@ fn the_workspace_menu_rows_are_fusions() {
   // Fusion's list is about 153 px (116 in the prober's screenshot)
   assert!((menu.width() - 153.0).abs() < 6.0, "the menu is {} wide", menu.width());
   assert!(menu.right() > generative.right() + 16.0, "room for the badge: {menu:?} vs {generative:?}");
-  // GENERATIVE DESIGN and SIMULATION are grey, each with a round blue badge just after its name
+  // GENERATIVE DESIGN and SIMULATION are grey, each with a round blue badge holding a white up
+  // arrow, the two badges in one column at the list's right edge
   let color = |text: &str| {
     shapes.iter().find_map(|s| match s {
       egui::Shape::Text(t) if t.galley.text() == text && t.pos.y > switcher.bottom() => Some(text_color(t)),
@@ -1294,18 +1295,31 @@ fn the_workspace_menu_rows_are_fusions() {
   assert_eq!(color("SIMULATION"), Some(crate::theme::MUTED));
   assert_eq!(color("RENDER"), Some(crate::theme::TEXT));
   let simulation = row("SIMULATION").expect("the SIMULATION row");
-  for name in [generative, simulation] {
-    let badge = shapes.iter().find_map(|s| match s {
-      egui::Shape::Circle(c)
-        if c.fill == crate::panels::WORKSPACE_BADGE && (c.center.y - name.center().y).abs() < 3.0 =>
-      {
-        Some(c.center)
-      }
-      _ => None,
-    });
-    let badge = badge.unwrap_or_else(|| panic!("a blue badge beside {name:?}"));
-    assert!(badge.x > name.right() && badge.x < name.right() + 14.0, "just after the name: {badge:?} vs {name:?}");
-  }
+  let badges: Vec<Pos2> = [generative, simulation]
+    .iter()
+    .map(|name| {
+      let badge = shapes.iter().find_map(|s| match s {
+        egui::Shape::Circle(c)
+          if c.fill == crate::panels::WORKSPACE_BADGE && (c.center.y - name.center().y).abs() < 3.0 =>
+        {
+          Some(c.center)
+        }
+        _ => None,
+      });
+      let badge = badge.unwrap_or_else(|| panic!("a blue badge beside {name:?}"));
+      assert!(badge.x > name.right() + 4.0, "clear of the name: {badge:?} vs {name:?}");
+      assert!(menu.right() - badge.x < 16.0, "at the list's right edge: {badge:?} vs {menu:?}");
+      let arrow = shapes.iter().any(|s| match s {
+        egui::Shape::Path(p) => {
+          p.closed && p.fill == egui::Color32::WHITE && p.points.iter().all(|q| q.distance(badge) < 5.0)
+        }
+        _ => false,
+      });
+      assert!(arrow, "a white up arrow in the badge at {badge:?}");
+      badge
+    })
+    .collect();
+  assert!((badges[0].x - badges[1].x).abs() < 0.5, "one column: {badges:?}");
   // no padlock: nothing grey-black drawn after GENERATIVE DESIGN
   assert!(!shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r)
     if r.fill == egui::Color32::from_gray(80) && r.rect.center().y > generative.top() && r.rect.center().y < generative.bottom())));
